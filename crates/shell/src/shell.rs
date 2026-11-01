@@ -125,6 +125,7 @@ mod audio_device;
 mod browser_commands;
 mod clip_scale;
 mod control_surface;
+mod convert;
 mod device_commands;
 mod document_edits;
 mod focus;
@@ -876,6 +877,7 @@ pub struct Shell {
     /// The parameters under modulation, as the engine last published them
     /// (WP-5.9).
     modulated: Vec<bl_engine::PlayedParam>,
+    matrix_played: Vec<bl_engine::PlayedParam>,
     /// Whether `modulated` came from a running engine, so it clears when
     /// the engine stops while values a host set stay.
     modulating: bool,
@@ -1443,6 +1445,7 @@ impl Shell {
             last_launched: None,
             session_over: Vec::new(),
             modulated: Vec::new(),
+            matrix_played: Vec::new(),
             processing: Vec::new(),
             modulating: false,
             meters: Vec::new(),

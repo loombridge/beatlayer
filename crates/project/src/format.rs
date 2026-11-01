@@ -796,6 +796,67 @@ mod tests {
         assert!(matches!(load_json(&empty), Err(LoadError::Invalid { .. })));
     }
 
+    /// Spec: instrument modulation R10. A device's free routes are saved with
+    /// the set and come back with it; a set that repeats a slot doesn't load.
+    #[test]
+    fn a_devices_routes_are_saved_with_the_set() {
+        let mut editor = Editor::new();
+        let track = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Midi,
+                name: "Keys".to_owned(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let device = editor.new_id();
+        let instrument = bl_model::Device::new(
+            device,
+            "Instrument",
+            DeviceKind::Native {
+                device_type: "test.framework.instrument".to_owned(),
+            },
+        )
+        .with_role(DeviceRole::Instrument);
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device: instrument,
+            })
+            .unwrap();
+        editor
+            .apply(Command::SetModRoute {
+                device,
+                slot: 2,
+                source: "Velocity".to_owned(),
+                destination: "Note Level".to_owned(),
+            })
+            .unwrap();
+        let project = Project::from_editor(&editor, Media::new());
+        let value = json_of(&project, 1);
+        let (loaded, _) = load_json(&value).unwrap();
+        let routes = &loaded.document.device(device).unwrap().routes;
+        assert_eq!(
+            routes,
+            &vec![bl_model::ModRoute {
+                slot: 2,
+                source: "Velocity".to_owned(),
+                destination: "Note Level".to_owned(),
+            }]
+        );
+        // The same slot twice doesn't load.
+        let mut repeated = value;
+        let route = repeated["document"]["tracks"][0]["devices"][0]["routes"][0].clone();
+        repeated["document"]["tracks"][0]["devices"][0]["routes"] = json!([route, route]);
+        assert!(matches!(
+            load_json(&repeated),
+            Err(LoadError::Invalid { .. })
+        ));
+    }
+
     #[test]
     fn encodes_and_decodes() {
         let project = song();

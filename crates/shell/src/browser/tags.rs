@@ -8,7 +8,10 @@
 //! Beatlayer fills four groups of its own — Content, Format, Creator and
 //! Devices — from what it knows of each item. Their tags are in the
 //! catalogue like any other's, but they can't be renamed or deleted, and
-//! they can't be taken off an item. The rest are the person's.
+//! they can't be taken off an item. A fifth, Function, holds automatic
+//! tags: Beatlayer gives them from a plug-in's categories and a sample's
+//! sound, keeps them apart from a person's, and remembers the ones a person
+//! took off (spec: browser-tags R49 to R54). The rest are the person's.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -34,6 +37,51 @@ pub const FORMAT_TAGS: [&str; 3] = ["CLAP", "VST3", "AUv2"];
 
 /// The tags Beatlayer gives in the Devices group (spec: browser-tags R7).
 pub const DEVICE_TAGS: [&str; 3] = ["Instrument", "Audio Effect", "MIDI Effect"];
+
+/// The Function group, which holds the automatic tags (spec: browser-tags
+/// R49).
+pub const FUNCTION_GROUP: &str = "Function";
+
+/// The tags in the Function group, in order: instruments' first, then
+/// effects', then the ones only samples have; Bass, Synth and Percussion
+/// serve instruments and samples alike (spec: browser-tags R50).
+/// Beatlayer's own list.
+pub const FUNCTION_TAGS: [&str; 34] = [
+    "Synth",
+    "Bass",
+    "Keys",
+    "Piano",
+    "Organ",
+    "Strings",
+    "Brass",
+    "Woodwind",
+    "Drums",
+    "Percussion",
+    "Sampler",
+    "EQ",
+    "Filter",
+    "Dynamics",
+    "Distortion",
+    "Delay",
+    "Reverb",
+    "Modulation",
+    "Pitch",
+    "Spatial",
+    "Utility",
+    "Analyser",
+    "Kick",
+    "Snare",
+    "Clap",
+    "Hi-Hat",
+    "Cymbal",
+    "Tom",
+    "Pad",
+    "Lead",
+    "Vocal",
+    "FX",
+    "Loop",
+    "One-Shot",
+];
 
 /// A tag group.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -79,6 +127,10 @@ pub enum Source {
     Folder,
     /// Beatlayer gave it, from what it knows of the item (R7).
     Beatlayer,
+    /// Beatlayer gave it automatically, from a plug-in's categories or a
+    /// sample's sound, and a person can take it off (spec: browser-tags
+    /// R49 and R51).
+    Auto,
 }
 
 impl Source {
@@ -89,6 +141,35 @@ impl Source {
             Self::Own => "own",
             Self::Folder => "folder",
             Self::Beatlayer => "beatlayer",
+            Self::Auto => "auto",
+        }
+    }
+}
+
+/// What an automatic tag comes from (spec: browser-tags R49 and R51).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum AutoSource {
+    /// A plug-in's declared categories.
+    Plugin,
+    /// A sample's sound.
+    Sound,
+}
+
+impl AutoSource {
+    /// The name the database keeps it under.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Plugin => "plugin",
+            Self::Sound => "sound",
+        }
+    }
+
+    fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "plugin" => Some(Self::Plugin),
+            "sound" => Some(Self::Sound),
+            _ => None,
         }
     }
 }
@@ -110,6 +191,12 @@ pub struct TagStore {
     tags: Vec<Tag>,
     /// The tags each item carries in its own right, by its key.
     items: BTreeMap<String, BTreeSet<i64>>,
+    /// The automatic tags each item has, and what each comes from
+    /// (spec: browser-tags R51).
+    auto: BTreeMap<String, BTreeMap<i64, AutoSource>>,
+    /// The automatic tags a person took off each item: a rescan or a new
+    /// analysis doesn't give them again (spec: browser-tags R51).
+    removed: BTreeMap<String, BTreeSet<i64>>,
     /// The tags searched recently, most recent first.
     recent: Vec<i64>,
     next_id: i64,
@@ -153,7 +240,57 @@ impl TagStore {
                 });
             }
         }
+        store.ensure_function();
         store
+    }
+
+    /// Makes the Function group and its tags if they aren't there (spec:
+    /// browser-tags R49 and R50). They are made after the others, with
+    /// the next free IDs, so a database from before them has no clash.
+    fn ensure_function(&mut self) {
+        let group = if let Some(id) = self.group_id(FUNCTION_GROUP) {
+            id
+        } else {
+            let id = self.next_id;
+            self.next_id += 1;
+            let position = i32::try_from(self.groups.len()).unwrap_or(i32::MAX);
+            self.groups.push(TagGroup {
+                id,
+                name: FUNCTION_GROUP.to_owned(),
+                position,
+                builtin: true,
+                first: position,
+            });
+            id
+        };
+        for name in FUNCTION_TAGS {
+            if !self.tags.iter().any(|t| t.group == group && t.name == name) {
+                // The database learns of the tag when `load` writes what it
+                // doesn't hold.
+                let _ = self.add_builtin_tag(name, group);
+            }
+        }
+    }
+
+    /// Takes the Function group and its tags out of the store, before the
+    /// database's own are read in.
+    fn drop_function(&mut self) {
+        if let Some(group) = self.group_id(FUNCTION_GROUP) {
+            self.tags.retain(|t| t.group != group);
+            self.groups.retain(|g| g.id != group);
+        }
+    }
+
+    /// The next free ID, past every group and tag the store holds.
+    fn recount(&mut self) {
+        self.next_id = self
+            .groups
+            .iter()
+            .map(|g| g.id)
+            .chain(self.tags.iter().map(|t| t.id))
+            .max()
+            .unwrap_or(0)
+            + 1;
     }
 
     /// The groups, in the order the Tag Editor shows them.
@@ -284,6 +421,132 @@ impl TagStore {
             .filter(|(_, tags)| tags.contains(&tag))
             .map(|(key, _)| key.clone())
             .collect()
+    }
+
+    /// The automatic tags an item has, and what each comes from.
+    #[must_use]
+    pub fn auto_tags_ref(&self, key: &str) -> Option<&BTreeMap<i64, AutoSource>> {
+        self.auto.get(key)
+    }
+
+    /// The items that have an automatic tag.
+    #[must_use]
+    pub fn items_with_auto_tag(&self, tag: i64) -> Vec<String> {
+        self.auto
+            .iter()
+            .filter(|(_, tags)| tags.contains_key(&tag))
+            .map(|(key, _)| key.clone())
+            .collect()
+    }
+
+    /// The automatic tags a person took off an item.
+    #[must_use]
+    pub fn removed_auto_tags(&self, key: &str) -> Vec<i64> {
+        self.removed
+            .get(key)
+            .map_or_else(Vec::new, |tags| tags.iter().copied().collect())
+    }
+
+    /// Gives an item the automatic tags a source finds for it now, in place
+    /// of the ones that source gave it before, and says what to write to
+    /// the database. A tag the person took off isn't given again (spec:
+    /// browser-tags R51).
+    pub fn set_auto_tags(
+        &mut self,
+        key: &str,
+        source: AutoSource,
+        tags: impl IntoIterator<Item = i64>,
+    ) -> Vec<TagOp> {
+        let removed = self.removed.get(key);
+        let wanted: BTreeSet<i64> = tags
+            .into_iter()
+            .filter(|tag| !removed.is_some_and(|removed| removed.contains(tag)))
+            .collect();
+        let entry = self.auto.entry(key.to_owned()).or_default();
+        let before: BTreeSet<i64> = entry
+            .iter()
+            .filter(|(_, from)| **from == source)
+            .map(|(tag, _)| *tag)
+            .collect();
+        if before == wanted {
+            if entry.is_empty() {
+                self.auto.remove(key);
+            }
+            return Vec::new();
+        }
+        entry.retain(|_, from| *from != source);
+        for tag in &wanted {
+            entry.insert(*tag, source);
+        }
+        if entry.is_empty() {
+            self.auto.remove(key);
+        }
+        vec![TagOp::SetAutoTags {
+            key: key.to_owned(),
+            source: source.name().to_owned(),
+            tags: wanted.into_iter().collect(),
+        }]
+    }
+
+    /// Takes an automatic tag off an item and remembers it, so no rescan or
+    /// analysis gives it again, and says what to write to the database
+    /// (spec: browser-tags R51). Nothing happens if the item doesn't have
+    /// it.
+    pub fn remove_auto_tag(&mut self, key: &str, tag: i64) -> Vec<TagOp> {
+        let Some(tags) = self.auto.get_mut(key) else {
+            return Vec::new();
+        };
+        let Some(source) = tags.remove(&tag) else {
+            return Vec::new();
+        };
+        let left: Vec<i64> = tags
+            .iter()
+            .filter(|(_, from)| **from == source)
+            .map(|(tag, _)| *tag)
+            .collect();
+        if tags.is_empty() {
+            self.auto.remove(key);
+        }
+        let removed = self.removed.entry(key.to_owned()).or_default();
+        removed.insert(tag);
+        vec![
+            TagOp::SetAutoTags {
+                key: key.to_owned(),
+                source: source.name().to_owned(),
+                tags: left,
+            },
+            TagOp::SetRemovedAutoTags {
+                key: key.to_owned(),
+                tags: removed.iter().copied().collect(),
+            },
+        ]
+    }
+
+    /// Passes what a file's automatic tags know to the path it moved to:
+    /// the tags a person took off stay off (spec: browser-tags R5 and R51).
+    pub fn move_removed_auto_tags(&mut self, old: &str, new: &str) -> Vec<TagOp> {
+        let Some(moved) = self.removed.remove(old) else {
+            return Vec::new();
+        };
+        let kept = self.removed.entry(new.to_owned()).or_default();
+        kept.extend(moved);
+        let mut ops = vec![
+            TagOp::SetRemovedAutoTags {
+                key: new.to_owned(),
+                tags: kept.iter().copied().collect(),
+            },
+            TagOp::SetRemovedAutoTags {
+                key: old.to_owned(),
+                tags: Vec::new(),
+            },
+        ];
+        // What the new path has already been given and the person had taken
+        // off the old one goes.
+        let gone: Vec<i64> = self.removed_auto_tags(new);
+        for tag in gone {
+            ops.extend(self.remove_auto_tag(new, tag));
+        }
+        ops
     }
 
     /// The tags searched recently, most recent first.
@@ -665,14 +928,7 @@ impl TagStore {
                 self.tags.push(tag);
             }
         }
-        self.next_id = self
-            .groups
-            .iter()
-            .map(|g| g.id)
-            .chain(self.tags.iter().map(|t| t.id))
-            .max()
-            .unwrap_or(0)
-            + 1;
+        self.recount();
     }
 
     /// Fills the store from what the database holds, and says what to write
@@ -688,7 +944,12 @@ impl TagStore {
         groups: Vec<TagGroup>,
         tags: Vec<Tag>,
         items: Vec<(String, Vec<i64>)>,
+        auto: Vec<(String, i64, String)>,
+        removed: Vec<(String, Vec<i64>)>,
     ) -> Vec<TagOp> {
+        // The Function group the store made for itself has IDs of its own;
+        // the database's, if it has one, wins.
+        self.drop_function();
         let mut ops = Vec::new();
         let mut held: Vec<i64> = Vec::new();
         for group in groups {
@@ -708,9 +969,11 @@ impl TagStore {
             }
             self.tags.push(tag.clone());
         }
+        self.recount();
+        self.ensure_function();
         // The groups and tags the file doesn't hold yet are written to it,
-        // so it holds Beatlayer's own four groups and the tags it gives
-        // too (spec: browser-tags R1).
+        // so it holds Beatlayer's own groups and the tags it gives too
+        // (spec: browser-tags R1).
         for group in &self.groups {
             if !held.contains(&group.id) {
                 ops.push(TagOp::AddGroup {
@@ -741,14 +1004,17 @@ impl TagStore {
                 self.items.insert(key, after);
             }
         }
-        self.next_id = self
-            .groups
-            .iter()
-            .map(|g| g.id)
-            .chain(self.tags.iter().map(|t| t.id))
-            .max()
-            .unwrap_or(0)
-            + 1;
+        self.recount();
+        self.auto.clear();
+        for (key, tag, source) in auto {
+            if let Some(source) = AutoSource::from_name(&source) {
+                self.auto.entry(key).or_default().insert(tag, source);
+            }
+        }
+        self.removed = removed
+            .into_iter()
+            .map(|(key, tags)| (key, tags.into_iter().collect()))
+            .collect();
         self.first_orders();
         ops
     }
@@ -779,5 +1045,141 @@ impl TagStore {
                 tag.first = first;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn store() -> (TagStore, i64, i64) {
+        let store = TagStore::new();
+        let kick = store.find("Function|Kick")[0];
+        let loop_ = store.find("Function|Loop")[0];
+        (store, kick, loop_)
+    }
+
+    // Spec: browser-tags R50. Every tag the formats' tables and the sound
+    // classifier can give is in the Function group's list.
+    #[test]
+    fn what_the_tables_and_the_classifier_give_is_in_the_function_list() {
+        let store = TagStore::new();
+        let given = bl_plugin_host::categories::all_function_tags()
+            .chain(bl_analysis::autotag::classes().iter().copied())
+            .chain(["Loop", "One-Shot"]);
+        for name in given {
+            assert!(FUNCTION_TAGS.contains(&name), "{name}");
+            assert_eq!(store.find(&format!("Function|{name}")).len(), 1, "{name}");
+        }
+        let group = store
+            .group(store.group_id(FUNCTION_GROUP).unwrap())
+            .unwrap();
+        assert!(
+            group.builtin,
+            "Beatlayer's group can't be renamed or deleted"
+        );
+    }
+
+    // Spec: browser-tags R51, R52. A removed automatic tag is remembered and
+    // not given again, whichever source gives it; the other tags are kept.
+    #[test]
+    fn a_removed_automatic_tag_is_not_given_again() {
+        let (mut store, kick, loop_) = store();
+        let ops = store.set_auto_tags("/a.wav", AutoSource::Sound, [kick, loop_]);
+        assert_eq!(ops.len(), 1);
+        let ops = store.remove_auto_tag("/a.wav", kick);
+        assert_eq!(ops.len(), 2, "the tags left and the one removed are kept");
+        assert_eq!(store.removed_auto_tags("/a.wav"), [kick]);
+        // A new analysis finds both again; only the one still wanted stays.
+        store.set_auto_tags("/a.wav", AutoSource::Sound, [kick, loop_]);
+        let kept: Vec<i64> = store
+            .auto_tags_ref("/a.wav")
+            .unwrap()
+            .keys()
+            .copied()
+            .collect();
+        assert_eq!(kept, [loop_]);
+        // The same answer again changes nothing to write.
+        assert!(
+            store
+                .set_auto_tags("/a.wav", AutoSource::Sound, [kick, loop_])
+                .is_empty()
+        );
+        // A tag the item doesn't have can't be removed.
+        assert!(store.remove_auto_tag("/b.wav", kick).is_empty());
+        // A person's own tags are another set, which none of this touches.
+        assert!(store.item_tags("/a.wav").is_empty());
+    }
+
+    // Spec: browser-tags R51. Each source's tags are replaced by that source
+    // alone.
+    #[test]
+    fn a_source_replaces_only_its_own_tags() {
+        let (mut store, kick, loop_) = store();
+        store.set_auto_tags("/a", AutoSource::Plugin, [kick]);
+        store.set_auto_tags("/a", AutoSource::Sound, [loop_]);
+        store.set_auto_tags("/a", AutoSource::Sound, []);
+        let now = store.auto_tags_ref("/a").unwrap();
+        assert_eq!(now.get(&kick), Some(&AutoSource::Plugin));
+        assert!(!now.contains_key(&loop_));
+        store.set_auto_tags("/a", AutoSource::Plugin, []);
+        assert!(store.auto_tags_ref("/a").is_none());
+    }
+
+    // Spec: browser-tags R5, R51. What a person removed passes to the file's
+    // new path, and takes the tag off what that path was given meanwhile.
+    #[test]
+    fn what_was_removed_moves_with_the_file() {
+        let (mut store, kick, _) = store();
+        store.set_auto_tags("/old", AutoSource::Sound, [kick]);
+        store.remove_auto_tag("/old", kick);
+        store.set_auto_tags("/new", AutoSource::Sound, [kick]);
+        assert!(store.auto_tags_ref("/new").is_some());
+        let ops = store.move_removed_auto_tags("/old", "/new");
+        assert!(!ops.is_empty());
+        assert!(store.removed_auto_tags("/old").is_empty());
+        assert_eq!(store.removed_auto_tags("/new"), [kick]);
+        assert!(store.auto_tags_ref("/new").is_none());
+    }
+
+    // Spec: browser-tags R49, R56. A database from before the Function group
+    // gets it, with IDs that clash with none of the person's.
+    #[test]
+    fn a_database_without_the_function_group_gains_it_beside_a_persons_own() {
+        let mut first = TagStore::new();
+        // Make the store as an older build wrote it: no Function group, and a
+        // person's group and tag made with the IDs it would have used.
+        first.drop_function();
+        first.recount();
+        let (group, _) = first.add_group("Mine").unwrap();
+        let (tag, _) = first.add_tag("Hard", group, None).unwrap();
+        let groups: Vec<TagGroup> = first.groups.clone();
+        let tags: Vec<Tag> = first.tags.clone();
+        assert!(first.group_id(FUNCTION_GROUP).is_none());
+
+        let mut second = TagStore::new();
+        let ops = second.load(groups, tags, Vec::new(), Vec::new(), Vec::new());
+        assert!(
+            second.group_id(FUNCTION_GROUP).is_some(),
+            "the Function group"
+        );
+        assert_eq!(second.group(group).unwrap().name, "Mine");
+        assert_eq!(second.tag(tag).unwrap().name, "Hard");
+        assert!(
+            ops.iter()
+                .any(|op| matches!(op, TagOp::AddGroup { name, .. } if name == FUNCTION_GROUP)),
+            "the database is told of it"
+        );
+        let ids: BTreeSet<i64> = second
+            .groups
+            .iter()
+            .map(|g| g.id)
+            .chain(second.tags.iter().map(|t| t.id))
+            .collect();
+        assert_eq!(
+            ids.len(),
+            second.groups.len() + second.tags.len(),
+            "no ID twice"
+        );
     }
 }

@@ -6,6 +6,7 @@
 #[cfg(debug_assertions)]
 bl_rt::install_trap!();
 
+mod bench;
 mod device_changes;
 mod devices;
 mod engine_smoke;
@@ -81,6 +82,23 @@ enum Command {
     /// --update, remakes the references whose renders changed: say why in
     /// the pull request.
     Golden(bl_cli::golden::GoldenArgs),
+    /// Measure how accurately Convert Melody, Convert Harmony and Convert
+    /// Drums find notes.
+    ///
+    /// Seeded phrases with known notes are played through Drift and Simpler,
+    /// clean, with a room and with noise, transcribed, and scored by
+    /// mir_eval's note definitions. Prints a table of precision, recall and
+    /// F-measure, and exits with status 1 if an onset F-measure is under its
+    /// target. Drums are generated breaks played through Drum Samplers; with
+    /// --drums, only they run, and no runtime or model is needed. `BL_TRANSCRIBE_CORPUS` names the folder of an open labelled
+    /// set to report on as well.
+    TranscribeBench(bl_cli::transcribe_bench::BenchArgs),
+    /// Write the drum classifier's training set to standard output.
+    ///
+    /// Breaks rendered through Drum Samplers playing generated sounds, from
+    /// seeds the bench never uses: a line for each onset found, its labels
+    /// then its features, which `tools/drum-classifier/train.py` fits.
+    DrumTrainingSet(bl_cli::drum_bench::TrainingArgs),
     /// Serve the agent API (MCP) on standard input and output, with no
     /// window.
     ///
@@ -99,6 +117,8 @@ enum Command {
     /// keychain, where the Agents page stores it, and from nowhere else.
     /// --record writes the exchange as a JSON transcript.
     Assistant(bl_cli::assistant::AssistantArgs),
+    /// Time an on-device feature, and print the result as JSON.
+    Bench(bench::BenchArgs),
 }
 
 fn main() -> ExitCode {
@@ -111,8 +131,11 @@ fn main() -> ExitCode {
         Command::Render(args) => bl_cli::render::run(args),
         Command::Export(args) => export::run(args),
         Command::Golden(args) => bl_cli::golden::run(args),
+        Command::TranscribeBench(args) => bl_cli::transcribe_bench::run(args),
+        Command::DrumTrainingSet(args) => bl_cli::drum_bench::training_set(args),
         Command::Mcp(args) => mcp::run(args),
         Command::Assistant(args) => bl_cli::assistant::run(args),
+        Command::Bench(args) => bench::run(args),
     };
     outcome.unwrap_or_else(|message| {
         eprintln!("error: {message}");

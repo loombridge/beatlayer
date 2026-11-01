@@ -99,6 +99,8 @@ pub struct Vst3Type {
     pub version: Option<String>,
     /// What it is as an ARA 2 plug-in, if it is one (IMP-20).
     pub ara: Option<crate::ara::Factory>,
+    /// Its class's subcategories (spec: browser-tags R49).
+    pub categories: Vec<String>,
 }
 
 /// What a device's plug-in is doing, for `plugin.info`.
@@ -612,10 +614,17 @@ impl Vst3Host {
                     midi_tap: false,
                     note_output,
                     outputs: Vec::new(),
+                    matrix: None,
                 },
                 vendor,
                 version,
                 ara,
+                categories: subcategories
+                    .split('|')
+                    .map(str::trim)
+                    .filter(|part| !part.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
             });
         }
         drop(guard);

@@ -14,6 +14,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use bl_core::time::Ticks;
 use bl_engine::DeviceType;
 use bl_media::MediaStore;
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, LayoutNode, Widget};
@@ -243,6 +244,7 @@ pub struct Context<'a> {
 /// The display of a device whose type draws none.
 fn empty_display(device: DeviceId) -> bl_model::DeviceDisplay {
     bl_model::DeviceDisplay {
+        spectrograms: Vec::new(),
         device,
         live: false,
         view: None,
@@ -460,6 +462,7 @@ impl DeviceView {
                 .collect(),
             articulations: device.articulations.clone(),
             learning: self.learning.get(&device.id).map(|learn| learn.row),
+            matrix_routes: self.matrix_routes(device),
             locked: Vec::new(),
         })
     }
@@ -564,6 +567,7 @@ impl DeviceView {
                 menu_options: Vec::new(),
                 title_switch: None,
                 banks: Vec::new(),
+                spectrogram: None,
                 alternates: Vec::new(),
             },
             plugin: true,
@@ -574,8 +578,36 @@ impl DeviceView {
             slot_keys: Vec::new(),
             articulations: Vec::new(),
             learning: None,
+            matrix_routes: Vec::new(),
             locked: Vec::new(),
         }
+    }
+
+    /// The sources routed into each parameter `device`'s matrix moves (the
+    /// instrument modulation spec, R12): a slot counts while it has a source
+    /// and a destination and its amount isn't 0 %.
+    fn matrix_routes(&self, device: &Device) -> Vec<ids::MatrixRoutes> {
+        let Some(layout) = self
+            .device_type(&device.kind)
+            .and_then(|device_type| device_type.matrix.as_ref())
+        else {
+            return Vec::new();
+        };
+        let state = layout.state(device);
+        state
+            .destinations
+            .iter()
+            .filter_map(|dest| {
+                let param = dest.param?;
+                let sources: Vec<String> = state
+                    .slots
+                    .iter()
+                    .filter(|slot| slot.destination == Some(dest.name) && slot.amount != 0.0)
+                    .filter_map(|slot| slot.source.map(str::to_owned))
+                    .collect();
+                (!sources.is_empty()).then_some(ids::MatrixRoutes { param, sources })
+            })
+            .collect()
     }
 
     /// The parameters a plug-in device's panel and the automation and
@@ -635,11 +667,11 @@ impl DeviceView {
     /// has that device.
     #[must_use]
     pub fn parameters_of(&self, doc: &Document, device: DeviceId) -> Option<DeviceParameters> {
-        doc.device(device).map(|d| self.parameters(d))
+        doc.device(device).map(|d| self.parameters(d, doc))
     }
 
     /// `device`'s parameters as `device.parameters` reports them.
-    fn parameters(&self, device: &Device) -> DeviceParameters {
+    fn parameters(&self, device: &Device, doc: &Document) -> DeviceParameters {
         // A plug-in's panel shows its configured parameters (WP-5.40); any
         // other device's panel shows them all.
         let configured: BTreeSet<ParamId> = self
@@ -656,15 +688,35 @@ impl DeviceView {
         let params = self
             .description(&device.kind)
             .map(|description| {
+                // Spec: spectral-time R12. A delay time the delay memory
+                // can't hold says so in its text.
+                let capped = matches!(
+                    &device.kind,
+                    DeviceKind::Native { device_type } if device_type == bl_devices::SPECTRAL_TIME
+                )
+                .then(|| {
+                    bl_devices::spectral_time::capped_time(
+                        |id| description.value(&device.params, id).unwrap_or_default(),
+                        doc.settings().tempo.bpm_at(Ticks::ZERO).get(),
+                    )
+                })
+                .flatten();
                 description
                     .params
                     .iter()
                     .map(|p| {
                         let value = description.value(&device.params, p.id).unwrap_or(p.default);
+                        let mut text = p.format(value);
+                        if capped == Some(p.id) {
+                            text.push_str(&format!(
+                                " (held at {} s)",
+                                bl_devices::spectral_time::CAP_SECONDS
+                            ));
+                        }
                         ParameterState {
                             descriptor: p.clone(),
                             value,
-                            text: p.format(value),
+                            text,
                             menu_option: description.menu_options.contains(&p.id),
                             title_switch: description.title_switch == Some(p.id),
                             configured: configured.contains(&p.id),
@@ -1837,6 +1889,7 @@ impl DeviceView {
                     })
             }
             ids::LOAD_PRESET => has_target() && args.get("path").is_some(),
+            ids::SET_ROUTE | ids::CLEAR_ROUTE => has_target(),
             ids::PARAMETERS | ids::DISPLAY | ids::SET_DISPLAY_VIEW | ids::SET_PAGE => has_target(),
             ids::ARM_MAP => self.target(doc, named).is_ok_and(|device| {
                 doc.device(device)
@@ -2599,7 +2652,13 @@ impl DeviceView {
                 let DeviceArgs { device } = parse(args)?;
                 let device = self.target(editor.document(), device)?;
                 let current = editor.document().device(device).expect("the target exists");
-                outcome.value = to_value(&self.parameters(current));
+                outcome.value = to_value(&self.parameters(current, editor.document()));
+                return Ok(outcome);
+            }
+            ids::SET_ROUTE | ids::CLEAR_ROUTE => {
+                let changed = self.edit_route(id, args, editor)?;
+                outcome.document_changed = true;
+                outcome.value = to_value(&changed);
                 return Ok(outcome);
             }
             ids::ARTICULATION_LIST => {
@@ -2748,6 +2807,102 @@ impl DeviceView {
         Ok(outcome)
     }
 
+    /// Sets or clears a route of an instrument's modulation matrix
+    /// (`device.set_route`, `device.clear_route`; instrument modulation R8,
+    /// R9): the route and its amount, in one undo step.
+    fn edit_route(
+        &self,
+        id: &str,
+        args: Value,
+        editor: &mut Editor,
+    ) -> Result<ids::RouteChanged, DeviceError> {
+        let (device, set) = if id == ids::SET_ROUTE {
+            let set: ids::SetRouteArgs = parse(args)?;
+            (set.device, Some(set))
+        } else {
+            let clear: ids::ClearRouteArgs = parse(args)?;
+            let device = clear.device;
+            return self.clear_route(device, clear, editor);
+        };
+        let set = set.expect("set_route has its arguments");
+        let device = self.target(editor.document(), device)?;
+        let current = editor.document().device(device).expect("the target exists");
+        let layout = self.matrix_of(device, current)?;
+        let route = layout
+            .plan_set(
+                current,
+                set.slot.map(usize::from),
+                &set.source,
+                &set.destination,
+            )
+            .map_err(|e| DeviceError::InvalidArgs(e.to_string()))?;
+        let amount = layout.slots[usize::from(route.slot)].amount;
+        let slot = route.slot;
+        editor
+            .transact("Change Modulation Route", |editor| {
+                editor.apply(Command::SetModRoute {
+                    device,
+                    slot,
+                    source: route.source,
+                    destination: route.destination,
+                })?;
+                if let Some(value) = set.amount {
+                    editor.apply(Command::SetDeviceParam {
+                        device,
+                        param: amount,
+                        value: value.clamp(-100.0, 100.0),
+                    })?;
+                }
+                Ok::<(), bl_model::EditError>(())
+            })
+            .map_err(|e| DeviceError::Failed(e.to_string()))?;
+        Ok(ids::RouteChanged { device, slot })
+    }
+
+    /// `device.clear_route`: empties the slot and puts its amount back to 0 %.
+    fn clear_route(
+        &self,
+        device: Option<DeviceId>,
+        args: ids::ClearRouteArgs,
+        editor: &mut Editor,
+    ) -> Result<ids::RouteChanged, DeviceError> {
+        let device = self.target(editor.document(), device)?;
+        let current = editor.document().device(device).expect("the target exists");
+        let layout = self.matrix_of(device, current)?;
+        let slot = layout
+            .plan_clear(
+                current,
+                args.slot.map(usize::from),
+                args.source.as_deref(),
+                args.destination.as_deref(),
+            )
+            .map_err(|e| DeviceError::InvalidArgs(e.to_string()))?;
+        let amount = layout.slots[usize::from(slot)].amount;
+        editor
+            .transact("Clear Modulation Route", |editor| {
+                editor.apply(Command::ClearModRoute { device, slot })?;
+                editor.apply(Command::SetDeviceParam {
+                    device,
+                    param: amount,
+                    value: 0.0,
+                })?;
+                Ok::<(), bl_model::EditError>(())
+            })
+            .map_err(|e| DeviceError::Failed(e.to_string()))?;
+        Ok(ids::RouteChanged { device, slot })
+    }
+
+    /// The modulation matrix `device`'s type declares.
+    fn matrix_of(
+        &self,
+        device: DeviceId,
+        current: &Device,
+    ) -> Result<std::sync::Arc<bl_model::MatrixLayout>, DeviceError> {
+        self.device_type(&current.kind)
+            .and_then(|device_type| device_type.matrix.clone())
+            .ok_or_else(|| DeviceError::Unavailable(format!("{device} has no modulation matrix")))
+    }
+
     /// Replaces the Drum Sampler `device` with Simpler in One-Shot
     /// mode (`device.swap_to_snapshot`; one-shot drum sampler R22, R23): the
     /// same place, sample and on or off state, and its Start and Length as
@@ -2883,13 +3038,14 @@ impl DeviceView {
                 index,
                 device,
             })?;
-            if let Some((params, name, shape, articulations, mpe)) = state {
+            if let Some((params, name, shape, articulations, routes, mpe)) = state {
                 editor.apply(Command::SetDeviceState {
                     device: id,
                     params,
                     name,
                     shape,
                     articulations,
+                    routes,
                     mpe,
                 })?;
             }
@@ -2938,6 +3094,7 @@ impl DeviceView {
                 preset::preset_name(&path),
                 preset.shape,
                 preset.articulations,
+                preset.routes,
                 preset.mpe,
             )
         });
@@ -2992,13 +3149,14 @@ impl DeviceView {
                     index,
                     device,
                 })?;
-                if let Some((params, name, shape, articulations, mpe)) = state {
+                if let Some((params, name, shape, articulations, routes, mpe)) = state {
                     editor.apply(Command::SetDeviceState {
                         device: id,
                         params,
                         name,
                         shape,
                         articulations,
+                        routes,
                         mpe,
                     })?;
                 }
@@ -3448,7 +3606,7 @@ impl DeviceView {
                     chain.receive = bl_model::Receive::Note(note);
                 }
                 editor.apply(Command::AddChain { rack, index, chain })?;
-                if let (Some(device), Some((params, name, shape, articulations, mpe))) =
+                if let (Some(device), Some((params, name, shape, articulations, routes, mpe))) =
                     (device_id, state)
                 {
                     editor.apply(Command::SetDeviceState {
@@ -3457,6 +3615,7 @@ impl DeviceView {
                         name,
                         shape,
                         articulations,
+                        routes,
                         mpe,
                     })?;
                 }
@@ -3732,6 +3891,8 @@ fn load_preset(
             name: preset::preset_name(path),
             shape: loaded.shape,
             articulations: loaded.articulations,
+            // A preset with no routes leaves the device with none.
+            routes: Some(loaded.routes.unwrap_or_default()),
             mpe: loaded.mpe,
         })
         .map(|_| ())

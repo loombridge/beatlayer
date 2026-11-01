@@ -10,13 +10,20 @@ publish.workspace = true
 [dependencies]
 # Parameter smoothing (`smooth`), re-exported from the plug-in kit.
 lspk-params.workspace = true
+# The transforms of `stft`: the version bl-analysis and bl-stretch use.
+realfft = "3.5.0"
+# The small complex transforms of `convolution`, as realfft's own dependency.
+rustfft = "6.4.1"
 # The SIMD lanes the physical models run their voices in (physical-models R12, R18).
 lspk-dsp.workspace = true
 
 [dev-dependencies]
+proptest = { version = "1.11", default-features = false, features = ["std"] }
 # Every block in the physical models' tests runs as a real-time section under
 # the allocation trap.
 lspk-rt.workspace = true
+# The drop thread's queue in the convolver's swap test.
+rtrb = "0.4.0"
 
 # The physical models against the device budget, run by hand: `cargo bench -p bl-dsp --bench physical`.
 [[bench]]

@@ -152,6 +152,12 @@ fn fixture() -> Project {
             channel: Channel::Pair(3),
         },
         Command::SetCueMode { enabled: true },
+        Command::SetPadLayout {
+            in_key: Some(false),
+            fixed: Some(true),
+            spacing: Some(bl_model::PadSpacing::Thirds),
+            direction: Some(bl_model::PadDirection::Horizontal),
+        },
         Command::SetCueVolume { volume: 0.5 },
         Command::SetReducedLatencyMonitoring { enabled: true },
         // Spec: tunings R2, R14. A tuning inside the set, with a track that
@@ -292,6 +298,24 @@ fn fixture() -> Project {
                 "Impulse",
                 DeviceKind::Native {
                     device_type: "beatlayer.kitbag".to_owned(),
+                },
+            )
+            .with_role(DeviceRole::Instrument),
+        },
+    );
+    // An instrument with a modulation matrix, so its slots read back
+    // (instrument modulation R11).
+    let drift: DeviceId = editor.new_id();
+    apply(
+        &mut editor,
+        Command::InsertDevice {
+            track: pad,
+            index: 0,
+            device: Device::new(
+                drift,
+                "Drift",
+                DeviceKind::Native {
+                    device_type: bl_devices::polysynth::POLYSYNTH.to_owned(),
                 },
             )
             .with_role(DeviceRole::Instrument),
@@ -440,6 +464,17 @@ fn fixture() -> Project {
         bpm: Some(90.0),
     };
     device.slices = vec![1_000, 2_000];
+    // What each wavetable oscillator plays (WP-8.8, wavetable R7).
+    device.wavetables = vec![
+        Some(bl_model::WavetableChoice::User {
+            raw: true,
+            frames: 3,
+        }),
+        Some(bl_model::WavetableChoice::Factory {
+            category: "Additive".to_owned(),
+            name: "Odd Rise".to_owned(),
+        }),
+    ];
     // The flags that bound what a Simpler plays (sampler R22).
     device.region = Some(bl_model::SampleRegion::Frames {
         start: 500,
@@ -1158,6 +1193,7 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "midi_sidechain",
                 "floating",
                 "media",
+                "wavetables",
                 "layers",
                 "layers.ram_mode",
                 "layers.snap",

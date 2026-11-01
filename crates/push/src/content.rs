@@ -258,6 +258,14 @@ pub enum Enter {
     AddTrack,
     /// Add Device was pressed (push-2-tracks R25).
     AddDevice,
+    /// Clip Mode offered a sample for this empty audio slot (push-2-tracks
+    /// R43).
+    Samples {
+        /// The track.
+        track: bl_model::TrackId,
+        /// The scene.
+        scene: bl_model::SceneId,
+    },
 }
 
 /// How the touch strip is configured (R11).
@@ -316,6 +324,15 @@ pub struct Ctx<'a> {
     pub held_steps: &'a [HeldStep],
     /// Mix's page, for Mix Mode (R22).
     pub mix_page: MixPage,
+    /// The display mode, for a pad mode whose buttons it shares (notes R45).
+    pub display: DisplayMode,
+    /// What Note Mode showed at the last tick, for the display modes that
+    /// follow its layout (push-2-tracks R50 to R57).
+    pub note: Option<&'a crate::note::State>,
+    /// The key of the slice picked on a slicing Simpler's pads (notes R73).
+    pub slice: Option<u8>,
+    /// Whether Simpler's Pad Slicing is on (notes R74).
+    pub pad_slicing: bool,
     pub(crate) actions: &'a mut Vec<Action>,
 }
 
@@ -328,6 +345,10 @@ pub(crate) enum Action {
     Aftertouch(bool),
     /// An encoder's turns are a gesture the surface ends at its release.
     Gesture(u8),
+    /// Browse Mode is entered, and shown.
+    Browse(Enter),
+    /// The steps held are being edited, so letting them go is no tap.
+    KeepSteps,
 }
 
 impl Ctx<'_> {
@@ -365,6 +386,19 @@ impl Ctx<'_> {
         }
         self.cx
             .run("arrangement.select_tracks", json!({ "tracks": [track] }));
+    }
+
+    /// Says the steps held are being edited, so letting one go isn't a tap
+    /// that toggles its note (push-2-tracks R55).
+    pub fn keep_steps(&mut self) {
+        self.actions.push(Action::KeepSteps);
+    }
+
+    /// Opens Browse Mode listing the audio files Load puts in the empty slot
+    /// at `track` and `scene` (push-2-tracks R43).
+    pub fn browse_samples(&mut self, track: bl_model::TrackId, scene: bl_model::SceneId) {
+        self.actions
+            .push(Action::Browse(Enter::Samples { track, scene }));
     }
 
     /// Chooses channel pressure (false) or polyphonic key pressure for the
@@ -434,6 +468,13 @@ pub struct Paint<'a> {
     pub colours: &'a [[u8; 3]],
     /// The steps held in Note Mode.
     pub held_steps: &'a [HeldStep],
+    /// What Note Mode showed at the last tick, for the display modes that
+    /// follow its layout (push-2-tracks R50 to R57).
+    pub note: Option<&'a crate::note::State>,
+    /// Whether the pads are in Session Mode (push-2-tracks R71).
+    pub session: bool,
+    /// The key of the slice picked on a slicing Simpler's pads (notes R73).
+    pub slice: Option<u8>,
 }
 
 /// The content of one pad mode or display mode.
@@ -489,6 +530,11 @@ pub trait Content: Send {
         None
     }
 
+    /// What Clip Mode shows, for `push.state` (push-2-tracks R58).
+    fn clip_state(&self) -> Option<crate::clip::State> {
+        None
+    }
+
     /// What Session Mode shows, for `push.state` (push-2-tracks R73).
     fn session_state(&self) -> Option<crate::session::State> {
         None
@@ -497,6 +543,15 @@ pub trait Content: Send {
     /// Draws the mode: the display's columns and labels, the pads, the
     /// buttons it owns.
     fn paint(&mut self, _paint: &mut Paint<'_>) {}
+
+    /// A display button pressed while the Scale menu is open (notes R35).
+    fn scale_button(&mut self, _button: u8, _ctx: &mut Ctx<'_>) {}
+
+    /// An encoder turned while the Scale menu is open (notes R35).
+    fn scale_turn(&mut self, _column: u8, _steps: i32, _ctx: &mut Ctx<'_>) {}
+
+    /// Draws the Scale menu over the display (notes R35).
+    fn paint_scale(&mut self, _paint: &mut Paint<'_>) {}
 
     /// Whether the mode uses the lower display buttons itself rather than
     /// leaving them to the ring's tracks (R26).
@@ -509,6 +564,10 @@ pub trait Content: Send {
         false
     }
 
+    /// The steps held are being edited by the display mode: a pad let go
+    /// afterwards toggles nothing (push-2-tracks R55).
+    fn keep_steps(&mut self) {}
+
     /// The steps held down now: only Note Mode has any (notes R25).
     fn held_steps(&self) -> Vec<HeldStep> {
         Vec::new()
@@ -518,6 +577,17 @@ pub trait Content: Send {
     /// if it has a use for it (R11).
     fn strip_use(&self) -> Option<StripUse> {
         None
+    }
+
+    /// The key of the slice picked on the pads, if they play a slicing
+    /// Simpler's slices (notes R73).
+    fn picked_slice(&self, _model: &ReadModel) -> Option<u8> {
+        None
+    }
+
+    /// Whether Simpler's Pad Slicing is on, which the pads read (notes R74).
+    fn pad_slicing(&self) -> bool {
+        false
     }
 
     /// What Note Mode shows, for `push.state` (notes R5 to R31).

@@ -968,13 +968,13 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 7.18b | done | 31 October 2026 | [#632](https://github.com/loombridge/beatlayer/pull/632): CV Envelope Follower, CV LFO and CV Shaper share the modulators' laws, worked out every frame and equal to the modulators on their 32-frame grid points, with Min, Max and Depth in volts |
 | 7.19 | done | 30 October 2026 | [#546](https://github.com/loombridge/beatlayer/pull/546): `bl-push` detects Push 2 and runs it on the surface host with every control, LEDs, the 960 × 160 display over USB, the mode framework, the Setup menu, footswitches and User Mode, with a simulated Push 2 for the tests and `push.state`, `push.set_mode`, `push.set_setup` and `push.display_frame` |
 | 7.20 | done | 30 October 2026 | [#555](https://github.com/loombridge/beatlayer/pull/555): Push 2's Browse Mode browses the catalogue in columns from the read model without waiting on the index, with Load, Preview and Add Track, and `push.state` reads it back |
-| 7.21 | todo |  |  |
-| 7.22 | todo |  |  |
+| 7.21 | done | 1 November 2026 | [#563](https://github.com/loombridge/beatlayer/pull/563): Note Mode on Push 2 arms the selected track and plays its drum rack through the Loop Selector, 16 Velocities and 64 Pads layouts tied to the pad view, with pad options, step sequencing with loop pads and pages, and `push.state` reading it back |
+| 7.22 | done | 1 November 2026 | [#696](https://github.com/loombridge/beatlayer/pull/696): Melodies on Push 2 with pad pressure as polyphonic key pressure, the touch strip's bend and modulation, 64 Notes, In Key and Chromatic in every layout saved with the set (`song.set_pad_layout`), the Scale menu, the Melodic Sequencer and its + 32 Notes variant, Note Mode navigation, and `session.launch` taking `legato` |
 | 7.23 | todo |  |  |
-| 7.24 | todo |  |  |
+| 7.24 | done | 1 November 2026 | [#711](https://github.com/loombridge/beatlayer/pull/711): Simpler on Push 2 with its main bank over the waveform in Classic, One-Shot and Slice, Edit Mode's buttons, slicing from the pads and Convert, read back in `push.state` |
 | 7.25 | done | 1 November 2026 | [#633](https://github.com/loombridge/beatlayer/pull/633): Device Mode on Push 2 with its banks and Edit Mode, adding, deleting, switching off and moving devices, unfolding racks with their macros and chains, read back in `push.state` |
 | 7.26 | done | 31 October 2026 | [#634](https://github.com/loombridge/beatlayer/pull/634): Mix Mode on Push 2 with Track Mix, Global Mix, Input & Output and Master, unfolding groups, drum racks and rack chains, and Mute, Solo, Delete and Duplicate on the lower buttons, read back in `push.state` |
-| 7.27 | todo |  |  |
+| 7.27 | done | 1 November 2026 | [#719](https://github.com/loombridge/beatlayer/pull/719): Clip Mode on Push 2 shows the clip, moves its loop, markers and zoom, sets audio clips' warp mode, gain and transpose, runs Crop, draws each layout's display, edits the note settings of held steps and loads samples into empty audio slots through Browse, read back in `push.state` |
 | 7.28 | done | 31 October 2026 | [#635](https://github.com/loombridge/beatlayer/pull/635): Session Mode on Push 2 launches, records and colours slots from the pads and scenes from the scene buttons, moves the ring with the arrows, Octave and Page, runs Stop Clip in every mode and shows the Session Overview, read back in `push.state`; R71 comes with Clip Mode (WP-7.27) |
 | 7.29 | done | 29 October 2026 | [#507](https://github.com/loombridge/beatlayer/pull/507): Legato, a clip's own launch quantisation with Repeat's restarts, and `session.nudge` with the Launch Properties panel's nudge buttons run in the engine, with the clip time in `session.state`; the scrub control and the mapping targets come with WP-7.3 and 7.3b |
 | 7.30 | done | 30 October 2026 | [#509](https://github.com/loombridge/beatlayer/pull/509): a `Follower` asked once per block gives a per-block song speed that clips, warped audio, notes, the metronome, automation, the loop, launch lines, scheduled commands, recording and tempo-synced devices honour, starts wait for the follower's frame and Stop cancels them, and the Control Bar's Phase Nudge Down and Up run `transport.phase_nudge`; the followers come with WP-7.12, 7.14 and 7.18, and mapping the buttons with WP-7.3b |
@@ -983,13 +983,13 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 7.33 | done | 29 October 2026 | [#512](https://github.com/loombridge/beatlayer/pull/512): Simpler's region is the Start and End flags in the sample's own frames, set by `device.set_sample_region` as one undo step; Classic plays S Start, S Length and S Loop Length inside the flags and One-Shot and Slice play flag to flag; the display, Crop, Normalize, the conversions and Slice to New MIDI Track read the flags, and schema 13 moves older sets over |
 | 7.33b | done | 31 October 2026 | [#525](https://github.com/loombridge/beatlayer/pull/525): Simpler's Slice mode has the Playback chooser (Mono, Poly, Thru, parameter 56, in the Slicing bank), and Slice to Drum Rack and Slice to New MIDI Track run from Simpler's title-bar and display menus as one undo step each, and by ID for agents |
 | 8.1 | done | 31 October 2026 | [#640](https://github.com/loombridge/beatlayer/pull/640): a native device's body switches between named pages, as tabs or as a shell and display, set by clicks or `device.set_page` without an undo step and read back in `device_view.state`; the page saves with the set, and the multisampler's tabs are now pages that open on their saved tab |
-| 8.2 | todo |  |  |
+| 8.2 | done | 1 November 2026 | [#643](https://github.com/loombridge/beatlayer/pull/643): `bl_devices::instrument` gives the kit's voices the shared voice section (Voices, Poly and Mono, Legato, Portamento and Glissando, Unison, Retrigger, stealing with Priority), pitch bend ranges and Note PB, the MPE sources, velocity and key curves, the tuning path and Hi-Quality, and Drift moved onto it rendering as before; exact block-size identity while pitch moves waits on the kit placing its pitch ramps by frame |
 | 8.3 | done | 1 November 2026 | [#642](https://github.com/loombridge/beatlayer/pull/642): the instruments' filter has low-pass, high-pass, band-pass, notch and Morph at 12 and 24 dB per octave with the Clean, OSR, MS2, SMP and PRD circuits, Drive and Morph per voice; Simpler gains the circuits, Drive and Morph and Sampler the circuits and per-voice Resonance, Morph and Drive, with sets on Clean rendering as before; greying the controls a circuit doesn't use and Simpler's Morph menu are still to build |
-| 8.4 | todo |  |  |
+| 8.4 | done | 1 November 2026 | [#724](https://github.com/loombridge/beatlayer/pull/724): the instruments' modulation matrix routes per-voice and global sources to an instrument's parameters through fixed, chosen and free slots whose amounts are automatable parameters, on top of a parameter's played value; `device.set_route` and `device.clear_route` set and clear routes as one undo step each, routes save with the set and presets and read back through the `device` query's `matrix`, and Drift's Mod section moved onto it rendering as before; the evaluator is the matrix's own rather than the kit's modulation engine |
 | 8.5 | done | 31 October 2026 | [#644](https://github.com/loombridge/beatlayer/pull/644): `bl_dsp::physical` has modal banks for Beam, Marimba, Cantilever, Membrane, Circular Membrane and Plate and waveguides for String, Tube and Pipe on the kit's SIMD lanes, tuned within 1 cent from 40 Hz to 4 kHz at 44.1 to 96 kHz and stable to 192 kHz; the R11 damper and finger and fret positions wait on Tension |
-| 8.6 | todo |  |  |
+| 8.6 | done | 1 November 2026 | [#720](https://github.com/loombridge/beatlayer/pull/720): `bl_devices::fm` runs four phase-modulation operators per voice on SIMD lanes with Operator's eleven algorithms, feedback, coarse, fine and fixed frequency, per-key band-limited built-in and user waveforms and the Antialias, Interpolation and Tone controls, behind a test device; the panel waits on Operator (8.12) |
 | 8.7 | todo |  |  |
-| 8.8 | todo |  |  |
+| 8.8 | done | 1 November 2026 | [#645](https://github.com/loombridge/beatlayer/pull/645): a generator in the repository makes 26 factory wavetables in 7 categories bit-identically, built on first use into the kit's shared cache; user wavetables load from WAV (with or without a frame-size chunk), AIFF or raw files as media the set references and Collect All and Save collects; `device.load_wavetable` and `device.set_wavetable` are one undo step each and read back; the device itself comes with WP-8.9 |
 | 8.9 | todo |  |  |
 | 8.10 | todo |  |  |
 | 8.11 | todo |  |  |
@@ -1009,44 +1009,44 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.25 | todo |  |  |
 | 8.26 | todo |  |  |
 | 8.27 | todo |  |  |
-| 8.28 | todo |  |  |
-| 8.29 | todo |  |  |
+| 8.28 | done | 1 November 2026 | [#648](https://github.com/loombridge/beatlayer/pull/648): `bl_dsp::stft` gives a streaming STFT with exact overlap-add resynthesis, phase-vocoder helpers and a cepstral envelope, reporting `size - 1` frames of latency, and devices get a spectrogram display kind that reads back through `device.display`; Spectrum keeps its own FFT for now |
+| 8.29 | done | 1 November 2026 | [#695](https://github.com/loombridge/beatlayer/pull/695): `bl_dsp::convolution` gives zero-latency partitioned convolution (a 64-tap direct head and FFT stages of 64, 512 and 2,048 with their work sliced evenly per block) for mono, stereo and true-stereo responses up to 30 seconds, prepared off the audio thread and swapped with a crossfade, the old response freed off the audio thread |
 | 8.30 | todo |  |  |
 | 8.31 | todo |  |  |
-| 8.32 | todo |  |  |
+| 8.32 | done | 1 November 2026 | [#697](https://github.com/loombridge/beatlayer/pull/697): `bl_dsp::pitch` has a streaming tracker (the Tuner's detector moved out, with confidence, voiced and onset every hop) and a PSOLA voice shifter that keeps or moves formants; a quiet reading in the shifter dated one interval early is a follow-up |
 | 8.33 | done | 31 October 2026 | [#650](https://github.com/loombridge/beatlayer/pull/650): Delay has 12.4's LFO with six rate modes, seven waves and Morph in its expanded part, and Limiter has Maximize with Threshold and Output; saving Delay's expanded part with the set (R13) is a follow-up |
 | 8.34 | todo |  |  |
 | 8.35 | todo |  |  |
 | 8.36 | todo |  |  |
 | 8.37 | done | 1 November 2026 | [#649](https://github.com/loombridge/beatlayer/pull/649): Echo has its two lines with their time and channel modes, input drive and inverted feedback, filters, the Modulation and Character tabs, its reverb, the global controls and the tunnel display on its pages |
 | 8.38 | done | 31 October 2026 | [#651](https://github.com/loombridge/beatlayer/pull/651): Roar has its input section, three stages with twelve shapers and nine filters, seven routing modes, 4× oversampling, Output, Color compensation, Dry/Wet and the shaper display, with the Auto Filter's filters moved to a shared module; R11's aliasing level at 4× (8×, ADAA or the narrower test) and Mid Side's Blend are follow-ups |
-| 8.39 | todo |  |  |
+| 8.39 | done | 1 November 2026 | [#673](https://github.com/loombridge/beatlayer/pull/673): Roar has its modulation matrix (LFO 1, LFO 2, the envelope follower and Noise to 31 targets on the 32-frame grid), the feedback section with Note mode and octave keys, the compressor, both sidechains (R38) and the modulation displays, using the MIDI tapping point R39 from #659; the single matrix view with its lamps, Input Listen as view state, loops past 4 s and a linked compressor detector are follow-ups |
 | 8.40 | todo |  |  |
-| 8.41 | todo |  |  |
+| 8.41 | done | 1 November 2026 | [#663](https://github.com/loombridge/beatlayer/pull/663): Pedal, with Overdrive, Distortion and Fuzz circuits oversampled 4x (8x with Hi-Quality), Bass, Mid at three positions, Treble and Sub, Output and Dry/Wet, and a 20 ms crossfade when the type changes; its aliasing target holds at −36 dBFS, not at full level, which is with the maintainer |
 | 8.42 | todo |  |  |
 | 8.43 | done | 1 November 2026 | [#670](https://github.com/loombridge/beatlayer/pull/670): Resonators is a native device with its input filter, five tuned comb resonators (I by note and fine, II to V by interval), Decay, Const, Color, Mode A and B, Width, Gain and Dry/Wet, following the current scale and the set's tuning |
-| 8.44 | todo |  |  |
-| 8.45 | todo |  |  |
+| 8.44 | done | 1 November 2026 | [#659](https://github.com/loombridge/beatlayer/pull/659): Corpus is a native device with its seven resonator types on the shared physical models, the LFO, the input filter, the global controls and Bleed, and its frequency set by notes from a MIDI sidechain (routing R39) |
+| 8.45 | done | 1 November 2026 | [#715](https://github.com/loombridge/beatlayer/pull/715): Vocoder is a native device with its filter bank of 4 to 40 bands, the Noise, External, Modulator and Pitch Tracking carriers, Enhance, Unvoiced, Gate, Level, Depth, Attack, Release, Formant, the channel modes and its band display |
 | 8.46 | todo |  |  |
-| 8.47 | todo |  |  |
+| 8.47 | done | 1 November 2026 | [#699](https://github.com/loombridge/beatlayer/pull/699): Spectral Time, an STFT effect with the Freezer (Manual and Retrigger on onsets or synced divisions, crossfade and envelope fades), the spectral delay (time in milliseconds, notes or sixteenths, Feedback, Tilt, Spray, Mask, Stereo), the order switch, Resolution with a crossfade, the global controls and a headless spectrogram, its banks covering every parameter |
 | 8.48 | todo |  |  |
-| 8.49 | todo |  |  |
+| 8.49 | done | 1 November 2026 | [#701](https://github.com/loombridge/beatlayer/pull/701): Spectral Blur is a native device: a chosen frequency range smeared into a cloud over Halo's time, with Residual, Freeze, Wet Gain, Dry/Wet, a display with draggable range edges, and its bank |
 | 8.50 | done | 1 November 2026 | [#654](https://github.com/loombridge/beatlayer/pull/654): Color Limiter (Loudness, Ceiling, Lookahead, Release, Saturation, Color, built on the shared limiter stage) and Re-Enveloper (three bands on the shared crossover, each with its C/E Factor) are native devices with their pages |
-| 8.51 | todo |  |  |
+| 8.51 | done | 1 November 2026 | [#653](https://github.com/loombridge/beatlayer/pull/653): Gated Delay (a delay fed through a 16-step gate sequencer on the tempo map, with random steps and feedback) and Pitch Hack (a pitch-shifting delay line on the Shifter's line, with reverse, random intervals and feedback) are native devices with their pages |
 | 8.52 | done | 1 November 2026 | [#657](https://github.com/loombridge/beatlayer/pull/657): PitchLoop89 (two pitch-shifting looping voices with loop, jitter and seeded random controls) and Vector Delay (taps that move as particles on its display, with drag, arrow keys and accessible tap positions) are native devices with their pages |
 | 9.1 | done | 1 November 2026 | [#658](https://github.com/loombridge/beatlayer/pull/658): one Packages manager installs each feature's ONNX Runtime build and models from a manifest on one installer thread, with a record per package, the shared download page, and `packages.list`, `packages.install` and `packages.remove`; stem separation's download runs through it |
-| 9.2 | todo |  |  |
-| 9.3 | todo |  |  |
+| 9.2 | done | 1 November 2026 | [#688](https://github.com/loombridge/beatlayer/pull/688): stem separation takes a Session clip, a file from the browser or an Arrangement time selection as its source (`source` on `stems.open` and `stems.separate`, with menu entries for each), gives the stems their track colours and copies the source track's devices, mixer and automation to the group |
+| 9.3 | done | 1 November 2026 | [#683](https://github.com/loombridge/beatlayer/pull/683): the split stems model runs with the STFT and its inverse in Rust, on Core ML on macOS with the CPU as fallback (named in `stems.status`), and `bl-cli bench stems` separates a 3-minute generated mix in High Speed in about 7 seconds on an M5 Max, reporting the first compile apart |
 | 9.4 | todo |  |  |
-| 9.5 | todo |  |  |
-| 9.6 | todo |  |  |
+| 9.5 | done | 1 November 2026 | [#684](https://github.com/loombridge/beatlayer/pull/684): basic-pitch's note step is ported in `bl_analysis::transcribe` with the Melody rule and the clean-up (weak re-onsets merged, confident onsets snapped, velocity from onset strength), its model is the `pitch-model` package, and `cargo xtask transcribe-bench` scores Melody and Harmony above the spec's F-measure targets |
+| 9.6 | done | 1 November 2026 | [#707](https://github.com/loombridge/beatlayer/pull/707): `bl_analysis::drums` finds onsets and classes them as kick, snare and hi-hat with a small network whose weights `tools/drum-classifier/train.py` reproduces byte for byte from its seed, velocity from onset strength, and `cargo xtask transcribe-bench --drums` scores each class at 0.90 or above on generated breaks, clean and with noise and reverb |
 | 9.7 | todo |  |  |
 | 9.8 | done | 1 November 2026 | [#660](https://github.com/loombridge/beatlayer/pull/660): every sample up to 60 seconds and every instrument and drum preset gets a sound descriptor in the background, kept in the browser's database by content hash, with the Status Bar's progress and Pause and agents reading the progress |
 | 9.9 | done | 1 November 2026 | [#677](https://github.com/loombridge/beatlayer/pull/677): Show Similar Files from the icon beside a selected file, the item menu and the View menu (Cmd-Shift-F) puts the reference in the search field and lists its neighbours most similar first, with `browser.similar` for agents and saved labels keeping the reference first. |
 | 9.10 | todo |  |  |
-| 9.11 | todo |  |  |
+| 9.11 | done | 1 November 2026 | [#676](https://github.com/loombridge/beatlayer/pull/676): plug-ins get Function tags from the categories they declare (CLAP, VST3, AU, LV2) and samples get sound tags from a classifier, kept apart from a person's tags with removed ones remembered, and the Filter View Menu's Include Auto Tags works, with `browser.set_include_auto_tags` and `browser.tags` marking auto tags for agents |
 | 9.12 | done | 1 November 2026 | [#661](https://github.com/loombridge/beatlayer/pull/661): a real-time tempo tracker in `bl-analysis` copies incoming audio off the audio thread and estimates tempo and beat phase, measured on generated straight and swung drum loops from 80 to 180 BPM |
-| 9.13 | todo |  |  |
+| 9.13 | done | 1 November 2026 | [#672](https://github.com/loombridge/beatlayer/pull/672): Tempo Follower follows the tracker in the engine before Link, with Settings ▸ Tempo & MIDI's section, the Control Bar's Follow toggle, EXT and Tap off while it follows, Link peers taking the followed tempo, and the `tempo_follower.*` commands |
 | 9.14 | todo |  |  |
 | 9.15 | todo |  |  |
 | 9.16 | todo |  |  |
@@ -1061,7 +1061,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 9.25 | todo |  |  |
 | 9.26 | todo |  |  |
 | 9.27 | todo |  |  |
-| 9.28 | todo |  |  |
+| 9.28 | done | 1 November 2026 | [#690](https://github.com/loombridge/beatlayer/pull/690): a spike under `spikes/ext-wasmtime` runs a component's process function under `wasmtime` with a pooling allocator on a real-time thread on all three platforms: no allocation after instantiation, about 0.4 to 1.3 µs per 32-frame block, runaways stopped by epoch interruption, and `cargo deny` passing; its report on D12 is with the maintainer |
 | 9.29 | todo |  |  |
 | 9.30 | todo |  |  |
 | 9.31 | todo |  |  |

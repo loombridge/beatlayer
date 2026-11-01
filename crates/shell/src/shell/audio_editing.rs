@@ -26,7 +26,7 @@ use crate::arrangement::placing::clear_on;
 use crate::processed::{Kind, Request, Written};
 
 /// The longest a consolidate render may run: a day, as an export's is.
-const LONGEST: f64 = 86_400.0;
+pub(super) const LONGEST: f64 = 86_400.0;
 
 /// How close two positions may be and still name the same point: a
 /// millionth of a frame at 192 kHz.
@@ -1363,7 +1363,7 @@ pub(crate) fn midi_region(clip: &Clip, midi: &MidiData) -> (Ticks, Ticks) {
 /// The audio clip data a consolidate's clip plays (R21): the new file, at 0
 /// dB until `gain` makes up for its normalisation, warped with the map that
 /// holds the beats it was rendered at, and looped over the whole file.
-fn consolidated_audio(
+pub(super) fn consolidated_audio(
     media: ContentHash,
     gain: f64,
     markers: Vec<WarpMarker>,
@@ -1406,7 +1406,7 @@ fn consolidated_audio(
 /// shortcut: a tempo segment that ramps is one straight stretch of the warp
 /// map between two markers, where the song's tempo map curves; upgrade to a
 /// marker per beat once a rounded, ramped tempo has to null to the bit.
-fn beat_markers(document: &Document, start: Ticks, end: Ticks) -> Vec<WarpMarker> {
+pub(super) fn beat_markers(document: &Document, start: Ticks, end: Ticks) -> Vec<WarpMarker> {
     let tempo = &document.settings().tempo;
     let base = tempo.ticks_to_seconds(start);
     let mut beats = vec![start];

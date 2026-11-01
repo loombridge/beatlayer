@@ -639,5 +639,6 @@ pub fn display(
         }],
         markers,
         readings,
+        spectrograms: Vec::new(),
     }
 }

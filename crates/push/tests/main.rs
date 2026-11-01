@@ -5,14 +5,17 @@
 bl_rt::install_trap!();
 
 mod browse;
+mod clip;
 mod connect;
 mod controls;
 mod devices;
 mod display;
 mod leds;
+mod melodies;
 mod mix;
 mod modes;
 mod realtime;
 mod rig;
 mod session;
 mod sim;
+mod simpler;

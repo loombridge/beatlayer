@@ -1051,6 +1051,7 @@ pub fn display(
             .collect(),
     };
     let mut out = DeviceDisplay {
+        spectrograms: Vec::new(),
         device,
         live: data.is_some(),
         view: None,

@@ -58,6 +58,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("browser.set_label_shown", nothing(BROWSER)),
     ("browser.set_label_icon", nothing(BROWSER)),
     ("browser.set_filter_view", nothing(BROWSER)),
+    ("browser.set_include_auto_tags", nothing(BROWSER)),
     ("browser.set_filter_groups", nothing(BROWSER)),
     ("browser.set_columns", nothing(BROWSER)),
     ("browser.set_preview", nothing(BROWSER)),

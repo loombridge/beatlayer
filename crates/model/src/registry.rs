@@ -505,6 +505,21 @@ const ENTRIES: &[Entry] = &[
             \"Change Scale\", and the set is saved with it.",
     },
     Entry {
+        id: "song.set_pad_layout",
+        action: Action::Apply("set_pad_layout"),
+        label: "Set Pad Layout",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets how a note-playing controller such as Push 2 lays the set's scale out \
+            on its pads: `in_key` (the pads play the scale's notes; false is Chromatic), \
+            `fixed` (the bottom-left pad stays on C whatever the scale's root), `spacing` \
+            (`fourths`, `thirds` or `sequent`, the interval between rows) and `direction` \
+            (`vertical` or `horizontal`). It leaves the values it isn't given as they were. A \
+            new set is In Key, fourths, vertical, Fixed off. The layout is saved with the set \
+            and is no undo step.",
+    },
+    Entry {
         id: "tuning.set",
         action: Action::Apply("set_tuning"),
         label: "Set Tuning",
@@ -3033,6 +3048,33 @@ const ENTRIES: &[Entry] = &[
             overlapping ranges of the same controller. One undo step (Change Articulation).",
     },
     Entry {
+        id: "device.write_route",
+        action: Action::Apply("set_mod_route"),
+        label: "Change Modulation Route",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Writes a route into slot `slot` of an instrument's modulation matrix as \
+            it is: the `source` and the `destination` by name. It checks the shape of the \
+            names only, and the device ignores a name it doesn't have. A slot's amount is a \
+            parameter, which `device.set_param` sets. To set a route with the matrix's \
+            rules (the first empty free slot, refusals for an unknown name or a full matrix, \
+            the amount in the same undo step), use `device.set_route`. One undo step (Change \
+            Modulation Route).",
+    },
+    Entry {
+        id: "device.erase_route",
+        action: Action::Apply("clear_mod_route"),
+        label: "Clear Modulation Route",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Empties slot `slot` of an instrument's modulation matrix as it is, \
+            leaving its amount. To clear a route with the matrix's rules (the amount goes \
+            back to 0 % in the same undo step), use `device.clear_route`. One undo step \
+            (Clear Modulation Route).",
+    },
+    Entry {
         id: "device.compare_switch",
         action: Action::Apply("compare_switch"),
         label: "Compare: Switch",
@@ -3078,6 +3120,20 @@ const ENTRIES: &[Entry] = &[
             ignore it. The set keeps the reference, so it reopens playing the same file. Null \
             clears the slot, one undo step named Clear Sample. To load a file from disk as a \
             person does, use `device.load_sample`.",
+    },
+    Entry {
+        id: "device.set_wavetable",
+        action: Action::Apply("set_device_wavetable"),
+        label: "Set Wavetable",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Gives a wavetable oscillator (`oscillator` 1 or 2) its table: `choice` is \
+            a factory table (`kind` factory, with its `category` and `name`) or a user table \
+            (`kind` user, with `raw` and its `frames`), whose file is `media`, a content hash \
+            the media store holds, as for `device.set_sample`. A factory table takes no \
+            `media`, and a user table needs it. One undo step, named Load Wavetable. To load \
+            a table by name or from a file as a person does, use `device.load_wavetable`.",
     },
     Entry {
         id: "device.set_warp",

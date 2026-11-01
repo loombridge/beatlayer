@@ -519,6 +519,7 @@ pub fn display(
     };
 
     DeviceDisplay {
+        spectrograms: Vec::new(),
         device,
         live: data.is_some(),
         view: None,

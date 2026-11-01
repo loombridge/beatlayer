@@ -1,5 +1,6 @@
-//! Note Mode on a track: the drum layouts, the pads of a drum rack and step
-//! sequencing beats (`docs/specs/push-2-notes.md`, R1 to R5 and R8 to R31).
+//! Note Mode on a track: the drum layouts, the pads of a drum rack, step
+//! sequencing beats, and the melodic layouts with the Scale menu and the
+//! arrows (`docs/specs/push-2-notes.md`, R1 to R47).
 //!
 //! [`Note`] is the content of the Note pad mode. Which layout the pads take
 //! comes from the selected track's first instrument every time it is read, so
@@ -8,24 +9,30 @@
 //! do reads the set from the read model and asks for the registered commands
 //! a person's editors run.
 
-mod clip;
+pub(crate) mod clip;
 pub mod grid;
-mod pads;
+mod keys;
+mod melodic;
+mod menu;
+mod navigate;
+pub(crate) mod pads;
 mod paint;
 mod steps;
+mod strip;
 
 use std::collections::BTreeMap;
 use std::time::Instant;
 
 use bl_control::{Cx, ReadModel};
 use bl_core::time::Ticks;
-use bl_model::{ClipId, DeviceId, SceneId, TrackId};
+use bl_model::{ClipId, DeviceId, PadLayout, Scale, SceneId, TrackId};
 use serde_json::{Value, json};
 
 use crate::content::{Content, Ctx, Gesture, HeldStep, Pad, PadEvent, Paint, StripEvent, StripUse};
 use crate::controls::cc;
+use crate::encoder::Counting;
 
-pub use grid::{Layout, Overlay, Role, Size};
+pub use grid::{Layout, Melodic, Overlay, Pages, Role, Size};
 
 /// The key of the gesture every step, pad and page edit runs in, so its
 /// commands are one undo step (control surfaces R7).
@@ -49,22 +56,45 @@ pub(crate) enum Kind {
         filled: u128,
     },
     /// A Simpler slicing a sample: its slices are the pads (R1, R75).
-    Slices,
-    /// Any other MIDI track: its layouts are WP-7.22's.
+    Slices {
+        device: DeviceId,
+        /// The keys whose pad holds a slice: bit n is key n.
+        filled: u128,
+    },
+    /// Any other MIDI track: it plays notes of the scale (R32 to R44).
     Melodic,
     /// An audio track, a return or the Main track: the pads are dark (R1).
     Silent,
 }
 
+/// A slice that a pad started, and when (R74).
+#[derive(Clone, Copy, Debug)]
+struct Sounding {
+    at: Instant,
+    played: crate::simpler::Played,
+}
+
 /// What the surface keeps for each track (R5).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Memory {
-    /// The layout, or the track's own default until Layout steps it.
+    /// The drum layout, or the track's own default until Layout steps it.
     layout: Option<Layout>,
+    /// The melodic layout (R39).
+    melodic: Melodic,
     /// The loop length pads Shift and Layout keep in view.
     lock: Option<Overlay>,
     /// The step size.
     size: Size,
+    /// 64 Notes' shift in octaves (R33).
+    octave: i32,
+    /// The Melodic Sequencer's lowest row, which is also where its 32 notes
+    /// start, until Octave or the strip moves it (R40, R43).
+    low: Option<u8>,
+    /// The selected notes of the Melodic Sequencer + 32 Notes, a bit for
+    /// each of the 128 (R43).
+    keys: u128,
+    /// Whether the touch strip is the modulation wheel (R7).
+    modulation: bool,
 }
 
 /// What a pad that is down does until it is released.
@@ -73,12 +103,42 @@ enum Down {
     /// It plays a note, which its release ends whatever the layout has
     /// become (R2).
     Played(u8),
+    /// It plays and selects one of the 32 notes, or only selects it (R43).
+    Picked { key: u8, played: bool },
     /// It holds a step.
     Step(HeldStep),
+    /// It holds a step whose note a tap toggles when it is let go; a hold
+    /// edits the step's notes instead (push-2-tracks R55, R57).
+    Tap(HeldStep, Tap),
     /// It holds a loop length pad.
     Loop(u8),
     /// It did something that ends with the press.
     Done,
+}
+
+/// A tap on a step pad toggles the note when the pad comes up within this
+/// long; a pad held longer leaves it (push-2 R7).
+const TAP: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// What a step pad pressed with no modifier does when it is let go in time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Tap {
+    /// The pitch of the note the step toggles.
+    key: u8,
+    /// The velocity a note added takes.
+    velocity: u8,
+    /// When the pad went down.
+    at: Instant,
+}
+
+impl Down {
+    /// The step the pad holds, if it holds one.
+    fn step(&self) -> Option<HeldStep> {
+        match self {
+            Self::Step(step) | Self::Tap(step, _) => Some(*step),
+            _ => None,
+        }
+    }
 }
 
 /// What Duplicate copies from, after its first tap (R17, R30).
@@ -86,6 +146,8 @@ enum Down {
 enum Source {
     Pad(u8),
     Page(u8),
+    /// A step of the Melodic Sequencer + 32 Notes, by where it starts.
+    Step(Ticks),
 }
 
 /// The first step on an empty slot, waiting for its clip (R20).
@@ -93,7 +155,8 @@ enum Source {
 struct Pending {
     track: TrackId,
     scene: SceneId,
-    key: u8,
+    /// The notes the step takes, a bit for each of the 128.
+    keys: u128,
     start: Ticks,
     length: Ticks,
     velocity: u8,
@@ -130,6 +193,71 @@ pub struct State {
     pub velocity: Option<u8>,
     /// The steps held now.
     pub held_steps: Vec<HeldStep>,
+    /// What the layout lets the display show of the clip (push-2-tracks
+    /// R50 to R54).
+    pub area: Option<Area>,
+    /// What a melodic layout shows, on a melodic track.
+    pub melody: Option<Melody>,
+}
+
+/// How the display fits the clip to the layout (push-2-tracks R50 to R54).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fit {
+    /// A real-time layout: only the pitches that hold notes, every note
+    /// fitting.
+    Folded,
+    /// The Melodic Sequencer: one page of eight pitches.
+    Sequencer,
+    /// The Melodic Sequencer + 32 Notes: every note, and the area of the
+    /// selected notes that the clip holds.
+    SequencerNotes,
+    /// A drum or Slicing layout's step sequencer: the selected pad's notes.
+    Pad,
+}
+
+/// The part of the clip the step pads edit: a span of time and a range of
+/// pitches (push-2-tracks R51).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Area {
+    /// How the display fits the clip.
+    pub fit: Fit,
+    /// Where the page, or pair of pages, of steps starts.
+    pub from: Ticks,
+    /// Where it ends.
+    pub to: Ticks,
+    /// The lowest pitch of the range.
+    pub low: u8,
+    /// The highest.
+    pub high: u8,
+    /// How long one step is.
+    pub step: Ticks,
+}
+
+/// What Note Mode shows of a melodic track's layouts and scale options
+/// (R32 to R44).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Melody {
+    /// In Key (true) or Chromatic.
+    pub in_key: bool,
+    /// Whether the bottom-left pad stays on C.
+    pub fixed: bool,
+    /// The interval between rows: `4ths`, `3rds` or `Sequent`.
+    pub spacing: String,
+    /// `Vertical` or `Horizontal`.
+    pub direction: String,
+    /// 64 Notes' shift in octaves.
+    pub octave: i32,
+    /// The lowest note the pads, rows or 32 notes hold.
+    pub low: u8,
+    /// The highest.
+    pub high: u8,
+    /// The range's notes as the display notifies them, such as `C1 to C3`.
+    pub range: String,
+    /// The notes selected in the Melodic Sequencer + 32 Notes.
+    pub selected_notes: Vec<u8>,
+    /// Whether the touch strip is the modulation wheel rather than pitch
+    /// bend, in 64 Notes.
+    pub modulation: bool,
 }
 
 /// The content of Note Mode.
@@ -158,10 +286,21 @@ pub struct Note {
     /// Whether Shift was held when an Octave button went down.
     octave_shift: bool,
     pending: Option<Pending>,
+    /// Set while a tap on a step pad is carried out as it is let go.
+    tapping: bool,
     /// The pad each track's slicing Simpler's steps edit (R75).
     picked: BTreeMap<TrackId, u8>,
+    /// The slice that started playing last, for Pad Slicing (R74).
+    sounding: Option<Sounding>,
     summary: State,
     reduced: u64,
+    /// The Scale menu's encoders' leftover steps.
+    menu_counts: [Counting; 8],
+    /// Whether the touch strip's press was a Select tap, whose position
+    /// goes nowhere (R7).
+    strip_taken: bool,
+    /// What the strip is for.
+    strip: Option<StripUse>,
 }
 
 impl Default for Note {
@@ -188,10 +327,24 @@ impl Note {
             source: None,
             octave_shift: false,
             pending: None,
+            tapping: false,
             picked: BTreeMap::new(),
+            sounding: None,
             summary: State::default(),
             reduced: 0,
+            menu_counts: Default::default(),
+            strip_taken: false,
+            strip: None,
         }
+    }
+
+    /// The key of the slice picked on `track`'s pads: the first until a pad
+    /// is tapped (R73).
+    fn picked_key(&self, track: TrackId) -> u8 {
+        self.picked
+            .get(&track)
+            .copied()
+            .unwrap_or(crate::simpler::FIRST_KEY)
     }
 
     fn memory(&mut self, track: TrackId) -> &mut Memory {
@@ -222,14 +375,21 @@ impl Note {
         let clip = scene.and_then(|scene| clip::midi_clip(model, track, scene));
         let memory = *self.memory(track);
         let layout = memory.layout.unwrap_or(match kind {
-            Kind::Slices => Layout::Pads,
+            Kind::Slices { .. } => Layout::Pads,
             _ => Layout::LoopSelector,
         });
+        let settings = model.document.settings();
+        let (scale, pads) = (settings.scale, settings.pad_layout);
+        let pages = if matches!(kind, Kind::Melodic) {
+            Pages::melodic(memory.size, memory.melodic)
+        } else {
+            Pages::drum(memory.size)
+        };
         let selected = match &kind {
             Kind::Rack {
                 first, selected, ..
             } => Some(selected.unwrap_or(*first)),
-            Kind::Slices => Some(self.picked.get(&track).copied().unwrap_or(36)),
+            Kind::Slices { .. } => Some(self.picked_key(track)),
             _ => None,
         };
         Some(Frame {
@@ -241,6 +401,14 @@ impl Note {
             overlay: self.held.or(memory.lock),
             size: memory.size,
             selected,
+            melodic: memory.melodic,
+            scale,
+            pads,
+            octave: memory.octave,
+            low: memory.low.unwrap_or_else(|| melodic::default_low(scale)),
+            keys: memory.keys,
+            modulation: memory.modulation,
+            pages,
         })
     }
 
@@ -248,8 +416,9 @@ impl Note {
     fn role(frame: &Frame, row: u8, column: u8) -> Role {
         let first = match frame.kind {
             Kind::Rack { first, .. } => first,
-            Kind::Slices => 36,
-            Kind::Melodic | Kind::Silent => return Role::Off,
+            Kind::Slices { .. } => crate::simpler::FIRST_KEY,
+            Kind::Melodic => return frame.view().role(row, column),
+            Kind::Silent => return Role::Off,
         };
         grid::role(frame.layout, frame.overlay, first, frame.size, row, column)
     }
@@ -280,6 +449,37 @@ pub(crate) struct Frame {
     pub size: Size,
     /// The drum pad the steps edit.
     pub selected: Option<u8>,
+    /// The melodic layout.
+    pub melodic: Melodic,
+    /// The set's current scale.
+    pub scale: Scale,
+    /// The set's pad layout options.
+    pub pads: PadLayout,
+    /// 64 Notes' shift in octaves.
+    pub octave: i32,
+    /// The Melodic Sequencer's lowest row, and where its 32 notes start.
+    pub low: u8,
+    /// The selected notes of the Melodic Sequencer + 32 Notes.
+    pub keys: u128,
+    /// Whether the strip is the modulation wheel.
+    pub modulation: bool,
+    /// How the layout counts pages.
+    pub pages: Pages,
+}
+
+impl Frame {
+    /// What the melodic layout's pads are.
+    fn view(&self) -> melodic::View {
+        melodic::View {
+            layout: self.melodic,
+            scale: self.scale,
+            pads: self.pads,
+            octave: self.octave,
+            low: self.low,
+            loops: self.overlay.is_some(),
+            per_row: self.size.per_row(),
+        }
+    }
 }
 
 impl Content for Note {
@@ -291,8 +491,9 @@ impl Content for Note {
         match event {
             PadEvent::On(velocity) => self.pad_on(pad, velocity, ctx),
             PadEvent::Off => self.pad_off(pad, ctx),
-            // Pressure is WP-7.22's (R6).
-            PadEvent::Pressure(_) | PadEvent::ChannelPressure(_) => {}
+            PadEvent::Pressure(pressure) => self.pressure(pad, pressure, ctx),
+            // Polyphonic key pressure is what Note Mode sets (R6).
+            PadEvent::ChannelPressure(_) => {}
         }
     }
 
@@ -312,18 +513,41 @@ impl Content for Note {
         self.paint_pads(paint);
     }
 
+    fn keep_steps(&mut self) {
+        for down in self.down.values_mut() {
+            if let Down::Tap(step, _) = *down {
+                *down = Down::Step(step);
+            }
+        }
+    }
+
+    fn picked_slice(&self, model: &ReadModel) -> Option<u8> {
+        let track = clip::selected_track(model)?;
+        matches!(clip::classify(model, track), Kind::Slices { .. }).then(|| self.picked_key(track))
+    }
+
     fn held_steps(&self) -> Vec<HeldStep> {
-        self.down
-            .values()
-            .filter_map(|down| match down {
-                Down::Step(step) => Some(*step),
-                _ => None,
-            })
-            .collect()
+        self.down.values().filter_map(Down::step).collect()
     }
 
     fn strip_use(&self) -> Option<StripUse> {
-        self.summary.bank.map(|_| StripUse::Range)
+        self.strip
+    }
+
+    fn scale_available(&self) -> bool {
+        self.summary.melody.is_some()
+    }
+
+    fn scale_button(&mut self, button: u8, ctx: &mut Ctx<'_>) {
+        self.scale_press(button, ctx);
+    }
+
+    fn scale_turn(&mut self, column: u8, steps: i32, ctx: &mut Ctx<'_>) {
+        self.scale_steps(column, steps, ctx);
+    }
+
+    fn paint_scale(&mut self, paint: &mut Paint<'_>) {
+        self.paint_scale_menu(paint);
     }
 
     fn note_state(&self) -> Option<State> {
@@ -341,32 +565,6 @@ const fn bit(row: u8, column: u8) -> u64 {
 }
 
 impl Note {
-    fn strip_event(&mut self, event: StripEvent, ctx: &mut Ctx<'_>) {
-        let StripEvent::Position(position) = event else {
-            return;
-        };
-        let Some(model) = ctx.model else {
-            return;
-        };
-        let Some(frame) = self.frame(model) else {
-            return;
-        };
-        let Kind::Rack { rack, .. } = frame.kind else {
-            return;
-        };
-        // The strip chooses the bank by sixteen notes, or by a row of four
-        // with Shift held (R13).
-        let (parts, per) = if ctx.modifiers.shift() {
-            (32.0, 4)
-        } else {
-            (8.0, 16)
-        };
-        let place = (position.clamp(0.0, 0.999) * parts) as u8;
-        let first = (place * per).min(grid::LAST_FIRST_PAD);
-        ctx.cx
-            .run("rack.move_pads", json!({ "rack": rack, "first": first }));
-    }
-
     fn button_event(&mut self, button: u8, gesture: Gesture, ctx: &mut Ctx<'_>) {
         let Some(model) = ctx.model else {
             return;
@@ -384,8 +582,11 @@ impl Note {
             // Shift makes it a combination, which has no tap.
             (55 | 54, Gesture::Tap) if !self.octave_shift => self.octave(button == 55, ctx),
             (55 | 54, Gesture::Release) if self.octave_shift => self.octave(button == 55, ctx),
-            (62 | 63, Gesture::Tap) => self.page_button(button == 63, false),
-            (62 | 63, Gesture::Hold) => self.page_button(button == 63, true),
+            (62 | 63, Gesture::Tap) => self.page_button(button == 63, false, model),
+            (62 | 63, Gesture::Hold) => self.page_button(button == 63, true, model),
+            (cc::LEFT | cc::RIGHT | cc::UP | cc::DOWN, Gesture::Press) => {
+                self.arrow(button, ctx);
+            }
             (number, Gesture::Press) => {
                 // The scene buttons choose the step size (R21).
                 if let Some(row) = (cc::SCENE_8..=cc::SCENE_1)
@@ -408,16 +609,23 @@ impl Note {
         let Some(frame) = self.frame(model) else {
             return;
         };
-        if matches!(frame.kind, Kind::Melodic | Kind::Silent) {
+        if matches!(frame.kind, Kind::Silent) {
             return;
         }
         let track = frame.track;
+        let melodic = matches!(frame.kind, Kind::Melodic);
+        // A melodic layout shows the loop length pads (R39).
+        let held = if melodic {
+            Overlay::LoopPads
+        } else {
+            frame.layout.held()
+        };
         match gesture {
             Gesture::Press => {
                 self.layout_used = false;
                 // Shift and Layout keep the view Layout shows while held (R9).
                 if ctx.modifiers.shift() {
-                    let overlay = frame.layout.held();
+                    let overlay = held;
                     let memory = self.memory(track);
                     memory.lock = if memory.lock.is_some() {
                         None
@@ -427,13 +635,17 @@ impl Note {
                     self.layout_used = true;
                 }
             }
-            Gesture::Hold => self.held = Some(frame.layout.held()),
+            Gesture::Hold => self.held = Some(held),
             Gesture::Release => self.held = None,
             Gesture::Tap if !self.layout_used => {
                 let memory = self.memory(track);
                 // Layout alone leaves a kept view without stepping.
                 if memory.lock.take().is_none() {
-                    memory.layout = Some(frame.layout.next());
+                    if melodic {
+                        memory.melodic = frame.melodic.next();
+                    } else {
+                        memory.layout = Some(frame.layout.next());
+                    }
                 }
             }
             _ => {}
@@ -441,7 +653,8 @@ impl Note {
     }
 
     /// Octave Up and Down move the drum bank sixteen notes, or a row of four
-    /// with Shift held (R13).
+    /// with Shift held (R13), the melodic pads an octave (R33), and the
+    /// Melodic Sequencer's rows an octave, or one scale note (R41, R43).
     fn octave(&mut self, up: bool, ctx: &mut Ctx<'_>) {
         let Some(model) = ctx.model else {
             return;
@@ -449,6 +662,10 @@ impl Note {
         let Some(frame) = self.frame(model) else {
             return;
         };
+        if matches!(frame.kind, Kind::Melodic) {
+            self.octave_melodic(&frame, up, self.octave_shift, ctx);
+            return;
+        }
         let Kind::Rack { rack, first, .. } = frame.kind else {
             return;
         };
@@ -473,15 +690,18 @@ impl Note {
         }
     }
 
-    fn page_button(&mut self, right: bool, hold: bool) {
+    fn page_button(&mut self, right: bool, hold: bool, model: &ReadModel) {
         if hold {
             self.following = true;
             return;
         }
-        // Page Left and Right show the pair of pages before or after (R28).
+        let Some(views) = self.frame(model).map(|frame| frame.pages.views()) else {
+            return;
+        };
+        // Page Left and Right show the pages before or after (R28).
         self.following = false;
         self.pair = if right {
-            (self.pair + 1).min(grid::PAGES / 2 - 1)
+            (self.pair + 1).min(views - 1)
         } else {
             self.pair.saturating_sub(1)
         };

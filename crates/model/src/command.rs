@@ -20,7 +20,7 @@ use crate::clip::{
     TakeLane, clip_entry, crossfades,
 };
 use crate::clip_param::ClipParam;
-use crate::device::{Device, DeviceKind, DeviceRole};
+use crate::device::{Device, DeviceKind, DeviceRole, WavetableChoice};
 use crate::document::Document;
 use crate::error::ModelError;
 use crate::external::{CvCalibration, ExternalPort, HardwareLatency};
@@ -1816,6 +1816,11 @@ pub enum Command {
         /// device has.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         articulations: Option<Vec<crate::articulation::Articulation>>,
+        /// The routes of an instrument's modulation matrix (the instrument
+        /// modulation spec, R10), which a preset of one holds; `null` to
+        /// keep the ones the device has.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        routes: Option<Vec<crate::matrix::ModRoute>>,
         /// A plug-in's MPE Mode and settings (the MPE spec, R14), which a
         /// preset of one holds; `null` to keep the ones the device has.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1990,6 +1995,28 @@ pub enum Command {
         )]
         channel: Option<Option<u8>>,
     },
+    /// Puts a route in a free slot of an instrument's modulation matrix (the
+    /// instrument modulation spec, R8, R10): the source and the destination
+    /// by name. The slot's amount is a parameter, which `device.set_param`
+    /// sets.
+    SetModRoute {
+        /// The device.
+        device: DeviceId,
+        /// The slot's number.
+        slot: u8,
+        /// The source's name.
+        source: String,
+        /// The destination's name.
+        destination: String,
+    },
+    /// Empties a free slot of an instrument's modulation matrix (the
+    /// instrument modulation spec, R9).
+    ClearModRoute {
+        /// The device.
+        device: DeviceId,
+        /// The slot's number.
+        slot: u8,
+    },
     /// Sets the media a device plays, by content hash (WP-2.16): the
     /// sampler's sample, which the media store holds like a clip's audio.
     SetDeviceSample {
@@ -2003,6 +2030,20 @@ pub enum Command {
         /// given; the eight-slot drum sampler's are 0 to 7 (WP-5.17).
         #[serde(default)]
         slot: u8,
+    },
+    /// Gives a wavetable oscillator its table (WP-8.8; the wavetable spec,
+    /// R8).
+    SetDeviceWavetable {
+        /// The device.
+        device: DeviceId,
+        /// The oscillator: 1 or 2.
+        oscillator: u8,
+        /// The table: a factory table by category and name, or a user table.
+        choice: WavetableChoice,
+        /// A user table's file, as media by content hash; left out for a
+        /// factory table.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        media: Option<ContentHash>,
     },
     /// Switches a device's Warp on or off (WP-5.15b).
     SetDeviceWarp {
@@ -2743,6 +2784,22 @@ pub enum Command {
         #[serde(default)]
         name: Option<String>,
     },
+    /// Sets how a note-playing controller lays the scale out on its pads
+    /// (the notes on Push 2 spec, R32 and R37). It is no undo step.
+    SetPadLayout {
+        /// In Key (true) or Chromatic.
+        #[serde(default)]
+        in_key: Option<bool>,
+        /// Whether the bottom-left pad stays on C.
+        #[serde(default)]
+        fixed: Option<bool>,
+        /// The interval between rows.
+        #[serde(default)]
+        spacing: Option<crate::PadSpacing>,
+        /// Which way the rows run.
+        #[serde(default)]
+        direction: Option<crate::PadDirection>,
+    },
     /// Makes a tuning the set's, in place of any other (the tunings spec,
     /// R2 and R15). With `retune`, every note of the MIDI clips on tracks
     /// that play the tuning moves to the key whose new pitch is nearest the
@@ -2975,6 +3032,7 @@ impl Command {
             Self::SetLockEnvelopes { .. } => "Switch Lock Envelopes",
             Self::SetRemoteMappings { .. } => "Change MIDI and key mappings",
             Self::SetCueMode { .. } => "Switch Cue mode",
+            Self::SetPadLayout { .. } => "Change Pad Layout",
             Self::SetCueVolume { .. } => "Change \"Preview Volume\"",
             Self::SetInput { .. }
             | Self::SetOutput { .. }
@@ -3114,8 +3172,12 @@ impl Command {
             Self::DeleteArticulation { .. } => "Delete Articulation",
             Self::MoveArticulation { .. } => "Move Articulation",
             Self::SetArticulation { .. } => "Change Articulation",
+            // WP-8.4: Beatlayer's own names.
+            Self::SetModRoute { .. } => "Change Modulation Route",
+            Self::ClearModRoute { .. } => "Clear Modulation Route",
             Self::SetDeviceSample { media: Some(_), .. } => "Load Sample",
             Self::SetDeviceSample { media: None, .. } => "Clear Sample",
+            Self::SetDeviceWavetable { .. } => "Load Wavetable",
             // WP-5.15b: Warp controls and slices.
             Self::SetDeviceWarp { .. } => "Switch Warp",
             Self::SetDeviceWarpMode { .. } => "Change Warp Mode",
@@ -3249,9 +3311,10 @@ impl Command {
 
     /// Whether running the command outside a transaction is an undo step.
     /// Cue mode is not: Live's Solo/Cue button and Options items add none.
+    /// Nor is the pad layout a controller plays the scale in.
     #[must_use]
     pub fn records_undo(&self) -> bool {
-        !matches!(self, Self::SetCueMode { .. })
+        !matches!(self, Self::SetCueMode { .. } | Self::SetPadLayout { .. })
     }
 
     /// The undo step's name for this command run on `before`: the same as
@@ -3945,6 +4008,21 @@ impl Document {
                     ));
                 }
                 self.settings.remote.clone_from(mappings);
+                Ok(())
+            }
+            Command::SetPadLayout {
+                in_key,
+                fixed,
+                spacing,
+                direction,
+            } => {
+                let now = self.settings.pad_layout;
+                self.settings.pad_layout = crate::PadLayout {
+                    in_key: in_key.unwrap_or(now.in_key),
+                    fixed: fixed.unwrap_or(now.fixed),
+                    spacing: spacing.unwrap_or(now.spacing),
+                    direction: direction.unwrap_or(now.direction),
+                };
                 Ok(())
             }
             Command::SetCueMode { enabled } => {
@@ -4806,6 +4884,7 @@ impl Document {
                 name,
                 shape,
                 articulations,
+                routes,
                 mpe,
             } => {
                 let mut loaded = self.device_ref(*device)?.clone();
@@ -4813,6 +4892,10 @@ impl Document {
                 loaded.shape.clone_from(shape);
                 if let Some(articulations) = articulations {
                     loaded.set_articulations(articulations.clone());
+                }
+                if let Some(routes) = routes {
+                    crate::matrix::check_routes(routes)?;
+                    loaded.routes.clone_from(routes);
                 }
                 if let Some(mpe) = mpe {
                     mpe.settings.check()?;
@@ -4932,6 +5015,13 @@ impl Document {
                 outputs.as_deref(),
                 *channel,
             ),
+            Command::SetModRoute {
+                device,
+                slot,
+                source,
+                destination,
+            } => self.set_mod_route(*device, *slot, source, destination),
+            Command::ClearModRoute { device, slot } => self.clear_mod_route(*device, *slot),
             Command::CompareSwitch { device } => {
                 if !self.device_ref(*device)?.can_compare() {
                     return Err(ModelError::NoCompare(*device));
@@ -4964,6 +5054,29 @@ impl Document {
                     self.device_mut(*device)?
                         .set_media(usize::from(*slot), *media);
                 }
+                Ok(())
+            }
+            Command::SetDeviceWavetable {
+                device,
+                oscillator,
+                choice,
+                media,
+            } => {
+                check_value(
+                    "oscillator",
+                    f64::from(*oscillator),
+                    (1..=crate::device::MAX_WAVETABLES as u8).contains(oscillator),
+                )?;
+                check_value(
+                    "wavetable media",
+                    f64::from(u8::from(media.is_some())),
+                    media.is_some() == matches!(choice, WavetableChoice::User { .. }),
+                )?;
+                self.device_mut(*device)?.set_wavetable(
+                    usize::from(*oscillator) - 1,
+                    choice.clone(),
+                    *media,
+                );
                 Ok(())
             }
             Command::SetDeviceWarp { device, warp } => {
@@ -9375,6 +9488,9 @@ fn check_one_device(device: &Device) -> Result<(), ModelError> {
     if device.is_articulation_map() {
         crate::articulation::check(&device.articulations).map_err(ModelError::InvalidInput)?;
     }
+    // Spec: instrument modulation R10. A saved device whose routes repeat a
+    // slot or name nothing doesn't load.
+    crate::matrix::check_routes(&device.routes)?;
     if !device.can_compare() && (device.b_active || device.other_params.is_some()) {
         return Err(ModelError::NoCompare(device.id));
     }
@@ -12165,6 +12281,7 @@ mod tests {
             name: "Warm".to_owned(),
             shape: None,
             articulations: None,
+            routes: None,
             mpe: None,
         })
         .unwrap();
@@ -12179,6 +12296,7 @@ mod tests {
                 name: String::new(),
                 shape: None,
                 articulations: None,
+                routes: None,
                 mpe: None,
             }),
             ModelError::InvalidValue { .. }
@@ -14464,6 +14582,7 @@ mod tests {
             name: String::new(),
             shape: None,
             articulations: None,
+            routes: None,
             mpe: None,
         })
         .unwrap();

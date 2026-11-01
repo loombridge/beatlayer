@@ -12,6 +12,7 @@ use crate::groove::GroovePool;
 use crate::ids::{ChainId, ClipId, DeviceId, GrooveId, LocatorId, SceneId, TakeLaneId, TrackId};
 use crate::locator::{Locator, SongStart};
 use crate::metronome::MetronomeSettings;
+use crate::pad_layout::PadLayout;
 use crate::rack::Chain;
 use crate::record_quantization::RecordQuantization;
 use crate::scale::Scale;
@@ -129,6 +130,11 @@ pub struct Settings {
     /// then, so a set saved before the scales loads unchanged.
     #[serde(default, skip_serializing_if = "Scale::is_default")]
     pub scale: Scale,
+    /// How a note-playing controller lays the scale out on its pads (the
+    /// notes on Push 2 spec, R32 and R37). In Key, 4ths, Vertical and Fixed
+    /// off in a new set, and not written then. Changing it is no undo step.
+    #[serde(default, skip_serializing_if = "PadLayout::is_default")]
+    pub pad_layout: PadLayout,
     /// The set's tuning system (WP-6.9; the tunings spec, R1 and R11), saved
     /// whole inside the set so it opens without the file it came from. None
     /// plays twelve equal steps, and a set saved before tunings has none.
@@ -175,6 +181,7 @@ impl Default for Settings {
             song_start: None,
             grooves: GroovePool::default(),
             scale: Scale::default(),
+            pad_layout: PadLayout::default(),
             tuning: None,
             ara_archives: std::sync::Arc::default(),
             remote: Vec::new(),
@@ -1105,6 +1112,37 @@ mod tests {
         let loaded: Document = serde_json::from_value(saved).unwrap();
         assert_eq!(loaded, doc);
         assert!(loaded.cue_active());
+    }
+
+    // Spec: push-2-notes R37. The pad layout saves with the set and loads back,
+    // and a set at the default doesn't write it.
+    #[test]
+    fn the_pad_layout_saves_and_loads_back() {
+        let (mut doc, ..) = song(0);
+        assert!(
+            serde_json::to_value(&doc).unwrap()["settings"]
+                .get("pad_layout")
+                .is_none()
+        );
+        doc.apply(&Command::SetPadLayout {
+            in_key: Some(false),
+            fixed: Some(true),
+            spacing: Some(crate::PadSpacing::Thirds),
+            direction: Some(crate::PadDirection::Horizontal),
+        })
+        .unwrap();
+        let saved = serde_json::to_value(&doc).unwrap();
+        assert_eq!(
+            saved["settings"]["pad_layout"],
+            serde_json::json!({
+                "in_key": false,
+                "fixed": true,
+                "spacing": "thirds",
+                "direction": "horizontal",
+            })
+        );
+        let loaded: Document = serde_json::from_value(saved).unwrap();
+        assert_eq!(loaded, doc);
     }
 
     // Spec: mixer R7, R8, R16

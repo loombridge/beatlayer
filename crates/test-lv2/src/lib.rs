@@ -799,7 +799,7 @@ fn description() -> String {
          @prefix time: <http://lv2plug.in/ns/ext/time#> .\n\
          @prefix ui: <http://lv2plug.in/ns/extensions/ui#> .\n\
          @prefix worker: <http://lv2plug.in/ns/ext/worker#> .\n\
-         <{PLUGIN_URI}> a lv2:Plugin ;\n\
+         <{PLUGIN_URI}> a lv2:Plugin, lv2:DelayPlugin ;\n\
            doap:name \"{PLUGIN_NAME}\" ;\n\
            ui:ui <{UI_URI}> ;\n\
            lv2:requiredFeature urid:map ;\n\

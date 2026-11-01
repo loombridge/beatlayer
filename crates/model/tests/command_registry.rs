@@ -70,7 +70,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        275,
+        279,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -110,7 +110,7 @@ fn every_document_command_is_registered() {
              set_global_groove_amount, set_auto_load_groove and set_clip_groove, WP-6.9 \
              five for tunings: set_tuning, remove_tuning, set_tuning_reference, \
              set_tuning_range and set_tuning_bypass, WP-6.9b the two for tunings on plug-ins and controllers: set_plugin_tuning and set_tuning_layout, WP-6.22 move_clip_to_lane, and WP-6.24b \
-             the two for time: insert_time and delete_time, and WP-6.23 set_track_links, and WP-6.30b the five for colours: set_track_colour, assign_colour_to_clips, assign_colour_to_grouped, set_clip_colour and set_scene_colour, and WP-6.57 the two for clearing envelopes: clear_track_automation and clear_device_automation, and WP-6.58 the four for info text: set_track_info_text, set_clip_info_text, set_scene_info_text and set_device_info_text, and WP-7.1 set_remote_mappings, and WP-7.32 set_record_quantization, and WP-7.33 set_device_region, and WP-7.17 set_cv_calibration, and the copy fixes set_automation_enabled, and WP-7.21 set_chain_push_colour"
+             the two for time: insert_time and delete_time, and WP-6.23 set_track_links, and WP-6.30b the five for colours: set_track_colour, assign_colour_to_clips, assign_colour_to_grouped, set_clip_colour and set_scene_colour, and WP-6.57 the two for clearing envelopes: clear_track_automation and clear_device_automation, and WP-6.58 the four for info text: set_track_info_text, set_clip_info_text, set_scene_info_text and set_device_info_text, and WP-7.1 set_remote_mappings, and WP-7.32 set_record_quantization, and WP-7.33 set_device_region, and WP-7.17 set_cv_calibration, and WP-8.8 set_device_wavetable, and the copy fixes set_automation_enabled, and WP-7.21 set_chain_push_colour, and WP-7.22 set_pad_layout, and WP-8.4 the two for modulation routes: set_mod_route and clear_mod_route"
     );
 
     for op in &ops {
@@ -284,6 +284,8 @@ fn every_command_runs_by_id() {
     let changes = agent.run("mixer.set_cue_mode", json!({ "enabled": true }));
     assert!(changes.settings);
     agent.run("mixer.set_cue_volume", json!({ "volume": 0.5 }));
+    let changes = agent.run("song.set_pad_layout", json!({ "in_key": false }));
+    assert!(changes.settings);
     let changes = agent.run(
         "mixer.set_crossfade_assign",
         json!({ "track": drums, "assign": "a" }),
@@ -1390,6 +1392,13 @@ fn every_command_runs_by_id() {
         "device.set_sample",
         json!({ "device": eq, "media": "0303030303030303030303030303030303030303030303030303030303030303" }),
     );
+    // Spec: wavetable R8.
+    agent.run(
+        "device.set_wavetable",
+        json!({ "device": eq, "oscillator": 2,
+                "choice": { "kind": "factory", "category": "Additive", "name": "Odd Rise" } }),
+    );
+    assert_eq!(agent.editor.undo_history().next(), Some("Load Wavetable"));
     // Spec: clap-hosting R5; WP-5.40. Replaces a plug-in device's
     // configured parameter list, in order.
     agent.run(
@@ -1674,6 +1683,24 @@ fn every_command_runs_by_id() {
     agent.run("articulation.delete", json!({ "device": map, "index": 0 }));
     let list = &agent.editor.document().device(map).unwrap().articulations;
     assert_eq!(list.len(), 1, "the list keeps one articulation");
+
+    // A route written into a slot of an instrument's modulation matrix, and
+    // emptied again (instrument modulation R8 to R10).
+    agent.run(
+        "device.write_route",
+        json!({ "device": map, "slot": 2, "source": "Velocity", "destination": "Note Level" }),
+    );
+    assert_eq!(agent.editor.document().device(map).unwrap().routes.len(), 1);
+    agent.run("device.erase_route", json!({ "device": map, "slot": 2 }));
+    assert!(
+        agent
+            .editor
+            .document()
+            .device(map)
+            .unwrap()
+            .routes
+            .is_empty()
+    );
 
     // A device with a sidechain input (WP-2.19b), listening to another
     // track.
@@ -2903,6 +2930,15 @@ fn schemas_match_what_commands_serialise() {
         ),
         ("mixer.set_cue_mode", Command::SetCueMode { enabled: true }),
         (
+            "song.set_pad_layout",
+            Command::SetPadLayout {
+                in_key: Some(false),
+                fixed: Some(true),
+                spacing: Some(bl_model::PadSpacing::Sequent),
+                direction: Some(bl_model::PadDirection::Horizontal),
+            },
+        ),
+        (
             "mixer.set_cue_volume",
             Command::SetCueVolume { volume: 0.5 },
         ),
@@ -3692,6 +3728,7 @@ fn schemas_match_what_commands_serialise() {
             "device.set_state",
             Command::SetDeviceState {
                 articulations: None,
+                routes: None,
                 device,
                 params: [(ParamId(4), 0.5)].into_iter().collect(),
                 name: "Warm Pad".to_owned(),
@@ -3727,6 +3764,18 @@ fn schemas_match_what_commands_serialise() {
                 device,
                 media: Some(ContentHash([3u8; 32])),
                 slot: 0,
+            },
+        ),
+        (
+            "device.set_wavetable",
+            Command::SetDeviceWavetable {
+                device,
+                oscillator: 2,
+                choice: bl_model::WavetableChoice::User {
+                    raw: true,
+                    frames: 3,
+                },
+                media: Some(ContentHash([5u8; 32])),
             },
         ),
         (
@@ -3979,6 +4028,19 @@ fn schemas_match_what_commands_serialise() {
                 index: 0,
                 to: Some(1),
             },
+        ),
+        (
+            "device.write_route",
+            Command::SetModRoute {
+                device,
+                slot: 0,
+                source: "Velocity".to_owned(),
+                destination: "Cutoff".to_owned(),
+            },
+        ),
+        (
+            "device.erase_route",
+            Command::ClearModRoute { device, slot: 0 },
         ),
         (
             "articulation.set",

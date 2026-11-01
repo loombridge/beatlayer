@@ -392,6 +392,17 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             "device.set_sample",
             Exception(Equivalent("loading a sample (`device.load_sample`)")),
         ),
+        (
+            "device.load_wavetable",
+            Exception(LaterView(
+                "the Wavetable device's oscillator choosers and display, which take a table \
+                 (WP-8.9, WP-8.11)",
+            )),
+        ),
+        (
+            "device.set_wavetable",
+            Exception(Equivalent("loading a wavetable (`device.load_wavetable`)")),
+        ),
         // WP-5.10: a modulator's Map and Unmap buttons, the controls it
         // maps while Map is lit (Enter on one), and the Shaper's preset
         // buttons, which draw its shape.
@@ -652,6 +663,33 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             Exception(Gap(
                 "dragging a flag in the sample display, which has no keyboard form yet \
                  (sampler R22)",
+            )),
+        ),
+        // An instrument's modulation matrix (WP-8.4): the route commands are
+        // the Matrix tabs' grids, which come with Wavetable and Meld; the
+        // model's commands write a slot as given.
+        (
+            "device.write_route",
+            Exception(Equivalent(
+                "`device.set_route`, which checks the names against the device's matrix",
+            )),
+        ),
+        (
+            "device.erase_route",
+            Exception(Equivalent(
+                "`device.clear_route`, which puts the slot's amount back to 0 %",
+            )),
+        ),
+        (
+            "device.set_route",
+            Exception(LaterView(
+                "the Matrix tabs of Wavetable and Meld (WP-8.10, WP-8.20)",
+            )),
+        ),
+        (
+            "device.clear_route",
+            Exception(LaterView(
+                "the Matrix tabs of Wavetable and Meld (WP-8.10, WP-8.20)",
             )),
         ),
         // Manual slicing in the sample display, and the Warp controls

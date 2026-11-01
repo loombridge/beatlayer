@@ -58,6 +58,9 @@ pub const REPLACE: &str = "device.replace";
 /// `device.load_sample`: load an audio file into a device that plays one
 /// sample (WP-2.16).
 pub const LOAD_SAMPLE: &str = "device.load_sample";
+/// `device.load_wavetable`: give a wavetable oscillator a factory table by
+/// name or a user table from a file (WP-8.8).
+pub const LOAD_WAVETABLE: &str = "device.load_wavetable";
 /// `device.swap_to_snapshot`: replace a Drum Sampler with the Simpler
 /// sampler, keeping its sample's start and length (one-shot drum sampler
 /// R22).
@@ -157,6 +160,13 @@ pub const COMPARE_SWITCH: &str = "device.compare_switch";
 /// other (`bl-model`'s).
 pub const COMPARE_COPY: &str = "device.compare_copy";
 
+/// `device.set_route`: puts a route in a free slot of an instrument's
+/// modulation matrix.
+pub const SET_ROUTE: &str = "device.set_route";
+/// `device.clear_route`: empties a free slot of an instrument's modulation
+/// matrix.
+pub const CLEAR_ROUTE: &str = "device.clear_route";
+
 /// `articulation.list`: the articulations an Articulation Map holds.
 pub const ARTICULATION_LIST: &str = "articulation.list";
 /// `articulation.learn`: arms a row's Learn button.
@@ -181,6 +191,7 @@ pub const IDS: &[&str] = &[
     ADD_PRESET,
     REPLACE,
     LOAD_SAMPLE,
+    LOAD_WAVETABLE,
     SWAP_TO_SNAPSHOT,
     SELECT_SLOT,
     HOT_SWAP,
@@ -215,6 +226,8 @@ pub const IDS: &[&str] = &[
     RACK_SELECT_MACRO,
     RACK_SHOW_VARIATIONS,
     RACK_SELECT_VARIATION,
+    SET_ROUTE,
+    CLEAR_ROUTE,
     ARTICULATION_LIST,
     ARTICULATION_LEARN,
 ];
@@ -425,8 +438,20 @@ pub fn sidechain_width(frame: &DeviceFrame) -> f32 {
         .as_ref()
         .map(|s| s.shown)
         .or_else(|| frame.midi_sidechain.as_ref().map(|s| s.shown));
+    // Spec: routing R38. A device with both sidechains has two columns, the
+    // audio's and the MIDI's, each as wide as a section.
+    let columns = if frame.sidechain.is_some() && frame.midi_sidechain.is_some() {
+        2.0
+    } else {
+        1.0
+    };
     shown.map_or(0.0, |shown| {
-        SIDECHAIN_STRIP_WIDTH + if shown { SIDECHAIN_SECTION_WIDTH } else { 0.0 }
+        SIDECHAIN_STRIP_WIDTH
+            + if shown {
+                columns * SIDECHAIN_SECTION_WIDTH
+            } else {
+                0.0
+            }
     }) + external_width(frame)
 }
 
@@ -526,11 +551,26 @@ pub struct DevicePanel {
     /// panel's state, not the set's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub learning: Option<u8>,
+    /// For each parameter an instrument's modulation matrix moves, the
+    /// sources routed into it, in slot order (the instrument modulation
+    /// spec, R12): what assistive technology reads beside the control's
+    /// value. Empty for a device without a matrix or with no route.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub matrix_routes: Vec<MatrixRoutes>,
     /// The parameters drawn disabled because the device takes them from its
     /// current scale: Scale's Base and Scale Name and Arpeggiator's Root and
     /// Scale, while Use Current Scale is on (the scales spec, R16).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub locked: Vec<ParamId>,
+}
+
+/// The sources routed into one parameter of an instrument's matrix.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MatrixRoutes {
+    /// The parameter.
+    pub param: ParamId,
+    /// The names of the sources routed into it, in slot order.
+    pub sources: Vec<String>,
 }
 
 /// A pages node of a device's layout as the panel shows it (device framework
@@ -1062,7 +1102,9 @@ fn returns_default() -> bool {
 
 /// A device's MIDI sidechain section, in the same left strip as a
 /// sidechain's (WP-5.27; the routing spec, R34): the toggle shows the
-/// section, which holds the MIDI source chooser.
+/// section, which holds the MIDI source chooser and, where the device has
+/// one, the tapping point chooser (R39). A device with both sidechains
+/// reports both sections (R38).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MidiSidechainSection {
     /// Whether the section is shown, by the toggle at the top of the
@@ -1259,6 +1301,55 @@ pub struct ArticulationLearn {
     /// The articulation's place in the list, from 0, or `null` when none is
     /// learning.
     pub index: Option<u8>,
+}
+
+/// Arguments of `device.set_route`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetRouteArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The free slot, by its number; without one, the free slot that already
+    /// routes this source to this destination, else the first empty one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<u8>,
+    /// The source's name, as the device's `matrix` lists it.
+    pub source: String,
+    /// The destination's name, as the device's `matrix` lists it.
+    pub destination: String,
+    /// The route's amount, in per cent from -100 to 100; the slot's amount
+    /// is left as it is if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amount: Option<f64>,
+}
+
+/// Arguments of `device.clear_route`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ClearRouteArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The free slot, by its number; or name its source and destination.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<u8>,
+    /// The source of the route to clear, with its destination.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// The destination of the route to clear, with its source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destination: Option<String>,
+}
+
+/// What `device.set_route` and `device.clear_route` return: the slot they
+/// changed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RouteChanged {
+    /// The device.
+    pub device: DeviceId,
+    /// The slot's number.
+    pub slot: u8,
 }
 
 /// Arguments of `device_view.scroll`.
@@ -1868,6 +1959,44 @@ pub struct LoadSampleArgs {
     pub slot: Option<u8>,
 }
 
+/// Arguments of `device.load_wavetable`: a factory table by `category` and
+/// `name`, or a user table by `file`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LoadWavetableArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The oscillator that takes the table: 1 or 2.
+    pub oscillator: u8,
+    /// A factory table's category, with `name`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// A factory table's name in its category.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// A WAV or AIFF file to make the table from, instead of a factory
+    /// table.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    /// For a file: use its frames as they are, with no clean-up.
+    #[serde(default)]
+    pub raw: bool,
+}
+
+/// What `device.load_wavetable` returns.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct LoadWavetableResult {
+    /// The device that took the table.
+    pub device: DeviceId,
+    /// The oscillator that took it.
+    pub oscillator: u8,
+    /// What the oscillator plays now.
+    pub choice: bl_model::WavetableChoice,
+    /// How many frames the table has.
+    pub frames: u16,
+}
+
 /// Arguments of `device.select_slot`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -2207,6 +2336,25 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .args::<LoadSampleArgs>()
             .result::<LoadSampleResult>(),
+        CommandSpec::new(LOAD_WAVETABLE, "Load Wavetable")
+            .description(
+                "Gives a wavetable oscillator (`oscillator` 1 or 2) its table: a factory table \
+                 by its `category` and `name`, or a user table made from the WAV or AIFF \
+                 `file`. A WAV with a `clm ` chunk is cut into frames of its frame size; any \
+                 other file into frames of 2,048 samples, up to 256, and a file shorter than \
+                 a frame fills one. With `raw` off (the default) each frame's DC offset is \
+                 removed and its ends are made to meet; with `raw` on the frames are used as \
+                 they are. A file goes into the set's media store like a sample, so the set \
+                 reopens with it and Collect All and Save copies it. One undo step, named \
+                 Load Wavetable. An unknown table, an unreadable file, a file with no audio \
+                 or a device that plays no wavetable is refused. Reads a file outside the \
+                 project. What each oscillator plays is `wavetables` in the `device` query \
+                 result.",
+            )
+            .permission(Permission::External)
+            .context(DeviceView)
+            .args::<LoadWavetableArgs>()
+            .result::<LoadWavetableResult>(),
         CommandSpec::new(SWAP_TO_SNAPSHOT, "Swap to Simpler")
             .description(
                 "Replaces a Drum Sampler with Simpler in One-Shot mode, as \
@@ -2617,6 +2765,33 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .args::<SetPageArgs>()
             .result::<DeviceViewState>(),
+        CommandSpec::new(SET_ROUTE, "Change Modulation Route")
+            .description(
+                "Routes a modulation source to a destination in a free slot of an instrument's \
+                 matrix, as dragging in its Matrix tab does: `source` and `destination` by the \
+                 names the device's `matrix` (in the query tool's `device` result) lists, in \
+                 the slot named by `slot` or, without one, the free slot that already routes \
+                 them, else the first empty free slot. `amount` is in per cent from -100 to 100 \
+                 and goes to the slot's amount parameter in the same undo step; without it the \
+                 amount stays. A fixed or chosen slot, an unknown name, a pair the device \
+                 refuses and a matrix with every free slot taken are refused. One undo step \
+                 (Change Modulation Route) restoring source, destination and amount together.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<SetRouteArgs>()
+            .result::<RouteChanged>(),
+        CommandSpec::new(CLEAR_ROUTE, "Clear Modulation Route")
+            .description(
+                "Empties a free slot of an instrument's matrix, by `slot` or by the `source` \
+                 and `destination` it routes, and sets the slot's amount to 0 %, in one undo \
+                 step (Clear Modulation Route) that restores both. A fixed or chosen slot, an \
+                 empty one and a pair no slot routes are refused.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<ClearRouteArgs>()
+            .result::<RouteChanged>(),
         CommandSpec::new(ARTICULATION_LIST, "List Articulations")
             .description(
                 "Reports the articulations an Articulation Map holds, in order: each with its \

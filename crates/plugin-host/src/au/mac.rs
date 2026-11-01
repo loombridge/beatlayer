@@ -483,6 +483,7 @@ impl AuHost {
                 midi_tap: false,
                 note_output: has_note_output(&unit, role),
                 outputs: Vec::new(),
+                matrix: None,
             },
             vendor,
             version: has_version.then(|| version_text(version)),
@@ -1038,6 +1039,9 @@ pub(super) fn scan_file(path: &Path) -> Result<Vec<ScannedPlugin>, AuError> {
             version: unit.version,
             role: unit.device_type.role,
             note_output: unit.device_type.note_output,
+            // Spec: browser-tags R49. An Audio Unit's categories are the
+            // four characters of its type and of its subtype.
+            categories: vec![kind.clone(), subtype.clone()],
         });
     }
     Ok(found)

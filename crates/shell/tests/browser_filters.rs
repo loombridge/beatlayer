@@ -904,6 +904,7 @@ fn the_new_commands_are_registered_with_their_classes() {
     assert_eq!(class(ids::REMOVE_LABEL), Permission::Destructive);
     for id in [
         ids::SET_FILTER_VIEW,
+        ids::SET_INCLUDE_AUTO_TAGS,
         ids::SET_FILTER_GROUPS,
         ids::ADD_LABEL,
         ids::RENAME_LABEL,

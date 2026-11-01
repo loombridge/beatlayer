@@ -542,6 +542,12 @@ impl View<'_> {
                 "list": self.page.slice(layers),
             });
         }
+        // Spec: wavetable R8. What each wavetable oscillator plays, which
+        // `device.load_wavetable` changes.
+        let wavetables = self.shell.wavetables_of(device);
+        if !wavetables.is_empty() {
+            value["wavetables"] = json!(wavetables);
+        }
         // Spec: modulation R18. A modulator's mappings, which
         // `modulator.map` and `modulator.unmap` change.
         if bl_model::modulator::is_modulator_kind(&device.kind) {
@@ -558,6 +564,12 @@ impl View<'_> {
         // which `articulation.list` gives too.
         if device.is_articulation_map() {
             value["articulations"] = json!(device.articulations);
+        }
+        // Spec: instrument modulation R11. An instrument's modulation matrix:
+        // its sources and destinations, and every slot, which
+        // `device.set_route` and `device.clear_route` change.
+        if let Some(matrix) = self.shell.device_matrix(device) {
+            value["matrix"] = json!(matrix);
         }
         if device.can_compare() {
             // Spec: device-compare R11.

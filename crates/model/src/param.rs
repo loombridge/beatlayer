@@ -19,6 +19,7 @@ pub use lspk_params::{
     gain_to_db,
 };
 
+use crate::device_display::SpectrogramGrid;
 use crate::device_layout::DeviceLayout;
 use crate::ids::ParamId;
 
@@ -87,6 +88,10 @@ pub struct DeviceDescription {
     /// switch.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub banks: Vec<Bank>,
+    /// The grid of the spectrogram its display holds, if it holds one (the
+    /// device framework spec, R46).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spectrogram: Option<SpectrogramGrid>,
     /// The controls that show one of two parameters, as a switch says. Both
     /// parameters keep their values and their lanes whichever is shown.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -111,8 +116,16 @@ impl DeviceDescription {
             menu_options: Vec::new(),
             title_switch: None,
             banks: Vec::new(),
+            spectrogram: None,
             alternates: Vec::new(),
         }
+    }
+
+    /// The same, with a display that holds a spectrogram of `grid`.
+    #[must_use]
+    pub fn with_spectrogram(mut self, grid: SpectrogramGrid) -> Self {
+        self.spectrogram = Some(grid);
+        self
     }
 
     /// The same, with a display that offers `views`, the first the one it
@@ -393,6 +406,9 @@ impl DeviceDescription {
             {
                 return Err(format!("parameter {} is in no bank", p.id.0));
             }
+        }
+        if let Some(grid) = &self.spectrogram {
+            grid.check()?;
         }
         self.layout.check(&self.placed())
     }

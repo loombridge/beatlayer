@@ -693,10 +693,16 @@ impl DeviceViewUi {
             UiBuilder::new().max_rect(rect).accessibility_parent(id),
             |ui| {
                 let track = shell.editor().document().device_track(frame.id);
+                // Spec: modulation R31. A parameter an instrument's matrix
+                // moves shows the newest voice's movement as modulation
+                // does, from its base.
                 let played = |param| {
                     let device = frame.id;
                     track.and_then(|track| {
-                        shell.played(track, &AutomationTarget::Device { device, param })
+                        let target = AutomationTarget::Device { device, param };
+                        shell
+                            .matrix_played(track, &target)
+                            .or_else(|| shell.played(track, &target))
                     })
                 };
                 // Spec: device-framework R15. A described device's body is
@@ -813,7 +819,25 @@ impl DeviceViewUi {
                     self.round_button(ui, theme, frame, "dock", dock, events);
                 }
                 if let (Some(section), false) = (&frame.sidechain, strip) {
-                    crate::sidechain::draw(ui, shell, theme, frame.id, section, rect, events);
+                    // Spec: routing R38. A device with both sidechains
+                    // draws the MIDI one as a second column.
+                    let midi =
+                        frame
+                            .midi_sidechain
+                            .as_ref()
+                            .map(|section| crate::sidechain::MidiColumn {
+                                section,
+                                switch: midi_switch(frame),
+                            });
+                    crate::sidechain::draw(
+                        ui,
+                        shell,
+                        theme,
+                        frame.id,
+                        (section, midi.as_ref()),
+                        rect,
+                        events,
+                    );
                 } else if let (Some(section), false) = (&frame.midi_sidechain, strip) {
                     crate::sidechain::draw_midi(ui, shell, theme, frame.id, section, rect, events);
                 }
@@ -2245,4 +2269,25 @@ pub fn title_switch_rect(frame: Rect, expandable: bool) -> Rect {
 /// button.
 fn is_plugin(frame: &DeviceFrame) -> bool {
     matches!(frame.kind, bl_model::DeviceKind::Plugin { .. })
+}
+
+/// The device's own MIDI switch in its sidechain's MIDI column (the routing
+/// spec, R38), if its type has one: Roar's MIDI > FB Note.
+fn midi_switch(
+    frame: &bl_shell::device_commands::DeviceFrame,
+) -> Option<(bl_model::ParamId, &str, bool)> {
+    let roar = bl_model::DeviceKind::Native {
+        device_type: bl_devices::roar::ROAR.to_owned(),
+    };
+    if frame.kind != roar {
+        return None;
+    }
+    let panel = frame.panel.as_ref()?;
+    let index = panel
+        .description
+        .params
+        .iter()
+        .position(|p| p.id == bl_devices::roar::MIDI_FB_NOTE)?;
+    let param = &panel.description.params[index];
+    Some((param.id, &param.name, panel.value(index) >= 0.5))
 }

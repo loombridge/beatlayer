@@ -1,16 +1,22 @@
 //! What a device's display cell draws from its display data (the device
 //! framework spec, R36): spectra and curves over their axes with markers on
-//! them, a gain reduction meter, and the views a display offers. The data is
+//! them, spectrograms, a gain reduction meter, and the views a display offers. The data is
 //! the device type's own (`bl_model::DeviceDisplay`); what is drawn depends
 //! only on what the data holds, so a later device draws through the same
 //! code.
 
-use bl_model::{DeviceDisplay, DeviceId, DisplayMarker, DisplaySeries, ParamDescriptor, ParamId};
+use bl_devices::gated_delay::{PLAYING_STEP, ROW_COLUMNS, STEPS_SERIES, TURNED_SERIES};
+use bl_model::device_layout::{PADDING, Widget};
+use bl_model::{
+    DeviceDisplay, DeviceId, DisplayMarker, DisplaySeries, DisplaySpectrogram, ParamDescriptor,
+    ParamId,
+};
 use bl_shell::Invocation;
 use bl_shell::device_commands::DevicePanel;
 use egui::accesskit::{Action, Role};
 use egui::{
-    Align2, Color32, Event, Id, Key, Painter, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2,
+    Align2, Color32, Event, Id, Key, Mesh, Painter, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2,
+    vec2,
 };
 use serde_json::json;
 
@@ -28,6 +34,8 @@ const COLLAPSED: &str = "Collapsed";
 const ACTIVITY: &str = "Activity";
 /// The series whose markers draw as rings, an echo each (Echo's tunnel).
 const TUNNEL: &str = "Tunnel";
+/// The series whose markers draw as bars, a band's level each (Vocoder).
+const BANDS: &str = "Bands";
 /// A handle's drawn radius, and the half side of what takes a press.
 const HANDLE_RADIUS: f32 = 4.5;
 const HANDLE_HIT: f32 = 8.0;
@@ -116,6 +124,8 @@ pub fn draw(
     };
     if view == Some(ACTIVITY) {
         activity(ui, &painter, area, id, ink, display);
+    } else if display.series(STEPS_SERIES).is_some() {
+        step_row(&painter, area, ink, display);
     } else if !collapsed {
         plot(&painter, theme, area, ink, display);
         crate::particles::draw(ui, theme, area, (id, enabled), display, panel, events);
@@ -134,6 +144,38 @@ pub fn draw(
     modulator_readings(&painter, theme, cell, ink, display);
     if views.len() > 1 {
         view_buttons(ui, theme, cell, display, views, enabled, events);
+    }
+}
+
+/// Gated Delay's step row (the gated-delay spec, R9): the switches are the
+/// cell's own controls, in two rows of [`ROW_COLUMNS`]; this marks the step
+/// playing with a bar under its switch, and with a dot above it each step
+/// Random turned over this pass.
+fn step_row(painter: &Painter, cell: Rect, ink: Color32, display: &DeviceDisplay) {
+    let size = Widget::Toggle.size();
+    let switch = |n: usize| {
+        let (column, row) = ((n % ROW_COLUMNS) as f32, (n / ROW_COLUMNS) as f32);
+        Rect::from_min_size(
+            pos2(
+                cell.left() + PADDING + column * (size.width + PADDING),
+                cell.top() + PADDING + row * (size.height + PADDING),
+            ),
+            vec2(size.width, size.height),
+        )
+    };
+    if let Some(playing) = display.reading(PLAYING_STEP).filter(|r| r.value >= 1.0) {
+        let at = switch(playing.value as usize - 1);
+        painter.rect_filled(
+            Rect::from_min_size(pos2(at.left(), at.bottom() + 1.0), vec2(at.width(), 2.0)),
+            0.0,
+            ink,
+        );
+    }
+    if let Some(turned) = display.series(TURNED_SERIES) {
+        for (n, _) in turned.values.iter().enumerate().filter(|(_, v)| **v > 0.5) {
+            let at = switch(n);
+            painter.circle_filled(pos2(at.left() + 4.0, at.top() - 2.0), 1.5, ink);
+        }
     }
 }
 
@@ -188,6 +230,9 @@ fn modulator_readings(
 /// responses faint, and dots where markers sit.
 fn plot(painter: &Painter, theme: &Theme, area: Rect, ink: Color32, display: &DeviceDisplay) {
     let c = &theme.colors;
+    for spectrogram in &display.spectrograms {
+        spectrogram_image(painter, theme, area, ink, spectrogram);
+    }
     for series in display.series.iter().filter(|s| !s.values.is_empty()) {
         let at = |i: usize, v: f32| point(area, series, series.x_at(i), v);
         if series.name == SPECTRUM {
@@ -215,6 +260,7 @@ fn plot(painter: &Painter, theme: &Theme, area: Rect, ink: Color32, display: &De
             .collect();
         painter.add(Shape::line(line, Stroke::new(1.5, colour)));
     }
+    let bar = band_spacing(area, display) * 0.8;
     // The particles of a particle field and the handles draw themselves.
     for marker in display
         .markers
@@ -228,9 +274,75 @@ fn plot(painter: &Painter, theme: &Theme, area: Rect, ink: Color32, display: &De
             ring(painter, area, series, marker, ink);
             continue;
         }
+        if series.name == BANDS {
+            let top = point(area, series, marker.x, marker.y);
+            let wide = Rect::from_min_max(
+                pos2(top.x - bar / 2.0, top.y),
+                pos2(top.x + bar / 2.0, area.bottom()),
+            );
+            painter.rect_filled(wide, 0.0, ink.gamma_multiply(0.6));
+            continue;
+        }
         let at = point(area, series, marker.x, marker.y);
         painter.circle(at, 3.0, ink, Stroke::new(1.0, c.text.0));
     }
+}
+
+/// How far apart, across `area`, the first two bands of a band display sit:
+/// the bands are evenly spaced, so a bar this wide leaves a gap between.
+fn band_spacing(area: Rect, display: &DeviceDisplay) -> f32 {
+    let mut bands = display
+        .markers
+        .iter()
+        .filter(|m| m.series == BANDS && m.handle.is_none());
+    match (bands.next(), bands.next(), display.series(BANDS)) {
+        (Some(a), Some(b), Some(series)) => {
+            (point(area, series, b.x, 0.0).x - point(area, series, a.x, 0.0).x).abs()
+        }
+        _ => 0.0,
+    }
+}
+
+/// A spectrogram as an image: one mesh of a coloured cell for each column and
+/// row of its grid, so the picture is the grid's however big the cell is,
+/// the newest column at the right and the lowest row at the bottom. The
+/// colour ramp runs from the display's black at the grid's floor through
+/// `ink` (the accent, or grey while the device is off) to the text colour at
+/// its ceiling; cells at the floor are left black.
+fn spectrogram_image(
+    painter: &Painter,
+    theme: &Theme,
+    area: Rect,
+    ink: Color32,
+    spectrogram: &DisplaySpectrogram,
+) {
+    let grid = &spectrogram.grid;
+    let c = &theme.colors;
+    let [floor, ceiling] = grid.levels;
+    let cell = vec2(
+        area.width() / grid.columns as f32,
+        area.height() / grid.rows as f32,
+    );
+    let mut mesh = Mesh::default();
+    for (column, values) in spectrogram.values.chunks_exact(grid.rows).enumerate() {
+        for (row, &level) in values.iter().enumerate() {
+            let t = ((level - floor) / (ceiling - floor)).clamp(0.0, 1.0);
+            if t.is_nan() || t <= 0.0 {
+                continue;
+            }
+            let colour = if t < 0.5 {
+                c.display.0.lerp_to_gamma(ink, t * 2.0)
+            } else {
+                ink.lerp_to_gamma(c.text.0, t * 2.0 - 1.0)
+            };
+            let origin = pos2(
+                area.left() + cell.x * column as f32,
+                area.bottom() - cell.y * (row + 1) as f32,
+            );
+            mesh.add_colored_rect(Rect::from_min_size(origin, cell), colour);
+        }
+    }
+    painter.add(Shape::mesh(mesh));
 }
 
 /// One echo of the tunnel: a ring about its channel's vanishing point, the

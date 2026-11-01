@@ -34,10 +34,10 @@ const MAX_ONE_SAMPLER: usize = 64;
 const VELOCITY: u8 = 127;
 /// The note the first slice's chain receives: C1, the first pad a new drum
 /// rack shows (R8).
-const FIRST_NOTE: u8 = 36;
+pub(super) const FIRST_NOTE: u8 = 36;
 /// The note a drum chain plays (drum racks R3): C3, the sampler's reference
 /// pitch, so a slice sounds at its own pitch.
-const PLAY_NOTE: u8 = 60;
+pub(super) const PLAY_NOTE: u8 = 60;
 /// The sampler device type's ID.
 const SAMPLER: &str = "beatlayer.snapshot";
 /// The Slice By choice that places no automatic slices and plays the
@@ -52,7 +52,7 @@ const PLAYBACK_THRU: usize = 2;
 /// The choke group a Mono or Thru Simpler's slices share (slice-to-midi R15).
 const CHOKE_GROUP: u8 = 1;
 /// The Mode choice that plays the region straight through (sampler R10).
-const MODE_ONE_SHOT: f64 = 1.0;
+pub(super) const MODE_ONE_SHOT: f64 = 1.0;
 /// Where a user slicing preset's samples go when the set's media store
 /// lacks them, under the User Library (R11).
 const PRESET_SAMPLES_FOLDER: &str = "Samples/Preset Samples";
@@ -204,7 +204,7 @@ impl Shell {
 
     /// The audio clip a slicing acts on (R1): the one the call names, or the
     /// one audio clip selected in either view.
-    fn slice_clip(&self, args: &Value) -> Result<ClipId, ShellError> {
+    pub(super) fn slice_clip(&self, args: &Value) -> Result<ClipId, ShellError> {
         let doc = self.editor.document();
         let named = args
             .get("clip")
@@ -362,7 +362,7 @@ impl Shell {
     }
 
     /// The group and position a track made directly after `track` takes.
-    fn track_after(&self, track: TrackId) -> (Option<TrackId>, usize) {
+    pub(super) fn track_after(&self, track: TrackId) -> (Option<TrackId>, usize) {
         let doc = self.editor.document();
         let parent = doc.parent(track);
         let siblings: Vec<TrackId> = match parent {
@@ -899,7 +899,7 @@ impl Shell {
 
 /// A Simpler in Slice mode and the slices it plays (R15, R16), in frames of
 /// its edited sample at its own rate.
-struct SimplerSlices {
+pub(super) struct SimplerSlices {
     device: Device,
     /// The slice boundaries: the region's start, each cut, the region's end.
     bounds: Vec<u64>,
@@ -952,7 +952,7 @@ impl Shell {
 
     /// The Simpler `device` (or the selected device) names and its slices,
     /// refused unless it is in Slice mode with a slice (R17).
-    fn simpler_slices(
+    pub(super) fn simpler_slices(
         &self,
         id: &str,
         device: Option<DeviceId>,
@@ -1026,7 +1026,7 @@ impl Shell {
 
     /// `device.slice_to_drum_rack` (R15): the Simpler becomes the rack, in its
     /// place.
-    fn slice_to_drum_rack(
+    pub(super) fn slice_to_drum_rack(
         &mut self,
         id: &str,
         slices: &SimplerSlices,
@@ -1121,7 +1121,7 @@ impl Shell {
 }
 
 /// An "invalid arguments" error naming the command.
-fn invalid(id: &str, message: impl ToString) -> ShellError {
+pub(super) fn invalid(id: &str, message: impl ToString) -> ShellError {
     ShellError::InvalidArgs {
         command: id.to_owned(),
         message: message.to_string(),
@@ -1129,7 +1129,7 @@ fn invalid(id: &str, message: impl ToString) -> ShellError {
 }
 
 /// A "not now" error naming the command.
-fn unavailable(id: &str, reason: impl ToString) -> ShellError {
+pub(super) fn unavailable(id: &str, reason: impl ToString) -> ShellError {
     ShellError::Unavailable {
         command: id.to_owned(),
         reason: reason.to_string(),
@@ -1137,7 +1137,7 @@ fn unavailable(id: &str, reason: impl ToString) -> ShellError {
 }
 
 /// A failure naming the command.
-fn failed(id: &str, message: impl ToString) -> ShellError {
+pub(super) fn failed(id: &str, message: impl ToString) -> ShellError {
     ShellError::Failed {
         command: id.to_owned(),
         message: message.to_string(),
@@ -1145,7 +1145,7 @@ fn failed(id: &str, message: impl ToString) -> ShellError {
 }
 
 /// Whether `device` is Beatlayer's sampler.
-fn is_sampler(device: &Device) -> bool {
+pub(super) fn is_sampler(device: &Device) -> bool {
     matches!(&device.kind, DeviceKind::Native { device_type } if device_type == SAMPLER)
 }
 
@@ -1153,7 +1153,7 @@ fn is_sampler(device: &Device) -> bool {
 /// R22, R13). `region` is the played region's frames and `slices` its manual
 /// slice points, both at the file's own rate, and `file_frames` the file's
 /// length in the same frames: a region of all of it is none.
-fn sampler_device(
+pub(super) fn sampler_device(
     id: DeviceId,
     media: ContentHash,
     mode: f64,

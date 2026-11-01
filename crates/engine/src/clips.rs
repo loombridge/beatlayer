@@ -126,6 +126,14 @@ pub trait MediaLibrary: Send + Sync {
         None
     }
 
+    /// The file `media` is kept in, for a device that reads a file itself
+    /// rather than decoded audio (a wavetable's user table, WP-8.9): `None`
+    /// where the library has no file for it, and the default has none.
+    fn file(&self, media: ContentHash) -> Option<std::path::PathBuf> {
+        let _ = media;
+        None
+    }
+
     /// The media decoded into memory at `rate`, whole, for a device that
     /// reads it at positions of its own (a sampler's sample, WP-2.16):
     /// `None` if the media is missing, has changed, or doesn't decode, and
@@ -268,6 +276,11 @@ fn in_memory(data: Arc<SampleData>) -> OpenedSource {
 }
 
 impl MediaLibrary for MediaStore {
+    fn file(&self, media: ContentHash) -> Option<std::path::PathBuf> {
+        let hash = bl_media::ContentHash::from_bytes(media.0);
+        self.entry(hash).map(|entry| entry.path)
+    }
+
     /// Decodes the whole file into memory at the engine's rate (shared with
     /// every other clip that plays it): for tools that want no disk thread.
     fn open(&self, media: ContentHash, rate: SampleRate, _start: u64) -> Option<OpenedSource> {
@@ -396,6 +409,10 @@ impl std::fmt::Debug for MediaStreams {
 }
 
 impl MediaLibrary for MediaStreams {
+    fn file(&self, media: ContentHash) -> Option<std::path::PathBuf> {
+        self.store.file(media)
+    }
+
     fn open(&self, media: ContentHash, rate: SampleRate, start: u64) -> Option<OpenedSource> {
         let hash = bl_media::ContentHash::from_bytes(media.0);
         match self

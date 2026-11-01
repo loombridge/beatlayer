@@ -76,4 +76,4 @@ This spec covers the filter. What modulates its cutoff in each device (key track
 - The circuit chooser doesn't grey a circuit the type doesn't offer (R2), and Drive isn't greyed on Clean, notch and Morph (R9): the generic device panel has no greyed choice or control yet. [`offered`](../../crates/devices/src/instrument_filter.rs) gives the list the chooser would show.
 - Simpler's Morph control has no context menu that snaps it to a type (R10); Sampler's has.
 - A change of Type, Slope or Circuit doesn't carry the filter's state over where the structure is the same: it always crossfades to a structure that starts from silence.
-- Operator, Wavetable, Bass, Poli and Meld don't use the filter yet; each does from its own work package.
+- Operator, Bass, Poli and Meld don't use the filter yet; each does from its own work package. Wavetable does, twice, from its first part.

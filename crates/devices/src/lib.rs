@@ -130,6 +130,7 @@ pub mod tuner;
 pub mod utility;
 pub mod vector_delay;
 pub mod vocoder;
+pub mod wavetable;
 pub mod wavetables;
 pub mod wax;
 
@@ -209,6 +210,7 @@ pub use tube::{TUBE, tube_type};
 pub use tuner::{TUNER, Tuner, tuner_type};
 pub use vector_delay::{VECTOR_DELAY, vector_delay_type};
 pub use vocoder::{VOCODER, vocoder_type};
+pub use wavetable::{WAVETABLE, Wavetable, wavetable_type};
 pub use wax::{WAX, wax_type};
 
 use bl_engine::{DeviceType, Registry};
@@ -431,6 +433,7 @@ pub fn register(registry: &mut Registry) {
     pitchloop89::register(registry);
     vector_delay::register(registry);
     vocoder::register(registry);
+    wavetable::register(registry);
     granulator_iii::register(registry);
     bass::register(registry);
     poli::register(registry);

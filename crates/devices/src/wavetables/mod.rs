@@ -25,10 +25,10 @@ use generate::Frame;
 pub const BENCH: &str = "test.framework.wavetable";
 
 /// Whether the native device type `device_type` plays wavetables that
-/// `device.load_wavetable` loads into it.
+/// `device.load_wavetable` loads into it: Wavetable, and the harness type.
 #[must_use]
 pub fn plays_wavetables(device_type: &str) -> bool {
-    device_type == BENCH
+    device_type == BENCH || device_type == crate::wavetable::WAVETABLE
 }
 
 /// The factory categories, in the order the chooser lists them (R1).
@@ -292,6 +292,66 @@ impl Source {
             Self::File { path, raw } => Ok(Cache::global().share(user::read(path, *raw)?)),
         }
     }
+}
+
+/// A table for an oscillator, as the compiler sends it to a node: built off
+/// the audio thread, shared through the kit's cache.
+pub struct OscTable {
+    /// The oscillator it is for, 1 or 2.
+    pub oscillator: u8,
+    /// The table to swap in.
+    pub table: SharedTable,
+}
+
+/// The table an oscillator with no choice plays: Beatlayer's own default.
+#[must_use]
+pub fn default_source() -> Source {
+    Source::Factory {
+        category: "Shape Morphs".into(),
+        name: "Sine to Saw".into(),
+    }
+}
+
+/// The tables `device`'s oscillators have been given, built for the
+/// compiler to send (R3, R10), and the media of user tables whose file
+/// `file` can't name. An oscillator with no choice is sent the default, so
+/// undoing its first choice is heard. A table that can't be built leaves its
+/// oscillator with the table it had. Not for the audio thread.
+#[must_use]
+pub fn device_data(
+    device: &bl_model::Device,
+    file: bl_engine::FileOf<'_>,
+) -> bl_engine::DeviceData {
+    let mut data = bl_engine::DeviceData::default();
+    for at in 0..bl_model::MAX_WAVETABLES {
+        let source = match device.wavetable_at(at) {
+            None => default_source(),
+            Some(bl_model::WavetableChoice::Factory { category, name }) => Source::Factory {
+                category: category.clone(),
+                name: name.clone(),
+            },
+            Some(bl_model::WavetableChoice::User { raw, .. }) => {
+                let Some(media) = device.media_at(at) else {
+                    continue;
+                };
+                match file(media) {
+                    Some(path) => Source::File { path, raw: *raw },
+                    None => {
+                        data.missing.push(media);
+                        continue;
+                    }
+                }
+            }
+        };
+        if let Ok(table) = source.build() {
+            let table = OscTable {
+                oscillator: at as u8 + 1,
+                table,
+            };
+            data.items.push(Box::new(move |gc| gc.data(table)));
+        }
+    }
+    data
 }
 
 /// A table built for an oscillator by a [`Loader`] worker.

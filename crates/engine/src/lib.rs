@@ -182,7 +182,7 @@ pub use program::EngineProgram;
 pub use recording::{
     LaunchLog, MidiRecordTrack, RecordTrack, RecordedMidi, RecordingPlan, SessionTarget, TakeBounds,
 };
-pub use registry::{DeviceType, NodeFactory, Registry};
+pub use registry::{DataFn, DataItem, DeviceData, DeviceType, FileOf, NodeFactory, Registry};
 pub use render::{RenderOutput, RenderPlan};
 pub use sched::{Pool, PoolConfig, PoolMonitor};
 pub use session::{

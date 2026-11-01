@@ -19,8 +19,30 @@ use std::sync::Arc;
 use bl_model::{AraSupport, Device, DeviceDescription, DeviceId, DeviceKind, DeviceRole};
 
 use crate::clips::MediaLibrary;
-use crate::node::{Node, NodeConfig};
+use crate::gc::GcHandle;
+use crate::node::{Node, NodeConfig, NodeData};
 use crate::nodes::{BEAT_TONE, BeatTone, TEST_TONE, TestTone};
+
+/// One piece of node data a factory builds for a device, wrapped for the
+/// audio thread when the compiler sends it.
+pub type DataItem = Box<dyn FnOnce(&GcHandle) -> NodeData + Send>;
+
+/// What a factory builds for a device's node off the audio thread, from the
+/// device in the document (a wavetable device's tables, WP-8.9).
+#[derive(Default)]
+pub struct DeviceData {
+    /// The pieces to send, in order.
+    pub items: Vec<DataItem>,
+    /// Media the device names that `file` couldn't find: reported missing.
+    pub missing: Vec<bl_model::ContentHash>,
+}
+
+/// Names the file a media hash is kept in, for a device that reads files
+/// itself.
+pub type FileOf<'a> = &'a dyn Fn(bl_model::ContentHash) -> Option<std::path::PathBuf>;
+
+/// A native device type's builder of [`DeviceData`].
+pub type DataFn = Arc<dyn Fn(&Device, FileOf<'_>) -> DeviceData + Send + Sync>;
 
 /// Makes nodes for devices. The compiler asks each factory in a
 /// [`Registry`] in turn. It runs off the audio thread, so a factory may
@@ -51,6 +73,15 @@ pub trait NodeFactory: Send + Sync {
     /// to it ([`bl_model::ara_renders`]). The default says none is.
     fn ara_support(&self, device: &Device) -> Option<AraSupport> {
         let _ = device;
+        None
+    }
+
+    /// The data this factory builds for `device`'s node, off the audio
+    /// thread (WP-8.9), or `None` if it builds none for that device. The
+    /// compiler sends it with a new node and again when the device's
+    /// wavetables change.
+    fn data(&self, device: &Device, file: FileOf<'_>) -> Option<DeviceData> {
+        let _ = (device, file);
         None
     }
 }
@@ -272,6 +303,7 @@ struct Native<F> {
     offered: Option<DeviceType>,
     outputs: Vec<String>,
     make: F,
+    data: Option<DataFn>,
 }
 
 impl<F> NodeFactory for Native<F>
@@ -297,6 +329,15 @@ where
                 self.outputs.clone()
             }
             _ => Vec::new(),
+        }
+    }
+
+    fn data(&self, device: &Device, file: FileOf<'_>) -> Option<DeviceData> {
+        match &device.kind {
+            DeviceKind::Native { device_type } if *device_type == self.device_type => {
+                self.data.as_ref().map(|data| data(device, file))
+            }
+            _ => None,
         }
     }
 }
@@ -371,6 +412,7 @@ impl Registry {
             offered: None,
             outputs: Vec::new(),
             make,
+            data: None,
         });
     }
 
@@ -390,6 +432,7 @@ impl Registry {
             offered: None,
             outputs: outputs.iter().map(|name| (*name).to_owned()).collect(),
             make,
+            data: None,
         });
     }
 
@@ -402,6 +445,23 @@ impl Registry {
     where
         F: Fn(&Device, &NodeConfig) -> Box<dyn Node> + Send + Sync + 'static,
     {
+        self.add_device_with_data(device_type, make, None);
+    }
+
+    /// [`add_device`](Self::add_device), for a type whose nodes are also
+    /// sent the data `data` builds from the device (WP-8.9).
+    ///
+    /// # Panics
+    ///
+    /// If `device_type` isn't a native device type.
+    pub fn add_device_with_data<F>(
+        &mut self,
+        device_type: DeviceType,
+        make: F,
+        data: Option<DataFn>,
+    ) where
+        F: Fn(&Device, &NodeConfig) -> Box<dyn Node> + Send + Sync + 'static,
+    {
         let DeviceKind::Native { device_type: id } = &device_type.kind else {
             panic!("add_device takes native device types");
         };
@@ -411,6 +471,7 @@ impl Registry {
             offered: Some(device_type),
             outputs,
             make,
+            data,
         });
     }
 
@@ -472,6 +533,15 @@ impl Registry {
         self.factories
             .iter()
             .find_map(|factory| factory.create(device, config))
+    }
+
+    /// The data the first factory that builds some builds for `device`'s
+    /// node, off the audio thread (WP-8.9); none for a device whose factory
+    /// builds none.
+    pub(crate) fn data(&self, device: &Device, file: FileOf<'_>) -> Option<DeviceData> {
+        self.factories
+            .iter()
+            .find_map(|factory| factory.data(device, file))
     }
 
     /// Where clips' audio comes from, if anywhere.

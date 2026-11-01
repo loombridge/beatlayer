@@ -22,6 +22,7 @@ crates/devices/tests/meld.rs # measures Meld's real-time load
 crates/devices/tests/multisampler.rs # a timeout on a sample's disk read
 crates/devices/tests/operator.rs # measures Operator's real-time load
 crates/devices/tests/polysynth.rs # measures a synth's real-time load
+crates/devices/tests/wavetable.rs # measures a synth's real-time load
 crates/engine/src/gc.rs # a timeout on the drop thread
 crates/engine/src/sched.rs # a timeout on the compiler thread
 crates/engine/tests/capture_midi.rs # a timeout on capture

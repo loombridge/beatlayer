@@ -615,6 +615,15 @@ impl Compiler {
             {
                 self.send_layers(document, id, &mut update);
             }
+            // A wavetable device whose oscillators' tables changed gets them
+            // again as node data, with no new program (WP-8.9).
+            if let (Change::Modified, Some(before), Some(after)) =
+                (change, old.device(id), document.device(id))
+                && before.wavetables != after.wavetables
+                && before.media == after.media
+            {
+                self.send_device_data(document, id, &mut update);
+            }
             // A sampler whose sample's edits, warp or slices changed gets the
             // edited sample again as node data, with no new program (R57);
             // so does one that swaps samples in place, for another sample.
@@ -890,6 +899,25 @@ impl Compiler {
                 ));
             }
             None => update.missing.push(media),
+        }
+    }
+
+    /// Sends a device's node the data its factory builds from it (WP-8.9;
+    /// the wavetable spec, R3, R10): a wavetable device's tables, built here,
+    /// on the compiler's thread; media the library can't find is reported
+    /// missing.
+    fn send_device_data(&mut self, document: &Document, device: DeviceId, update: &mut Update) {
+        let Some(device_ref) = document.device(device) else {
+            return;
+        };
+        let library = self.registry.media();
+        let file = |media| library.and_then(|library| library.file(media));
+        let Some(data) = self.registry.data(device_ref, &file) else {
+            return;
+        };
+        update.missing.extend(data.missing);
+        for item in data.items {
+            update.data.push((NodeKey::Device(device), item(&self.gc)));
         }
     }
 
@@ -1667,6 +1695,11 @@ impl Compiler {
                 ));
             }
         }
+        // New nodes whose factories build data from their device (WP-8.9),
+        // after their automation.
+        for &device in &build.dataful {
+            self.send_device_data(document, device, &mut update);
+        }
         update
     }
 
@@ -2202,8 +2235,14 @@ impl Compiler {
                         }
                         // A new node that plays media gets its decoded audio
                         // with this compile's update (WP-2.16).
+                        // A device with wavetables reads its media as tables,
+                        // sent as data, not as decoded audio.
+                        let wavetables = device.wavetables.iter().any(Option::is_some);
+                        build.dataful.push(device.id);
                         for (slot, media) in device.media.iter().enumerate() {
-                            if let Some(media) = *media {
+                            if let Some(media) = *media
+                                && !wavetables
+                            {
                                 // Only slot 0 has edits (the sampler's one
                                 // sample).
                                 let edits = if slot == 0 {
@@ -2658,6 +2697,8 @@ struct Build {
     /// Devices new in this program that hold layers (WP-5.13): their layers,
     /// with each one's decoded audio, go with this compile's update.
     layered: Vec<DeviceId>,
+    /// New nodes, whose factories may build data for them (WP-8.9).
+    dataful: Vec<DeviceId>,
     /// Tracks whose clip player is new in this program.
     new_players: BTreeSet<TrackId>,
     /// The state of routes and players that migrate in, which an edit may

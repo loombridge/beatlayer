@@ -574,3 +574,59 @@ fn the_state_reads_back_what_browse_mode_shows() {
     assert_eq!(state.columns[1].selected, Some(0));
     assert_eq!(state.columns[1].entries[0], "Instrument 01");
 }
+
+// Spec: push-2-tracks R25. Add Device lists everything the track can hold,
+// instruments included, whatever device is selected; Load adds a device after
+// the selected one, and an instrument replaces the track's instrument.
+#[test]
+fn add_device_adds_after_the_selected_device_and_an_instrument_replaces_the_instrument() {
+    let mut b = Browsing::new();
+    let instrument = b.select_device(0, DeviceRole::Instrument);
+    b.rig.tap("add_device");
+    assert_eq!(
+        b.rig.snapshot().display_mode,
+        bl_push::content::DisplayMode::Browse,
+        "Add Device leads to Browse Mode"
+    );
+    assert_eq!(
+        b.names(0),
+        [
+            "Sounds",
+            "Drums",
+            "Instruments",
+            "Audio Effects",
+            "MIDI Effects",
+            "Plug-Ins"
+        ],
+        "with an instrument selected, Browse would list only instruments"
+    );
+    assert_eq!(b.state().load, LoadKind::Add);
+    assert!(b.rig.commands().is_empty());
+
+    // An instrument replaces the track's instrument.
+    b.rig.tap("down");
+    b.rig.tap("down");
+    b.rig.tap("upper_8");
+    assert_eq!(b.state().load, LoadKind::Replace(instrument));
+    b.rig.tap("lower_8");
+    assert_eq!(
+        b.rig.commands(),
+        [format!(
+            r#"device.replace {{"device":{},"new_device":{{"name":"Instrument 01"}}}}"#,
+            serde_json::to_string(&instrument).unwrap()
+        )]
+    );
+
+    // An audio effect is added, after the device selected.
+    b.rig.tap("upper_7");
+    b.rig.tap("down");
+    b.rig.tap("upper_8");
+    b.rig.tap("down");
+    assert_eq!(b.selected(1), Some(1));
+    assert_eq!(b.state().load, LoadKind::Add);
+    b.rig.tap("lower_8");
+    assert_eq!(
+        b.rig.commands(),
+        [r#"device.add {"device":{"name":"Reverb"}}"#]
+    );
+}

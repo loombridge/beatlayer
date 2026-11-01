@@ -113,6 +113,7 @@ jobs:
           seeds=()
           case "$TARGET" in
             set_file | set_json) seeds+=(../crates/project/tests/fixtures) ;;
+            movie) seeds+=(../tests/fixtures/video) ;;
           esac
           options=(-max_total_time="$SECONDS_PER_TARGET" -timeout=30 -print_final_stats=1)
           if [ -f "dictionaries/$TARGET.dict" ]; then

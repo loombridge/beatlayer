@@ -303,6 +303,24 @@ fn fixture() -> Project {
             .with_role(DeviceRole::Instrument),
         },
     );
+    // An instrument with a modulation matrix, so its slots read back
+    // (instrument modulation R11).
+    let drift: DeviceId = editor.new_id();
+    apply(
+        &mut editor,
+        Command::InsertDevice {
+            track: pad,
+            index: 0,
+            device: Device::new(
+                drift,
+                "Drift",
+                DeviceKind::Native {
+                    device_type: bl_devices::polysynth::POLYSYNTH.to_owned(),
+                },
+            )
+            .with_role(DeviceRole::Instrument),
+        },
+    );
     apply(
         &mut editor,
         Command::SetInput {

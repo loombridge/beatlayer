@@ -35,6 +35,7 @@ type State = (
     String,
     Option<Vec<bl_model::modulator::ShapePoint>>,
     Option<Vec<bl_model::Articulation>>,
+    Option<Vec<bl_model::ModRoute>>,
     Option<bl_model::PluginMpe>,
 );
 
@@ -209,6 +210,7 @@ impl DeviceView {
                     name.to_owned(),
                     p.shape,
                     p.articulations,
+                    p.routes,
                     p.mpe,
                 );
                 Ok(Ready {
@@ -435,13 +437,14 @@ impl DeviceView {
                         device,
                     }),
                 }?;
-                if let Some((params, name, shape, articulations, mpe)) = state {
+                if let Some((params, name, shape, articulations, routes, mpe)) = state {
                     editor.apply(Command::SetDeviceState {
                         device: id,
                         params,
                         name,
                         shape,
                         articulations,
+                        routes,
                         mpe,
                     })?;
                 }
@@ -497,13 +500,14 @@ impl DeviceView {
                     index: 0,
                     device,
                 })?;
-                if let Some((params, name, shape, articulations, mpe)) = state {
+                if let Some((params, name, shape, articulations, routes, mpe)) = state {
                     editor.apply(Command::SetDeviceState {
                         device: id,
                         params,
                         name,
                         shape,
                         articulations,
+                        routes,
                         mpe,
                     })?;
                 }

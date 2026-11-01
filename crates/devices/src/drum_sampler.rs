@@ -1356,6 +1356,10 @@ impl NativeDevice for DrumSampler {
                 right[frame] = r * volume * right_pan;
             }
         }
+        // Let go of the old sample before the node data that holds it: once
+        // that is dropped, the drop thread may free it, and this clone
+        // must not be the last reference on the audio thread.
+        drop(old);
         if self.retiring.is_some() && !self.voices.iter().any(|v| v.active && v.old) {
             self.retiring = None;
         }

@@ -172,6 +172,31 @@ fn a_peers_tempo_change_is_played_from_the_next_block_and_the_phase_holds() {
 }
 
 #[test]
+fn sync_to_incoming_audio_plays_the_song_the_latency_after_the_sessions_beat() {
+    // Spec: link-audio R8. With the session's delay set to a Latency of
+    // 20 ms (960 frames), the song keeps the session's phase as it was that
+    // long ago: it sounds 960 frames after the session's beat, and nothing
+    // else about it changes. Without the delay it is on the beat.
+    for block in BLOCKS {
+        for (micros_late, frames_late) in [(0, 0.0), (20_000, 960.0)] {
+            let mut host = Host::new(block, 120.0);
+            host.align();
+            host.peers.set_audio_delay(micros_late);
+            host.rig.sender.transport(TransportCommand::Play);
+            host.run_to(60_000);
+            assert!(host.started(0).is_some(), "block {block}: it plays");
+            for i in [30_000, 45_000, 59_999] {
+                let error = host.error(i);
+                assert!(
+                    (error - frames_late).abs() < 1.5,
+                    "block {block}, delay {micros_late}: {error} frames off at {i}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn drift_is_closed_without_a_jump_and_a_big_difference_jumps_once() {
     // Spec: link R6. A session that moves a tenth of a beat is caught up by
     // playing up to 2 % faster; one that moves a whole beat is jumped to.

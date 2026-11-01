@@ -606,6 +606,7 @@ pub fn display(
             x,
             y,
             text: format!("{name}, {time_text}, {level_text}"),
+            handle: None,
         });
         readings.extend([
             DisplayReading {

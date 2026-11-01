@@ -11,6 +11,7 @@ mod export;
 mod fades;
 mod grooves;
 mod http;
+mod instrument_filter;
 mod kit_devices;
 mod link;
 mod linked_tracks;

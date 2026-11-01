@@ -17,6 +17,7 @@ crates/cli/src/tone.rs # tests the test tone against real-time pacing
 crates/cli/tests/agent_session_recording.rs # a timeout on a recording
 crates/cli/tests/capacity.rs # measures a real-time streaming load
 crates/cli/tests/m2_song.rs # a timeout on the playhead
+crates/devices/tests/instrument_filter.rs # measures the instruments' filter's real-time load
 crates/devices/tests/multisampler.rs # a timeout on a sample's disk read
 crates/devices/tests/polysynth.rs # measures a synth's real-time load
 crates/engine/src/gc.rs # a timeout on the drop thread
@@ -24,6 +25,7 @@ crates/engine/src/sched.rs # a timeout on the compiler thread
 crates/engine/tests/capture_midi.rs # a timeout on capture
 crates/engine/tests/drum_racks.rs # a timeout on a drum chain
 crates/engine/tests/external_devices.rs # a timeout on a MIDI port
+crates/engine/tests/flush.rs # a library whose files take real time to open on the loader thread
 crates/engine/tests/midi_input.rs # the delay-locked loop measured against a real-time thread and clock
 crates/engine/tests/midi_output.rs # stamps messages with the system's clock
 crates/engine/tests/mpe_output.rs # stamps messages with the system's clock

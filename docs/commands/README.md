@@ -13634,6 +13634,7 @@ The Filter View (spec: browser-tags R18 to R22).
 | `groups` | array of [`FilterGroup`](#filtergroup) | yes | The groups it shows under the chosen label that have tags to show. |
 | `menu` | array of [`FilterGroupChoice`](#filtergroupchoice) | yes | Every group the chosen label can show, with whether it shows. |
 | `selected` | array of string | yes | The selected tags' full names. |
+| `include_auto_tags` | boolean | yes | Whether the Filter View Menu's Include Auto Tags is on: automatic tags show in the Filter View, filter and answer `#` search (spec: browser-tags R55). |
 
 <details><summary>JSON Schema</summary>
 
@@ -13647,6 +13648,10 @@ The Filter View (spec: browser-tags R18 to R22).
         "$ref": "#/$defs/FilterGroup"
       },
       "type": "array"
+    },
+    "include_auto_tags": {
+      "description": "Whether the Filter View Menu's Include Auto Tags is on: automatic tags show in the Filter View, filter and answer `#` search (spec: browser-tags R55).",
+      "type": "boolean"
     },
     "menu": {
       "description": "Every group the chosen label can show, with whether it shows.",
@@ -13671,7 +13676,8 @@ The Filter View (spec: browser-tags R18 to R22).
     "shown",
     "groups",
     "menu",
-    "selected"
+    "selected",
+    "include_auto_tags"
   ],
   "type": "object"
 }
@@ -16251,6 +16257,7 @@ A tag on an item, and where it comes from.
 |---|---|---|---|
 | `tag` | string | yes | The tag's full name. |
 | `source` | [`TagSource`](#tagsource) | yes | Where it comes from. |
+| `origin` | string or null | no | For an automatic tag, what it was found from: `plugin` (its categories) or `sound` (the sample's sound). |
 
 <details><summary>JSON Schema</summary>
 
@@ -16258,6 +16265,13 @@ A tag on an item, and where it comes from.
 {
   "description": "A tag on an item, and where it comes from.",
   "properties": {
+    "origin": {
+      "description": "For an automatic tag, what it was found from: `plugin` (its categories) or `sound` (the sample's sound).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "source": {
       "$ref": "#/$defs/TagSource",
       "description": "Where it comes from."
@@ -35191,6 +35205,7 @@ One of:
 - `"own"`: The item carries it in its own right.
 - `"folder"`: A folder it lies in carries it.
 - `"beatlayer"`: Beatlayer gave it, from what it knows of the item.
+- `"auto"`: Beatlayer gave it automatically, from a plug-in's categories or a sample's sound (spec: browser-tags R49); a person can take it off or make it their own.
 
 <details><summary>JSON Schema</summary>
 
@@ -35211,6 +35226,11 @@ One of:
     {
       "const": "beatlayer",
       "description": "Beatlayer gave it, from what it knows of the item.",
+      "type": "string"
+    },
+    {
+      "const": "auto",
+      "description": "Beatlayer gave it automatically, from a plug-in's categories or a sample's sound (spec: browser-tags R49); a person can take it off or make it their own.",
       "type": "string"
     }
   ]

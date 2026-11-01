@@ -55,6 +55,12 @@ Tasks:
                  in tests/golden/ (`cargo test` does too). With --update, remake the
                  references whose renders changed; say why in the pull request. Fixture
                  names after the options pick some; the default is all.
+  transcribe-bench  Measure how accurately Convert Melody and Convert Harmony find notes, on
+                 seeded phrases through Drift and Simpler, clean, with a room and with
+                 noise, and fail below the targets. Needs --runtime and --model (or
+                 BL_ONNX_RUNTIME and BL_PITCH_MODEL): the Packages manager's ONNX Runtime
+                 library and basic-pitch model. BL_TRANSCRIBE_CORPUS names an open labelled
+                 set to report on as well.
   progress       Print the progress of the roadmap, the parity matrix and Reagent's plan
                  as JSON, read from origin/main (with --worktree, from the files on disk)
   dashboard      Serve the progress page on http://localhost:4106 (or PORT, or --port N),
@@ -158,6 +164,7 @@ fn run(root: &Path, args: &[String]) -> Result<ExitCode, String> {
         Some("private-terms") => private_terms::check(root).map(|()| ExitCode::SUCCESS),
         Some("test-clock") => test_clock::check(root).map(|()| ExitCode::SUCCESS),
         Some("golden") => golden(root, options).map(|()| ExitCode::SUCCESS),
+        Some("transcribe-bench") => transcribe_bench(root, options).map(|()| ExitCode::SUCCESS),
         Some("progress") => dashboard::print(root, options).map(|()| ExitCode::SUCCESS),
         Some("dashboard") => dashboard::serve(root, options).map(|()| ExitCode::SUCCESS),
         Some("wiki") => match options {
@@ -537,6 +544,21 @@ fn golden(root: &Path, options: &[String]) -> Result<(), String> {
         "golden",
         "--dir",
         dir,
+    ];
+    args.extend(options.iter().map(String::as_str));
+    cargo(root, &args)
+}
+
+/// Runs `bl-cli transcribe-bench`, passing its options on.
+fn transcribe_bench(root: &Path, options: &[String]) -> Result<(), String> {
+    let mut args = vec![
+        "run",
+        "--quiet",
+        "--locked",
+        "--package",
+        "bl-cli",
+        "--",
+        "transcribe-bench",
     ];
     args.extend(options.iter().map(String::as_str));
     cargo(root, &args)

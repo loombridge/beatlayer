@@ -1038,7 +1038,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 9.2 | todo |  |  |
 | 9.3 | todo |  |  |
 | 9.4 | todo |  |  |
-| 9.5 | todo |  |  |
+| 9.5 | done | 1 November 2026 | [#684](https://github.com/loombridge/beatlayer/pull/684): basic-pitch's note step is ported in `bl_analysis::transcribe` with the Melody rule and the clean-up (weak re-onsets merged, confident onsets snapped, velocity from onset strength), its model is the `pitch-model` package, and `cargo xtask transcribe-bench` scores Melody and Harmony above the spec's F-measure targets |
 | 9.6 | todo |  |  |
 | 9.7 | todo |  |  |
 | 9.8 | done | 1 November 2026 | [#660](https://github.com/loombridge/beatlayer/pull/660): every sample up to 60 seconds and every instrument and drum preset gets a sound descriptor in the background, kept in the browser's database by content hash, with the Status Bar's progress and Pause and agents reading the progress |

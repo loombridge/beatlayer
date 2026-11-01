@@ -82,6 +82,7 @@ pub mod polysynth;
 pub mod remap;
 pub mod reverb;
 pub mod roar;
+mod roar_parts;
 pub mod sampler;
 pub mod saturator;
 mod sections;

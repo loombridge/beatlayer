@@ -69,6 +69,9 @@ pub struct MidiLink {
     pub to: TrackId,
     /// The device.
     pub device: DeviceId,
+    /// Where on the source track the notes are taken (the routing spec,
+    /// R39); Post Mixer is the same as Post FX.
+    pub tap: Tap,
 }
 
 /// One route in the graph.
@@ -365,19 +368,27 @@ impl Graph {
                 continue;
             };
             for device in track.devices_deep() {
-                let Some(from) = device.midi_sidechain.as_ref().and_then(|s| s.source) else {
+                let Some((from, tap)) = device
+                    .midi_sidechain
+                    .as_ref()
+                    .and_then(|s| Some((s.source?, s.tapped())))
+                else {
                     continue;
                 };
                 if document.track(from).is_none() {
                     continue;
                 }
-                // Its own track's notes are there before its chain runs.
+                // Its own track's notes are there before its chain runs, and
+                // not after: Post FX on its own track would close a loop.
                 if from == id {
-                    self.midi_links.push(MidiLink {
-                        from,
-                        to: id,
-                        device: device.id,
-                    });
+                    if tap == Tap::PreFx {
+                        self.midi_links.push(MidiLink {
+                            from,
+                            to: id,
+                            device: device.id,
+                            tap,
+                        });
+                    }
                 } else if reaches(&all, id, from) {
                     self.broken.push((from, id));
                 } else {
@@ -386,6 +397,7 @@ impl Graph {
                         from,
                         to: id,
                         device: device.id,
+                        tap,
                     });
                 }
             }

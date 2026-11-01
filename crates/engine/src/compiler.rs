@@ -1049,7 +1049,12 @@ impl Compiler {
         let build_midi_sources = graph
             .midi_links
             .iter()
-            .filter_map(|link| Some((link.device, *task_of.get(&link.from)?)))
+            .filter_map(|link| {
+                Some((
+                    link.device,
+                    (*task_of.get(&link.from)?, link.tap != Tap::PreFx),
+                ))
+            })
             .collect();
         let mut build = Build {
             midi_sources: build_midi_sources,
@@ -1186,7 +1191,12 @@ impl Compiler {
             if from == NO_TASK {
                 continue;
             }
-            let keep = &mut build.tasks[from as usize].midi_keep;
+            let task = &mut build.tasks[from as usize];
+            let keep = if build.midi_sidechains[at].post {
+                &mut task.midi_keep_post
+            } else {
+                &mut task.midi_keep
+            };
             let index = *keep.get_or_insert_with(|| {
                 midi_kept += 1;
                 midi_kept - 1
@@ -1886,6 +1896,7 @@ impl Compiler {
             pre_fx: None,
             post_fx: None,
             midi_keep: None,
+            midi_keep_post: None,
             dependents: Span::default(),
             dependencies,
         });
@@ -2047,6 +2058,7 @@ impl Compiler {
             sidechains,
             midi_sidechains,
             midi_keep: None,
+            midi_keep_post: None,
             mixer,
             clip_delay: NO_DELAY,
             note_delay,
@@ -2207,11 +2219,13 @@ impl Compiler {
                 self.add_sidechain(build, device.id, settings, slot, sources);
             }
             if device.midi_sidechain.is_some() {
-                let from = build.midi_sources.get(&device.id).copied();
+                let source = build.midi_sources.get(&device.id).copied();
+                let from = source.map(|(from, _)| from);
                 *dependencies += u32::from(from.is_some_and(|from| from != own));
                 build.midi_sidechains.push(DeviceMidiSidechain {
                     device: slot,
                     from: from.unwrap_or(NO_TASK),
+                    post: source.is_some_and(|(_, post)| post),
                     kept: NO_TASK,
                 });
             }
@@ -2565,7 +2579,7 @@ struct Build {
     sidechains: Vec<DeviceSidechain>,
     sidechain_inputs: Vec<Input>,
     /// The task each device's MIDI sidechain listens to (WP-5.27).
-    midi_sources: BTreeMap<DeviceId, u32>,
+    midi_sources: BTreeMap<DeviceId, (u32, bool)>,
     /// The slot each device has in `slots` (WP-5.45).
     device_slots: BTreeMap<DeviceId, u32>,
     midi_sidechains: Vec<DeviceMidiSidechain>,

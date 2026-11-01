@@ -12,7 +12,7 @@
 
 use std::f32::consts::FRAC_PI_2;
 
-use bl_model::DeviceId;
+use bl_model::{DeviceId, ParamId};
 use bl_shell::device_commands::{
     MidiSidechainSection, SHOW_SIDECHAIN, SIDECHAIN_SECTION_WIDTH, SIDECHAIN_STRIP_WIDTH,
     SidechainSection, TITLE_BAR_HEIGHT,
@@ -80,6 +80,29 @@ pub fn rows(frame: Rect) -> [Rect; 6] {
     })
 }
 
+/// The MIDI column of a device with both sidechains, beside the audio's
+/// section (the routing spec, R38).
+pub struct MidiColumn<'a> {
+    pub section: &'a MidiSidechainSection,
+    /// The device's own MIDI switch where its spec gives one (Roar's MIDI >
+    /// FB Note): its parameter, its name and whether it is on.
+    pub switch: Option<(ParamId, &'a str, bool)>,
+}
+
+/// Where the MIDI column's controls sit, top to bottom: the device's MIDI
+/// switch, the Source label, the Source chooser and the tapping point
+/// chooser.
+#[must_use]
+pub fn midi_rows(frame: Rect) -> [Rect; 4] {
+    let column = section_rect(frame)
+        .translate(vec2(SIDECHAIN_SECTION_WIDTH, 0.0))
+        .shrink2(vec2(3.0, 0.0));
+    std::array::from_fn(|i| {
+        let top = column.top() + 3.0 + (ROW + ROW_GAP) * i as f32;
+        Rect::from_min_size(pos2(column.left(), top), vec2(column.width(), ROW))
+    })
+}
+
 /// Where the strip's toggle and Listen button sit.
 #[must_use]
 pub fn strip_buttons(frame: Rect) -> [Rect; 2] {
@@ -118,7 +141,7 @@ pub fn draw(
     shell: &Shell,
     theme: &Theme,
     device: DeviceId,
-    section: &SidechainSection,
+    (section, midi): (&SidechainSection, Option<&MidiColumn<'_>>),
     frame: Rect,
     events: &mut Vec<UiEvent>,
 ) {
@@ -313,6 +336,87 @@ pub fn draw(
         gain,
         events,
     );
+    if let Some(midi) = midi {
+        draw_midi_column(ui, shell, theme, device, midi, frame, events);
+    }
+}
+
+/// Draws the MIDI column right of the audio section (the routing spec, R38).
+fn draw_midi_column(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    device: DeviceId,
+    midi: &MidiColumn<'_>,
+    frame: Rect,
+    events: &mut Vec<UiEvent>,
+) {
+    let c = &theme.colors;
+    let [switch, label, source, tap] = midi_rows(frame);
+    if let Some((param, name, on)) = midi.switch {
+        let id = control_id(device, "midi-switch");
+        let response = ui.interact(switch, id, Sense::click());
+        crate::focus::register(ui.ctx(), id, Area::Detail, None);
+        if pressed(ui, &response) {
+            invoke(
+                events,
+                "device.set_param",
+                json!({ "device": device, "param": param, "value": if on { 0.0 } else { 1.0 } }),
+            );
+        }
+        let (face, ink) = if on {
+            (c.accent.0, c.accent_text.0)
+        } else {
+            (c.control.0, c.text.0)
+        };
+        let painter = ui.painter_at(switch.expand(2.0));
+        painter.rect(
+            switch,
+            theme.sizes.corner,
+            face,
+            Stroke::new(1.0, c.separator.0),
+            StrokeKind::Inside,
+        );
+        painter.text(
+            switch.center(),
+            Align2::CENTER_CENTER,
+            name,
+            theme.small_font(),
+            ink,
+        );
+        focus_ring(ui, theme, switch, &response);
+        describe(ui, id, Role::Button, name, on_off(on));
+    }
+    ui.painter_at(label).text(
+        label.left_center(),
+        Align2::LEFT_CENTER,
+        "MIDI Source",
+        theme.small_font(),
+        c.text_dim.0,
+    );
+    let doc = shell.editor().document();
+    if let Some(chooser) = routing::midi_sidechain_source(doc, device) {
+        draw_chooser(
+            ui,
+            theme,
+            control_id(device, "midi-source"),
+            source,
+            &chooser,
+            events,
+        );
+    }
+    if midi.section.tap.is_some()
+        && let Some(chooser) = routing::midi_sidechain_tap(doc, device)
+    {
+        draw_chooser(
+            ui,
+            theme,
+            control_id(device, "midi-tap"),
+            tap,
+            &chooser,
+            events,
+        );
+    }
 }
 
 /// Draws a device's MIDI sidechain strip and, while shown, its section, in

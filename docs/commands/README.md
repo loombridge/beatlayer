@@ -19778,17 +19778,18 @@ What `midi.ports` returns.
 
 ### `MidiSidechain`
 
-A device's MIDI sidechain input: `source`, the MIDI track whose notes and channel messages the device hears, or absent for No Input.
+A device's MIDI sidechain input: `source`, the MIDI track whose notes and channel messages the device hears, or absent for No Input; and `tap`, for a device with a tapping point, where on that track they are taken: `pre_fx`, `post_fx` (a new device's) or `post_mixer` (the same as `post_fx`). A device without a `tap` hears them `pre_fx`.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `source` | [`TrackId`](#trackid) or null | no | The MIDI track it listens to, or `None` (No Input), as on a new device. |
+| `tap` | [`Tap`](#tap) or null | no | Where on the source track its notes are taken (the routing spec, R39), for a device whose type gives its MIDI sidechain a tapping point; `None` for one that hears Pre FX only, as a set saved before the tapping point has it. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A device's MIDI sidechain input: `source`, the MIDI track whose notes and channel messages the device hears, or absent for No Input.",
+  "description": "A device's MIDI sidechain input: `source`, the MIDI track whose notes and channel messages the device hears, or absent for No Input; and `tap`, for a device with a tapping point, where on that track they are taken: `pre_fx`, `post_fx` (a new device's) or `post_mixer` (the same as `post_fx`). A device without a `tap` hears them `pre_fx`.",
   "properties": {
     "source": {
       "anyOf": [
@@ -19800,6 +19801,17 @@ A device's MIDI sidechain input: `source`, the MIDI track whose notes and channe
         }
       ],
       "description": "The MIDI track it listens to, or `None` (No Input), as on a new device."
+    },
+    "tap": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Tap"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Where on the source track its notes are taken (the routing spec, R39), for a device whose type gives its MIDI sidechain a tapping point; `None` for one that hears Pre FX only, as a set saved before the tapping point has it."
     }
   },
   "type": "object"
@@ -19810,18 +19822,19 @@ A device's MIDI sidechain input: `source`, the MIDI track whose notes and channe
 
 ### `MidiSidechainSection`
 
-A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5.27; the routing spec, R34): the toggle shows the section, which holds the MIDI source chooser.
+A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5.27; the routing spec, R34): the toggle shows the section, which holds the MIDI source chooser and, where the device has one, the tapping point chooser (R39). A device with both sidechains reports both sections (R38).
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `shown` | boolean | yes | Whether the section is shown, by the toggle at the top of the device's left strip. It changes only the view. |
 | `source` | string | yes | What the MIDI source chooser shows: a MIDI track's label (`1-MIDI`) or `No Input`. |
+| `tap` | [`Tap`](#tap) or null | no | What the tapping point chooser shows (the routing spec, R39), for a device whose MIDI sidechain has one; left out for one that hasn't. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5.27; the routing spec, R34): the toggle shows the section, which holds the MIDI source chooser.",
+  "description": "A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5.27; the routing spec, R34): the toggle shows the section, which holds the MIDI source chooser and, where the device has one, the tapping point chooser (R39). A device with both sidechains reports both sections (R38).",
   "properties": {
     "shown": {
       "description": "Whether the section is shown, by the toggle at the top of the device's left strip. It changes only the view.",
@@ -19830,6 +19843,17 @@ A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5
     "source": {
       "description": "What the MIDI source chooser shows: a MIDI track's label (`1-MIDI`) or `No Input`.",
       "type": "string"
+    },
+    "tap": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Tap"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What the tapping point chooser shows (the routing spec, R39), for a device whose MIDI sidechain has one; left out for one that hasn't."
     }
   },
   "required": [

@@ -425,8 +425,20 @@ pub fn sidechain_width(frame: &DeviceFrame) -> f32 {
         .as_ref()
         .map(|s| s.shown)
         .or_else(|| frame.midi_sidechain.as_ref().map(|s| s.shown));
+    // Spec: routing R38. A device with both sidechains has two columns, the
+    // audio's and the MIDI's, each as wide as a section.
+    let columns = if frame.sidechain.is_some() && frame.midi_sidechain.is_some() {
+        2.0
+    } else {
+        1.0
+    };
     shown.map_or(0.0, |shown| {
-        SIDECHAIN_STRIP_WIDTH + if shown { SIDECHAIN_SECTION_WIDTH } else { 0.0 }
+        SIDECHAIN_STRIP_WIDTH
+            + if shown {
+                columns * SIDECHAIN_SECTION_WIDTH
+            } else {
+                0.0
+            }
     }) + external_width(frame)
 }
 
@@ -1062,7 +1074,9 @@ fn returns_default() -> bool {
 
 /// A device's MIDI sidechain section, in the same left strip as a
 /// sidechain's (WP-5.27; the routing spec, R34): the toggle shows the
-/// section, which holds the MIDI source chooser.
+/// section, which holds the MIDI source chooser and, where the device has
+/// one, the tapping point chooser (R39). A device with both sidechains
+/// reports both sections (R38).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MidiSidechainSection {
     /// Whether the section is shown, by the toggle at the top of the
@@ -1071,6 +1085,10 @@ pub struct MidiSidechainSection {
     /// What the MIDI source chooser shows: a MIDI track's label (`1-MIDI`)
     /// or `No Input`.
     pub source: String,
+    /// What the tapping point chooser shows (the routing spec, R39), for a
+    /// device whose MIDI sidechain has one; left out for one that hasn't.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tap: Option<Tap>,
 }
 
 /// A floating device's window, as `device.windows` reports it (WP-2.5b).

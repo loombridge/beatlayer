@@ -19,7 +19,7 @@ use crate::modulator::{Mapping, ShapePoint};
 use crate::mpe_settings::PluginMpe;
 use crate::rack::{Chain, RackKind, RackMacros};
 use crate::sample_edits::{SampleEdit, SampleRegion};
-use crate::track::{Channel, Input};
+use crate::track::{Channel, Input, Tap};
 use crate::warp_settings::{WarpMode, WarpSettings};
 
 /// The most sample slots a device's media can fill.
@@ -350,17 +350,36 @@ impl Default for Sidechain {
 
 /// A device's MIDI sidechain input (the routing spec, R32): the MIDI track
 /// whose notes and channel messages the device hears, played before that
-/// track's own devices. A new device has none.
+/// track's own devices unless its tapping point says otherwise. A new device
+/// has none.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[schemars(
     description = "A device's MIDI sidechain input: `source`, the MIDI track whose notes and \
-                   channel messages the device hears, or absent for No Input."
+                   channel messages the device hears, or absent for No Input; and `tap`, for \
+                   a device with a tapping point, where on that track they are taken: \
+                   `pre_fx`, `post_fx` (a new device's) or `post_mixer` (the same as \
+                   `post_fx`). A device without a `tap` hears them `pre_fx`."
 )]
 pub struct MidiSidechain {
     /// The MIDI track it listens to, or `None` (No Input), as on a new
     /// device.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<TrackId>,
+    /// Where on the source track its notes are taken (the routing spec,
+    /// R39), for a device whose type gives its MIDI sidechain a tapping
+    /// point; `None` for one that hears Pre FX only, as a set saved before
+    /// the tapping point has it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tap: Option<Tap>,
+}
+
+impl MidiSidechain {
+    /// Where the device's notes are taken: Pre FX where it has no tapping
+    /// point.
+    #[must_use]
+    pub fn tapped(&self) -> Tap {
+        self.tap.unwrap_or(Tap::PreFx)
+    }
 }
 
 /// Reads a device's media: a list of slots, or the one hash (or `null`) a
@@ -648,6 +667,17 @@ impl Device {
     #[must_use]
     pub fn with_midi_sidechain(mut self) -> Self {
         self.midi_sidechain = Some(MidiSidechain::default());
+        self
+    }
+
+    /// The same device with a MIDI sidechain input that has a tapping point,
+    /// Post FX as a new device has it (the routing spec, R39).
+    #[must_use]
+    pub fn with_midi_sidechain_tap(mut self) -> Self {
+        self.midi_sidechain = Some(MidiSidechain {
+            source: None,
+            tap: Some(Tap::PostFx),
+        });
         self
     }
 

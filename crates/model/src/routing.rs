@@ -1274,7 +1274,11 @@ mod tests {
             "a new device's MIDI sidechain has no source and saves none"
         );
         let set = |editor: &mut Editor, track| {
-            editor.apply(Command::SetMidiSidechainSource { device: id, track })
+            editor.apply(Command::SetMidiSidechainSource {
+                device: id,
+                track,
+                tap: None,
+            })
         };
         assert!(
             set(&mut editor, Some(a)).is_err(),
@@ -1309,7 +1313,8 @@ mod tests {
         assert!(matches!(
             editor.apply(Command::SetMidiSidechainSource {
                 device: plain,
-                track: None
+                track: None,
+                tap: None,
             }),
             Err(crate::EditError::Command(ModelError::NoMidiSidechain(_)))
         ));

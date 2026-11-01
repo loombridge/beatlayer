@@ -1304,7 +1304,7 @@ Result: [`ChangeSet`](README.md#changeset).
 
 **Set MIDI Sidechain Source**. Permission: `edit`. Contexts: `device-view`.
 
-Sets the MIDI track a device's MIDI sidechain listens to, as the MIDI source chooser in its sidechain parameters does: `track` is a MIDI track (the device's own track too), or left out for No Input, a new device's. The device hears the notes and channel messages that track's clips and input play, before its own devices change them; the track still plays as before. Only devices that declare a MIDI sidechain input have one. Deleting the track leaves No Input.
+Sets the MIDI track a device's MIDI sidechain listens to, as the MIDI source chooser in its sidechain parameters does: `track` is a MIDI track (the device's own track too), or left out for No Input, a new device's. The device hears the notes and channel messages that track's clips and input play, before its own devices change them; the track still plays as before. Only devices that declare a MIDI sidechain input have one. Deleting the track leaves No Input. A device whose MIDI sidechain has a tapping point (Roar) also takes `tap`: `pre_fx` (the notes as the track's clips and input played them), `post_fx` (a new device's: the notes leaving the track's MIDI effects) or `post_mixer` (the same as `post_fx`); leave it out to keep the tap. Pass the current `track` with a `tap`, for a left-out `track` is No Input.
 
 Default keys: none.
 
@@ -1313,6 +1313,7 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `device` | [`DeviceId`](README.md#deviceid) | yes | The device. |
+| `tap` | [`Tap`](README.md#tap) or null | no | Where on that track the notes are taken, for a device whose MIDI sidechain has a tapping point (the routing spec, R39); left as it is when absent. |
 | `track` | [`TrackId`](README.md#trackid) or null | no | The MIDI track whose notes and channel messages the device hears (its own track too), or `None` for No Input. |
 
 Result: [`ChangeSet`](README.md#changeset).

@@ -1389,12 +1389,14 @@ pub fn external_choosers(
     })
 }
 
-fn set_midi_sidechain_source(device: DeviceId, track: Value) -> Invocation {
-    let args = if track.is_null() {
-        json!({ "device": device })
-    } else {
-        json!({ "device": device, "track": track })
-    };
+fn set_midi_sidechain_source(device: DeviceId, track: Value, tap: Option<Tap>) -> Invocation {
+    let mut args = json!({ "device": device });
+    if !track.is_null() {
+        args["track"] = track;
+    }
+    if let Some(tap) = tap {
+        args["tap"] = json!(tap_name(tap));
+    }
     Invocation::new("device.set_midi_sidechain_source", args)
 }
 
@@ -1410,7 +1412,7 @@ pub fn midi_sidechain_source(doc: &Document, device: DeviceId) -> Option<Chooser
         if doc.track(id).map(bl_model::Track::kind) == Some(TrackKind::Midi) {
             entries.push(Entry::choice(
                 label(&labels, id),
-                set_midi_sidechain_source(device, json!(id)),
+                set_midi_sidechain_source(device, json!(id), None),
                 current == Some(id),
             ));
         }
@@ -1418,7 +1420,7 @@ pub fn midi_sidechain_source(doc: &Document, device: DeviceId) -> Option<Chooser
     entries.push(Entry::Separator);
     entries.push(Entry::choice(
         "No Input",
-        set_midi_sidechain_source(device, Value::Null),
+        set_midi_sidechain_source(device, Value::Null, None),
         current.is_none(),
     ));
     let mut chooser = chooser("MIDI Sidechain Source", entries);
@@ -1426,6 +1428,31 @@ pub fn midi_sidechain_source(doc: &Document, device: DeviceId) -> Option<Chooser
         "No Input".clone_into(&mut chooser.text);
     }
     Some(chooser)
+}
+
+/// A device's MIDI sidechain tapping point chooser (the routing spec, R39):
+/// Pre FX · Post FX · Post Mixer. `None` for a device whose MIDI sidechain
+/// has no tapping point. Choosing keeps the source.
+#[must_use]
+pub fn midi_sidechain_tap(doc: &Document, device: DeviceId) -> Option<Chooser> {
+    let sidechain = doc.device(device)?.midi_sidechain.as_ref()?;
+    let tap = sidechain.tap?;
+    let source = sidechain.source.map_or(Value::Null, |id| json!(id));
+    Some(Chooser {
+        name: "MIDI Sidechain Tap",
+        text: tap_label(tap).to_owned(),
+        entries: [Tap::PreFx, Tap::PostFx, Tap::PostMixer]
+            .into_iter()
+            .map(|t| {
+                Entry::choice(
+                    tap_label(t),
+                    set_midi_sidechain_source(device, source.clone(), Some(t)),
+                    t == tap,
+                )
+            })
+            .collect(),
+        pending: None,
+    })
 }
 
 /// A device's sidechain channel chooser: Pre FX · Post FX · Post Mixer with

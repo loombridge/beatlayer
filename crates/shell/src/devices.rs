@@ -1592,6 +1592,7 @@ impl DeviceView {
                         || "No Input".to_owned(),
                         |track| crate::routing::track_label(doc, track),
                     ),
+                    tap: sidechain.tap,
                 }),
             display_view: self.display_view(d),
             rack: d.rack_kind().map(|kind| self.rack_frame(doc, d, kind)),
@@ -3646,7 +3647,11 @@ fn new_device(id: DeviceId, args: &AddDeviceArgs, types: &[DeviceType]) -> Devic
     if let Some(t) = known.filter(|t| !t.cv_outputs.is_empty() || !t.cv_inputs.is_empty()) {
         device = device.with_cv(&t.cv_outputs, &t.cv_inputs);
     }
-    if args.device.midi_sidechain {
+    // Spec: routing R39. A MIDI sidechain with a tapping point starts at
+    // Post FX.
+    if known.is_some_and(|t| t.midi_tap) {
+        device = device.with_midi_sidechain_tap();
+    } else if args.device.midi_sidechain {
         device = device.with_midi_sidechain();
     }
     device

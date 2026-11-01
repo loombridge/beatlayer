@@ -2888,13 +2888,30 @@ pub fn run(
                 grid,
                 target,
                 amount,
+                swing,
+                pitch,
+                or_all,
                 ..
             } = parse(args)?;
             check_grid(grid)?;
             check_amount(amount)?;
+            if swing.is_some_and(|swing| swing > 100) {
+                return Err(invalid("`swing` is a percentage from 0 to 100"));
+            }
+            let swing = swing.unwrap_or(0);
             let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
             let ordered = notes_in_order(&midi);
-            let places = places_or_selected(view, clip, notes, ordered.len())?;
+            let places = match pitch {
+                // Spec: push-2-notes R57. One pad's notes.
+                Some(pitch) => (0..ordered.len() as u32)
+                    .filter(|place| ordered[*place as usize].key == pitch)
+                    .collect(),
+                // Spec: push-2-notes R57. All of them when none is selected.
+                None if or_all && notes.is_none() && view.selection_of(clip).is_empty() => {
+                    (0..ordered.len() as u32).collect()
+                }
+                None => places_or_selected(view, clip, notes, ordered.len())?,
+            };
             let settings = view.quantize();
             let grid = grid.unwrap_or_else(|| view.quantize_grid(arrangement.grid_ticks(doc)));
             // Start and End both off move nothing (the MIDI transformations spec, R19).
@@ -2920,6 +2937,7 @@ pub fn run(
                             step,
                             signatures,
                             amount,
+                            swing,
                         )?,
                         None => quantized[*place as usize].clone(),
                     };
@@ -4036,7 +4054,11 @@ fn quantize_note(
     step: Step,
     signatures: &TimeSignatureMap,
     amount: u8,
+    swing: u8,
 ) -> Result<Note, EditFailure> {
+    let snap = |signatures: &TimeSignatureMap, step: Step, at: Ticks| {
+        swung(signatures, step, snap(signatures, step, at), swing)
+    };
     let mut quantized = note.clone();
     match target {
         QuantizeTarget::NoteStart => {
@@ -4065,6 +4087,16 @@ fn quantize_note(
         }
     }
     Ok(quantized)
+}
+
+/// `line` delayed by `swing` percent of half a step when it is an odd line of
+/// the step, counted from its bar's start (Spec: push-2-notes R56).
+fn swung(signatures: &TimeSignatureMap, step: Step, line: Ticks, swing: u8) -> Ticks {
+    let (_, into) = signatures.bar_at(line);
+    if step.bars.is_some() || swing == 0 || (into.get() / step.ticks.get().max(1)) % 2 == 0 {
+        return line;
+    }
+    line + Ticks(step.ticks.get() * i64::from(swing) / 200)
 }
 
 /// The first grid line after `at`, for the lines `step` lays out.
@@ -4161,7 +4193,7 @@ mod tests {
         let step = quantize_step(Ticks::QUARTER, TimeSignature::new(4, 4).unwrap());
         let signatures = TimeSignatureMap::default();
         let quantized =
-            quantize_note(&note, QuantizeTarget::NoteEnd, step, &signatures, 100).unwrap();
+            quantize_note(&note, QuantizeTarget::NoteEnd, step, &signatures, 100, 0).unwrap();
         assert_eq!(quantized.length, Ticks::QUARTER);
         assert_eq!(quantized.pressure.len(), 3);
         assert_eq!(quantized.pressure[..2], note.pressure[..2]);

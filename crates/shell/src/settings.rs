@@ -321,6 +321,13 @@ pub struct PushPrefs {
     pub workflow_clip: bool,
     /// The swing amount in thousandths, 0 to 1,000.
     pub swing: u16,
+    /// Whether Fixed Length is on (push-2-notes R50).
+    pub fixed_length_on: bool,
+    /// Fixed Length's length, as a place in the list the lower display
+    /// buttons choose from: 1 bar in a new install.
+    pub fixed_length: u8,
+    /// Whether Phrase Sync is on.
+    pub phrase_sync: bool,
 }
 
 impl Default for PushPrefs {
@@ -334,6 +341,9 @@ impl Default for PushPrefs {
             led_brightness: setup.led_brightness,
             workflow_clip: false,
             swing: 0,
+            fixed_length_on: false,
+            fixed_length: bl_push::recording::FixedLength::default().length,
+            phrase_sync: false,
         }
     }
 }
@@ -357,9 +367,24 @@ impl PushPrefs {
         .clamped()
     }
 
-    /// The preferences that keep `setup` and `swing` (0 to 1).
+    /// Fixed Length's settings these preferences keep.
     #[must_use]
-    pub fn of(setup: bl_push::curve::Setup, swing: f64) -> Self {
+    pub fn fixed(&self) -> bl_push::recording::FixedLength {
+        bl_push::recording::FixedLength {
+            on: self.fixed_length_on,
+            length: self.fixed_length,
+            phrase_sync: self.phrase_sync,
+        }
+        .clamped()
+    }
+
+    /// The preferences that keep `setup`, `swing` (0 to 1) and `fixed`.
+    #[must_use]
+    pub fn of(
+        setup: bl_push::curve::Setup,
+        swing: f64,
+        fixed: bl_push::recording::FixedLength,
+    ) -> Self {
         Self {
             pad_sensitivity: setup.sensitivity,
             pad_gain: setup.gain,
@@ -368,6 +393,9 @@ impl PushPrefs {
             led_brightness: setup.led_brightness,
             workflow_clip: setup.workflow == bl_push::curve::Workflow::Clip,
             swing: (swing.clamp(0.0, 1.0) * 1000.0).round() as u16,
+            fixed_length_on: fixed.on,
+            fixed_length: fixed.length,
+            phrase_sync: fixed.phrase_sync,
         }
     }
 }

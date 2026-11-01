@@ -116,6 +116,8 @@ impl Note {
             following: self.following,
             velocity: self.velocity,
             held_steps: crate::content::Content::held_steps(self),
+            accent: self.accent.on(),
+            repeat: self.repeating(frame.track),
             area: self.area(frame),
             melody: melodic.then(|| Self::melody(frame, self.strip)),
         };
@@ -272,6 +274,10 @@ impl Note {
             .white(cc::LAYOUT, true, frame.overlay.is_some());
         paint.lights.white(62, edited.is_some(), false);
         paint.lights.white(63, edited.is_some(), false);
+        paint.lights.white(cc::ACCENT, true, self.accent.on());
+        paint
+            .lights
+            .white(cc::REPEAT, true, self.repeating(frame.track));
         for row in 0..8u8 {
             let colour = if frame.size.row() == row {
                 fixed::WHITE

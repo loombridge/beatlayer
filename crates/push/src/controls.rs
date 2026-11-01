@@ -55,6 +55,10 @@ pub mod cc {
     pub const UP: u8 = 46;
     /// Down arrow.
     pub const DOWN: u8 = 47;
+    /// Repeat.
+    pub const REPEAT: u8 = 56;
+    /// Accent.
+    pub const ACCENT: u8 = 57;
     /// Octave Down.
     pub const OCTAVE_DOWN: u8 = 54;
     /// Octave Up.
@@ -186,8 +190,8 @@ pub const BUTTONS: [Button; 65] = [
     white("down", 47),
     white("left", 44),
     white("right", 45),
-    white("repeat", 56),
-    white("accent", 57),
+    white("repeat", cc::REPEAT),
+    white("accent", cc::ACCENT),
     white("scale", cc::SCALE),
     white("layout", cc::LAYOUT),
     white("note", cc::NOTE),

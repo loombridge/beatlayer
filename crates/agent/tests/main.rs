@@ -15,6 +15,7 @@ mod instrument_filter;
 mod kit_devices;
 mod link;
 mod linked_tracks;
+mod meld;
 mod midi_clock;
 mod midi_effects;
 mod midi_tools;

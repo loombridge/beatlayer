@@ -188,7 +188,8 @@ pub use locator::{Locator, SongStart};
 pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound};
 pub use pad_layout::{PadDirection, PadLayout, PadSpacing};
 pub use param::{
-    BANK_SIZE, Bank, DeviceDescription, ParamDescriptor, ParamKind, ParamUnit, numbered,
+    BANK_SIZE, Bank, DeviceDescription, ParamDescriptor, ParamKind, ParamLabel, ParamUnit, Relabel,
+    numbered,
 };
 pub use rack::{
     CHAIN_COLOURS, CHAIN_SELECTOR, Chain, ChainMixer, ChainSend, ChainZones, DEFAULT_PLAY,

@@ -87,6 +87,7 @@ mod linked_tracks;
 mod locator;
 mod macros;
 mod mapping_targets;
+mod meld;
 mod menus;
 mod midi_controller_recording;
 mod midi_files;

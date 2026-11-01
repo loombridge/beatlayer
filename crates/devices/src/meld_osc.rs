@@ -76,10 +76,6 @@ pub const MACROS: [(&str, &str); 25] = [
     ("Shape", "Inversion"),
 ];
 
-/// How many types are built; the rest wait for Meld's next part and play
-/// nothing.
-pub const BUILT: usize = 10;
-
 /// The most lanes a type reads for one voice: the swarms' copies.
 pub const MAX_LANES: usize = 8;
 
@@ -211,10 +207,7 @@ fn table(frames: usize, wave: impl Fn(usize, f64) -> f64) -> SharedTable {
                 .map(|n| wave(f, n as f64 / FRAME_SIZE as f64))
                 .collect();
             let mean = cycle.iter().sum::<f64>() / FRAME_SIZE as f64;
-            let peak = cycle
-                .iter()
-                .map(|x| (x - mean).abs())
-                .fold(1e-9, f64::max);
+            let peak = cycle.iter().map(|x| (x - mean).abs()).fold(1e-9, f64::max);
             cycle.iter().map(|x| ((x - mean) / peak) as f32).collect()
         })
         .collect();
@@ -406,7 +399,6 @@ pub fn swarm_shape(index: usize) -> usize {
 /// of the kind's lanes each, and the per-lane arrays one render of
 /// [`CHUNK`] frames reads and writes.
 pub struct Bank {
-    kind: Kind,
     oscs: Vec<Oscillator>,
     pitch: Vec<f32>,
     step: Vec<f32>,
@@ -455,7 +447,6 @@ impl Bank {
             .collect();
         let stride = oscs[0].lane_count();
         Self {
-            kind,
             pitch: vec![0.0; stride * oscs.len()],
             step: vec![0.0; stride * oscs.len()],
             pitch_mod: vec![0.0; stride * oscs.len() * CHUNK],
@@ -473,12 +464,6 @@ impl Bank {
         for osc in &mut self.oscs {
             osc.set_table(table.clone());
         }
-    }
-
-    /// The kind of type this bank plays.
-    #[must_use]
-    pub fn kind(&self) -> Kind {
-        self.kind
     }
 
     fn at(&self, slot: usize, copy: usize) -> (usize, usize) {

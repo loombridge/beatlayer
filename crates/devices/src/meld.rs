@@ -20,11 +20,12 @@ use bl_engine::{DeviceType, NodeConfig, NodeData, NodeEvent, Registry};
 use bl_model::device_layout::{
     BODY_HEIGHT, ControlBand, LayoutNode, Page, PageStyle, PagesNode, TAB_HEIGHT, Widget,
 };
-use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
-use bl_model::{Scale, param::db_to_gain};
-use lspk_dsp::envelope::{
-    EnvelopeBank, EnvelopeParams, StealRestart, TimeUnit, Timing, Trigger,
+use bl_model::{
+    DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamLabel, ParamUnit,
+    Relabel,
 };
+use bl_model::{Scale, param::db_to_gain};
+use lspk_dsp::envelope::{EnvelopeBank, EnvelopeParams, StealRestart, TimeUnit, Timing, Trigger};
 use lspk_dsp::filter::pitch_of;
 use lspk_voice::unison::pan_gains;
 use lspk_voice::{Start, VoiceBlock, VoiceEvent, VoiceEventKind};
@@ -33,7 +34,7 @@ use lspk_wavetable::osc::Onset;
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::instrument::{self, Instrument, Parts, Section, State};
 use crate::instrument_filter::{InstrumentFilter, Per, PerFrame, Setup};
-use crate::meld_osc::{self, Bank, CHUNK, Context, Kind, MAX_LANES, TYPES};
+use crate::meld_osc::{self, Bank, CHUNK, Context, Kind, MACROS, MAX_LANES, TYPES};
 
 /// Meld's device type.
 pub const MELD: &str = "beatlayer.meld";
@@ -360,12 +361,14 @@ pub fn meld_type() -> DeviceType {
             ),
             (
                 name("Envelope"),
-                vec![name("Attack"), name("Decay"), name("Sustain"), name("Release")],
+                vec![
+                    name("Attack"),
+                    name("Decay"),
+                    name("Sustain"),
+                    name("Release"),
+                ],
             ),
-            (
-                name("Mix"),
-                vec![name("Volume"), name("Pan"), name("Tone")],
-            ),
+            (name("Mix"), vec![name("Volume"), name("Pan"), name("Tone")]),
             (
                 name("Settings"),
                 vec![
@@ -384,9 +387,18 @@ pub fn meld_type() -> DeviceType {
     banks.extend(engine_bank("B"));
     banks.push((
         "Global".to_owned(),
-        ["Voice Mode", "Voices", "Legato", "Stacked Voices", "Spread", "Mixer Drive", "Limit", "Volume"]
-            .map(str::to_owned)
-            .to_vec(),
+        [
+            "Voice Mode",
+            "Voices",
+            "Legato",
+            "Stacked Voices",
+            "Spread",
+            "Mixer Drive",
+            "Limit",
+            "Volume",
+        ]
+        .map(str::to_owned)
+        .to_vec(),
     ));
     banks.push(("Pitch Bend".to_owned(), vec!["PB Range".to_owned()]));
     let banks: Vec<(&str, Vec<&str>)> = banks
@@ -394,12 +406,119 @@ pub fn meld_type() -> DeviceType {
         .map(|(name, params)| (name.as_str(), params.iter().map(String::as_str).collect()))
         .collect();
     let banks: Vec<(&str, &[&str])> = banks.iter().map(|(n, p)| (*n, p.as_slice())).collect();
+    // Spec: meld R3, R5, R12. The macros are named by their type, and
+    // Semitones read in scale degrees while Use Current Scale is on.
+    let relabels = (0..2)
+        .flat_map(|engine| {
+            let by = |param, by, names: Vec<&str>| Relabel {
+                param,
+                by,
+                labels: names.into_iter().map(ParamLabel::named).collect(),
+            };
+            [
+                by(
+                    param(engine, MACRO_1),
+                    param(engine, TYPE),
+                    MACROS.iter().map(|m| m.0).collect(),
+                ),
+                by(
+                    param(engine, MACRO_2),
+                    param(engine, TYPE),
+                    MACROS.iter().map(|m| m.1).collect(),
+                ),
+                by(
+                    param(engine, FILTER_MACRO_1),
+                    param(engine, FILTER_TYPE),
+                    FILTER_MACROS.iter().map(|m| m.0).collect(),
+                ),
+                by(
+                    param(engine, FILTER_MACRO_2),
+                    param(engine, FILTER_TYPE),
+                    FILTER_MACROS.iter().map(|m| m.1).collect(),
+                ),
+                Relabel {
+                    param: param(engine, SEMITONES),
+                    by: USE_SCALE,
+                    labels: vec![
+                        ParamLabel::named("Semitones"),
+                        ParamLabel {
+                            name: "Semitones".to_owned(),
+                            unit: Some("sd".to_owned()),
+                        },
+                    ],
+                },
+            ]
+        })
+        .collect();
     DeviceType::native(MELD, "Meld", DeviceRole::Instrument).with_description(
         DeviceDescription::new(params)
             .with_layout(layout)
             .with_title_switch(USE_SCALE)
+            .with_relabels(relabels)
             .with_banks(&banks),
     )
+}
+
+/// Spec: meld R1. Meld's factory presets of Beatlayer's own: each a name and
+/// the parameters it sets, the rest staying at their defaults.
+#[must_use]
+pub fn factory_presets() -> Vec<(&'static str, Vec<(ParamId, f64)>)> {
+    let (a, b) = (|offset| param(0, offset), |offset| param(1, offset));
+    vec![
+        ("Init", vec![]),
+        (
+            "Warm Swarm",
+            vec![
+                (a(TYPE), 8.0),
+                (a(MACRO_1), 15.0),
+                (a(MACRO_2), 0.0),
+                (a(FILTER_FREQ), 1_800.0),
+                (a(FILTER_MACRO_1), 20.0),
+                (a(ATTACK), 120.0),
+                (a(RELEASE), 600.0),
+                (a(VOLUME), db_to_gain(-6.0)),
+                (b(ON), 1.0),
+                (b(TYPE), 6.0),
+                (b(OCTAVES), -1.0),
+                (b(MACRO_1), 10.0),
+                (b(VOLUME), db_to_gain(-9.0)),
+                (STACK, 2.0),
+            ],
+        ),
+        (
+            "Fifth Pluck",
+            vec![
+                (a(TYPE), 4.0),
+                (a(MACRO_1), 60.0),
+                (a(MACRO_2), 50.0),
+                (a(FILTER_FREQ), 3_200.0),
+                (a(FILTER_MACRO_1), 35.0),
+                (a(DECAY), 220.0),
+                (a(SUSTAIN), 0.0),
+                (a(RELEASE), 120.0),
+            ],
+        ),
+        (
+            "Sub and Sync",
+            vec![
+                (a(TYPE), 5.0),
+                (a(MACRO_1), 30.0),
+                (a(MACRO_2), 70.0),
+                (a(OCTAVES), -1.0),
+                (b(ON), 1.0),
+                (b(TYPE), 3.0),
+                (b(MACRO_1), 20.0),
+                (b(MACRO_2), 55.0),
+                (b(FILTER_ON), 1.0),
+                (b(FILTER_FREQ), 900.0),
+                (b(FILTER_MACRO_1), 40.0),
+                (b(VOLUME), db_to_gain(-12.0)),
+                (MODE, 1.0),
+                (LEGATO, 1.0),
+                (a(GLIDE_TIME), 80.0),
+            ],
+        ),
+    ]
 }
 
 /// A macro, 0 to 100 %.
@@ -409,9 +528,15 @@ fn macro_param(id: ParamId, name: &str, text: &str) -> ParamDescriptor {
 
 /// An envelope time, 0 ms to 20 s.
 fn time(id: ParamId, name: &str, default_ms: f64, text: &str) -> ParamDescriptor {
-    ParamDescriptor::continuous(id, name, (0.0, 20_000.0), default_ms, ParamUnit::Milliseconds)
-        .power(2)
-        .describe(text)
+    ParamDescriptor::continuous(
+        id,
+        name,
+        (0.0, 20_000.0),
+        default_ms,
+        ParamUnit::Milliseconds,
+    )
+    .power(2)
+    .describe(text)
 }
 
 /// Adds Meld to `registry`.
@@ -491,7 +616,10 @@ impl Meld {
         let gain = db_to_gain(value(DRIVE)) as f32;
         let limit = value(LIMIT) >= 0.5;
         let volume = ramp(OUTPUT);
-        let used = self.engines[0].voices.used().max(self.engines[1].voices.used());
+        let used = self.engines[0]
+            .voices
+            .used()
+            .max(self.engines[1].voices.used());
         let release = 1.0 - (-1.0 / (LIMIT_RELEASE * self.rate)).exp();
         let [a, b] = &self.engines;
         let (a, b) = (&a.voices.out, &b.voices.out);
@@ -597,7 +725,6 @@ struct Held {
 #[derive(Clone, Copy)]
 struct Slot {
     voice: i8,
-    copy: u8,
     copies: u8,
     key: u8,
     /// The pitch offset Semitones gives, and the key an engine without key
@@ -613,13 +740,12 @@ struct Slot {
     noise: [f32; 2],
     noise_state: u32,
     fresh: bool,
-    tone: [f32; 2],
+    tone: f32,
 }
 
 impl Slot {
     const FREE: Self = Self {
         voice: -1,
-        copy: 0,
         copies: 1,
         key: 0,
         offset: 0.0,
@@ -632,7 +758,7 @@ impl Slot {
         noise: [0.0; 2],
         noise_state: 1,
         fresh: false,
-        tone: [0.0; 2],
+        tone: 0.0,
     };
 }
 
@@ -673,7 +799,8 @@ struct Voices {
 
 impl Voices {
     fn new(which: usize, rate: f64, frames: usize) -> Self {
-        let banks = Kind::ALL.map(|kind| Bank::new(kind, SLOTS, rate as f32, 0x6D31 + which as u64));
+        let banks =
+            Kind::ALL.map(|kind| Bank::new(kind, SLOTS, rate as f32, 0x6D31 + which as u64));
         let envelope = || EnvelopeBank::new(MAX_VOICES, EnvelopeParams::AMP, Timing::new(rate));
         let envelopes = [envelope(), envelope()];
         let envelope_stride = envelopes[0].stride();
@@ -786,11 +913,8 @@ impl Voices {
                 ..curve
             });
         }
-        self.filter.set_setup(Setup::new(
-            4,
-            snap.filter_type == 1,
-            0,
-        ));
+        self.filter
+            .set_setup(Setup::new(4, snap.filter_type == 1, 0));
         for k in 0..frames {
             self.cutoffs[k * self.filter_stride..(k + 1) * self.filter_stride]
                 .fill(pitch_of(self.cutoff[k], 440.0));
@@ -814,7 +938,13 @@ impl Voices {
         if let Some(bank) = Kind::of(kind) {
             for (slot, s) in self.slots.iter().enumerate() {
                 if s.voice >= 0 {
-                    self.banks[bank.index()].start(slot, f32::from(s.key), Onset::Fresh, true, s.phase);
+                    self.banks[bank.index()].start(
+                        slot,
+                        f32::from(s.key),
+                        Onset::Fresh,
+                        true,
+                        s.phase,
+                    );
                 }
             }
         }
@@ -860,7 +990,7 @@ impl Instrument for Voices {
                     }
                 }
                 if !matches!(start, Start::Legato) {
-                    self.start_slots(voices, state, voice, start);
+                    self.start_slots(voices, state, voice);
                 }
             }
             VoiceEventKind::Release => {
@@ -903,7 +1033,7 @@ impl Instrument for Voices {
 
 impl Voices {
     /// Gives `voice` its slots, one per stacked copy, and starts them.
-    fn start_slots(&mut self, voices: &VoiceBlock, state: &State, voice: usize, start: Start) {
+    fn start_slots(&mut self, voices: &VoiceBlock, state: &State, voice: usize) {
         self.free_slots(voice);
         let copies = state.config().copies.clamp(1, MAX_STACK);
         let key = voices.info(voice).key;
@@ -914,7 +1044,12 @@ impl Voices {
         } else {
             semitones as f32
         };
-        let fixed = 60.0 + if scale.enabled { f32::from(scale.root) } else { 0.0 };
+        let fixed = 60.0
+            + if scale.enabled {
+                f32::from(scale.root)
+            } else {
+                0.0
+            };
         let spread = self.snap.spread;
         let random = state.random(voice) as f32;
         self.notes = self.notes.wrapping_add(1);
@@ -935,7 +1070,6 @@ impl Voices {
             };
             self.slots[slot] = Slot {
                 voice: voice as i8,
-                copy: copy as u8,
                 copies: copies as u8,
                 key,
                 offset,
@@ -946,10 +1080,9 @@ impl Voices {
                 ..Slot::FREE
             };
             self.filter.reset_voice(slot, 0);
-            let (reset, fresh) = (self.snap.phase_reset, !matches!(start, Start::Legato));
-            let onset = if fresh { Onset::Fresh } else { Onset::Legato };
+            let reset = self.snap.phase_reset;
             if let Some(bank) = self.bank() {
-                bank.start(slot, f32::from(key), onset, reset, phase);
+                bank.start(slot, f32::from(key), Onset::Fresh, reset, phase);
             }
         }
     }
@@ -991,7 +1124,8 @@ impl Voices {
                 at += n;
             }
         }
-        // Mono into both of the filter's channels' first, then filtered.
+        // The filter's first two types are built; the others pass the signal
+        // until Meld's next part.
         if on && self.snap.filter_on && self.snap.filter_type < 2 {
             let stride = self.filter_stride;
             let (start, end) = (frames.start, frames.end);
@@ -1004,7 +1138,7 @@ impl Voices {
             self.filter
                 .process(used, count, &per, &mut self.signal[..count * 2 * stride]);
         }
-        self.mix(voices, frames, used);
+        self.mix(frames, used);
     }
 
     /// Renders `n` frames of every slot from `at` into the piece's signal.
@@ -1151,8 +1285,7 @@ impl Voices {
 
     /// Spec: meld R13, R18. Takes the filtered signal under the amplitude
     /// envelope, Tone, Pan and Volume into the stretch's output.
-    fn mix(&mut self, voices: &VoiceBlock, frames: &std::ops::Range<usize>, used: usize) {
-        let _ = voices;
+    fn mix(&mut self, frames: &std::ops::Range<usize>, used: usize) {
         let count = frames.len();
         let stride = self.filter_stride;
         let on = self.snap.on;
@@ -1181,8 +1314,8 @@ impl Voices {
                         20_000.0 * 0.01f32.powf(-t)
                     };
                     let a = 1.0 - (-std::f32::consts::TAU * cutoff / self.rate as f32).exp();
-                    s.tone[0] += (x - s.tone[0]) * a;
-                    x = if t > 0.0 { x - s.tone[0] } else { s.tone[0] };
+                    s.tone += (x - s.tone) * a;
+                    x = if t > 0.0 { x - s.tone } else { s.tone };
                 }
                 // The envelope is last, so a voice whose envelope has ended
                 // is exactly silent whenever the section frees it.

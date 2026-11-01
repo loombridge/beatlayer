@@ -506,12 +506,22 @@ pub fn show(
             };
             found
         };
-        let descriptor = &panel.description.params[index];
+        // Spec: meld R3, R5. A relabelled parameter shows its label's name,
+        // and its number in the label's unit.
+        let read = |id| panel.read(id);
+        let descriptor = panel
+            .description
+            .described(&read, &panel.description.params[index]);
         let value = panel.value(index);
+        let relabelled_text = panel
+            .description
+            .label(&read, param)
+            .is_some_and(|label| label.unit.is_some())
+            .then(|| panel.description.text(&read, &descriptor, value));
         let control = Control {
             device: frame.id,
             enabled: frame.enabled,
-            descriptor,
+            descriptor: &descriptor,
             value,
             modulated: played(param),
             rect,
@@ -537,7 +547,8 @@ pub fn show(
                     .and_then(|display| display.reading("Name"))
                     .map(|reading| reading.text.clone())
             })
-            .flatten(),
+            .flatten()
+            .or(relabelled_text),
             automation: menu(param),
             coarse: if frame.kind
                 == (bl_model::DeviceKind::Native {

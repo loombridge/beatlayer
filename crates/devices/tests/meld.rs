@@ -5,7 +5,7 @@
 //!
 //! Every block runs as a real-time section under the allocation trap.
 
-use crate::common::{CHANNELS, RATE, device, node};
+use crate::common::{CHANNELS, RATE, node};
 use std::time::Instant;
 
 use bl_devices::meld::{
@@ -332,7 +332,11 @@ fn meld_is_an_instrument_with_two_engines_and_twenty_five_types() {
     assert_eq!(choices[0], "Basic Shapes");
     assert_eq!(choices[24], "Chord");
     let pages = description.layout.pages();
-    assert!(pages.iter().any(|p| p.name == "Engine" && p.pages.len() == 2));
+    assert!(
+        pages
+            .iter()
+            .any(|p| p.name == "Engine" && p.pages.len() == 2)
+    );
     assert_eq!(description.title_switch, Some(USE_SCALE));
 }
 
@@ -346,7 +350,10 @@ fn the_macros_keep_their_ids_and_values_whatever_the_type() {
     assert_eq!(b(MACRO_2), ParamId(106));
     // A macro keeps its value across a type change.
     let first = steady(&[(a(TYPE), 0.0), (a(MACRO_1), 100.0)], 57);
-    let again = steady(&[(a(TYPE), 5.0), (a(MACRO_1), 100.0), (a(MACRO_2), 0.0)], 57);
+    let again = steady(
+        &[(a(TYPE), 5.0), (a(MACRO_1), 100.0), (a(MACRO_2), 0.0)],
+        57,
+    );
     assert!(rms(&first) > 0.1 && rms(&again) > 0.1);
     assert!(description.param(a(MACRO_1)).unwrap().default == 0.0);
 }
@@ -409,7 +416,10 @@ fn shape_morphs_sine_triangle_saw_and_square_and_tone_narrows_the_duty_cycle() {
     );
     // And it narrows a saw's duty cycle too; a sine and a triangle it leaves.
     let (_, saw_two, _) = harmonics(200.0 / 3.0, 100.0);
-    assert!((saw_two - 0.5).abs() > 0.05, "tone changes the saw: {saw_two}");
+    assert!(
+        (saw_two - 0.5).abs() > 0.05,
+        "tone changes the saw: {saw_two}"
+    );
     let (_, two, three) = harmonics(0.0, 100.0);
     assert!(two < 0.01 && three < 0.01, "tone leaves the sine");
 }
@@ -425,12 +435,18 @@ fn rough_adds_phase_noise_from_the_seed_and_is_the_same_run_after_run() {
         .map(|(x, y)| (x - y).abs())
         .fold(0.0, f32::max);
     assert!(worst < 1e-4, "no Rough is Basic Shapes: {worst}");
-    let rough = steady(&[(a(TYPE), 2.0), (a(MACRO_1), 0.0), (a(MACRO_2), 100.0)], 57);
+    let rough = steady(
+        &[(a(TYPE), 2.0), (a(MACRO_1), 0.0), (a(MACRO_2), 100.0)],
+        57,
+    );
     let around = (210.0, 230.0);
     assert!(power_outside(&smooth, &[around]) < 1e-4);
     let spread = power_outside(&rough, &[around]);
     assert!(spread > 0.01, "noise spreads the line: {spread}");
-    let again = steady(&[(a(TYPE), 2.0), (a(MACRO_1), 0.0), (a(MACRO_2), 100.0)], 57);
+    let again = steady(
+        &[(a(TYPE), 2.0), (a(MACRO_1), 0.0), (a(MACRO_2), 100.0)],
+        57,
+    );
     assert_same(&rough, &again, "from its seed");
     // The phase wanders by up to a quarter cycle, not more: the tone stays.
     assert!(amp(&rough, 220.0) > 0.5, "the note stays");
@@ -447,12 +463,23 @@ fn dual_basic_shapes_detunes_a_copy_by_cents_then_by_intervals() {
         left[48_000..].to_vec()
     };
     let signal = render(0.0, &Setting::default(), &[]);
-    assert!((amp(&signal, 440.0) - 1.0).abs() < 0.03, "two waves, one pitch");
+    assert!(
+        (amp(&signal, 440.0) - 1.0).abs() < 0.03,
+        "two waves, one pitch"
+    );
     // Up to 50 cents: the second wave is 50 cents up at 50 %.
     let signal = render(50.0, &Setting::default(), &[]);
     let up = 440.0 * (50.0f64 / 1200.0).exp2();
-    assert!((amp(&signal, 440.0) - 0.5).abs() < 0.05, "{}", amp(&signal, 440.0));
-    assert!((amp(&signal, up) - 0.5).abs() < 0.05, "{}", amp(&signal, up));
+    assert!(
+        (amp(&signal, 440.0) - 0.5).abs() < 0.05,
+        "{}",
+        amp(&signal, 440.0)
+    );
+    assert!(
+        (amp(&signal, up) - 0.5).abs() < 0.05,
+        "{}",
+        amp(&signal, up)
+    );
     // Past 50 % it lands on semitones: 75 % is half an octave.
     let signal = render(75.0, &Setting::default(), &[]);
     assert!(amp(&signal, hz(75.0)) > 0.4, "six semitones up");
@@ -464,7 +491,11 @@ fn dual_basic_shapes_detunes_a_copy_by_cents_then_by_intervals() {
     assert!(amp(&signal, hz(76.0)) > 0.4, "four degrees up is E");
     assert!(amp(&signal, hz(75.0)) < 0.05);
     // Oscillator Scale Awareness off puts it back to semitones.
-    let signal = render(75.0, &scaled(c_major()), &[(USE_SCALE, 1.0), (a(OSC_SCALE), 0.0)]);
+    let signal = render(
+        75.0,
+        &scaled(c_major()),
+        &[(USE_SCALE, 1.0), (a(OSC_SCALE), 0.0)],
+    );
     assert!(amp(&signal, hz(75.0)) > 0.4, "six semitones again");
 }
 
@@ -480,13 +511,23 @@ fn square_sync_and_square_5th_play_their_ratios() {
     assert!((amp(&signal, 8.0 * 220.0) - square).abs() < 0.05);
     assert!(amp(&signal, 220.0) < 0.05, "the note itself is gone");
     // One at 1 and one at 8, mixed equally.
-    let signal = steady(&[(a(TYPE), 3.0), (a(MACRO_1), 0.0), (a(MACRO_2), 100.0)], 57);
+    let signal = steady(
+        &[(a(TYPE), 3.0), (a(MACRO_1), 0.0), (a(MACRO_2), 100.0)],
+        57,
+    );
     assert!((amp(&signal, 220.0) - 0.5 * square).abs() < 0.05);
     assert!((amp(&signal, 1_760.0) - 0.5 * square).abs() < 0.05);
     // A ratio of 2.5 (macro 21.4 %) has its energy at the note's own
     // multiples: a synced wave is periodic in the note.
     let signal = steady(&[(a(TYPE), 3.0), (a(MACRO_1), 100.0 * 1.5 / 7.0)], 57);
-    assert!(power_outside(&signal, &(1..100).map(|h| (h as f64 * 220.0 - 8.0, h as f64 * 220.0 + 8.0)).collect::<Vec<_>>()) < 1e-3);
+    assert!(
+        power_outside(
+            &signal,
+            &(1..100)
+                .map(|h| (h as f64 * 220.0 - 8.0, h as f64 * 220.0 + 8.0))
+                .collect::<Vec<_>>()
+        ) < 1e-3
+    );
     // Square 5th: 5th Amt mixes in a square a fifth up.
     let level = |amount: f64| {
         let signal = steady(
@@ -511,15 +552,17 @@ fn square_sync_and_square_5th_play_their_ratios() {
 // Spec: meld R10
 #[test]
 fn sub_morphs_a_sine_into_a_square_and_adds_a_sine_below() {
-    let tone = |tone: f64, aux: f64| {
-        steady(&[(a(TYPE), 5.0), (a(MACRO_1), tone), (a(MACRO_2), aux)], 57)
-    };
+    let tone =
+        |tone: f64, aux: f64| steady(&[(a(TYPE), 5.0), (a(MACRO_1), tone), (a(MACRO_2), aux)], 57);
     let sine = tone(0.0, 0.0);
     assert!((amp(&sine, 220.0) - 1.0).abs() < 0.02 && amp(&sine, 660.0) < 0.01);
     let square = tone(100.0, 0.0);
     assert!((amp(&square, 660.0) / amp(&square, 220.0) - 1.0 / 3.0).abs() < 0.02);
     let both = tone(0.0, 100.0);
-    assert!((amp(&both, 110.0) - amp(&both, 220.0)).abs() < 0.03, "an octave below");
+    assert!(
+        (amp(&both, 110.0) - amp(&both, 220.0)).abs() < 0.03,
+        "an octave below"
+    );
     assert!(amp(&both, 110.0) > 0.6);
 }
 
@@ -529,16 +572,13 @@ fn the_swarms_spread_drift_and_fade_into_a_chord() {
     // A6, 1,760 Hz, where a cent is more than a hertz and a second's DFT
     // separates the copies.
     let f0 = 1_760.0;
-    let swarm = |kind: f64, motion: f64, spacing: f64, setting: &Setting, extra: &[(ParamId, f64)]| {
-        let mut params = vec![
-            (a(TYPE), kind),
-            (a(MACRO_1), motion),
-            (a(MACRO_2), spacing),
-        ];
-        params.extend_from_slice(extra);
-        let [left, _] = play_with(&params, 512, 96_000, &[on(0, 93)], setting);
-        left[48_000..].to_vec()
-    };
+    let swarm =
+        |kind: f64, motion: f64, spacing: f64, setting: &Setting, extra: &[(ParamId, f64)]| {
+            let mut params = vec![(a(TYPE), kind), (a(MACRO_1), motion), (a(MACRO_2), spacing)];
+            params.extend_from_slice(extra);
+            let [left, _] = play_with(&params, 512, 96_000, &[on(0, 93)], setting);
+            left[48_000..].to_vec()
+        };
     let cents = |c: f64| f0 * (c / 1200.0).exp2();
     // Spacing 0, Motion 0: eight copies within ±10 cents.
     let tight = swarm(6.0, 0.0, 0.0, &Setting::default(), &[]);
@@ -666,7 +706,11 @@ fn no_type_folds_back_more_than_minus_80_db_at_the_top_key() {
                 } {
                     cases.push((
                         format!("type {kind} shape {shape} tone {tone}"),
-                        vec![(a(TYPE), f64::from(kind)), (a(MACRO_1), shape), (a(MACRO_2), tone)],
+                        vec![
+                            (a(TYPE), f64::from(kind)),
+                            (a(MACRO_1), shape),
+                            (a(MACRO_2), tone),
+                        ],
                         // Dual Basic Shapes' second wave is tone cents up
                         // from tone per cent of a semitone.
                         if kind == 1 {
@@ -681,7 +725,11 @@ fn no_type_folds_back_more_than_minus_80_db_at_the_top_key() {
         for macros in [(0.0, 0.0), (100.0, 0.0), (0.0, 100.0), (37.0, 61.0)] {
             cases.push((
                 format!("Square Sync {macros:?}"),
-                vec![(a(TYPE), 3.0), (a(MACRO_1), macros.0), (a(MACRO_2), macros.1)],
+                vec![
+                    (a(TYPE), 3.0),
+                    (a(MACRO_1), macros.0),
+                    (a(MACRO_2), macros.1),
+                ],
                 vec![f0],
             ));
         }
@@ -761,8 +809,18 @@ fn each_engine_switches_and_mixes_on_its_own_and_an_engine_off_silences_its_filt
     // Neither: silence, and A off with its filter on and open stays silent.
     let none = steady(&[(a(ON), 0.0)], 57);
     assert!(none.iter().all(|x| *x == 0.0));
-    let filtered = steady(&[(a(ON), 0.0), (a(FILTER_ON), 1.0), (a(FILTER_MACRO_1), 100.0)], 57);
-    assert!(filtered.iter().all(|x| *x == 0.0), "an engine off silences its filter");
+    let filtered = steady(
+        &[
+            (a(ON), 0.0),
+            (a(FILTER_ON), 1.0),
+            (a(FILTER_MACRO_1), 100.0),
+        ],
+        57,
+    );
+    assert!(
+        filtered.iter().all(|x| *x == 0.0),
+        "an engine off silences its filter"
+    );
     // Each engine has its own type and macros.
     let own = steady(
         &[
@@ -773,7 +831,6 @@ fn each_engine_switches_and_mixes_on_its_own_and_an_engine_off_silences_its_filt
         ],
         57,
     );
-    assert!((amp(&own, 660.0) / amp(&own, 220.0) - 0.5 / 4.0 * core::f64::consts::PI * 0.0 - amp(&own, 660.0) / amp(&own, 220.0)).abs() < 1e-9);
     assert!(amp(&own, 110.0) > 0.5, "B's sub is an octave below");
 }
 
@@ -805,9 +862,15 @@ fn the_filter_is_a_state_variable_at_12_or_24_db_morphing_low_band_high_notch() 
     assert!(hp(high) > 0.9 && hp(low) < 0.03, "high-pass");
     let notch_at_cutoff = tone(&[(a(FILTER_MACRO_2), 100.0)], 83);
     let pass = tone(&[(a(FILTER_MACRO_2), 100.0)], low);
-    assert!(notch_at_cutoff < 0.2 * pass, "a notch at the cutoff: {notch_at_cutoff}");
+    assert!(
+        notch_at_cutoff < 0.2 * pass,
+        "a notch at the cutoff: {notch_at_cutoff}"
+    );
     let band = |key| tone(&[(a(FILTER_MACRO_2), 100.0 / 3.0)], key);
-    assert!(band(83) > 0.5 && band(low) < 0.2 && band(high) < 0.2, "band-pass");
+    assert!(
+        band(83) > 0.5 && band(low) < 0.2 && band(high) < 0.2,
+        "band-pass"
+    );
     // Q lifts the cutoff's peak.
     let flat = tone(&[], 83);
     let peaked = tone(&[(a(FILTER_MACRO_1), 80.0)], 83);
@@ -827,7 +890,11 @@ fn the_amplitude_envelope_shapes_the_level_and_a_voice_ends_when_both_have_ended
         (a(RELEASE), 300.0),
     ];
     let [left, _] = play(&params, 72_000, &[on(0, 57), off(48_000, 57)]);
-    assert!((level_at(&left, 50.0) - 0.5).abs() < 0.1, "{}", level_at(&left, 50.0));
+    assert!(
+        (level_at(&left, 50.0) - 0.5).abs() < 0.1,
+        "{}",
+        level_at(&left, 50.0)
+    );
     assert!(level_at(&left, 100.0) > 0.85);
     assert!((level_at(&left, 600.0) - 0.5).abs() < 0.03, "sustain");
     assert!((level_at(&left, 900.0) - 0.5).abs() < 0.03, "holds");
@@ -843,7 +910,11 @@ fn the_amplitude_envelope_shapes_the_level_and_a_voice_ends_when_both_have_ended
     ];
     let [left, _] = play(&params, 48_000, &[on(0, 57), off(9_600, 57)]);
     let late = &left[24_000..32_000];
-    assert!(amp(late, 440.0) > 0.08, "B still sounds: {}", amp(late, 440.0));
+    assert!(
+        amp(late, 440.0) > 0.08,
+        "B still sounds: {}",
+        amp(late, 440.0)
+    );
     assert!(amp(late, 220.0) < 0.01, "and A has ended");
 }
 
@@ -864,9 +935,7 @@ fn the_mix_section_sets_each_engines_volume_pan_and_tone() {
     assert!((rms(&left) - rms(&right)).abs() < 1e-6, "centred");
     // Tone: positive cuts the lows and leaves the highs; negative the other
     // way.
-    let tone = |amount: f64, key: u8| {
-        amp(&steady(&[(a(TONE), amount)], key), hz(f64::from(key)))
-    };
+    let tone = |amount: f64, key: u8| amp(&steady(&[(a(TONE), amount)], key), hz(f64::from(key)));
     assert!(tone(100.0, 31) < 0.05 && tone(100.0, 119) > 0.8);
     assert!(tone(-100.0, 119) < 0.05 && tone(-100.0, 31) > 0.9);
     assert!((tone(0.0, 31) - 1.0).abs() < 0.02);
@@ -912,12 +981,10 @@ fn poly_steals_the_oldest_mono_returns_to_a_held_key_and_legato_keeps_the_envelo
     // Mono: the new note takes over, and releasing it returns to the held
     // one.
     let mono = [(MODE, 1.0)];
-    let [left, _] = play(
-        &mono,
-        48_000,
-        &[on(0, 57), on(6_000, 64), off(24_000, 64)],
+    let [left, _] = play(&mono, 48_000, &[on(0, 57), on(6_000, 64), off(24_000, 64)]);
+    assert!(
+        amp(&left[12_000..22_000], key(64)) > 0.5 && amp(&left[12_000..22_000], key(57)) < 0.01
     );
-    assert!(amp(&left[12_000..22_000], key(64)) > 0.5 && amp(&left[12_000..22_000], key(57)) < 0.01);
     assert!(amp(&left[36_000..], key(57)) > 0.5 && amp(&left[36_000..], key(64)) < 0.01);
     // Legato: with a sustain of 20 % reached, a second note over a held one
     // leaves the envelope where it is; without, it attacks again.
@@ -942,7 +1009,11 @@ fn poly_steals_the_oldest_mono_returns_to_a_held_key_and_legato_keeps_the_envelo
 fn stacked_voices_keep_a_voices_level_and_phase_spread_offsets_the_copies_by_the_spread() {
     let one = rms(&steady(&[], 57));
     let three = rms(&steady(&[(STACK, 3.0)], 57));
-    assert!((three / one - 3f64.sqrt()).abs() < 0.03, "identical copies add up: {}", three / one);
+    assert!(
+        (three / one - 3f64.sqrt()).abs() < 0.03,
+        "identical copies add up: {}",
+        three / one
+    );
     // Phase Spread by the Spread source: with a Spread of 25 %, two copies
     // start a quarter cycle either side of 0, half a cycle apart, and cancel.
     let cancelled = rms(&steady(
@@ -986,7 +1057,10 @@ fn key_tracking_off_plays_c3_or_the_scales_root() {
         &[on(0, 80)],
         &scaled(Scale::new(1, ScaleName::Major)),
     );
-    assert!(amp(&signal[0][24_000..], hz(61.0)) > 0.9, "C# in C3's octave");
+    assert!(
+        amp(&signal[0][24_000..], hz(61.0)) > 0.9,
+        "C# in C3's octave"
+    );
 }
 
 // Spec: meld R16, instrument voices R8, R10
@@ -996,7 +1070,12 @@ fn each_engine_glides_by_its_own_time_and_a_glissando_steps_through_the_scale() 
     let window = |signal: &[f32]| crossing_hz(&signal[16_800..17_400]);
     let mono = (MODE, 1.0);
     // A alone glides over 400 ms; 100 ms in, it is between 220 and 440.
-    let a_alone = play(&[mono, (b(ON), 0.0), (a(GLIDE_TIME), 400.0)], 36_000, &notes)[0].clone();
+    let a_alone = play(
+        &[mono, (b(ON), 0.0), (a(GLIDE_TIME), 400.0)],
+        36_000,
+        &notes,
+    )[0]
+    .clone();
     let slide = window(&a_alone);
     assert!(slide > 260.0 && slide < 400.0, "A slides: {slide}");
     // B alone with A's glide set doesn't: it is at 440.
@@ -1029,7 +1108,10 @@ fn each_engine_glides_by_its_own_time_and_a_glissando_steps_through_the_scale() 
         &scaled(c_major()),
     )[0]
     .clone();
-    for (i, key) in [60.0, 62.0, 64.0, 65.0, 67.0, 69.0, 71.0].iter().enumerate() {
+    for (i, key) in [60.0, 62.0, 64.0, 65.0, 67.0, 69.0, 71.0]
+        .iter()
+        .enumerate()
+    {
         let from = 6_000 + i * 9_600 + 3_000;
         let heard = crossing_hz(&steps[from..from + 3_600]);
         assert!(
@@ -1077,7 +1159,10 @@ fn semitones_count_degrees_and_a_held_note_stays_while_the_scale_changes() {
     );
     let held = crossing_hz(&left[26_000..35_000]);
     assert!((held / hz(64.0) - 1.0).abs() < 1e-3, "held note: {held}");
-    assert!(rms(&left[40_000..58_000]) < 1e-3, "ended by its own note-off");
+    assert!(
+        rms(&left[40_000..58_000]) < 1e-3,
+        "ended by its own note-off"
+    );
     let next = crossing_hz(&left[70_000..90_000]);
     assert!((next / hz(63.0) - 1.0).abs() < 1e-3, "the new note: {next}");
     // The scale-aware types follow the scale from the frame it changes.
@@ -1093,7 +1178,10 @@ fn semitones_count_degrees_and_a_held_note_stays_while_the_scale_changes() {
         &setting,
     );
     assert!(amp(&left[12_000..22_000], hz(64.0)) > 0.4, "E in C major");
-    assert!(amp(&left[60_000..70_000], hz(63.0)) > 0.4, "E flat in C minor");
+    assert!(
+        amp(&left[60_000..70_000], hz(63.0)) > 0.4,
+        "E flat in C minor"
+    );
     assert!(amp(&left[60_000..70_000], hz(64.0)) < 0.05);
 }
 
@@ -1280,4 +1368,22 @@ fn render_block(node: &mut dyn Node, frames: usize, notes: &[NoteEvent]) -> [Vec
         bl_rt::rt_test!({ node.process(&mut audio) });
     }
     [data[..frames].to_vec(), data[frames..].to_vec()]
+}
+
+// Spec: meld R1 (factory presets)
+#[test]
+fn the_factory_presets_set_parameters_the_device_has_and_sound() {
+    let description = meld_type().description;
+    let presets = bl_devices::meld::factory_presets();
+    assert!(presets.len() >= 4);
+    for (name, params) in presets {
+        for (id, value) in &params {
+            let p = description
+                .param(*id)
+                .unwrap_or_else(|| panic!("{name}: {id:?}"));
+            assert_eq!(p.clamp(*value), *value, "{name}: {} is in range", p.name);
+        }
+        let [left, _] = play_with(&params, 512, 24_000, &[on(0, 57)], &Setting::default());
+        assert!(rms(&left[6_000..]) > 0.01, "{name} sounds");
+    }
 }

@@ -553,35 +553,49 @@ fn midi_sidechains_pass_under_rtsan() {
                     device_type: HEAR.to_owned(),
                 },
             )
-            .with_midi_sidechain(),
+            .with_midi_sidechain_tap(),
         })
         .unwrap();
     sender.send_update(compiler.sync(editor.document()));
     sender.transport(TransportCommand::Play);
 
+    let tap = |tap| Command::SetMidiSidechainSource {
+        device: hear,
+        track: Some(keys[0]),
+        tap: Some(tap),
+    };
     let mut programs = 1u64;
     for round in 0..2_000u64 {
         let command = match round {
             20 => Some(Command::SetMidiSidechainSource {
                 device: hear,
                 track: Some(keys[0]),
+                tap: None,
             }),
             200 => Some(Command::SetMidiSidechainSource {
                 device: hear,
                 track: Some(keys[1]),
+                tap: None,
             }),
             400 => Some(Command::SetMidiSidechainSource {
                 device: hear,
                 track: None,
+                tap: None,
             }),
             600 => Some(Command::SetMidiSidechainSource {
                 device: hear,
                 track: Some(keys[2]),
+                tap: None,
             }),
+            // Spec: routing R39. The tapping point moves between the three.
+            100 => Some(tap(bl_model::Tap::PostFx)),
+            300 => Some(tap(bl_model::Tap::PreFx)),
+            700 => Some(tap(bl_model::Tap::PostMixer)),
             900 => Some(Command::DeleteTrack { track: keys[2] }),
             1_000 => Some(Command::SetMidiSidechainSource {
                 device: hear,
                 track: Some(keys[0]),
+                tap: None,
             }),
             _ => None,
         };

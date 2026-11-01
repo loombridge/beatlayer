@@ -87,6 +87,7 @@ mod session_view;
 mod set_exchange;
 mod settings_window;
 mod signature_lane;
+mod similar_files;
 mod slice_to_midi;
 mod sound_analysis;
 mod stems_dialog;

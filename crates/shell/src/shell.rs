@@ -149,6 +149,7 @@ mod recovery;
 mod remote;
 mod remote_targets;
 mod search;
+mod selection_arm;
 mod session_launch;
 mod session_recording;
 mod session_strip;
@@ -1739,6 +1740,7 @@ impl Shell {
         let shown_scale = crate::scales::shown_scale(self.editor.document(), shown);
         let revision = self.document_revision;
         let generation = self.editor_generation;
+        let arm_args = matches!(id, "mixer.set_arm" | "mixer.arm_exclusive").then(|| args.clone());
         let result = self.run_command(id, args);
         self.rack_map_mode_ends_map_mode(id);
         self.sync_key_edit();
@@ -1751,6 +1753,9 @@ impl Shell {
             self.refresh_search();
         }
         if result.is_ok() {
+            if let Some(args) = &arm_args {
+                self.arm_taken_by_hand(args);
+            }
             self.follow_clip_selection(id, &arranged, slot, &slots);
             // Spec: scales R10. Selecting a clip makes its scale the
             // current scale, and a change to that clip's scale changes it

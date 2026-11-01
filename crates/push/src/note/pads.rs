@@ -45,7 +45,13 @@ impl Note {
             Role::Drum(note) => self.drum(&frame, note, velocity, ctx, model),
             Role::Velocity(velocity) => self.velocity_pad(&frame, velocity, ctx),
             Role::Loop(page) => self.loop_pad(&frame, page, ctx, model),
+            Role::Step(index) if matches!(frame.kind, Kind::Melodic) => {
+                self.notes_step(&frame, index, ctx, model)
+            }
             Role::Step(index) => self.step_pad(&frame, index, ctx, model),
+            Role::Key(note) => self.key_pad(&frame, note, velocity, ctx, model),
+            Role::Pick(note) => self.pick_pad(&frame, note, velocity, ctx, model),
+            Role::Cell { key, step } => self.cell_pad(&frame, key, step, ctx, model),
             Role::Off => Down::Done,
         };
         self.down.insert((pad.row, pad.column), down);
@@ -54,8 +60,17 @@ impl Note {
     /// Releasing a pad ends the note it played, whatever the layout has
     /// become since (R2).
     pub(super) fn pad_off(&mut self, pad: Pad, ctx: &mut Ctx<'_>) {
-        if let Some(Down::Played(note)) = self.down.remove(&(pad.row, pad.column)) {
-            ctx.cx.play_at(ctx.at, MidiMessage::note_off(0, note));
+        match self.down.remove(&(pad.row, pad.column)) {
+            Some(
+                Down::Played(note)
+                | Down::Picked {
+                    key: note,
+                    played: true,
+                },
+            ) => {
+                ctx.cx.play_at(ctx.at, MidiMessage::note_off(0, note));
+            }
+            _ => {}
         }
     }
 

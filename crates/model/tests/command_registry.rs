@@ -2903,6 +2903,15 @@ fn schemas_match_what_commands_serialise() {
         ),
         ("mixer.set_cue_mode", Command::SetCueMode { enabled: true }),
         (
+            "song.set_pad_layout",
+            Command::SetPadLayout {
+                in_key: Some(false),
+                fixed: Some(true),
+                spacing: Some(bl_model::PadSpacing::Sequent),
+                direction: Some(bl_model::PadDirection::Horizontal),
+            },
+        ),
+        (
             "mixer.set_cue_volume",
             Command::SetCueVolume { volume: 0.5 },
         ),

@@ -8,7 +8,7 @@
 
 use bl_control::browse::{Browse as Lists, Entry, Load};
 use bl_control::{Cx, ReadModel};
-use bl_model::{DeviceId, DeviceRole, TrackKind};
+use bl_model::{DeviceId, DeviceRole, SceneId, TrackId, TrackKind};
 use serde_json::{Value, json};
 
 use crate::content::{Content, Ctx, Enter, Gesture, Paint, Turn};
@@ -28,6 +28,10 @@ const KINDS: [(&str, &str, Option<DeviceRole>); 3] = [
     ("return", "Return", Some(DeviceRole::AudioEffect)),
 ];
 
+/// The key of the one label of the list Clip Mode offers an empty audio slot
+/// (R43).
+const SAMPLES: &str = "samples";
+
 /// What Load does (R5, R12).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LoadKind {
@@ -37,6 +41,9 @@ pub enum LoadKind {
     Replace(DeviceId),
     /// Adds a track, with the device on it when one is chosen.
     AddTrack,
+    /// Puts the chosen audio file in the empty slot Clip Mode offered it for
+    /// (R43).
+    Sample,
 }
 
 /// What `push.state` reads of Browse Mode (R14).
@@ -125,6 +132,8 @@ pub struct Browse {
     add_track: bool,
     add_device: bool,
     target: Option<Target>,
+    /// The empty audio slot Clip Mode is loading a sample into (R43).
+    samples: Option<(TrackId, SceneId)>,
     columns: Vec<Col>,
     in_use: usize,
     seen: Option<u64>,
@@ -146,6 +155,7 @@ impl Browse {
             add_track: false,
             add_device: false,
             target: None,
+            samples: None,
             columns: Vec::new(),
             in_use: 0,
             seen: None,
@@ -169,6 +179,15 @@ impl Browse {
     fn list(&self, lists: &Lists, above: Option<&Entry>) -> Vec<Entry> {
         let role = self.role();
         match above {
+            None if self.samples.is_some() => vec![Entry {
+                key: SAMPLES.to_owned(),
+                name: "Samples".to_owned(),
+                load: None,
+                folder: true,
+            }],
+            Some(entry) if self.samples.is_some() && entry.key == SAMPLES => {
+                lists.catalogue.samples()
+            }
             None if self.add_track => KINDS
                 .iter()
                 .map(|(key, name, _)| Entry {
@@ -316,6 +335,9 @@ impl Browse {
     }
 
     fn load_kind(&self) -> LoadKind {
+        if self.samples.is_some() {
+            return LoadKind::Sample;
+        }
         match (self.add_track, self.target.and_then(|t| t.replace)) {
             (true, _) => LoadKind::AddTrack,
             (false, Some(device)) => LoadKind::Replace(device),
@@ -353,6 +375,15 @@ impl Browse {
             (Load::Plugin { path, plugin, .. }, _) => (
                 "plugin.load".to_owned(),
                 json!({ "path": path, "plugin": plugin }),
+            ),
+            // A sample goes in the slot Clip Mode offered it for (R43).
+            (Load::Sample { path }, _) => (
+                "session.drop_files".to_owned(),
+                json!({
+                    "paths": [path],
+                    "track": self.samples.map(|(track, _)| track),
+                    "scene": self.samples.map(|(_, scene)| scene),
+                }),
             ),
         }
     }
@@ -407,6 +438,10 @@ impl Content for Browse {
     fn enter(&mut self, why: Enter, ctx: &mut Ctx<'_>) {
         self.add_track = why == Enter::AddTrack;
         self.add_device = why == Enter::AddDevice;
+        self.samples = match why {
+            Enter::Samples { track, scene } => Some((track, scene)),
+            _ => None,
+        };
         self.target = ctx.model.map(|model| Target::of(model, self.add_device));
         self.columns.clear();
         self.in_use = 0;
@@ -478,8 +513,8 @@ impl Content for Browse {
         };
         // What Load acts on follows the window (R3); the lists are fetched
         // again when it changes what is offered or the catalogue changes.
-        let offered = self.target.map(|t| t.role) != Some(target.role);
-        if !self.add_track {
+        let offered = self.samples.is_none() && self.target.map(|t| t.role) != Some(target.role);
+        if !self.add_track && self.samples.is_none() {
             self.target = Some(target);
         }
         if self.seen != Some(lists.revision) || (offered && !self.add_track) {

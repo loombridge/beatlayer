@@ -13,7 +13,8 @@
 use std::sync::OnceLock;
 
 use bl_model::Scale;
-use lspk_wavetable::osc::{Inputs, Layout, Onset, Oscillator, PhaseMode};
+use lspk_dsp::simd::{F32s, U32s};
+use lspk_wavetable::osc::{Bypass, Inputs, Layout, Onset, Oscillator, PhaseMode, PhaseStage};
 use lspk_wavetable::{Cache, FRAME_SIZE, SharedTable, Wavetable};
 
 /// The names of the twenty-five oscillator types, in the manual's order
@@ -409,7 +410,8 @@ pub struct Bank {
     oscs: Vec<Oscillator>,
     pitch: Vec<f32>,
     step: Vec<f32>,
-    noise: Vec<f32>,
+    pitch_mod: Vec<f32>,
+    phase_noise: Vec<u32>,
     out: Vec<f32>,
     per: usize,
     stride: usize,
@@ -456,7 +458,8 @@ impl Bank {
             kind,
             pitch: vec![0.0; stride * oscs.len()],
             step: vec![0.0; stride * oscs.len()],
-            noise: vec![0.0; stride * oscs.len() * CHUNK],
+            pitch_mod: vec![0.0; stride * oscs.len() * CHUNK],
+            phase_noise: vec![0; stride * oscs.len() * CHUNK],
             out: vec![0.0; stride * oscs.len() * CHUNK],
             oscs,
             per,
@@ -507,17 +510,29 @@ impl Bank {
     }
 
     /// Pitch modulation in semitones for lane `copy` of slot `slot` over the
-    /// chunk, `values` per frame: how phase noise reaches the oscillator.
-    pub fn set_noise(&mut self, slot: usize, copy: usize, values: &[f32]) {
+    /// chunk, `values` per frame: how a Glissando's steps reach the
+    /// oscillator.
+    pub fn set_mod(&mut self, slot: usize, copy: usize, values: &[f32]) {
         let (osc, local) = self.at(slot, copy);
         for (k, v) in values.iter().enumerate() {
-            self.noise[(osc * CHUNK + k) * self.stride + local] = *v;
+            self.pitch_mod[(osc * CHUNK + k) * self.stride + local] = *v;
         }
     }
 
-    /// Renders `frames` frames of the first `slots` slots. `noisy` reads
-    /// the noise as pitch modulation, in semitones, per lane and frame.
-    pub fn render(&mut self, frames: usize, slots: usize, noisy: bool) {
+    /// Phase noise for lane `copy` of slot `slot` over the chunk, `values`
+    /// per frame in cycles, added to the phase the table is read at.
+    pub fn set_phase(&mut self, slot: usize, copy: usize, values: &[f32]) {
+        let (osc, local) = self.at(slot, copy);
+        for (k, v) in values.iter().enumerate() {
+            let word = (f64::from(*v) * lspk_wavetable::CYCLE).round() as i64 as u32;
+            self.phase_noise[(osc * CHUNK + k) * self.stride + local] = word;
+        }
+    }
+
+    /// Renders `frames` frames of the first `slots` slots. `modulated` reads
+    /// [`set_mod`](Self::set_mod)'s values and `noisy` [`set_phase`](Self::set_phase)'s,
+    /// per lane and frame.
+    pub fn render(&mut self, frames: usize, slots: usize, modulated: bool, noisy: bool) {
         for (i, osc) in self.oscs.iter_mut().enumerate() {
             let from = i * OSC_VOICES;
             if slots <= from {
@@ -525,19 +540,24 @@ impl Bank {
             }
             let lanes = (slots - from).min(OSC_VOICES) * self.per;
             let base = i * self.stride;
+            let span = i * CHUNK * self.stride..(i * CHUNK + frames) * self.stride;
             let inputs = Inputs {
                 lanes,
                 pitch: &self.pitch[base..base + self.stride],
                 pitch_step: Some(&self.step[base..base + self.stride]),
-                pitch_mod: noisy
-                    .then(|| &self.noise[i * CHUNK * self.stride..(i * CHUNK + frames) * self.stride]),
+                pitch_mod: modulated.then(|| &self.pitch_mod[span.clone()]),
                 frame_mod: None,
             };
-            osc.process(
-                frames,
-                &inputs,
-                &mut self.out[i * CHUNK * self.stride..(i * CHUNK + frames) * self.stride],
-            );
+            let out = &mut self.out[span.clone()];
+            if noisy {
+                let mut stage = PhaseNoise {
+                    offsets: &self.phase_noise[span],
+                    lanes: self.stride,
+                };
+                osc.process_scalar_with(frames, &inputs, out, &mut stage, &mut Bypass);
+            } else {
+                osc.process(frames, &inputs, out);
+            }
         }
     }
 
@@ -546,5 +566,37 @@ impl Bank {
     pub fn out(&self, slot: usize, copy: usize, frame: usize) -> f32 {
         let (osc, local) = self.at(slot, copy);
         self.out[(osc * CHUNK + frame) * self.stride + local]
+    }
+}
+
+/// Phase noise as a phase stage: each lane's read phase moves by its
+/// offset at the frame.
+struct PhaseNoise<'a> {
+    offsets: &'a [u32],
+    lanes: usize,
+}
+
+impl PhaseStage for PhaseNoise<'_> {
+    #[inline(always)]
+    fn shape<S: F32s>(
+        &mut self,
+        lanes: usize,
+        frame: usize,
+        phase: <S as F32s>::U32s,
+        _: <S as F32s>::U32s,
+    ) -> <S as F32s>::U32s {
+        let at = frame * self.lanes + lanes;
+        phase.wrapping_add(<S as F32s>::U32s::load(&self.offsets[at..]))
+    }
+
+    #[inline(always)]
+    fn shape_lane(&mut self, lane: usize, frame: usize, phase: u32, _: u32) -> u32 {
+        phase.wrapping_add(self.offsets[frame * self.lanes + lane])
+    }
+
+    /// The noise's slope is at most about twice the note's.
+    #[inline(always)]
+    fn stretch(&mut self, _: usize, _: std::ops::Range<usize>, _: u32) -> f32 {
+        2.0
     }
 }

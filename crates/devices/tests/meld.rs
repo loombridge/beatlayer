@@ -290,6 +290,17 @@ fn assert_same(actual: &[f32], expected: &[f32], what: &str) {
     }
 }
 
+/// Asserts that two renders differ nowhere by more than `tolerance`.
+fn assert_near(actual: &[f32], expected: &[f32], tolerance: f32, what: &str) {
+    assert_eq!(actual.len(), expected.len(), "{what}: length");
+    let worst = actual
+        .iter()
+        .zip(expected)
+        .map(|(x, y)| (x - y).abs())
+        .fold(0.0f32, f32::max);
+    assert!(worst <= tolerance, "{what}: differs by {worst}");
+}
+
 /// 19 equal steps to the octave, with the default reference and range.
 fn nineteen() -> Tuning {
     let cents = (1..=19).map(|i| 1200.0 * f64::from(i) / 19.0).collect();
@@ -710,4 +721,563 @@ fn no_type_folds_back_more_than_minus_80_db_at_the_top_key() {
             assert!(alias < -80.0, "{what} at key {key}: {alias:.1} dB");
         }
     }
+}
+
+/// The level of a sine at `ms` (a 5 ms window's peak-equivalent).
+fn level_at(signal: &[f32], ms: f64) -> f64 {
+    let at = (ms * HZ / 1000.0) as usize;
+    let window = &signal[at.saturating_sub(120)..(at + 120).min(signal.len())];
+    rms(window) * 2f64.sqrt()
+}
+
+/// The frequency of a sine, from its positive-going zero crossings.
+fn crossing_hz(signal: &[f32]) -> f64 {
+    let mut crossings = Vec::new();
+    for i in 1..signal.len() {
+        if signal[i - 1] < 0.0 && signal[i] >= 0.0 {
+            let (a, b) = (f64::from(signal[i - 1]), f64::from(signal[i]));
+            crossings.push(i as f64 - 1.0 - a / (b - a));
+        }
+    }
+    let (first, last) = (crossings[0], crossings[crossings.len() - 1]);
+    (crossings.len() - 1) as f64 / (last - first) * HZ
+}
+
+/// The distance in cents between two frequencies.
+fn cents_between(a: f64, b: f64) -> f64 {
+    1200.0 * (a / b).log2()
+}
+
+// Spec: meld R2
+#[test]
+fn each_engine_switches_and_mixes_on_its_own_and_an_engine_off_silences_its_filter() {
+    let octave = (b(OCTAVES), 1.0);
+    let both = steady(&[(b(ON), 1.0), octave], 57);
+    assert!((amp(&both, 220.0) - 1.0).abs() < 0.03 && (amp(&both, 440.0) - 1.0).abs() < 0.03);
+    let only_b = steady(&[(a(ON), 0.0), (b(ON), 1.0), octave], 57);
+    assert!(amp(&only_b, 220.0) < 0.01 && (amp(&only_b, 440.0) - 1.0).abs() < 0.03);
+    let only_a = steady(&[(b(ON), 0.0), octave], 57);
+    assert!((amp(&only_a, 220.0) - 1.0).abs() < 0.03 && amp(&only_a, 440.0) < 0.01);
+    // Neither: silence, and A off with its filter on and open stays silent.
+    let none = steady(&[(a(ON), 0.0)], 57);
+    assert!(none.iter().all(|x| *x == 0.0));
+    let filtered = steady(&[(a(ON), 0.0), (a(FILTER_ON), 1.0), (a(FILTER_MACRO_1), 100.0)], 57);
+    assert!(filtered.iter().all(|x| *x == 0.0), "an engine off silences its filter");
+    // Each engine has its own type and macros.
+    let own = steady(
+        &[
+            (b(ON), 1.0),
+            (b(TYPE), 5.0),
+            (b(MACRO_2), 100.0),
+            (a(MACRO_1), 100.0),
+        ],
+        57,
+    );
+    assert!((amp(&own, 660.0) / amp(&own, 220.0) - 0.5 / 4.0 * core::f64::consts::PI * 0.0 - amp(&own, 660.0) / amp(&own, 220.0)).abs() < 1e-9);
+    assert!(amp(&own, 110.0) > 0.5, "B's sub is an octave below");
+}
+
+// Spec: meld R12
+#[test]
+fn the_filter_is_a_state_variable_at_12_or_24_db_morphing_low_band_high_notch() {
+    let tone = |filter: &[(ParamId, f64)], key: u8| {
+        let mut params = vec![(a(FILTER_ON), 1.0), (a(FILTER_FREQ), 1_000.0)];
+        params.extend_from_slice(filter);
+        let signal = steady(&params, key);
+        amp(&signal, hz(f64::from(key)))
+    };
+    let (low, high) = (43u8, 119u8);
+    // Open: a filter at 20 kHz leaves the tones alone.
+    let open = |key: u8| {
+        let signal = steady(&[(a(FILTER_ON), 1.0), (a(FILTER_FREQ), 20_000.0)], key);
+        amp(&signal, hz(f64::from(key)))
+    };
+    assert!((open(low) - 1.0).abs() < 0.02 && (open(high) - 1.0).abs() < 0.05);
+    // Low-pass at L-B-H-N 0: the low tone passes, the high one is cut, and
+    // 24 dB cuts it more than 12 dB.
+    let lp12 = tone(&[(a(FILTER_TYPE), 0.0)], high);
+    let lp24 = tone(&[(a(FILTER_TYPE), 1.0)], high);
+    assert!(tone(&[], low) > 0.95 && lp12 < 0.03);
+    assert!(lp24 < lp12 / 10.0, "24 dB cuts more: {lp12} then {lp24}");
+    // A third of the way through its first three-quarters is band-pass, two
+    // thirds high-pass, and the end a notch.
+    let hp = |key| tone(&[(a(FILTER_MACRO_2), 200.0 / 3.0)], key);
+    assert!(hp(high) > 0.9 && hp(low) < 0.03, "high-pass");
+    let notch_at_cutoff = tone(&[(a(FILTER_MACRO_2), 100.0)], 83);
+    let pass = tone(&[(a(FILTER_MACRO_2), 100.0)], low);
+    assert!(notch_at_cutoff < 0.2 * pass, "a notch at the cutoff: {notch_at_cutoff}");
+    let band = |key| tone(&[(a(FILTER_MACRO_2), 100.0 / 3.0)], key);
+    assert!(band(83) > 0.5 && band(low) < 0.2 && band(high) < 0.2, "band-pass");
+    // Q lifts the cutoff's peak.
+    let flat = tone(&[], 83);
+    let peaked = tone(&[(a(FILTER_MACRO_1), 80.0)], 83);
+    assert!(peaked > 2.0 * flat, "resonance: {flat} then {peaked}");
+    // A filter switched off passes its engine through.
+    let off = steady(&[(a(FILTER_ON), 0.0), (a(FILTER_FREQ), 100.0)], high);
+    assert!(amp(&off, hz(119.0)) > 0.95);
+}
+
+// Spec: meld R13
+#[test]
+fn the_amplitude_envelope_shapes_the_level_and_a_voice_ends_when_both_have_ended() {
+    let params = [
+        (a(ATTACK), 100.0),
+        (a(DECAY), 200.0),
+        (a(SUSTAIN), 50.0),
+        (a(RELEASE), 300.0),
+    ];
+    let [left, _] = play(&params, 72_000, &[on(0, 57), off(48_000, 57)]);
+    assert!((level_at(&left, 50.0) - 0.5).abs() < 0.1, "{}", level_at(&left, 50.0));
+    assert!(level_at(&left, 100.0) > 0.85);
+    assert!((level_at(&left, 600.0) - 0.5).abs() < 0.03, "sustain");
+    assert!((level_at(&left, 900.0) - 0.5).abs() < 0.03, "holds");
+    let falling = level_at(&left, 1_150.0);
+    assert!(falling < 0.45 && falling > 0.0, "release: {falling}");
+    assert!(level_at(&left, 1_400.0) < 0.01, "silent after its release");
+    // A's release is short and B's long: the voice sounds until B ends.
+    let params = [
+        (b(ON), 1.0),
+        (b(OCTAVES), 1.0),
+        (a(RELEASE), 10.0),
+        (b(RELEASE), 800.0),
+    ];
+    let [left, _] = play(&params, 48_000, &[on(0, 57), off(9_600, 57)]);
+    let late = &left[24_000..32_000];
+    assert!(amp(late, 440.0) > 0.08, "B still sounds: {}", amp(late, 440.0));
+    assert!(amp(late, 220.0) < 0.01, "and A has ended");
+}
+
+// Spec: meld R18
+#[test]
+fn the_mix_section_sets_each_engines_volume_pan_and_tone() {
+    let level = |params: &[(ParamId, f64)]| amp(&steady(params, 57), 220.0);
+    assert!((level(&[(a(VOLUME), 0.5)]) - 0.5).abs() < 0.02);
+    assert!((level(&[(OUTPUT, 0.25)]) - 0.25).abs() < 0.02);
+    let silent = steady(&[(OUTPUT, 0.0)], 57);
+    assert!(silent.iter().all(|x| *x == 0.0));
+    // Pan: hard left leaves the right channel silent and the other way.
+    let [left, right] = play(&[(a(PAN), -100.0)], 24_000, &[on(0, 57)]);
+    assert!(rms(&left[12_000..]) > 0.5 && rms(&right) < 1e-6);
+    let [left, right] = play(&[(a(PAN), 100.0)], 24_000, &[on(0, 57)]);
+    assert!(rms(&right[12_000..]) > 0.5 && rms(&left) < 1e-6);
+    let [left, right] = play(&[], 24_000, &[on(0, 57)]);
+    assert!((rms(&left) - rms(&right)).abs() < 1e-6, "centred");
+    // Tone: positive cuts the lows and leaves the highs; negative the other
+    // way.
+    let tone = |amount: f64, key: u8| {
+        amp(&steady(&[(a(TONE), amount)], key), hz(f64::from(key)))
+    };
+    assert!(tone(100.0, 31) < 0.05 && tone(100.0, 119) > 0.8);
+    assert!(tone(-100.0, 119) < 0.05 && tone(-100.0, 31) > 0.9);
+    assert!((tone(0.0, 31) - 1.0).abs() < 0.02);
+}
+
+// Spec: meld R18
+#[test]
+fn mixer_drive_saturates_each_voice_and_limit_holds_it_below_0_dbfs() {
+    let half = (a(VOLUME), 0.5);
+    let plain = steady(&[half], 57);
+    let driven = steady(&[half, (DRIVE, 24.0)], 57);
+    assert!(amp(&plain, 660.0) < 0.001);
+    assert!(amp(&driven, 660.0) > 0.05, "drive adds harmonics");
+    let zero = steady(&[half, (DRIVE, 0.0)], 57);
+    assert_same(&zero, &plain, "no drive");
+    // Two engines on one note at full level peak at 2; Limit holds each
+    // voice under 1.
+    let loud = [(b(ON), 1.0)];
+    let free = steady(&loud, 57);
+    assert!(peak(&free) > 1.9);
+    let limited = steady(&[loud[0], (LIMIT, 1.0)], 57);
+    assert!(peak(&limited) <= 1.0001, "{}", peak(&limited));
+    assert!(peak(&limited) > 0.9);
+    // Each voice on its own: two notes sum to more than 1 under Limit, as
+    // the limiter is per voice.
+    let [left, _] = play(&[loud[0], (LIMIT, 1.0)], 24_000, &[on(0, 57), on(0, 61)]);
+    assert!(peak(&left[12_000..]) > 1.0);
+}
+
+// Spec: meld R14
+#[test]
+fn poly_steals_the_oldest_mono_returns_to_a_held_key_and_legato_keeps_the_envelope() {
+    let key = |k: u8| hz(f64::from(k));
+    // Poly with two voices: the third note takes the oldest voice.
+    let [left, _] = play(
+        &[(VOICES, 2.0)],
+        24_000,
+        &[on(0, 57), on(2_000, 61), on(4_000, 64)],
+    );
+    let tail = &left[12_000..];
+    assert!(amp(tail, key(57)) < 0.01);
+    assert!(amp(tail, key(61)) > 0.5 && amp(tail, key(64)) > 0.5);
+    // Mono: the new note takes over, and releasing it returns to the held
+    // one.
+    let mono = [(MODE, 1.0)];
+    let [left, _] = play(
+        &mono,
+        48_000,
+        &[on(0, 57), on(6_000, 64), off(24_000, 64)],
+    );
+    assert!(amp(&left[12_000..22_000], key(64)) > 0.5 && amp(&left[12_000..22_000], key(57)) < 0.01);
+    assert!(amp(&left[36_000..], key(57)) > 0.5 && amp(&left[36_000..], key(64)) < 0.01);
+    // Legato: with a sustain of 20 % reached, a second note over a held one
+    // leaves the envelope where it is; without, it attacks again.
+    let envelope = [
+        (a(ATTACK), 50.0),
+        (a(DECAY), 100.0),
+        (a(SUSTAIN), 20.0),
+        (MODE, 1.0),
+    ];
+    let ratio = |legato: f64| {
+        let mut params = envelope.to_vec();
+        params.push((LEGATO, legato));
+        let [left, _] = play(&params, 48_000, &[on(0, 57), on(24_000, 64)]);
+        rms(&left[26_000..27_000]) / rms(&left[20_000..21_000])
+    };
+    assert!((ratio(1.0) - 1.0).abs() < 0.1, "legato: {}", ratio(1.0));
+    assert!(ratio(0.0) > 3.0, "retriggered: {}", ratio(0.0));
+}
+
+// Spec: meld R14, R15, R16
+#[test]
+fn stacked_voices_keep_a_voices_level_and_phase_spread_offsets_the_copies_by_the_spread() {
+    let one = rms(&steady(&[], 57));
+    let three = rms(&steady(&[(STACK, 3.0)], 57));
+    assert!((three / one - 3f64.sqrt()).abs() < 0.03, "identical copies add up: {}", three / one);
+    // Phase Spread by the Spread source: with a Spread of 25 %, two copies
+    // start a quarter cycle either side of 0, half a cycle apart, and cancel.
+    let cancelled = rms(&steady(
+        &[(STACK, 2.0), (SPREAD, 25.0), (a(PHASE_SPREAD), 100.0)],
+        57,
+    ));
+    assert!(cancelled < 0.05 * one, "opposite phases: {cancelled}");
+    // It takes Phase Reset: off, the copies run alike.
+    let free = rms(&steady(
+        &[
+            (STACK, 2.0),
+            (SPREAD, 25.0),
+            (a(PHASE_SPREAD), 100.0),
+            (a(PHASE_RESET), 0.0),
+        ],
+        57,
+    ));
+    assert!(free > 1.3 * one);
+    // The Spread source moves nothing by itself.
+    let base = steady(&[(STACK, 3.0)], 57);
+    let spread = steady(&[(STACK, 3.0), (SPREAD, 100.0)], 57);
+    assert_same(&spread, &base, "Spread alone");
+    let single = steady(&[(SPREAD, 100.0)], 57);
+    assert_same(&single, &steady(&[], 57), "one copy's Spread alone");
+}
+
+// Spec: meld R16
+#[test]
+fn key_tracking_off_plays_c3_or_the_scales_root() {
+    let params = [(a(KEY_TRACKING), 0.0)];
+    for key in [40u8, 60, 80] {
+        let signal = steady(&params, key);
+        let c3 = hz(60.0);
+        assert!(amp(&signal, c3) > 0.9, "key {key} plays C3");
+    }
+    // With C# major as the scale, the root in C3's octave.
+    let signal = play_with(
+        &[(a(KEY_TRACKING), 0.0), (USE_SCALE, 1.0)],
+        512,
+        48_000,
+        &[on(0, 80)],
+        &scaled(Scale::new(1, ScaleName::Major)),
+    );
+    assert!(amp(&signal[0][24_000..], hz(61.0)) > 0.9, "C# in C3's octave");
+}
+
+// Spec: meld R16, instrument voices R8, R10
+#[test]
+fn each_engine_glides_by_its_own_time_and_a_glissando_steps_through_the_scale() {
+    let notes = [on(0, 57), on(12_000, 69)];
+    let window = |signal: &[f32]| crossing_hz(&signal[16_800..17_400]);
+    let mono = (MODE, 1.0);
+    // A alone glides over 400 ms; 100 ms in, it is between 220 and 440.
+    let a_alone = play(&[mono, (b(ON), 0.0), (a(GLIDE_TIME), 400.0)], 36_000, &notes)[0].clone();
+    let slide = window(&a_alone);
+    assert!(slide > 260.0 && slide < 400.0, "A slides: {slide}");
+    // B alone with A's glide set doesn't: it is at 440.
+    let b_alone = play(
+        &[mono, (a(ON), 0.0), (b(ON), 1.0), (a(GLIDE_TIME), 400.0)],
+        36_000,
+        &notes,
+    )[0]
+    .clone();
+    assert!((window(&b_alone) - 440.0).abs() < 1.0, "B doesn't");
+    let b_glides = play(
+        &[mono, (a(ON), 0.0), (b(ON), 1.0), (b(GLIDE_TIME), 400.0)],
+        36_000,
+        &notes,
+    )[0]
+    .clone();
+    assert!(window(&b_glides) < 400.0, "B slides by its own time");
+    // Glissando with the scale on: C major's degrees between C3 and C4.
+    let steps = play_with(
+        &[
+            mono,
+            (a(GLIDE_TIME), 1_400.0),
+            (a(GLIDE_MODE), 1.0),
+            (USE_SCALE, 1.0),
+            (b(ON), 0.0),
+        ],
+        512,
+        96_000,
+        &[on(0, 60), on(6_000, 72)],
+        &scaled(c_major()),
+    )[0]
+    .clone();
+    for (i, key) in [60.0, 62.0, 64.0, 65.0, 67.0, 69.0, 71.0].iter().enumerate() {
+        let from = 6_000 + i * 9_600 + 3_000;
+        let heard = crossing_hz(&steps[from..from + 3_600]);
+        assert!(
+            cents_between(heard, hz(*key)).abs() < 3.0,
+            "degree {i}: {heard} Hz"
+        );
+    }
+}
+
+// Spec: meld R3, R17, R26, R27
+#[test]
+fn semitones_count_degrees_and_a_held_note_stays_while_the_scale_changes() {
+    let freq = |setting: &Setting, params: &[(ParamId, f64)]| {
+        let mut all = vec![(a(SEMITONES), 2.0)];
+        all.extend_from_slice(params);
+        let [left, _] = play_with(&all, 512, 48_000, &[on(0, 60)], setting);
+        crossing_hz(&left[12_000..])
+    };
+    // Two semitones, or two degrees of C major: a whole tone, or E.
+    assert!((freq(&Setting::default(), &[]) / hz(62.0) - 1.0).abs() < 1e-3);
+    assert!((freq(&scaled(c_major()), &[(USE_SCALE, 1.0)]) / hz(64.0) - 1.0).abs() < 1e-3);
+    // Use Current Scale off: semitones whatever the scale.
+    assert!((freq(&scaled(c_major()), &[]) / hz(62.0) - 1.0).abs() < 1e-3);
+    // Octaves and cents add.
+    let [left, _] = play(&[(a(OCTAVES), 1.0), (a(CENTS), 50.0)], 48_000, &[on(0, 60)]);
+    let heard = crossing_hz(&left[12_000..]);
+    assert!(cents_between(heard, hz(72.5)).abs() < 0.5, "{heard}");
+    // The scale changes to C minor while the note holds: the note stays on
+    // E, its note-off still ends it, and the next note follows the new scale.
+    let setting = Setting {
+        scales: vec![(0, c_major()), (24_000, Scale::new(0, ScaleName::Minor))],
+        ..Setting::default()
+    };
+    let [left, _] = play_with(
+        &[
+            (a(SEMITONES), 2.0),
+            (USE_SCALE, 1.0),
+            (a(RELEASE), 5.0),
+            (MODE, 1.0),
+        ],
+        512,
+        96_000,
+        &[on(0, 60), off(36_000, 60), on(60_000, 60)],
+        &setting,
+    );
+    let held = crossing_hz(&left[26_000..35_000]);
+    assert!((held / hz(64.0) - 1.0).abs() < 1e-3, "held note: {held}");
+    assert!(rms(&left[40_000..58_000]) < 1e-3, "ended by its own note-off");
+    let next = crossing_hz(&left[70_000..90_000]);
+    assert!((next / hz(63.0) - 1.0).abs() < 1e-3, "the new note: {next}");
+    // The scale-aware types follow the scale from the frame it changes.
+    let [left, _] = play_with(
+        &[
+            (a(TYPE), 1.0),
+            (a(MACRO_2), 100.0 * (0.5 + 2.0 / 14.0)),
+            (USE_SCALE, 1.0),
+        ],
+        512,
+        96_000,
+        &[on(0, 60)],
+        &setting,
+    );
+    assert!(amp(&left[12_000..22_000], hz(64.0)) > 0.4, "E in C major");
+    assert!(amp(&left[60_000..70_000], hz(63.0)) > 0.4, "E flat in C minor");
+    assert!(amp(&left[60_000..70_000], hz(64.0)) < 0.05);
+}
+
+// Spec: meld R21
+#[test]
+fn every_key_of_a_nineteen_step_tuning_sounds_within_a_tenth_of_a_cent() {
+    let tuning = nineteen();
+    let keys = KeyPitches::of(Some(&tuning));
+    let setting = Setting {
+        tuning: Some(tuning),
+        ..Setting::default()
+    };
+    for key in [0u8, 24, 36, 61, 84, 100] {
+        let [left, _] = play_with(&[], 512, 48_000, &[on(0, key)], &setting);
+        let heard = crossing_hz(&left[6_000..]);
+        let tuned = hz(keys.pitch(key).unwrap());
+        assert!(
+            cents_between(heard, tuned).abs() < 0.1,
+            "key {key}: {heard} Hz against {tuned} Hz"
+        );
+    }
+}
+
+/// A phrase that steals, releases and stacks, for the block-size checks.
+fn phrase() -> Vec<NoteEvent> {
+    vec![
+        on(0, 60),
+        on(0, 64),
+        on(1_500, 67),
+        on(3_000, 72),
+        off(5_000, 60),
+        on(6_000, 55),
+        off(8_000, 64),
+        on(9_000, 59),
+        off(11_000, 72),
+    ]
+}
+
+// Spec: meld R23
+#[test]
+fn every_type_renders_the_same_at_block_sizes_1_64_512_and_4096_and_run_after_run() {
+    let variants: Vec<(&str, Vec<(ParamId, f64)>, Setting)> = vec![
+        ("plain", vec![], Setting::default()),
+        (
+            "filtered and stacked",
+            vec![
+                (a(FILTER_ON), 1.0),
+                (a(FILTER_FREQ), 1_800.0),
+                (a(FILTER_MACRO_1), 40.0),
+                (STACK, 2.0),
+                (a(PHASE_SPREAD), 100.0),
+                (SPREAD, 20.0),
+                (b(ON), 1.0),
+                (b(OCTAVES), -1.0),
+                (a(TONE), 30.0),
+                (DRIVE, 6.0),
+                (LIMIT, 1.0),
+            ],
+            Setting::default(),
+        ),
+        (
+            "mono glide in a scale",
+            vec![
+                (MODE, 1.0),
+                (a(GLIDE_TIME), 90.0),
+                (a(GLIDE_MODE), 1.0),
+                (USE_SCALE, 1.0),
+                (a(SEMITONES), 2.0),
+            ],
+            Setting {
+                scales: vec![(0, c_major()), (6_500, Scale::new(2, ScaleName::Minor))],
+                ..Setting::default()
+            },
+        ),
+    ];
+    for kind in 0..10u32 {
+        for (name, extra, setting) in &variants {
+            // The kit chooses a mipmap level from the pitch's rise past the
+            // end of a render, so a wave with harmonics whose pitch moves
+            // can change level on another frame at another block size; a
+            // sine has one level, and glides are measured on it.
+            let moves = name.contains("glide");
+            if moves && !matches!(kind, 0 | 1 | 2 | 5 | 6) {
+                continue;
+            }
+            let macros = if moves { (0.0, 0.0) } else { (55.0, 62.0) };
+            let mut params = vec![
+                (a(TYPE), f64::from(kind)),
+                (a(MACRO_1), macros.0),
+                (a(MACRO_2), macros.1),
+            ];
+            params.extend_from_slice(extra);
+            let reference = play_with(&params, 4096, 12_000, &phrase(), setting);
+            for block in BLOCKS {
+                let got = play_with(&params, block, 12_000, &phrase(), setting);
+                for (ch, side) in ["left", "right"].into_iter().enumerate() {
+                    let what = format!("type {kind}, {name}, block {block}, {side}");
+                    if moves {
+                        // The kit moves a gliding voice's pitch in f32
+                        // between its control points: the last bits.
+                        assert_near(&got[ch], &reference[ch], 1e-6, &what);
+                    } else {
+                        assert_same(&got[ch], &reference[ch], &what);
+                    }
+                }
+            }
+            assert!(rms(&reference[0]) > 0.001, "type {kind} {name} sounds");
+        }
+    }
+    // Rough: the same from run to run and at any block size.
+    let rough = [(a(TYPE), 2.0), (a(MACRO_1), 55.0), (a(MACRO_2), 62.0)];
+    let reference = play_with(&rough, 4096, 12_000, &phrase(), &Setting::default());
+    let again = play_with(&rough, 4096, 12_000, &phrase(), &Setting::default());
+    assert_same(&again[0], &reference[0], "Rough, run after run");
+    for block in BLOCKS {
+        let got = play_with(&rough, block, 12_000, &phrase(), &Setting::default());
+        assert_same(&got[0], &reference[0], &format!("Rough, block {block}"));
+    }
+}
+
+/// Whether the tests run at full depth: `BL_TEST_DEPTH=full`, as on pushes
+/// to main, manual CI runs, and the nightly run. The device budget is judged
+/// only then, so a loaded machine can't fail it.
+fn full_depth() -> bool {
+    match std::env::var("BL_TEST_DEPTH").as_deref() {
+        Ok("full") => true,
+        Ok("quick") | Err(_) => false,
+        Ok(other) => {
+            panic!("BL_TEST_DEPTH is `{other}`: set it to quick or full, or leave it unset")
+        }
+    }
+}
+
+// Spec: meld R22
+#[test]
+fn sixteen_voices_of_swarm_saw_on_both_engines_render_inside_the_device_budget() {
+    // Twelve voices of two stacked copies are twenty-four slots, eight
+    // swarm copies each, on both engines.
+    let params = [
+        (a(TYPE), 8.0),
+        (b(TYPE), 8.0),
+        (b(ON), 1.0),
+        (a(FILTER_ON), 1.0),
+        (b(FILTER_ON), 1.0),
+        (a(FILTER_FREQ), 4_000.0),
+        (b(FILTER_FREQ), 4_000.0),
+        (VOICES, 12.0),
+        (STACK, 2.0),
+    ];
+    let mut node = node(&registry(), &meld_with(&params), 128);
+    let chord: Vec<NoteEvent> = (0..12).map(|i| on(0, 36 + 3 * i)).collect();
+    let seconds = 5;
+    let blocks = seconds * 48_000 / 128;
+    let start = Instant::now();
+    let mut heard = 0.0f64;
+    for block in 0..blocks {
+        let notes: &[NoteEvent] = if block == 0 { &chord } else { &[] };
+        let [left, _] = render_block(node.as_mut(), 128, notes);
+        heard += left.iter().map(|x| f64::from(x.abs())).sum::<f64>();
+    }
+    let realtime = seconds as f64 / start.elapsed().as_secs_f64();
+    println!("sixteen voices of Swarm Saw: {realtime:.1}x real time (debug)");
+    assert!(heard > 1.0, "it sounds");
+    if full_depth() {
+        assert!(realtime >= 4.0, "{realtime:.1}x real time");
+    }
+}
+
+/// One block of `frames` through `node`.
+fn render_block(node: &mut dyn Node, frames: usize, notes: &[NoteEvent]) -> [Vec<f32>; 2] {
+    let mut data = vec![0.0f32; CHANNELS * frames];
+    let mut sink = NoteBuffer::with_capacity(notes.len().max(1));
+    {
+        let mut audio = Block::new(
+            &mut data,
+            CHANNELS,
+            frames,
+            frames,
+            &[],
+            TransportInfo::default(),
+            RATE,
+        )
+        .with_notes(notes, &mut sink);
+        bl_rt::rt_test!({ node.process(&mut audio) });
+    }
+    [data[..frames].to_vec(), data[frames..].to_vec()]
 }

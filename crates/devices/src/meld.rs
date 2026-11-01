@@ -610,7 +610,7 @@ struct Slot {
     drift: [f32; MAX_LANES],
     target: [f32; MAX_LANES],
     clock: [f32; MAX_LANES],
-    noise: [f32; 3],
+    noise: [f32; 2],
     noise_state: u32,
     fresh: bool,
     tone: [f32; 2],
@@ -629,7 +629,7 @@ impl Slot {
         drift: [0.0; MAX_LANES],
         target: [0.0; MAX_LANES],
         clock: [0.0; MAX_LANES],
-        noise: [0.0; 3],
+        noise: [0.0; 2],
         noise_state: 1,
         fresh: false,
         tone: [0.0; 2],
@@ -1029,6 +1029,9 @@ impl Voices {
         };
         let on_grid = state.clock(frames.start + at) % CHUNK as u64 == 0;
         let noisy = self.current == 2;
+        let config = state.config();
+        let stepping = config.glissando && config.glide_secs > 0.0;
+        let modulated = stepping;
         let motion = m1 * m1 * 6.0;
         for slot in 0..used {
             if self.slots[slot].voice < 0 {
@@ -1052,14 +1055,28 @@ impl Voices {
             let step = (self.pitch(voices, state, slot, frames, at + n) - p0) / n as f32;
             let bank = &mut self.banks[bank_at];
             for (copy, lane) in lanes.lane[..lanes.count].iter().enumerate() {
+                let step = if stepping { 0.0 } else { step };
                 bank.set(slot, copy, p0 + lane.semitones, step, lane.frame);
             }
-            if noisy {
+            if modulated {
+                // A Glissando's steps and Noisy Shapes' phase noise move the
+                // pitch frame by frame; a glide's line is its own step.
                 let mut values = [0.0f32; CHUNK];
-                let base = (440.0 * ((f64::from(p0) - 69.0) / 12.0).exp2() / self.rate) as f32;
-                self.noise(slot, m2, base, &mut values[..n]);
+                if stepping {
+                    for (k, value) in values[..n].iter_mut().enumerate() {
+                        *value = self.pitch(voices, state, slot, frames, at + k) - p0;
+                    }
+                }
                 for copy in 0..lanes.count {
-                    self.banks[bank_at].set_noise(slot, copy, &values[..n]);
+                    self.banks[bank_at].set_mod(slot, copy, &values[..n]);
+                }
+            }
+            if noisy {
+                let mut noise = [0.0f32; CHUNK];
+                let base = (440.0 * ((f64::from(p0) - 69.0) / 12.0).exp2() / self.rate) as f32;
+                self.noise(slot, m2, base, &mut noise[..n]);
+                for copy in 0..lanes.count {
+                    self.banks[bank_at].set_phase(slot, copy, &noise[..n]);
                 }
             }
             let s = &mut self.slots[slot];
@@ -1069,7 +1086,7 @@ impl Voices {
             }
             self.lanes[slot] = lanes;
         }
-        self.banks[bank_at].render(n, used, noisy);
+        self.banks[bank_at].render(n, used, modulated, noisy);
         let stride = self.filter_stride;
         for slot in 0..used {
             if self.slots[slot].voice < 0 {
@@ -1110,10 +1127,9 @@ impl Voices {
         }
     }
 
-    /// Spec: meld R7. Phase noise for slot `slot` over a chunk, as the pitch
-    /// modulation, in semitones, that moves the phase by up to a quarter
-    /// cycle times `rough`: noise low-passed twice at half the note's
-    /// frequency, so its slope stays below the note's own.
+    /// Spec: meld R7. Phase noise for slot `slot` over a chunk, in cycles:
+    /// noise low-passed twice at half the note's frequency, up to a quarter
+    /// of a cycle times `rough` at its peaks.
     fn noise(&mut self, slot: usize, rough: f32, base: f32, out: &mut [f32]) {
         let s = &mut self.slots[slot];
         let a = (std::f32::consts::PI * base).min(1.0);
@@ -1129,10 +1145,7 @@ impl Voices {
             let white = (x >> 8) as f32 / (1u32 << 23) as f32 - 1.0;
             s.noise[0] += (white - s.noise[0]) * a;
             s.noise[1] += (s.noise[0] - s.noise[1]) * a;
-            let phase = s.noise[1] * scale;
-            let step = phase - s.noise[2];
-            s.noise[2] = phase;
-            *value = 12.0 * (1.0 + step / base).clamp(0.05, 4.0).log2();
+            *value = (s.noise[1] * scale).clamp(-0.25, 0.25);
         }
     }
 
@@ -1154,7 +1167,7 @@ impl Voices {
             for k in 0..count {
                 let frame = frames.start + k;
                 let mut x = if on {
-                    self.signal[k * 2 * stride + slot] * level[k * self.envelope_stride + voice]
+                    self.signal[k * 2 * stride + slot]
                 } else {
                     0.0
                 };
@@ -1171,6 +1184,9 @@ impl Voices {
                     s.tone[0] += (x - s.tone[0]) * a;
                     x = if t > 0.0 { x - s.tone[0] } else { s.tone[0] };
                 }
+                // The envelope is last, so a voice whose envelope has ended
+                // is exactly silent whenever the section frees it.
+                x *= level[k * self.envelope_stride + voice];
                 let (left, right) = pan_gains(self.pan[frame]);
                 let x = x * self.volume[frame] * copies;
                 self.out[0][frame * SLOTS + slot] = x * left;

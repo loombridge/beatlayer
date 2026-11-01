@@ -305,7 +305,7 @@ mod tests {
         assert_eq!(rows(shown).len(), 7);
         assert_eq!(shown.role(7, 3), Role::Loop(3));
         let leds = strip_leds(36, 48, &[10, 100]);
-        assert!(leds.iter().any(|&l| l == 7));
+        assert!(leds.contains(&7));
         assert_eq!(leds[10 * 31 / 128], 2);
         assert_eq!(leds[100 * 31 / 128], 2);
         assert_eq!(leds[0], 0);

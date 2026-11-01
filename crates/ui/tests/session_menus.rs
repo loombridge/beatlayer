@@ -401,12 +401,28 @@ fn an_audio_clips_menu_adds_the_audio_rows_after_crop_clip() {
         assert!(has(&output, row), "{row}");
     }
     assert!(!item(&output, "Slice to New MIDI Track").disabled);
+    // Spec: stem-separation R22. Built: enabled wherever stem separation is.
     let stems = item(&output, "Separate Stems to New Audio Tracks");
-    assert!(stems.disabled);
-    assert!(
-        stems.description.contains("Phase 9"),
-        "{}",
-        stems.description
+    assert_eq!(stems.disabled, bl_shell::stems::packages().is_empty());
+}
+
+// Spec: stem-separation R22, R23. Separate Stems to New Audio Tracks in a
+// Session audio clip's menu opens the dialog on that clip.
+#[test]
+fn separate_stems_in_a_session_clips_menu_opens_the_dialog_on_the_clip() {
+    if bl_shell::stems::packages().is_empty() {
+        return;
+    }
+    let mut h = harness();
+    let g = Grid::new(&h);
+    let track = track_of(&h, TrackKind::Audio);
+    let clip = audio_clip(&mut h, track, g.scenes[0]);
+    right_click(&mut h, g.slot(track, 0));
+    choose(&mut h, "Separate Stems to New Audio Tracks");
+    let dialog = h.shell.stems_dialog().expect("the dialog is open");
+    assert_eq!(
+        dialog.source,
+        bl_shell::stems_commands::StemSource::Clip { clip }
     );
 }
 

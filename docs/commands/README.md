@@ -10567,7 +10567,7 @@ The open dialog.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `step` | [`DialogStep`](#dialogstep) | yes | What it shows. |
-| `clip` | [`ClipId`](#clipid) | yes | The clip it separates. |
+| `source` | [`StemSource`](#stemsource) | yes | What it separates. |
 
 <details><summary>JSON Schema</summary>
 
@@ -10575,9 +10575,9 @@ The open dialog.
 {
   "description": "The open dialog.",
   "properties": {
-    "clip": {
-      "$ref": "#/$defs/ClipId",
-      "description": "The clip it separates."
+    "source": {
+      "$ref": "#/$defs/StemSource",
+      "description": "What it separates."
     },
     "step": {
       "$ref": "#/$defs/DialogStep",
@@ -10586,7 +10586,7 @@ The open dialog.
   },
   "required": [
     "step",
-    "clip"
+    "source"
   ],
   "type": "object"
 }
@@ -34668,6 +34668,95 @@ One of:
 
 </details>
 
+### `StemSource`
+
+What a separation works on (the stem separation spec, R22).
+
+One of:
+
+- an object with `kind` = `"clip"`, `clip` ([`ClipId`](#clipid)): An audio clip in the Arrangement or in a Session slot.
+- an object with `kind` = `"file"`, `path` (string): An audio file, separated whole: what the browser's menu runs.
+- an object with `kind` = `"time_selection"`, `tracks` (array of [`TrackId`](#trackid)), `start` ([`Ticks`](#ticks)), `end` ([`Ticks`](#ticks)): The audio the clips of audio tracks play inside the Arrangement's time selection, each track on its own.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a separation works on (the stem separation spec, R22).",
+  "oneOf": [
+    {
+      "description": "An audio clip in the Arrangement or in a Session slot.",
+      "properties": {
+        "clip": {
+          "$ref": "#/$defs/ClipId",
+          "description": "The clip."
+        },
+        "kind": {
+          "const": "clip",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "clip"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "An audio file, separated whole: what the browser's menu runs.",
+      "properties": {
+        "kind": {
+          "const": "file",
+          "type": "string"
+        },
+        "path": {
+          "description": "Its path.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "path"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The audio the clips of audio tracks play inside the Arrangement's time selection, each track on its own.",
+      "properties": {
+        "end": {
+          "$ref": "#/$defs/Ticks",
+          "description": "The range's end."
+        },
+        "kind": {
+          "const": "time_selection",
+          "type": "string"
+        },
+        "start": {
+          "$ref": "#/$defs/Ticks",
+          "description": "The range's start."
+        },
+        "tracks": {
+          "description": "The tracks; those with no audio in the range are skipped.",
+          "items": {
+            "$ref": "#/$defs/TrackId"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "tracks",
+        "start",
+        "end"
+      ],
+      "type": "object"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `StemsStatus`
 
 What `stems.status` returns.
@@ -34679,6 +34768,7 @@ What `stems.status` returns.
 | `packages` | array of [`PackageStatus`](#packagestatus) | yes | The packages. |
 | `install` | [`JobStatus`](#jobstatus) | yes | The download. |
 | `separation` | [`JobStatus`](#jobstatus) | yes | The separation. |
+| `created_clips` | array of [`ClipId`](#clipid) | no | The clips the last separation made, in the order of their tracks. |
 | `created_tracks` | array of [`TrackId`](#trackid) | no | The tracks the last separation made, the group first if it made one. |
 | `dialog` | [`DialogStatus`](#dialogstatus) or null | no | The dialog, if it's open. |
 | `provider` | string | no | What the current or last separation ran on, such as `Core ML`, or `CPU (not the GPU: ...)` with the reason a GPU wasn't used. |
@@ -34689,6 +34779,13 @@ What `stems.status` returns.
 {
   "description": "What `stems.status` returns.",
   "properties": {
+    "created_clips": {
+      "description": "The clips the last separation made, in the order of their tracks.",
+      "items": {
+        "$ref": "#/$defs/ClipId"
+      },
+      "type": "array"
+    },
     "created_tracks": {
       "description": "The tracks the last separation made, the group first if it made one.",
       "items": {

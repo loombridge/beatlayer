@@ -3974,6 +3974,7 @@ What the browser shows: most browser commands return it.
 | `note` | string or null | no | What the content pane says when it has no rows, such as which package fills an empty Library label. |
 | `renaming` | string or null | no | The file whose name is open for editing, after `clip.save_file` saved it: `browser.rename_file` gives it its new name. |
 | `renaming_label` | [`Label`](#label) or null | no | The label whose name is open for editing, after `browser.add_label` or `browser.rename_label` without a name. |
+| `similar` | string or null | no | The file the content pane lists the neighbours of, shown in the search field as a token (spec: sound-similarity R12). |
 
 <details><summary>JSON Schema</summary>
 
@@ -4076,6 +4077,13 @@ What the browser shows: most browser commands return it.
         "type": "string"
       },
       "type": "array"
+    },
+    "similar": {
+      "description": "The file the content pane lists the neighbours of, shown in the search field as a token (spec: sound-similarity R12).",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "tag_editor": {
       "description": "Whether the Tag Editor is open beside the content pane.",
@@ -30828,6 +30836,7 @@ A saved label (spec: browser-tags R24).
 | `search` | string | yes | The search words it keeps. |
 | `tags` | array of string | yes | The tags it keeps, by their full names. |
 | `icon` | string or null | no | The icon it was given. |
+| `reference` | string or null | no | The file it lists the neighbours of, first (spec: sound-similarity R15). |
 
 <details><summary>JSON Schema</summary>
 
@@ -30853,6 +30862,13 @@ A saved label (spec: browser-tags R24).
     "name": {
       "description": "Its name.",
       "type": "string"
+    },
+    "reference": {
+      "description": "The file it lists the neighbours of, first (spec: sound-similarity R15).",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "search": {
       "description": "The search words it keeps.",
@@ -32924,6 +32940,84 @@ What a time-signature command did: the marker selected afterwards, and whether i
   "required": [
     "selected",
     "undo_step"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SimilarItem`
+
+One item of `browser.similar`'s list.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | Its path. |
+| `kind` | [`ItemKind`](#itemkind) | yes | What it is. |
+| `distance` | number | yes | Its distance from the reference: 0 for the reference, up to 0.35. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One item of `browser.similar`'s list.",
+  "properties": {
+    "distance": {
+      "description": "Its distance from the reference: 0 for the reference, up to 0.35.",
+      "format": "float",
+      "type": "number"
+    },
+    "kind": {
+      "$ref": "#/$defs/ItemKind",
+      "description": "What it is."
+    },
+    "path": {
+      "description": "Its path.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path",
+    "kind",
+    "distance"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SimilarList`
+
+What `browser.similar` gives (spec: sound-similarity R16).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `reference` | [`SimilarItem`](#similaritem) | yes | The reference. |
+| `items` | array of [`SimilarItem`](#similaritem) | yes | The reference first, then the nearest items of its own kind, most similar first. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `browser.similar` gives (spec: sound-similarity R16).",
+  "properties": {
+    "items": {
+      "description": "The reference first, then the nearest items of its own kind, most similar first.",
+      "items": {
+        "$ref": "#/$defs/SimilarItem"
+      },
+      "type": "array"
+    },
+    "reference": {
+      "$ref": "#/$defs/SimilarItem",
+      "description": "The reference."
+    }
+  },
+  "required": [
+    "reference",
+    "items"
   ],
   "type": "object"
 }

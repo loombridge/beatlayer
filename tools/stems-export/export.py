@@ -50,7 +50,6 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("output", help="where to write the .onnx file")
     parser.add_argument("--name", default="htdemucs")
-    parser.add_argument("--fp16", action="store_true", help="store the weights as fp16")
     args = parser.parse_args()
 
     model = get_model(args.name)

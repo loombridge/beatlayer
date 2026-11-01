@@ -254,7 +254,10 @@ fn run_separation(job: &Job, progress: &Progress) -> Result<Separated, separatio
                 .store((f64::from(fraction) * 1000.0) as u64, Ordering::Relaxed);
             !progress.cancelled()
         },
-    )?;
+    );
+    // A GPU run that failed part way finished on the CPU (R33).
+    progress.set_provider(network.report().describe());
+    let stems = stems?;
     Ok(Separated { from, stems })
 }
 

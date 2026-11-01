@@ -3750,8 +3750,13 @@ impl BrowserView {
             ids::CLEAR_FILTERS => {
                 let ClearFiltersArgs { words, tags } = parse(args)?;
                 if words.unwrap_or(true) {
-                    self.end_similar();
-                    self.search.clear();
+                    // Spec: sound-similarity R14. Ending a similarity search
+                    // goes back to the words the browser had before it.
+                    if self.reference().is_some() {
+                        self.end_similar();
+                    } else {
+                        self.search.clear();
+                    }
                 }
                 if tags.unwrap_or(true) {
                     self.filter.clear();

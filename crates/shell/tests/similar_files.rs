@@ -252,10 +252,17 @@ fn showing_similar_files_lists_the_neighbours_under_the_token_and_ends_back() {
     assert_eq!((ended.label, ended.similar), (Label::Samples, None));
     assert_eq!(ended.search, "");
 
-    // Clearing the words ends it too.
+    // Clearing the words (Esc, the Results bar's Clear) ends it too, back to
+    // the words typed before it.
+    run::<BrowserState>(&mut shell, ids::SEARCH, json!({ "query": "kick" }));
+    select(&mut shell, &kick);
     run::<BrowserState>(&mut shell, ids::SHOW_SIMILAR, json!({}));
     let cleared: BrowserState = run(&mut shell, ids::CLEAR_FILTERS, json!({}));
     assert_eq!(cleared.similar, None);
+    assert_eq!(
+        (cleared.label, cleared.search.as_str()),
+        (Label::Samples, "kick")
+    );
 }
 
 // Spec: sound-similarity R15. A saved label made from the results lists the

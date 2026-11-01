@@ -1101,6 +1101,7 @@ dependencies = [
  "bl-test-vst3",
  "flate2",
  "getrandom 0.3.4",
+ "libc",
  "lspk-example-gain",
  "midly",
  "objc2 0.6.5",
@@ -1112,6 +1113,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tar",
+ "windows-sys 0.52.0",
  "zip",
 ]
 

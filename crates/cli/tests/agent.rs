@@ -5366,6 +5366,129 @@ fn an_agent_adds_sets_and_reads_the_modulation_devices_by_id_and_reopens_them() 
     }
 }
 
+// Spec: echo R8, R20, R23
+#[test]
+fn an_agent_adds_sets_and_reads_echo_by_id_reads_its_displays_and_reopens_it() {
+    use bl_devices::echo::{self, echo_type};
+
+    let dir = TempDir::new("echo");
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("echo-agent").unwrap();
+    let track = default_tracks(&mut client)[2];
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let reply = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+        reply["results"][0]["result"].clone()
+    };
+    run(
+        &mut client,
+        "arrangement.select_tracks",
+        json!({ "tracks": [track] }),
+    );
+    let kind = echo_type();
+    let added = run(
+        &mut client,
+        "device.add",
+        json!({
+            "track": track,
+            "device": { "kind": kind.kind, "name": kind.name, "role": kind.role },
+        }),
+    );
+    let device = added["device"].clone();
+    let parameters = |client: &mut Client<InProcess>| {
+        run(client, "device.parameters", json!({ "device": device }))["params"].clone()
+    };
+    assert_eq!(parameters(&mut client).as_array().unwrap().len(), 56);
+
+    // Every parameter moved to the other end of its range, and read back.
+    let mut wanted = Vec::new();
+    for param in &kind.description.params {
+        let to = if param.default == param.max() {
+            param.min()
+        } else {
+            param.max()
+        };
+        run(
+            &mut client,
+            "device.set_param",
+            json!({ "device": device, "param": param.id.0, "value": to }),
+        );
+        wanted.push((param.id, param.name.clone(), to));
+    }
+    let read = parameters(&mut client);
+    for (_, name, to) in &wanted {
+        let found = read
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == *name)
+            .unwrap_or_else(|| panic!("no {name}"));
+        assert_eq!(found["value"].as_f64().unwrap(), *to, "{name}");
+    }
+
+    // The tunnel is the first view and the filters' response the second.
+    let tunnel = run(&mut client, "device.display", json!({ "device": device }));
+    assert_eq!(tunnel["view"], json!("Tunnel"));
+    assert_eq!(tunnel["live"], json!(false));
+    let names: Vec<_> = tunnel["markers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["name"].as_str().unwrap().to_owned())
+        .collect();
+    assert!(names.contains(&"Left Time".to_owned()), "{names:?}");
+    let steps = call(&mut client, "query", json!({ "path": "history" }))["undo"]["items"]
+        .as_array()
+        .unwrap()
+        .len();
+    run(
+        &mut client,
+        "device.set_display_view",
+        json!({ "device": device, "view": "Filter" }),
+    );
+    let filter = run(&mut client, "device.display", json!({ "device": device }));
+    assert_eq!(filter["view"], json!("Filter"));
+    assert_eq!(filter["series"][0]["name"], json!("Filter"));
+    assert_eq!(
+        filter["markers"][0]["handle"]["x"],
+        json!(echo::HP_FREQ.0),
+        "a handle names the parameter it drags"
+    );
+    let after = call(&mut client, "query", json!({ "path": "history" }))["undo"]["items"]
+        .as_array()
+        .unwrap()
+        .len();
+    assert_eq!(after, steps, "a view is no undo step");
+
+    // A tab by name, then save and reopen.
+    run(
+        &mut client,
+        "device.set_page",
+        json!({ "device": device, "node": echo::TABS, "page": "Character" }),
+    );
+    let saved = run(
+        &mut client,
+        "set.save_as",
+        json!({ "path": dir.0.join("Echo.blset").to_string_lossy() }),
+    );
+    let (project, _) =
+        bl_project::load(saved_path(&json!({ "results": [{ "result": saved }] }))).unwrap();
+    let reopened = project
+        .document
+        .tracks()
+        .flat_map(|t| t.devices().cloned().collect::<Vec<_>>())
+        .find(|d| {
+            matches!(&d.kind, bl_model::DeviceKind::Native { device_type } if device_type == echo::ECHO)
+        })
+        .expect("Echo in the reopened set");
+    for (param, name, to) in &wanted {
+        assert_eq!(reopened.params[param], *to, "{name} reopened");
+    }
+}
+
 // Spec: spectrum-analyser R9, tuner R8, oscilloscope R8 (WP-5.28): an agent adds
 // Spectrum, Tuner and Oscilloscope, reads their parameters, sets some by ID,
 // reads each display, and finds the devices and values again when the saved set

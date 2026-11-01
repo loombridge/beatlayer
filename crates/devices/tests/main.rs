@@ -71,6 +71,7 @@ mod remap;
 mod resonators;
 mod reverb;
 mod roar;
+mod roar_modulation;
 mod rules;
 mod sampler;
 mod saturator;

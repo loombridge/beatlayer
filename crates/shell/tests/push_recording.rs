@@ -581,7 +581,7 @@ impl Rig {
             .filter(|e| e.kind == bl_model::EnvelopeKind::Automation)
             .map(|e| {
                 let points = e.envelope.points().map(|p| (p.at.get(), p.value)).collect();
-                (e.target.clone(), points)
+                (e.target, points)
             })
             .collect()
     }
@@ -847,7 +847,7 @@ fn phrase_sync_starts_the_take_part_way_into_the_clip() {
     };
     let start = midi.notes.iter().next().expect("the note").start.get();
     assert!(
-        start >= BAR && start < BAR + BAR / 2,
+        (BAR..BAR + BAR / 2).contains(&start),
         "the note is at bar 2 of the clip: {start}"
     );
 }

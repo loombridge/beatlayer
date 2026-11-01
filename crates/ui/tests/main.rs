@@ -80,6 +80,7 @@ mod recovery;
 mod roar;
 mod sample_display;
 mod sample_editor;
+mod sample_swap;
 mod save_history;
 mod scales;
 mod scene_view;

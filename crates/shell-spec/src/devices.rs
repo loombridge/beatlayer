@@ -12,7 +12,7 @@
 //! its key and its context-menu item do. The behaviour they follow is in the
 //! device chains spec.
 
-use bl_commands::Context::{Browser, DeviceView, Global, RackChains};
+use bl_commands::Context::{Browser, DeviceView, Global, RackChains, SampleSwap};
 use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_model::device_layout::BODY_HEIGHT;
 use bl_model::{
@@ -65,6 +65,15 @@ pub const LOAD_WAVETABLE: &str = "device.load_wavetable";
 /// sampler, keeping its sample's start and length (one-shot drum sampler
 /// R22).
 pub const SWAP_TO_SNAPSHOT: &str = "device.swap_to_snapshot";
+/// `device.swap_similar`: swap a sampler's sample for the next or previous
+/// similar one (sound similarity R21).
+pub const SWAP_SIMILAR: &str = "device.swap_similar";
+/// `device.return_to_reference`: load a sampler's similarity reference back
+/// (sound similarity R23).
+pub const RETURN_TO_REFERENCE: &str = "device.return_to_reference";
+/// `device.similar`: where a sampler's sample stands in its similar list
+/// (sound similarity R27, R28).
+pub const SIMILAR: &str = "device.similar";
 /// `device.select_slot`: select a sample slot of a device that has them
 /// (WP-5.17).
 pub const SELECT_SLOT: &str = "device.select_slot";
@@ -196,6 +205,9 @@ pub const IDS: &[&str] = &[
     LOAD_SAMPLE,
     LOAD_WAVETABLE,
     SWAP_TO_SNAPSHOT,
+    SWAP_SIMILAR,
+    RETURN_TO_REFERENCE,
+    SIMILAR,
     SELECT_SLOT,
     HOT_SWAP,
     PARAMETERS,
@@ -247,6 +259,7 @@ pub const ON_SELECTED: &[&str] = &[
     SET_ROLE,
     COMPARE_SWITCH,
     COMPARE_COPY,
+    "device.set_similarity_reference",
 ];
 
 /// Whether `id` is one of the Device View's commands.
@@ -1982,6 +1995,114 @@ pub struct LoadSampleArgs {
     pub slot: Option<u8>,
 }
 
+/// Which way `device.swap_similar` goes in the similar list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SwapDirection {
+    /// The next sample after the one the device holds.
+    Next,
+    /// The sample before the one the device holds.
+    Previous,
+}
+
+/// Which sampler the swap commands act on: `device`, or the pad `note` of
+/// the drum rack `rack`, or else the selected device (or the selected pad,
+/// when a drum rack is selected).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SwapTarget {
+    /// The Simpler or Drum Sampler; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The drum rack whose pad `note` is meant; the rack in focus if left
+    /// out. Used with `note`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rack: Option<DeviceId>,
+    /// The pad's note, 0 to 127: the sampler in the pad's one chain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<u8>,
+}
+
+/// Arguments of `device.swap_similar`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SwapSimilarArgs {
+    /// Next or previous.
+    pub direction: SwapDirection,
+    /// The Simpler or Drum Sampler; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The drum rack whose pad `note` is meant; the rack in focus if left
+    /// out. Used with `note`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rack: Option<DeviceId>,
+    /// The pad's note, 0 to 127: the sampler in the pad's one chain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<u8>,
+}
+
+impl SwapSimilarArgs {
+    /// The sampler the swap is for.
+    #[must_use]
+    pub const fn target(&self) -> SwapTarget {
+        SwapTarget {
+            device: self.device,
+            rack: self.rack,
+            note: self.note,
+        }
+    }
+}
+
+/// What `device.swap_similar` and `device.return_to_reference` return.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Swapped {
+    /// The device that took the sample.
+    pub device: DeviceId,
+    /// The sample it holds now, by content hash.
+    pub media: ContentHash,
+    /// The sample's file name, without its extension.
+    pub name: String,
+    /// The sample's place in the reference's similar list, counted from 0.
+    pub position: u32,
+    /// How many samples the list holds, the reference first.
+    pub count: u32,
+}
+
+/// What `device.similar` returns: where a sampler's sample stands in the
+/// similar list of its reference (sound similarity R27, R28).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SimilarState {
+    /// The sampler.
+    pub device: DeviceId,
+    /// The sample it holds, by content hash.
+    pub sample: Option<ContentHash>,
+    /// Its similarity reference, by content hash: the sample it was loaded
+    /// with unless one was saved or a swap began from another.
+    pub reference: Option<ContentHash>,
+    /// The sample's place in the reference's list, counted from 0 (the
+    /// reference is 0); `null` if the list can't be made or doesn't hold it.
+    pub position: Option<u32>,
+    /// How many samples the list holds, the reference first; `null` if the
+    /// list can't be made.
+    pub count: Option<u32>,
+    /// The file of the reference in the browser's places, which Show
+    /// Similar Files lists the neighbours of; `null` if the list can't be
+    /// made.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_path: Option<String>,
+    /// Whether the previous similar sample can be loaded.
+    pub can_previous: bool,
+    /// Whether the next similar sample can be loaded.
+    pub can_next: bool,
+    /// Whether Return to Reference can load the reference: the device holds
+    /// another sample.
+    pub can_return: bool,
+    /// Why the list can't be made or the swap controls are disabled, if so
+    /// (R27); `null` when the list exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
 /// Arguments of `device.load_wavetable`: a factory table by `category` and
 /// `name`, or a user table by `file`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -2390,6 +2511,58 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .args::<DeviceArgs>()
             .result::<DeviceAdded>(),
+        CommandSpec::new(SWAP_SIMILAR, "Swap to Similar Sample")
+            .description(
+                "Swaps the sample a Simpler, a Drum Sampler, or a Drum Rack pad's Simpler or \
+                 Drum Sampler holds for the next (`direction` `next`) or previous (`previous`) \
+                 sample in the similar list of its reference (`browser.similar`'s: the \
+                 reference first, then the nearest samples of the browser's places), as Cmd-Right \
+                 and Cmd-Left (Ctrl on Windows and Linux) and the display's and the pads' \
+                 buttons do. Name the sampler with `device`, or the pad with `note` (and `rack`), \
+                 or leave both out for the selected device or pad. Only the sample is replaced: \
+                 every parameter keeps its value, the region goes back to the whole of the new \
+                 sample, manual slices are cleared, and on a pad the note, choke group and \
+                 chain settings stay, the chain's name following the sample's when it was the \
+                 old sample's. The device's similarity reference doesn't change (it becomes \
+                 the sample the device held before, if none was saved). The list doesn't wrap: \
+                 past either end, and for a sample or reference that isn't analysed or has no \
+                 similar samples, the command is refused with the reason. One undo step, named \
+                 Swap Sample. Reads a file outside the project. Read the result in \
+                 `device.similar`.",
+            )
+            .permission(Permission::Edit)
+            .contexts([DeviceView, SampleSwap])
+            .binding(Binding::new("S-SWAP-001").arg("direction", "next"))
+            .binding(Binding::new("S-SWAP-002").arg("direction", "previous"))
+            .args::<SwapSimilarArgs>()
+            .result::<Swapped>(),
+        CommandSpec::new(RETURN_TO_REFERENCE, "Return to Reference")
+            .description(
+                "Loads the similarity reference of a Simpler, a Drum Sampler or a Drum Rack pad's \
+                 sampler back into it, as Return to Reference and Cmd-Down (Ctrl on Windows and \
+                 Linux) do, with everything a swap keeps and resets (`device.swap_similar`). \
+                 Refused while the device holds its reference. One undo step, named Return to \
+                 Reference. Read the result in `device.similar`.",
+            )
+            .permission(Permission::Edit)
+            .contexts([DeviceView, SampleSwap])
+            .binding("S-SWAP-004")
+            .args::<SwapTarget>()
+            .result::<Swapped>(),
+        CommandSpec::new(SIMILAR, "Similar Sample State")
+            .description(
+                "Reports where a sampler's sample stands among the similar samples of its \
+                 reference, the readback of `device.swap_similar`, `device.return_to_reference` \
+                 and `device.set_similarity_reference`: the sample, the reference, the sample's \
+                 place in the reference's list and the list's length, whether the previous \
+                 and next samples and the reference can be loaded, and, when the swap controls \
+                 are disabled, why. Name the sampler as `device.swap_similar` does. Changes \
+                 nothing.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<SwapTarget>()
+            .result::<SimilarState>(),
         CommandSpec::new(SELECT_SLOT, "Select Sample Slot")
             .description(
                 "Selects one of a device's sample slots, as clicking its cell in the panel \

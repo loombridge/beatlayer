@@ -934,10 +934,18 @@ impl Displays {
         } else {
             Vec::new()
         };
+        // Spec: sound-similarity R25. Simpler's display has the swap buttons
+        // at its top right, which a press on is theirs.
+        let swap_rects: Vec<Rect> = if shown.snapshot {
+            crate::sample_swap::display_rects(rect).to_vec()
+        } else {
+            Vec::new()
+        };
         let pointer = ui.input(|i| i.pointer.latest_pos());
         let on_handle = pointer.is_some_and(|p| {
             handle_rects.iter().any(|r| r.contains(p))
                 || slice_handle_rects.iter().any(|r| r.contains(p))
+                || swap_rects.iter().any(|r| r.contains(p))
         });
         let frame_at = |state: &State, x: f32| {
             (state.first + f64::from(x - rect.left()) / width * state.span).clamp(0.0, total)
@@ -1299,6 +1307,10 @@ impl Displays {
             }
         }
 
+        if shown.snapshot {
+            crate::sample_swap::display_buttons(ui, shell, theme, device, rect, events);
+        }
+
         // ----- the context menu --------------------------------------------
         let selection = state.selection;
         let layer = shown.layer;
@@ -1510,4 +1522,9 @@ fn menu(
         revert,
         edited,
     );
+    // Spec: sound-similarity R25. Simpler's similar sample items.
+    if snapshot {
+        ui.separator();
+        crate::sample_swap::menu_items(ui, shell, device, events);
+    }
 }

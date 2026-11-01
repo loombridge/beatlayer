@@ -40,8 +40,8 @@
 use core::fmt;
 
 use bl_commands::Context::{
-    self, Arrangement, Browser, ClipView, DeviceView, Global, RackChains, SampleEditor, Session,
-    TrackHeaders,
+    self, Arrangement, Browser, ClipView, DeviceView, Global, RackChains, SampleEditor, SampleSwap,
+    Session, TrackHeaders,
 };
 use bl_commands::{
     Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry, args_schema, result_schema,
@@ -3120,6 +3120,20 @@ const ENTRIES: &[Entry] = &[
             ignore it. The set keeps the reference, so it reopens playing the same file. Null \
             clears the slot, one undo step named Clear Sample. To load a file from disk as a \
             person does, use `device.load_sample`.",
+    },
+    Entry {
+        id: "device.set_similarity_reference",
+        action: Action::Apply("set_similarity_reference"),
+        label: "Save as Similarity Reference",
+        permission: Permission::Edit,
+        contexts: &[DeviceView, SampleSwap],
+        keys: &[Key::Runs("S-SWAP-003")],
+        description: "Makes the sample a Simpler or Drum Sampler holds (or `media`, a content \
+            hash) its similarity reference, the sample `device.swap_similar` takes its similar \
+            list from and `device.return_to_reference` goes back to (sound similarity R20, R23). \
+            One undo step named Save as Similarity Reference. The reference is saved with the \
+            set and with the device's preset; loading another sample clears it, and the new \
+            sample is the reference again.",
     },
     Entry {
         id: "device.set_wavetable",

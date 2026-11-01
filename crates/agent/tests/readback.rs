@@ -448,6 +448,8 @@ fn fixture() -> Project {
     device.show_preset_name = false;
     device.floating = true;
     device.set_media(0, Some(ContentHash([9; 32])));
+    // The sample similar-sample swapping goes by (sound similarity R23).
+    device.similarity_reference = Some(ContentHash([8; 32]));
     // The edits made to that sample (WP-5.15).
     device.sample_edits = vec![bl_model::SampleEdit {
         kind: bl_model::SampleEditKind::FadeIn,
@@ -1193,6 +1195,7 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "midi_sidechain",
                 "floating",
                 "media",
+                "similarity_reference",
                 "wavetables",
                 "layers",
                 "layers.ram_mode",

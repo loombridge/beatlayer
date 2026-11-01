@@ -14,7 +14,7 @@ use bl_model::{
     Document, Editor, MidiData, RackKind, Receive, TrackId, TrackKind,
 };
 use bl_project::preset::Preset;
-use bl_shell_spec::devices::{ChainRow, Grouped, NewDevice};
+use bl_shell_spec::devices::{ChainRow, Grouped, NewDevice, SwapTarget};
 use bl_shell_spec::pads::{
     DrumRow, ExtractChainArgs, Extracted, GroupToDrumRackArgs, MovePadsArgs, PADS_PER_ROW,
     PADS_SHOWN, PadArgs, PadCopyArgs, PadDropArgs, PadDropped, PadFrame, PadHotSwapArgs, PadKind,
@@ -32,6 +32,7 @@ type PresetState = (
     Option<Vec<bl_model::Articulation>>,
     Option<Vec<bl_model::ModRoute>>,
     Option<bl_model::PluginMpe>,
+    Option<bl_model::ContentHash>,
 );
 
 /// The notes the pad view can start at: the last group of sixteen.
@@ -396,6 +397,71 @@ impl DeviceView {
         Ok(pad_chains(rack, note).iter().map(|c| c.id).collect())
     }
 
+    /// The Simpler or Drum Sampler a swap command acts on (sound similarity
+    /// R20, R24): the device named, the sampler of the pad named, or the
+    /// selected device, or the selected pad's when a drum rack is selected.
+    ///
+    /// # Errors
+    ///
+    /// [`DeviceError`] if the target isn't one, with the reason.
+    pub fn swap_device(&self, doc: &Document, target: SwapTarget) -> Result<DeviceId, DeviceError> {
+        let swaps = |device: &Device| {
+            matches!(
+                &device.kind,
+                DeviceKind::Native { device_type } if bl_devices::swaps_similar(device_type)
+            )
+        };
+        let in_pad = |rack: &Device, note: u8| {
+            let chains = pad_chains(rack, note);
+            let [chain] = chains[..] else {
+                return Err(DeviceError::Unavailable(
+                    "only a pad of one chain swaps its sample".to_owned(),
+                ));
+            };
+            chain
+                .devices
+                .iter()
+                .find(|device| swaps(device))
+                .map(|device| device.id)
+                .ok_or_else(|| {
+                    DeviceError::Unavailable(
+                        "the pad's chain plays no Simpler or Drum Sampler".to_owned(),
+                    )
+                })
+        };
+        if let Some(id) = target.device {
+            let device = doc
+                .device(id)
+                .ok_or_else(|| DeviceError::InvalidArgs(format!("no {id}")))?;
+            return if swaps(device) {
+                Ok(id)
+            } else {
+                Err(DeviceError::Unavailable(format!(
+                    "{id} isn't a Simpler or a Drum Sampler"
+                )))
+            };
+        }
+        if let Some(note) = target.note {
+            return in_pad(self.drum_rack(doc, target.rack)?, note);
+        }
+        let selected = self
+            .selected
+            .and_then(|id| doc.device(id))
+            .ok_or_else(|| DeviceError::Unavailable("select a device first".to_owned()))?;
+        if swaps(selected) {
+            return Ok(selected.id);
+        }
+        match (
+            selected.rack_kind(),
+            self.pads_selected.get(&selected.id).copied(),
+        ) {
+            (Some(RackKind::Drum), Some(note)) => in_pad(selected, note),
+            _ => Err(DeviceError::Unavailable(
+                "select a Simpler, a Drum Sampler or a Drum Rack pad that plays one".to_owned(),
+            )),
+        }
+    }
+
     /// `pad.rename`.
     pub(super) fn rename_pad(
         &mut self,
@@ -629,6 +695,7 @@ impl DeviceView {
                             loaded.articulations,
                             loaded.routes,
                             loaded.mpe,
+                            loaded.similarity_reference,
                         )),
                     ))
                 }
@@ -952,7 +1019,16 @@ impl DeviceView {
                             index,
                             device,
                         })?;
-                        if let Some((params, name, shape, articulations, routes, mpe)) = state {
+                        if let Some((
+                            params,
+                            name,
+                            shape,
+                            articulations,
+                            routes,
+                            mpe,
+                            similarity_reference,
+                        )) = state
+                        {
                             editor.apply(Command::SetDeviceState {
                                 device: id,
                                 params,
@@ -961,6 +1037,7 @@ impl DeviceView {
                                 articulations,
                                 routes,
                                 mpe,
+                                similarity_reference,
                             })?;
                         }
                     }

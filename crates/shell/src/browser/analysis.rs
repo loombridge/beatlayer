@@ -116,8 +116,17 @@ pub struct Analysis {
     // shortcut: every descriptor is held in memory (about 800 bytes each), so
     // 100,000 sounds take about 80 MB; page them from the database if that
     // becomes too much.
-    descriptors: HashMap<String, Descriptor>,
-    descriptors_loaded: bool,
+    //
+    // A mutex, so a search that only reads the analysis (the swap buttons'
+    // state, drawn each frame) can load them.
+    descriptors: Mutex<Descriptors>,
+}
+
+/// The descriptors by content key, and whether the database's have been read.
+#[derive(Default)]
+struct Descriptors {
+    by_key: HashMap<String, Descriptor>,
+    loaded: bool,
 }
 
 impl std::fmt::Debug for Analysis {
@@ -149,8 +158,7 @@ impl Analysis {
             tagged: Vec::new(),
             analysed: 0,
             skipped: 0,
-            descriptors: HashMap::new(),
-            descriptors_loaded: false,
+            descriptors: Mutex::default(),
         }
     }
 
@@ -312,7 +320,11 @@ impl Analysis {
                 if let Ok(mut keys) = self.keys.lock() {
                     keys.insert(key.clone(), tags.clone());
                 }
-                self.descriptors.insert(key.clone(), descriptor.clone());
+                self.descriptors
+                    .get_mut()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .by_key
+                    .insert(key.clone(), descriptor.clone());
                 (
                     DONE,
                     Some(key),
@@ -392,8 +404,10 @@ impl Analysis {
         self.key_of(path).is_some()
     }
 
-    /// The content key of an analysed file's descriptor.
-    fn key_of(&self, path: &Path) -> Option<&str> {
+    /// The content key of an analysed file's descriptor: for an audio file
+    /// the hash of its bytes, which is the name the media store gives it.
+    #[must_use]
+    pub fn key_of(&self, path: &Path) -> Option<&str> {
         let row = self.known.get(path.to_string_lossy().as_ref())?;
         if row.status != DONE {
             return None;
@@ -417,26 +431,30 @@ impl Analysis {
     /// when the caller passes one kind. `None` when the reference has no
     /// descriptor.
     pub fn nearest<K: Copy>(
-        &mut self,
+        &self,
         db: Option<&Db>,
         reference: &Path,
         candidates: &[(K, PathBuf)],
         within: f32,
         limit: usize,
     ) -> Option<Vec<(K, f32)>> {
-        if !self.descriptors_loaded
+        let mut held = self
+            .descriptors
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !held.loaded
             && let Some(db) = db
         {
             for (key, version, bytes) in db.descriptors() {
                 if version == similarity::VERSION
                     && let Some(descriptor) = Descriptor::from_bytes(&bytes)
                 {
-                    self.descriptors.entry(key).or_insert(descriptor);
+                    held.by_key.entry(key).or_insert(descriptor);
                 }
             }
-            self.descriptors_loaded = true;
+            held.loaded = true;
         }
-        let of = |path: &Path| self.key_of(path).and_then(|key| self.descriptors.get(key));
+        let of = |path: &Path| self.key_of(path).and_then(|key| held.by_key.get(key));
         let reference = of(reference)?;
         let found: Vec<(K, &Descriptor)> = candidates
             .iter()
@@ -452,6 +470,22 @@ impl Analysis {
         near.sort_by(|a, b| a.1.total_cmp(&b.1));
         near.truncate(limit);
         Some(near)
+    }
+
+    /// The path of an analysed file whose descriptor is kept under `key`.
+    #[must_use]
+    pub fn path_of_key(&self, key: &str) -> Option<&Path> {
+        self.known
+            .values()
+            .find(|row| row.status == DONE && row.key.as_deref() == Some(key))
+            .map(|row| Path::new(row.path.as_str()))
+    }
+
+    /// A number that changes when a descriptor is made or a file is
+    /// analysed, so a list worked out from them is worked out again.
+    #[must_use]
+    pub fn version(&self) -> (usize, usize) {
+        (self.analysed, self.computed)
     }
 
     /// What the Status Bar and `browser.analysis_state` say.

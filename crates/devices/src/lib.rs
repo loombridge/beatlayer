@@ -461,6 +461,14 @@ pub fn plays_samples(device_type: &str) -> bool {
     )
 }
 
+/// Whether a device of this type swaps its sample for similar ones
+/// (sound similarity R20): Simpler and Drum Sampler, not the multisampler
+/// or the eight-slot drum sampler.
+#[must_use]
+pub fn swaps_similar(device_type: &str) -> bool {
+    matches!(device_type, sampler::SAMPLER | DRUM_SAMPLER)
+}
+
 /// A [`KitHost`] with the kit plug-ins compiled into Beatlayer: its
 /// examples with the `kit-examples` feature, none otherwise.
 #[must_use]

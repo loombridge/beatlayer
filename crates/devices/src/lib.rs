@@ -54,6 +54,7 @@ pub mod echo;
 pub mod eq;
 pub mod filter_delay;
 mod filters;
+pub mod fm;
 mod framework;
 pub mod gate;
 pub mod gate_mod;

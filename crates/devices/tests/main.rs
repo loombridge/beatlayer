@@ -39,6 +39,7 @@ mod echo;
 mod effect_parts;
 mod eq;
 mod filter_delay;
+mod fm;
 mod framework;
 mod gate;
 mod gate_mod;

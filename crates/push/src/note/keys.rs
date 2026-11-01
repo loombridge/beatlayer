@@ -71,10 +71,7 @@ impl Note {
         ctx: &mut Ctx<'_>,
         model: &ReadModel,
     ) -> Down {
-        let held = self.down.values().find_map(|down| match down {
-            Down::Step(step) => Some(*step),
-            _ => None,
-        });
+        let held = self.down.values().find_map(Down::step);
         if let Some(step) = held
             && let Some(id) = step.clip
             && let Some((_, midi)) = clip::midi(model, id)

@@ -936,6 +936,24 @@ pub fn copy_tracks(
     if data.is_empty() {
         return Err("there's nothing on the clipboard to paste".to_owned());
     }
+    editor
+        .transact(label, |editor| {
+            copy_tracks_in(editor, data, place, source_returns)
+        })
+        .map_err(|e| e.to_string())
+}
+
+/// [`copy_tracks`] inside a transaction the caller has open.
+///
+/// # Errors
+///
+/// [`EditError`] if a command is refused.
+pub fn copy_tracks_in(
+    editor: &mut Editor,
+    data: &[TrackData],
+    place: Place,
+    source_returns: Option<Vec<TrackId>>,
+) -> Result<Vec<TrackId>, EditError> {
     let mut ids = Copies {
         foreign: source_returns,
         ..Copies::default()
@@ -943,29 +961,24 @@ pub fn copy_tracks(
     let mut copies = Vec::with_capacity(data.len());
     let mut index = place.index;
     let mut returns = place.returns;
-    editor
-        .transact(label, |editor| {
-            for track in data {
-                // A return track goes among the returns, the others in the
-                // list they were pasted into.
-                let at = if track.kind == TrackKind::Return {
-                    let at = returns;
-                    returns += 1;
-                    at
-                } else {
-                    let at = index;
-                    index += 1;
-                    at
-                };
-                copies.push(create(editor, track, place.parent, at, &mut ids)?);
-            }
-            for track in data {
-                finish(editor, track, &ids)?;
-            }
-            map_copies(editor, data, &ids)?;
-            Ok::<_, EditError>(())
-        })
-        .map_err(|e| e.to_string())?;
+    for track in data {
+        // A return track goes among the returns, the others in the list they
+        // were pasted into.
+        let at = if track.kind == TrackKind::Return {
+            let at = returns;
+            returns += 1;
+            at
+        } else {
+            let at = index;
+            index += 1;
+            at
+        };
+        copies.push(create(editor, track, place.parent, at, &mut ids)?);
+    }
+    for track in data {
+        finish(editor, track, &ids)?;
+    }
+    map_copies(editor, data, &ids)?;
     Ok(copies)
 }
 

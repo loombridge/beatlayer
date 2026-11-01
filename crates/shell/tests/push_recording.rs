@@ -784,10 +784,12 @@ fn held_steps_and_a_turn_write_the_value_over_their_spans() {
         "flat over the spans"
     );
     assert!(points[0].1 < 1.0, "the turn lowered it: {points:?}");
+    // Held steps add no notes (push-2-tracks R55), so the touch is the one
+    // undo step.
     assert_eq!(
         rig.steps() - steps,
-        1 + 2,
-        "the clip's notes aside, one undo step for the touch: {}",
+        1,
+        "one undo step for the touch: {}",
         rig.steps()
     );
 }

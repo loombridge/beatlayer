@@ -13,6 +13,7 @@ use bl_control::{Kind, Ring};
 pub mod automation;
 pub mod browse;
 pub mod buttons;
+pub mod clip;
 pub mod content;
 pub mod controls;
 pub mod curve;
@@ -74,9 +75,9 @@ pub fn placeholder_contents() -> MakeContents {
 }
 
 /// The contents of the modes that are built: Note Mode's, Device Mode's,
-/// Browse Mode's, Mix Mode's and Session Mode's own, and the placeholders for
+/// Browse Mode's, Mix Mode's, Clip Mode's and Session Mode's own, and the placeholders for
 /// the others (`docs/specs/push-2-notes.md`, `docs/specs/push-2-tracks.md` R5,
-/// R15, R28, R59).
+/// R15, R28, R43, R59).
 #[must_use]
 pub fn contents() -> MakeContents {
     Arc::new(|| {
@@ -86,6 +87,7 @@ pub fn contents() -> MakeContents {
             Box::new(device::DeviceMode::new());
         contents.display[content::DisplayMode::Browse.index()] = Box::new(browse::Browse::new());
         contents.display[content::DisplayMode::Mix.index()] = Box::new(mix::Mix::new());
+        contents.display[content::DisplayMode::Clip.index()] = Box::new(clip::ClipMode::new());
         contents.pads[1] = Box::new(session::Session::new());
         contents
     })

@@ -157,20 +157,43 @@ impl<T: Send + 'static> Worker<T> {
     }
 }
 
+/// Where the network comes from.
+pub enum Backend {
+    /// ONNX Runtime's library and the model, from the Packages manager.
+    Packages {
+        /// ONNX Runtime's library.
+        runtime: PathBuf,
+        /// The model.
+        model: PathBuf,
+        /// Where Core ML keeps its compiled model (R34).
+        cache: PathBuf,
+    },
+    /// A generated stand-in for tests, which splits a mix into four fixed
+    /// shares that sum to it.
+    Fixture,
+}
+
+/// One piece of audio to separate.
+pub enum Input {
+    /// A region of a file of the set's media.
+    Region {
+        /// The file.
+        source: ContentHash,
+        /// Where in the file to start and stop, in seconds.
+        region: (f64, f64),
+    },
+    /// Audio already rendered, planar stereo at 44.1 kHz.
+    Frames([Vec<f32>; 2]),
+}
+
 /// What a separation works on.
 pub struct Job {
-    /// ONNX Runtime's library.
-    pub runtime: PathBuf,
-    /// The model.
-    pub model: PathBuf,
-    /// Where Core ML keeps its compiled model (R34).
-    pub cache: PathBuf,
-    /// The set's media, which decodes the clip's file.
+    /// The network.
+    pub backend: Backend,
+    /// The set's media, which decodes the files.
     pub media: Arc<MediaStore>,
-    /// The clip's file.
-    pub source: ContentHash,
-    /// Where in the file to start and stop, in seconds.
-    pub region: (f64, f64),
+    /// What to separate, one after another.
+    pub inputs: Vec<Input>,
     /// How hard to work.
     pub quality: Quality,
 }
@@ -184,12 +207,29 @@ pub struct Separated {
     pub stems: separation::Stems,
 }
 
+/// A stand-in for the network that splits a window into fixed shares of
+/// itself, Drums, Bass, Others and Vocals in that order, which sum to 1.
+struct Shares;
+
+impl separation::Network for Shares {
+    fn window(&self) -> usize {
+        4_096
+    }
+
+    fn run(&mut self, input: &[f32]) -> Result<Vec<f32>, String> {
+        Ok([0.2f32, 0.3, 0.4, 0.1]
+            .iter()
+            .flat_map(|share| input.iter().map(move |sample| sample * share))
+            .collect())
+    }
+}
+
 /// Starts separating on a thread of its own.
 ///
 /// # Errors
 ///
 /// A message if the thread can't start.
-pub fn separate(job: Job) -> Result<Worker<Separated>, String> {
+pub fn separate(job: Job) -> Result<Worker<Vec<Separated>>, String> {
     Worker::start("bl-shell-stems", move |progress| {
         match run_separation(&job, progress) {
             Ok(separated) => Ended::Done(separated),
@@ -199,13 +239,88 @@ pub fn separate(job: Job) -> Result<Worker<Separated>, String> {
     })
 }
 
-fn run_separation(job: &Job, progress: &Progress) -> Result<Separated, separation::Error> {
+fn run_separation(job: &Job, progress: &Progress) -> Result<Vec<Separated>, separation::Error> {
     let failed = separation::Error::Failed;
-    progress.set_stage("Reading the clip");
     progress.total.store(1000, Ordering::Relaxed);
+    progress.set_stage("Loading the model");
+    let mut demucs = match &job.backend {
+        Backend::Packages {
+            runtime,
+            model,
+            cache,
+        } => {
+            let threads = thread::available_parallelism().map_or(4, std::num::NonZero::get);
+            let options = separation::onnx::Options {
+                threads,
+                accelerate: true,
+                cache: Some(cache.clone()),
+            };
+            let network = separation::onnx::Demucs::load(runtime, model, &options, &mut |stage| {
+                progress.set_stage(stage);
+            })
+            .map_err(failed)?;
+            progress.set_provider(network.report().describe());
+            Some(network)
+        }
+        Backend::Fixture => None,
+    };
+    let mut shares = Shares;
+    let count = job.inputs.len();
+    let mut out = Vec::with_capacity(count);
+    for (index, input) in job.inputs.iter().enumerate() {
+        progress.set_stage("Reading the audio");
+        let (from, [left, right]) = match input {
+            Input::Region { source, region } => region_frames(job, *source, *region)?,
+            Input::Frames(frames) => (0, frames.clone()),
+        };
+        if progress.cancelled() {
+            return Err(separation::Error::Cancelled);
+        }
+        progress.set_stage(match &demucs {
+            Some(network) => format!("Separating on {}", network.report().describe()),
+            None => "Separating".to_owned(),
+        });
+        // Each input's share of the bar, so several tracks fill it in turn.
+        let share = |fraction: f32| (index as f32 + fraction) / count as f32;
+        let stems = separation::separate(
+            &left,
+            &right,
+            match &mut demucs {
+                Some(network) => network,
+                None => &mut shares,
+            },
+            job.quality,
+            &mut |fraction| {
+                progress.done.store(
+                    (f64::from(share(fraction)) * 1000.0) as u64,
+                    Ordering::Relaxed,
+                );
+                !progress.cancelled()
+            },
+        );
+        // A GPU run that failed part way finished on the CPU (R33).
+        if let Some(network) = &demucs {
+            progress.set_provider(network.report().describe());
+        }
+        out.push(Separated {
+            from,
+            stems: stems?,
+        });
+    }
+    Ok(out)
+}
+
+/// A file's region at 44.1 kHz as planar stereo, and where it starts in the
+/// file, in frames.
+fn region_frames(
+    job: &Job,
+    source: ContentHash,
+    region: (f64, f64),
+) -> Result<(usize, [Vec<f32>; 2]), separation::Error> {
+    let failed = separation::Error::Failed;
     let audio = job
         .media
-        .load(job.source)
+        .load(source)
         .map_err(|e| failed(format!("couldn't read the clip's file: {e}")))?;
     let audio = if audio.sample_rate() == RATE {
         audio
@@ -215,12 +330,9 @@ fn run_separation(job: &Job, progress: &Progress) -> Result<Separated, separatio
                 .map_err(|e| failed(format!("couldn't convert the clip's file: {e}")))?,
         )
     };
-    if progress.cancelled() {
-        return Err(separation::Error::Cancelled);
-    }
     let frames = audio.frames();
     let at = |seconds: f64| ((seconds * f64::from(RATE)).round().max(0.0) as usize).min(frames);
-    let (from, to) = (at(job.region.0), at(job.region.1));
+    let (from, to) = (at(region.0), at(region.1));
     if to <= from {
         return Err(failed("the clip plays no audio to separate".to_owned()));
     }
@@ -228,37 +340,7 @@ fn run_separation(job: &Job, progress: &Progress) -> Result<Separated, separatio
         .channel(0)
         .ok_or_else(|| failed("the clip's file has no audio".to_owned()))?;
     let right = audio.channel(1).unwrap_or(left);
-    progress.set_stage("Loading the model");
-    let threads = thread::available_parallelism().map_or(4, std::num::NonZero::get);
-    let options = separation::onnx::Options {
-        threads,
-        accelerate: true,
-        cache: Some(job.cache.clone()),
-    };
-    let mut network =
-        separation::onnx::Demucs::load(&job.runtime, &job.model, &options, &mut |stage| {
-            progress.set_stage(stage);
-        })
-        .map_err(failed)?;
-    let report = network.report().describe();
-    progress.set_stage(format!("Separating on {report}"));
-    progress.set_provider(report);
-    let stems = separation::separate(
-        &left[from..to],
-        &right[from..to],
-        &mut network,
-        job.quality,
-        &mut |fraction| {
-            progress
-                .done
-                .store((f64::from(fraction) * 1000.0) as u64, Ordering::Relaxed);
-            !progress.cancelled()
-        },
-    );
-    // A GPU run that failed part way finished on the CPU (R33).
-    progress.set_provider(network.report().describe());
-    let stems = stems?;
-    Ok(Separated { from, stems })
+    Ok((from, [left[from..to].to_vec(), right[from..to].to_vec()]))
 }
 
 /// The frames of one file the separation writes: `from` frames of silence,

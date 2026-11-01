@@ -258,6 +258,14 @@ pub enum Enter {
     AddTrack,
     /// Add Device was pressed (push-2-tracks R25).
     AddDevice,
+    /// Clip Mode offered a sample for this empty audio slot (push-2-tracks
+    /// R43).
+    Samples {
+        /// The track.
+        track: bl_model::TrackId,
+        /// The scene.
+        scene: bl_model::SceneId,
+    },
 }
 
 /// How the touch strip is configured (R11).
@@ -320,6 +328,9 @@ pub struct Ctx<'a> {
     pub mix_page: MixPage,
     /// The display mode, for a pad mode whose buttons it shares (notes R45).
     pub display: DisplayMode,
+    /// What Note Mode showed at the last tick, for the display modes that
+    /// follow its layout (push-2-tracks R50 to R57).
+    pub note: Option<&'a crate::note::State>,
     /// The key of the slice picked on a slicing Simpler's pads (notes R73).
     pub slice: Option<u8>,
     /// Whether Simpler's Pad Slicing is on (notes R74).
@@ -336,6 +347,10 @@ pub(crate) enum Action {
     Aftertouch(bool),
     /// An encoder's turns are a gesture the surface ends at its release.
     Gesture(u8),
+    /// Browse Mode is entered, and shown.
+    Browse(Enter),
+    /// The steps held are being edited, so letting them go is no tap.
+    KeepSteps,
 }
 
 impl Ctx<'_> {
@@ -379,6 +394,19 @@ impl Ctx<'_> {
         }
         self.cx
             .run("arrangement.select_tracks", json!({ "tracks": [track] }));
+    }
+
+    /// Says the steps held are being edited, so letting one go isn't a tap
+    /// that toggles its note (push-2-tracks R55).
+    pub fn keep_steps(&mut self) {
+        self.actions.push(Action::KeepSteps);
+    }
+
+    /// Opens Browse Mode listing the audio files Load puts in the empty slot
+    /// at `track` and `scene` (push-2-tracks R43).
+    pub fn browse_samples(&mut self, track: bl_model::TrackId, scene: bl_model::SceneId) {
+        self.actions
+            .push(Action::Browse(Enter::Samples { track, scene }));
     }
 
     /// Chooses channel pressure (false) or polyphonic key pressure for the
@@ -448,6 +476,11 @@ pub struct Paint<'a> {
     pub colours: &'a [[u8; 3]],
     /// The steps held in Note Mode.
     pub held_steps: &'a [HeldStep],
+    /// What Note Mode showed at the last tick, for the display modes that
+    /// follow its layout (push-2-tracks R50 to R57).
+    pub note: Option<&'a crate::note::State>,
+    /// Whether the pads are in Session Mode (push-2-tracks R71).
+    pub session: bool,
     /// The key of the slice picked on a slicing Simpler's pads (notes R73).
     pub slice: Option<u8>,
 }
@@ -505,6 +538,11 @@ pub trait Content: Send {
         None
     }
 
+    /// What Clip Mode shows, for `push.state` (push-2-tracks R58).
+    fn clip_state(&self) -> Option<crate::clip::State> {
+        None
+    }
+
     /// What Session Mode shows, for `push.state` (push-2-tracks R73).
     fn session_state(&self) -> Option<crate::session::State> {
         None
@@ -533,6 +571,10 @@ pub trait Content: Send {
     fn scale_available(&self) -> bool {
         false
     }
+
+    /// The steps held are being edited by the display mode: a pad let go
+    /// afterwards toggles nothing (push-2-tracks R55).
+    fn keep_steps(&mut self) {}
 
     /// The steps held down now: only Note Mode has any (notes R25).
     fn held_steps(&self) -> Vec<HeldStep> {

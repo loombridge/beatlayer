@@ -10,7 +10,7 @@ use bl_engine::SlotState;
 use bl_model::{Clip, MidiData, TrackId, swatch_rgb};
 
 use super::grid::{self, Role, lighter, scaled};
-use super::{Down, Frame, Kind, Melodic, Melody, Note, State, bit, clip, melodic, pads};
+use super::{Area, Down, Fit, Frame, Kind, Melodic, Melody, Note, State, bit, clip, melodic, pads};
 use crate::content::Paint;
 use crate::controls::cc;
 use crate::leds::{Led, fixed};
@@ -118,8 +118,44 @@ impl Note {
             held_steps: crate::content::Content::held_steps(self),
             accent: self.accent.on(),
             repeat: self.repeating(frame.track),
+            area: self.area(frame),
             melody: melodic.then(|| Self::melody(frame, self.strip)),
         };
+    }
+
+    /// What the layout lets the display show of the clip (push-2-tracks R50
+    /// to R54).
+    fn area(&self, frame: &Frame) -> Option<Area> {
+        let (from, to) = (
+            frame.pages.step_start(self.pair, 0),
+            frame.pages.step_start(self.pair + 1, 0),
+        );
+        let (fit, low, high) = match frame.kind {
+            Kind::Silent => return None,
+            Kind::Rack { .. } | Kind::Slices { .. } => {
+                let key = frame.selected.unwrap_or(36);
+                match frame.layout {
+                    grid::Layout::Pads => (Fit::Folded, 0, 127),
+                    _ => (Fit::Pad, key, key),
+                }
+            }
+            Kind::Melodic => {
+                let (low, high) = frame.view().range().unwrap_or((frame.low, frame.low));
+                match frame.melodic {
+                    Melodic::Notes => (Fit::Folded, 0, 127),
+                    Melodic::Sequencer => (Fit::Sequencer, low, high),
+                    Melodic::SequencerNotes => (Fit::SequencerNotes, low, high),
+                }
+            }
+        };
+        Some(Area {
+            fit,
+            from,
+            to,
+            low,
+            high,
+            step: frame.size.ticks(),
+        })
     }
 
     /// What a melodic layout shows, for `push.state` (R32 to R44).
@@ -176,10 +212,7 @@ impl Note {
             } => Some(*note),
             _ => None,
         }));
-        let held = self.down.values().find_map(|down| match down {
-            Down::Step(step) => Some(*step),
-            _ => None,
-        });
+        let held = self.down.values().find_map(Down::step);
         for row in 0..8 {
             for column in 0..8 {
                 let shade = match Self::role(&frame, row, column) {
@@ -511,7 +544,7 @@ impl Note {
         let held = self
             .down
             .values()
-            .any(|down| matches!(down, Down::Step(step) if step.start == start));
+            .any(|down| down.step().is_some_and(|step| step.start == start));
         if held {
             return Shade::Fixed(fixed::WHITE);
         }

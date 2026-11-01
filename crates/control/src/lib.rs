@@ -38,7 +38,7 @@ pub use host::{CommandRequest, ROWS, RowConfig, RowReport, RunState, Surfaces, T
 pub use surface::{
     Ask, Control, ControlSurface, Convert, Cx, DeviceViews, DrumView, Focus, Gesture, Kind, Lock,
     Moves, Out, ParamView, QuantizeView, ReadModel, Recognise, Request, Ring, RingStep, RingView,
-    Role, RowView, SampleView, Selection, SurfaceState, TICK, Transport, kind, kinds,
+    Role, RowView, SampleView, Selection, SurfaceState, TICK, Transport, Waveform, kind, kinds,
 };
 
 /// The messages `mappings` take, for the MIDI system's thread to judge by

@@ -16,8 +16,8 @@ use bl_core::midi::MidiMessage;
 use bl_core::time::{Bpm, Ticks};
 use bl_engine::{SlotStatus, TrackMeter};
 use bl_model::{
-    ChainId, DeviceId, Document, ParamDescriptor, ParamId, RackViewMap, RemoteMode, SceneId,
-    TrackId,
+    ChainId, ClipId, DeviceId, Document, ParamDescriptor, ParamId, RackViewMap, RemoteMode,
+    SceneId, TrackId,
 };
 use serde_json::Value;
 
@@ -120,6 +120,27 @@ pub struct ReadModel {
     pub samples: Arc<std::collections::BTreeMap<DeviceId, SampleView>>,
     /// What Convert would act on (push-2-notes R76).
     pub convert: Convert,
+    /// The clip the Clip View shows, for a surface that shows the selected
+    /// clip while the Arrangement is the main view (push-2-tracks R43).
+    pub clip_view: Option<ClipId>,
+    /// The waveform of the audio clip a surface shows, once its peaks are
+    /// built (push-2-tracks R44).
+    pub waveform: Option<Arc<Waveform>>,
+}
+
+/// An audio clip's waveform along the beats of its display: the lowest and
+/// highest sample of equal stretches of the file's time from `from` to `to`,
+/// all channels together (push-2-tracks R44).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Waveform {
+    /// The clip the peaks are for.
+    pub clip: ClipId,
+    /// The beat of the clip's contents the first point starts on.
+    pub from: f64,
+    /// The beat the last point ends on.
+    pub to: f64,
+    /// Each point's lowest and highest sample, from -1 to 1.
+    pub peaks: Vec<[f32; 2]>,
 }
 
 /// The Quantize tool's grid and amount, as the Clip View keeps them.
@@ -217,6 +238,8 @@ impl ReadModel {
                 amount: 100,
             },
             automation_arm: false,
+            clip_view: None,
+            waveform: None,
             samples: Arc::default(),
             convert: Convert::default(),
         }

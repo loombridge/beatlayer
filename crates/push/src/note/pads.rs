@@ -23,7 +23,7 @@ pub(super) fn pad_chains(model: &ReadModel, rack: DeviceId, note: u8) -> Vec<&Ch
 
 /// The swatch Push 2 shows for a pad in place of its track's colour, if its
 /// chains have one (R19).
-pub(super) fn pad_colour(model: &ReadModel, rack: DeviceId, note: u8) -> Option<u8> {
+pub(crate) fn pad_colour(model: &ReadModel, rack: DeviceId, note: u8) -> Option<u8> {
     pad_chains(model, rack, note)
         .into_iter()
         .find_map(|chain| chain.push_colour)
@@ -65,6 +65,11 @@ impl Note {
     /// become since (R2).
     pub(super) fn pad_off(&mut self, pad: Pad, ctx: &mut Ctx<'_>) {
         self.repeat_release((pad.row, pad.column));
+        if let Some(Down::Tap(step, tap)) = self.down.get(&(pad.row, pad.column)).copied() {
+            self.down.remove(&(pad.row, pad.column));
+            self.tap_step(step, tap, ctx);
+            return;
+        }
         if let Some(
             Down::Played(note)
             | Down::Picked {

@@ -130,6 +130,9 @@ pub(crate) fn write_steps(
                 .find(|e| e.kind == EnvelopeKind::Automation && e.target == *target)
         })
         .map(|e| &e.envelope);
+    // The held steps edited their automation: let go, they toggle no note
+    // (push-2-tracks R55).
+    ctx.keep_steps();
     let steps = ctx.held_steps;
     let held = |at: Ticks| {
         steps

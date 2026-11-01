@@ -54,6 +54,7 @@ pub mod echo;
 pub mod eq;
 pub mod filter_delay;
 mod filters;
+pub mod fm;
 mod framework;
 pub mod gate;
 pub mod gate_mod;
@@ -100,6 +101,7 @@ pub mod saturator;
 mod sections;
 pub mod shifter;
 mod signal_mod;
+pub mod spectral_blur;
 pub mod spectral_time;
 pub mod spectrum_analyser;
 pub mod stack;
@@ -174,6 +176,7 @@ pub use roar::{ROAR, roar_type};
 pub use sampler::{Sampler, sampler_type, slice_boundaries};
 pub use saturator::{SATURATOR, saturator_type};
 pub use shifter::{SHIFTER, shifter_type};
+pub use spectral_blur::{SPECTRAL_BLUR, spectral_blur_type};
 pub use spectral_time::{SPECTRAL_TIME, spectral_time_type};
 pub use spectrum_analyser::{SPECTRUM, Spectrum, spectrum_type};
 pub use stack::{STACK, stack_type};
@@ -284,6 +287,7 @@ pub fn display_in(
         OSCILLOSCOPE => Some(oscilloscope::display(device, description, values, data)),
         LOOPER => Some(looper::display(device, description, values, data)),
         VECTOR_DELAY => Some(vector_delay::display(device, description, values, data)),
+        SPECTRAL_BLUR => Some(spectral_blur::display(device, description, values, data)),
         CV_INSTRUMENT => Some(cv_instrument::display(device, data)),
         CV_TRIGGERS => Some(cv_triggers::display(device, data)),
         CV_CLOCK_OUT => Some(cv_clock_out::display(device, data)),
@@ -384,6 +388,7 @@ pub fn register(registry: &mut Registry) {
     looper::register(registry);
     pitchloop89::register(registry);
     vector_delay::register(registry);
+    spectral_blur::register(registry);
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell.

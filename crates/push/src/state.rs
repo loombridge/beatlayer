@@ -177,6 +177,8 @@ pub struct Snapshot {
     pub session: Option<crate::session::State>,
     /// What Mix Mode shows, while it is the display mode.
     pub mix: Option<crate::mix::State>,
+    /// What Clip Mode shows, while it is the display mode.
+    pub clip: Option<crate::clip::State>,
     /// What the display's thread is doing.
     pub display: Status,
     /// What the Quantize menu shows while it is open (notes R58).
@@ -230,6 +232,7 @@ impl Snapshot {
             device: None,
             session: None,
             mix: None,
+            clip: None,
             display: Status::default(),
             quantize_menu: None,
             record: "off",

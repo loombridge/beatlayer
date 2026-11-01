@@ -10567,7 +10567,7 @@ The open dialog.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `step` | [`DialogStep`](#dialogstep) | yes | What it shows. |
-| `clip` | [`ClipId`](#clipid) | yes | The clip it separates. |
+| `source` | [`StemSource`](#stemsource) | yes | What it separates. |
 
 <details><summary>JSON Schema</summary>
 
@@ -10575,9 +10575,9 @@ The open dialog.
 {
   "description": "The open dialog.",
   "properties": {
-    "clip": {
-      "$ref": "#/$defs/ClipId",
-      "description": "The clip it separates."
+    "source": {
+      "$ref": "#/$defs/StemSource",
+      "description": "What it separates."
     },
     "step": {
       "$ref": "#/$defs/DialogStep",
@@ -10586,7 +10586,7 @@ The open dialog.
   },
   "required": [
     "step",
-    "clip"
+    "source"
   ],
   "type": "object"
 }
@@ -25733,6 +25733,231 @@ A chain on one of the lower buttons while a rack's button is held.
 
 </details>
 
+### `PushClipArea`
+
+The sequenceable area the pads edit in a step sequencing layout (push-2-tracks R51).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `fit` | string | yes | How the display fits the clip: `folded`, `sequencer`, `sequencer_notes` or `pad`. |
+| `from` | [`Ticks`](#ticks) | yes | Where the page of steps starts, in ticks. |
+| `to` | [`Ticks`](#ticks) | yes | Where it ends. |
+| `low` | integer from 0 to 255 | yes | The lowest pitch the pads edit. |
+| `high` | integer from 0 to 255 | yes | The highest. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The sequenceable area the pads edit in a step sequencing layout (push-2-tracks R51).",
+  "properties": {
+    "fit": {
+      "description": "How the display fits the clip: `folded`, `sequencer`, `sequencer_notes` or `pad`.",
+      "type": "string"
+    },
+    "from": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where the page of steps starts, in ticks."
+    },
+    "high": {
+      "description": "The highest.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "low": {
+      "description": "The lowest pitch the pads edit.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "to": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it ends."
+    }
+  },
+  "required": [
+    "fit",
+    "from",
+    "to",
+    "low",
+    "high"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushClipControl`
+
+One control on an encoder in Clip Mode (push-2-tracks R58).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `encoder` | integer from 0 to 255 | yes | The encoder, from 1. |
+| `name` | string | yes | The control's name. |
+| `value` | string | yes | Its value as the display shows it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One control on an encoder in Clip Mode (push-2-tracks R58).",
+  "properties": {
+    "encoder": {
+      "description": "The encoder, from 1.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "name": {
+      "description": "The control's name.",
+      "type": "string"
+    },
+    "value": {
+      "description": "Its value as the display shows it.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "encoder",
+    "name",
+    "value"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushClipMode`
+
+What Clip Mode shows (push-2-tracks R58).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | yes | The clip shown. |
+| `shows` | string | yes | What the mode shows: `midi`, `audio`, `empty_midi`, `empty_audio` or `nothing`. |
+| `name` | string | yes | The clip's name. |
+| `looping` | boolean or null | yes | Whether the clip's Loop is on. |
+| `controls` | array of [`PushClipControl`](#pushclipcontrol) | yes | The controls on the encoders, left to right. |
+| `zoom` | number | yes | The zoom: 1 shows the whole clip. |
+| `view` | array of number, at least 2 | yes | The span of beats of the clip's contents the display shows. |
+| `folded` | boolean | yes | Whether the display is folded to the pitches that hold notes. |
+| `area` | [`PushClipArea`](#pushcliparea) or null | yes | The sequenceable area the pads edit. |
+| `held_steps` | array of [`PushHeldStep`](#pushheldstep) | yes | The steps held, whose notes the encoders set. |
+| `select_pad` | integer or null | yes | The drum pad whose every note the encoders set while Select holds it, as a MIDI note. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What Clip Mode shows (push-2-tracks R58).",
+  "properties": {
+    "area": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushClipArea"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The sequenceable area the pads edit."
+    },
+    "clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip shown."
+    },
+    "controls": {
+      "description": "The controls on the encoders, left to right.",
+      "items": {
+        "$ref": "#/$defs/PushClipControl"
+      },
+      "type": "array"
+    },
+    "folded": {
+      "description": "Whether the display is folded to the pitches that hold notes.",
+      "type": "boolean"
+    },
+    "held_steps": {
+      "description": "The steps held, whose notes the encoders set.",
+      "items": {
+        "$ref": "#/$defs/PushHeldStep"
+      },
+      "type": "array"
+    },
+    "looping": {
+      "description": "Whether the clip's Loop is on.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "The clip's name.",
+      "type": "string"
+    },
+    "select_pad": {
+      "description": "The drum pad whose every note the encoders set while Select holds it, as a MIDI note.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "shows": {
+      "description": "What the mode shows: `midi`, `audio`, `empty_midi`, `empty_audio` or `nothing`.",
+      "type": "string"
+    },
+    "view": {
+      "description": "The span of beats of the clip's contents the display shows.",
+      "items": {
+        "format": "double",
+        "type": "number"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": "array"
+    },
+    "zoom": {
+      "description": "The zoom: 1 shows the whole clip.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "clip",
+    "shows",
+    "name",
+    "looping",
+    "controls",
+    "zoom",
+    "view",
+    "folded",
+    "area",
+    "held_steps",
+    "select_pad"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `PushConvertTo`
 
 What `push.convert` makes a new MIDI track or drum rack of.
@@ -26242,6 +26467,7 @@ One connected Push 2.
 | `display` | [`PushDisplay`](#pushdisplay) | yes | The display. |
 | `browse` | [`PushBrowse`](#pushbrowse) or null | yes | What Browse Mode shows, while it is the display mode. |
 | `device` | [`PushDeviceMode`](#pushdevicemode) or null | yes | What Device Mode shows, while it is the display mode. |
+| `clip` | [`PushClipMode`](#pushclipmode) or null | yes | What Clip Mode shows, while it is the display mode. |
 | `session` | [`PushSession`](#pushsession) or null | yes | What Session Mode shows, while it is the pad mode. |
 | `mix_mode` | [`PushMix`](#pushmix) or null | yes | What Mix Mode shows, while it is the display mode. |
 | `note` | [`PushNote`](#pushnote) or null | yes | What Note Mode shows, while it is the pad mode. |
@@ -26262,6 +26488,17 @@ One connected Push 2.
         }
       ],
       "description": "What Browse Mode shows, while it is the display mode."
+    },
+    "clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushClipMode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What Clip Mode shows, while it is the display mode."
     },
     "colour_picker": {
       "description": "Whether the colour picker is open.",
@@ -26436,6 +26673,7 @@ One connected Push 2.
     "display",
     "browse",
     "device",
+    "clip",
     "session",
     "mix_mode",
     "note"
@@ -34668,6 +34906,95 @@ One of:
 
 </details>
 
+### `StemSource`
+
+What a separation works on (the stem separation spec, R22).
+
+One of:
+
+- an object with `kind` = `"clip"`, `clip` ([`ClipId`](#clipid)): An audio clip in the Arrangement or in a Session slot.
+- an object with `kind` = `"file"`, `path` (string): An audio file, separated whole: what the browser's menu runs.
+- an object with `kind` = `"time_selection"`, `tracks` (array of [`TrackId`](#trackid)), `start` ([`Ticks`](#ticks)), `end` ([`Ticks`](#ticks)): The audio the clips of audio tracks play inside the Arrangement's time selection, each track on its own.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a separation works on (the stem separation spec, R22).",
+  "oneOf": [
+    {
+      "description": "An audio clip in the Arrangement or in a Session slot.",
+      "properties": {
+        "clip": {
+          "$ref": "#/$defs/ClipId",
+          "description": "The clip."
+        },
+        "kind": {
+          "const": "clip",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "clip"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "An audio file, separated whole: what the browser's menu runs.",
+      "properties": {
+        "kind": {
+          "const": "file",
+          "type": "string"
+        },
+        "path": {
+          "description": "Its path.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "path"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The audio the clips of audio tracks play inside the Arrangement's time selection, each track on its own.",
+      "properties": {
+        "end": {
+          "$ref": "#/$defs/Ticks",
+          "description": "The range's end."
+        },
+        "kind": {
+          "const": "time_selection",
+          "type": "string"
+        },
+        "start": {
+          "$ref": "#/$defs/Ticks",
+          "description": "The range's start."
+        },
+        "tracks": {
+          "description": "The tracks; those with no audio in the range are skipped.",
+          "items": {
+            "$ref": "#/$defs/TrackId"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "tracks",
+        "start",
+        "end"
+      ],
+      "type": "object"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `StemsStatus`
 
 What `stems.status` returns.
@@ -34679,6 +35006,7 @@ What `stems.status` returns.
 | `packages` | array of [`PackageStatus`](#packagestatus) | yes | The packages. |
 | `install` | [`JobStatus`](#jobstatus) | yes | The download. |
 | `separation` | [`JobStatus`](#jobstatus) | yes | The separation. |
+| `created_clips` | array of [`ClipId`](#clipid) | no | The clips the last separation made, in the order of their tracks. |
 | `created_tracks` | array of [`TrackId`](#trackid) | no | The tracks the last separation made, the group first if it made one. |
 | `dialog` | [`DialogStatus`](#dialogstatus) or null | no | The dialog, if it's open. |
 | `provider` | string | no | What the current or last separation ran on, such as `Core ML`, or `CPU (not the GPU: ...)` with the reason a GPU wasn't used. |
@@ -34689,6 +35017,13 @@ What `stems.status` returns.
 {
   "description": "What `stems.status` returns.",
   "properties": {
+    "created_clips": {
+      "description": "The clips the last separation made, in the order of their tracks.",
+      "items": {
+        "$ref": "#/$defs/ClipId"
+      },
+      "type": "array"
+    },
     "created_tracks": {
       "description": "The tracks the last separation made, the group first if it made one.",
       "items": {

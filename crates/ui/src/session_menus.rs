@@ -460,9 +460,8 @@ impl SessionMenus {
                     .slot
                     .map(|(track, scene)| json!({ "track": track, "scene": scene })),
                 "C-CLIP-SES-007" => Some(json!({ "clips": chosen.clips })),
-                "C-CLIP-SES-006" | "C-CLIP-SES-009" | "C-CLIP-SES-014" | "C-CLIP-SES-019a" => {
-                    clicked_clip.map(|clip| json!({ "clip": clip }))
-                }
+                "C-CLIP-SES-006" | "C-CLIP-SES-009" | "C-CLIP-SES-014" | "C-CLIP-SES-019a"
+                | "C-CLIP-SES-020" => clicked_clip.map(|clip| json!({ "clip": clip })),
                 "C-SCENE-006" => on.scene.map(|scene| json!({ "scene": scene })),
                 _ => None,
             };

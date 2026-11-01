@@ -268,6 +268,7 @@ impl Shell {
         if running || self.modulating {
             self.modulating = running;
             self.audio.modulated_into(&mut self.modulated);
+            self.audio.matrix_played_into(&mut self.matrix_played);
             self.audio.processing_into(&mut self.processing);
         }
         if self
@@ -430,6 +431,21 @@ impl Shell {
     pub fn played(&self, track: TrackId, target: &AutomationTarget) -> Option<(f64, f64)> {
         let (node, param) = bl_engine::target_node(track, target)?;
         self.modulated
+            .iter()
+            .find(|entry| entry.node == node && entry.param == param)
+            .map(|entry| (entry.base, entry.played))
+    }
+
+    /// What an instrument's modulation matrix made `target` of `track` play
+    /// for the newest sounding voice in the last block, matrix included
+    /// (the instrument modulation spec, R12; modulation R31): its base and
+    /// the value it played, in the parameter's own units. `None` while the
+    /// matrix doesn't move it. `played` and `modulation.state` never see it
+    /// (modulation R30).
+    #[must_use]
+    pub fn matrix_played(&self, track: TrackId, target: &AutomationTarget) -> Option<(f64, f64)> {
+        let (node, param) = bl_engine::target_node(track, target)?;
+        self.matrix_played
             .iter()
             .find(|entry| entry.node == node && entry.param == param)
             .map(|entry| (entry.base, entry.played))

@@ -24,6 +24,7 @@
 //! `kit-examples` feature, off by default.
 
 pub mod alignment_delay;
+pub mod analog;
 mod analogue;
 pub mod arpeggiator;
 pub mod articulation_map;
@@ -116,10 +117,12 @@ pub mod tube;
 pub mod tuner;
 pub mod utility;
 pub mod vector_delay;
+pub mod vocoder;
 pub mod wavetables;
 pub mod wax;
 
 pub use alignment_delay::{ALIGNMENT_DELAY, alignment_delay_type};
+pub use analog::{ANALOG, Analog, analog_type};
 pub use arpeggiator::{ARPEGGIATOR, arpeggiator_type};
 pub use auto_filter::{AUTO_FILTER, AutoFilter, auto_filter_type};
 pub use auto_pan_tremolo::{AUTO_PAN_TREMOLO, auto_pan_tremolo_type};
@@ -190,6 +193,7 @@ pub use touch::{TOUCH, touch_type};
 pub use tube::{TUBE, tube_type};
 pub use tuner::{TUNER, Tuner, tuner_type};
 pub use vector_delay::{VECTOR_DELAY, vector_delay_type};
+pub use vocoder::{VOCODER, vocoder_type};
 pub use wax::{WAX, wax_type};
 
 use bl_engine::{DeviceType, Registry};
@@ -292,6 +296,7 @@ pub fn display_in(
         OSCILLOSCOPE => Some(oscilloscope::display(device, description, values, data)),
         LOOPER => Some(looper::display(device, description, values, data)),
         VECTOR_DELAY => Some(vector_delay::display(device, description, values, data)),
+        VOCODER => Some(vocoder::display(device, description, values, data)),
         SPECTRAL_BLUR => Some(spectral_blur::display(device, description, values, data)),
         CV_INSTRUMENT => Some(cv_instrument::display(device, data)),
         CV_TRIGGERS => Some(cv_triggers::display(device, data)),
@@ -322,6 +327,7 @@ pub fn register(registry: &mut Registry) {
     compressor::register(registry);
     corpus::register(registry);
     polysynth::register(registry);
+    analog::register(registry);
     limiter::register(registry);
     delay::register(registry);
     filter_delay::register(registry);
@@ -393,6 +399,7 @@ pub fn register(registry: &mut Registry) {
     looper::register(registry);
     pitchloop89::register(registry);
     vector_delay::register(registry);
+    vocoder::register(registry);
     bass::register(registry);
     poli::register(registry);
     spectral_blur::register(registry);

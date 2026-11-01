@@ -552,6 +552,14 @@ impl fmt::Debug for NodeData {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Articulations(pub bl_model::ArticulationList);
 
+/// An instrument's free modulation routes as node data (the instrument
+/// modulation spec, R10): resolved to places in the device type's lists on
+/// the main thread and sent when a route is set or cleared, so the change
+/// reaches the playing device without a new program. The list is of a
+/// fixed size, so nothing on the audio thread allocates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ModRoutes(pub bl_model::FreeRoutes);
+
 /// A plug-in device's MPE Mode and MPE/Multi-channel Settings as node data
 /// (the MPE spec, R14 and R18): a plug-in's node starts with MPE Mode off,
 /// and the compiler sends this when the device's is on or changes.
@@ -651,6 +659,16 @@ pub trait Node: Send + 'static {
     /// modulation (WP-5.9), with its base and the value it played, so the
     /// engine can publish them. The default reports none.
     fn modulated(&self, report: &mut dyn FnMut(ParamId, f64, f64)) {
+        let _ = report;
+    }
+
+    /// Calls `report` for each parameter an instrument's modulation matrix
+    /// moved in the node's last block, with its base and the value it played
+    /// for the newest sounding voice, matrix included (the instrument
+    /// modulation spec, R12; modulation R31). Apart from
+    /// [`modulated`](Self::modulated), which the matrix never changes
+    /// (modulation R30). The default reports none.
+    fn matrix_played(&self, report: &mut dyn FnMut(ParamId, f64, f64)) {
         let _ = report;
     }
 

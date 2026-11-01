@@ -1637,6 +1637,32 @@ fn a_one_shot_previews_once_at_its_own_speed() {
     });
 }
 
+// Spec: browser R19. The interface thread doesn't hash a file it previews.
+#[test]
+fn a_preview_is_hashed_off_the_interface_thread() {
+    let scratch = Scratch::new("preview-hash");
+    let (mut shell, _) = shell_with_library(&scratch);
+    shell.start_audio();
+    let (loop_file, _) = clicks(&scratch, "hashloop", 100.0, 0.0, 4.8);
+    let hashed = bl_media::ContentHash::file_hashes_on_this_thread();
+    run::<BrowserState>(
+        &mut shell,
+        ids::SELECT,
+        json!({ "paths": [text(&loop_file)] }),
+    );
+    wait_until(&mut shell, "the preview to start", |shell| {
+        shell.browser_preview().playing.is_some()
+    });
+    assert_eq!(
+        bl_media::ContentHash::file_hashes_on_this_thread(),
+        hashed,
+        "the interface thread hashed the file"
+    );
+    // The file still joined the media store, for the analysis cache.
+    let hash = bl_media::ContentHash::of_file(&loop_file).unwrap();
+    assert!(shell.media_store().contains(hash));
+}
+
 // Spec: browser R21.
 #[test]
 fn a_warped_preview_waits_for_its_analysis_and_a_raw_one_does_not() {

@@ -156,9 +156,11 @@ pub(crate) struct Controller {
     sources: BTreeMap<ContentHash, Source>,
     modifications: BTreeMap<ClipId, Modification>,
     regions: BTreeMap<RegionKey, PlacedRegion>,
-    /// Removed modifications, oldest first, and the sources they need.
-    dead_modifications: VecDeque<ClipId>,
-    dead_clips: BTreeMap<ClipId, Modification>,
+    /// Removed modifications, oldest first, and the sources they need. Keyed by
+    /// clip and file: a cropped clip keeps its id, and the modification on its
+    /// old file stays for undo.
+    dead_modifications: VecDeque<(ClipId, ContentHash)>,
+    dead_clips: BTreeMap<(ClipId, ContentHash), Modification>,
     dead_sources: BTreeMap<ContentHash, Source>,
     /// What the plug-in was last told about the tempo and signatures.
     applied: Option<Model>,
@@ -481,9 +483,10 @@ impl Controller {
                     self,
                     deactivateAudioModificationForUndoHistory(modification.reference, 1)
                 );
-                self.dead_clips.insert(clip, modification);
-                self.dead_modifications.retain(|dead| *dead != clip);
-                self.dead_modifications.push_back(clip);
+                let key = (clip, modification.media);
+                self.dead_clips.insert(key, modification);
+                self.dead_modifications.retain(|dead| *dead != key);
+                self.dead_modifications.push_back(key);
             }
         }
         // Sources no modification needs any more go the same way.
@@ -593,28 +596,22 @@ impl Controller {
                 continue;
             };
             let source_ref = source.reference;
-            if let Some(dead) = self.dead_clips.remove(clip) {
-                self.dead_modifications.retain(|dead| dead != clip);
-                if dead.media == wanted.media {
+            let key = (*clip, wanted.media);
+            if let Some(mut dead) = self.dead_clips.remove(&key) {
+                self.dead_modifications.retain(|dead| *dead != key);
+                call!(
+                    self,
+                    deactivateAudioModificationForUndoHistory(dead.reference, 0)
+                );
+                if dead.name != wanted.name {
                     call!(
                         self,
-                        deactivateAudioModificationForUndoHistory(dead.reference, 0)
+                        updateAudioModificationProperties(dead.reference, &raw const properties)
                     );
-                    let mut dead = dead;
-                    if dead.name != wanted.name {
-                        call!(
-                            self,
-                            updateAudioModificationProperties(
-                                dead.reference,
-                                &raw const properties
-                            )
-                        );
-                        dead.name.clone_from(&wanted.name);
-                    }
-                    self.modifications.insert(*clip, dead);
-                    continue;
+                    dead.name.clone_from(&wanted.name);
                 }
-                call!(self, destroyAudioModification(dead.reference));
+                self.modifications.insert(*clip, dead);
+                continue;
             }
             let host = tag();
             let reference = call!(
@@ -777,10 +774,10 @@ impl Controller {
     /// deactivated sources no modification needs.
     fn trim_graveyard(&mut self) -> Result<(), String> {
         while self.dead_modifications.len() > GRAVEYARD {
-            let Some(clip) = self.dead_modifications.pop_front() else {
+            let Some(key) = self.dead_modifications.pop_front() else {
                 break;
             };
-            if let Some(dead) = self.dead_clips.remove(&clip) {
+            if let Some(dead) = self.dead_clips.remove(&key) {
                 call!(self, destroyAudioModification(dead.reference));
             }
         }

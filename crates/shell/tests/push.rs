@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 
 struct Rig {
     shell: Shell,
-    _control: NullControl,
+    control: NullControl,
     test: TestBackend,
     clock: TestClock,
     sim: Simulated,
@@ -38,7 +38,7 @@ impl Rig {
         shell.start_audio();
         Self {
             shell,
-            _control: control,
+            control,
             test,
             clock,
             sim,
@@ -919,4 +919,411 @@ fn a_rack_tracks_second_press_unfolds_its_chains_in_the_mixer_and_they_are_mixed
             .as_array()
             .is_none_or(Vec::is_empty)
     );
+}
+
+impl Rig {
+    /// A Push 2 running in Session Mode, over a set of `tracks` MIDI tracks
+    /// and its eight scenes.
+    fn sessions(tracks: usize) -> Self {
+        let mut rig = Self::new();
+        // An empty set, so a track is the column its test puts it in.
+        let doc = rig.shell.editor().document();
+        let existing: Vec<_> = doc.top_level().chain(doc.returns()).collect();
+        for track in existing {
+            rig.run("track.delete", json!({ "track": track }));
+        }
+        for n in 0..tracks {
+            rig.shell
+                .invoke(
+                    "track.create",
+                    json!({ "kind": "midi", "name": format!("T{n}") }),
+                )
+                .unwrap();
+        }
+        rig.sim.plug_in();
+        rig.refresh();
+        rig.step();
+        rig.tap("session");
+        rig
+    }
+
+    fn tracks(&self) -> Vec<bl_model::TrackId> {
+        self.shell.editor().document().top_level().collect()
+    }
+
+    fn scenes(&self) -> Vec<bl_model::SceneId> {
+        self.shell
+            .editor()
+            .document()
+            .scenes()
+            .map(|s| s.id)
+            .collect()
+    }
+
+    /// A new empty MIDI clip in a slot.
+    fn clip(&mut self, track: usize, scene: usize) -> bl_model::ClipId {
+        let (track, scene) = (self.tracks()[track], self.scenes()[scene]);
+        self.run(
+            "session.insert_empty_midi_clip",
+            json!({ "track": track, "scene": scene }),
+        );
+        self.shell
+            .editor()
+            .document()
+            .slot(track, scene)
+            .expect("the clip is there")
+            .id
+    }
+
+    /// Presses and releases the pad in row `row` from the top.
+    fn pad(&mut self, row: u8, column: u8) {
+        self.pad_down(row, column);
+        self.pad_up(row, column);
+    }
+
+    fn pad_down(&mut self, row: u8, column: u8) {
+        assert!(self.sim.press_pad(7 - row, column, 100));
+        self.pass(1);
+    }
+
+    fn pad_up(&mut self, row: u8, column: u8) {
+        assert!(self.sim.release_pad(7 - row, column));
+        self.pass(1);
+    }
+
+    /// Runs the engine for `millis` of test time, then the surfaces.
+    fn engine(&mut self, millis: u64) {
+        testing::advance(&self.control, &mut self.shell, millis);
+        self.step();
+    }
+
+    /// Runs the engine until `done`, then the surfaces twice.
+    fn wait(&mut self, what: &str, done: impl FnMut(&mut Shell) -> bool) {
+        testing::wait_for(&self.control, &mut self.shell, what, done);
+        self.step();
+        self.step();
+    }
+
+    fn slot_is(&self, track: usize, scene: usize, state: bl_engine::SlotState) -> bool {
+        let (track, scene) = (self.tracks()[track], self.scenes()[scene]);
+        self.shell
+            .session_states()
+            .iter()
+            .any(|s| s.track == track && s.scene == scene && s.state == state)
+    }
+
+    /// Waits until the slot is in `state`.
+    fn wait_slot(&mut self, track: usize, scene: usize, state: bl_engine::SlotState) {
+        let (track, scene) = (self.tracks()[track], self.scenes()[scene]);
+        self.wait("the slot's state", |shell| {
+            shell
+                .session_states()
+                .iter()
+                .any(|s| s.track == track && s.scene == scene && s.state == state)
+        });
+    }
+
+    fn wait_stopped(&mut self) {
+        self.wait("every clip to stop", |shell| {
+            shell.session_states().is_empty()
+        });
+    }
+
+    fn pad_led(&mut self, row: u8, column: u8) -> Value {
+        self.state()["leds"][format!("pad_{}_{column}", 7 - row)].clone()
+    }
+
+    fn clip_colour(&self, track: usize, scene: usize) -> Option<u8> {
+        let (track, scene) = (self.tracks()[track], self.scenes()[scene]);
+        self.shell
+            .editor()
+            .document()
+            .slot(track, scene)
+            .and_then(|c| c.colour)
+    }
+}
+
+// Spec: push-2-tracks R61, R63, R72. A pad launches its clip on the launch
+// grid as `session.state` reads it, and its pad pulses while it plays; a Gate
+// clip stops on the release. It works as well with the Arrangement shown as
+// with the Session View.
+#[test]
+fn a_pad_launches_its_clip_on_the_grid_and_a_gate_clip_stops_on_release() {
+    let mut rig = Rig::sessions(2);
+    let first = rig.shell.main_view();
+    rig.clip(0, 0);
+    let gate = rig.clip(1, 1);
+    rig.run(
+        "clip.set_launch_mode",
+        json!({ "clip": gate, "mode": "gate" }),
+    );
+    rig.run(
+        "session.set_quantization",
+        json!({ "quantization": "1_bar" }),
+    );
+    rig.run("transport.play", json!({}));
+    rig.step();
+
+    for view in 0..2 {
+        // The pad is lit in its clip's colour, and still.
+        rig.step();
+        assert_eq!(rig.pad_led(0, 0)["animation"], Value::Null);
+        rig.pad(0, 0);
+        rig.engine(20);
+        assert!(
+            rig.slot_is(0, 0, bl_engine::SlotState::Queued),
+            "view {view}"
+        );
+        let state = rig.run("session.state", json!({}));
+        assert_eq!(state["launches"][0]["state"], "queued", "{state}");
+        rig.wait_slot(0, 0, bl_engine::SlotState::Playing);
+        assert_ne!(rig.pad_led(0, 0)["animation"], Value::Null, "pulses");
+        rig.run("session.stop_all", json!({}));
+        rig.wait_stopped();
+
+        // A Gate clip plays while the pad is down and stops after it.
+        rig.run(
+            "session.set_quantization",
+            json!({ "quantization": "none" }),
+        );
+        rig.pad_down(1, 1);
+        rig.wait_slot(1, 1, bl_engine::SlotState::Playing);
+        rig.pad_up(1, 1);
+        rig.wait_stopped();
+        rig.run(
+            "session.set_quantization",
+            json!({ "quantization": "1_bar" }),
+        );
+        rig.run("view.toggle_session_arrangement", json!({}));
+        rig.step();
+    }
+    assert_eq!(rig.shell.main_view(), first, "both views were tried");
+}
+
+// Spec: push-2-tracks R61, R62, R65. An empty pad on an armed track records into
+// its slot, and on an unarmed one stops its track; a scene button launches its
+// scene, and with Select selects it.
+#[test]
+fn an_empty_pad_records_and_the_scene_buttons_launch_and_select() {
+    let mut rig = Rig::sessions(2);
+    rig.run(
+        "session.set_quantization",
+        json!({ "quantization": "none" }),
+    );
+    rig.clip(1, 0);
+    // T1, the selected track, is armed by selection (push-2-notes R3).
+    let tracks = rig.tracks();
+    rig.run("mixer.set_arm", json!({ "track": tracks[1], "arm": false }));
+    rig.run("transport.play", json!({}));
+    rig.step();
+    rig.pad(0, 1);
+    rig.wait_slot(1, 0, bl_engine::SlotState::Playing);
+    // An unarmed track's empty slot stops its track.
+    rig.pad(1, 1);
+    rig.wait_stopped();
+    // An armed track's empty slot records.
+    rig.run("mixer.set_arm", json!({ "track": tracks[0], "arm": true }));
+    rig.step();
+    rig.pad(2, 0);
+    rig.wait_slot(0, 2, bl_engine::SlotState::Recording);
+    assert_eq!(rig.pad_led(2, 0)["animation"]["colour"], 127, "pulses red");
+    rig.run("session.stop_all", json!({}));
+    rig.wait("the recording to end", |shell| {
+        shell.session_states().is_empty()
+    });
+
+    // A scene button launches the scene; with Select it only selects it.
+    rig.tap("scene_1");
+    rig.wait_slot(1, 0, bl_engine::SlotState::Playing);
+    rig.run("session.stop_all", json!({}));
+    rig.wait_stopped();
+    let scenes = rig.scenes();
+    assert!(rig.sim.press("select"));
+    rig.pass(10);
+    rig.tap("scene_4");
+    assert!(rig.sim.let_go("select"));
+    rig.pass(10);
+    assert!(rig.shell.session_states().is_empty(), "nothing launched");
+    let state = rig.run("session.state", json!({}));
+    assert_eq!(state["scenes"], json!([scenes[3]]), "{state}");
+}
+
+// Spec: push-2-tracks R64, R66, R1. Shift and a pad open the colour picker and a
+// ring pad colours the clip; Duplicate copies a clip to two slots; Delete and
+// a pad deletes a clip. Each is one undo step.
+#[test]
+fn colouring_duplicating_and_deleting_clips_are_one_undo_step_each() {
+    let mut rig = Rig::sessions(2);
+    rig.clip(0, 0);
+    let (tracks, scenes) = (rig.tracks(), rig.scenes());
+    rig.step();
+
+    let steps = rig.steps();
+    assert!(rig.sim.press("shift"));
+    rig.pass(10);
+    rig.pad(0, 0);
+    assert!(rig.sim.let_go("shift"));
+    rig.pass(10);
+    assert_eq!(rig.state()["colour_picker"], true);
+    assert_eq!(rig.steps(), steps, "opening it changes nothing");
+    rig.pad(5, 0);
+    assert_eq!(rig.clip_colour(0, 0), Some(2));
+    assert_eq!(rig.steps(), steps + 1);
+
+    let steps = rig.steps();
+    assert!(rig.sim.press("duplicate"));
+    rig.pass(10);
+    rig.pad(0, 0);
+    rig.pad(1, 0);
+    rig.pad(3, 1);
+    assert!(rig.sim.let_go("duplicate"));
+    rig.pass(10);
+    let doc = rig.shell.editor().document();
+    assert!(doc.slot(tracks[0], scenes[1]).is_some());
+    assert!(doc.slot(tracks[1], scenes[3]).is_some());
+    assert_eq!(rig.steps(), steps + 2, "one undo step for each copy");
+
+    let steps = rig.steps();
+    assert!(rig.sim.press("delete"));
+    rig.pass(10);
+    rig.pad(1, 0);
+    assert!(rig.sim.let_go("delete"));
+    rig.pass(10);
+    let doc = rig.shell.editor().document();
+    assert!(doc.slot(tracks[0], scenes[1]).is_none());
+    assert!(doc.slot(tracks[0], scenes[0]).is_some());
+    assert_eq!(rig.steps(), steps + 1);
+}
+
+// Spec: push-2-tracks R67, R73, session-view R37. The arrows, Octave and Page
+// move the ring the window's border shows and `push.state` reads, as far as
+// the set reaches.
+#[test]
+fn the_arrows_move_the_ring_and_the_state_and_the_window_follow() {
+    let mut rig = Rig::sessions(12);
+    let tracks = rig.tracks();
+    let ring = |rig: &mut Rig| rig.run("session.state", json!({}))["rings"][0].clone();
+    assert_eq!(ring(&mut rig)["tracks"][0], json!(tracks[0]));
+    rig.tap("right");
+    assert_eq!(ring(&mut rig)["tracks"][0], json!(tracks[1]));
+    assert_eq!(rig.state()["session"]["first_track"], json!(tracks[1]));
+    rig.tap("page_right");
+    assert_eq!(
+        ring(&mut rig)["tracks"][0],
+        json!(tracks[4]),
+        "as far as the set reaches"
+    );
+    assert_eq!(rig.state()["leds"]["right"]["colour"], 0, "nothing further");
+    rig.tap("page_left");
+    rig.tap("left");
+    assert_eq!(ring(&mut rig)["tracks"][0], json!(tracks[0]));
+    assert_eq!(rig.state()["leds"]["left"]["colour"], 0);
+    let scenes = rig.scenes();
+    assert_eq!(rig.state()["session"]["first_scene"], json!(scenes[0]));
+    assert_eq!(rig.state()["session"]["pads"].as_array().unwrap().len(), 64);
+}
+
+// Spec: push-2-tracks R68. Stop Clip stops the selected track's clip; with a
+// lower button, that track; with Shift, every clip; locked, the lower
+// buttons stop their tracks.
+#[test]
+fn stop_clip_stops_the_selected_track_a_lower_buttons_track_or_every_clip() {
+    let mut rig = Rig::sessions(3);
+    rig.run(
+        "session.set_quantization",
+        json!({ "quantization": "none" }),
+    );
+    for track in 0..3 {
+        rig.clip(track, 0);
+    }
+    rig.run("transport.play", json!({}));
+    let tracks = rig.tracks();
+    let launch = |rig: &mut Rig| {
+        rig.run("session.launch_scene", json!({ "scene": rig.scenes()[0] }));
+        for track in 0..3 {
+            rig.wait_slot(track, 0, bl_engine::SlotState::Playing);
+        }
+    };
+
+    launch(&mut rig);
+    rig.run(
+        "arrangement.select_tracks",
+        json!({ "tracks": [tracks[1]] }),
+    );
+    rig.step();
+    rig.tap("stop_clip");
+    rig.wait("the selected track to stop", |shell| {
+        shell.session_states().len() == 2
+    });
+    assert!(!rig.slot_is(1, 0, bl_engine::SlotState::Playing));
+
+    assert!(rig.sim.press("stop_clip"));
+    rig.pass(10);
+    assert_ne!(rig.state()["leds"]["lower_1"]["animation"], Value::Null);
+    assert_eq!(rig.state()["leds"]["lower_2"]["animation"], Value::Null);
+    rig.tap("lower_1");
+    assert!(rig.sim.let_go("stop_clip"));
+    rig.pass(10);
+    rig.wait("that track to stop", |shell| {
+        shell.session_states().len() == 1
+    });
+
+    launch(&mut rig);
+    assert!(rig.sim.press("shift"));
+    rig.pass(10);
+    rig.tap("stop_clip");
+    assert!(rig.sim.let_go("shift"));
+    rig.pass(10);
+    rig.wait_stopped();
+
+    // Locked: the lower buttons stop their tracks.
+    launch(&mut rig);
+    assert!(rig.sim.press("stop_clip"));
+    rig.pass(1000);
+    assert!(rig.sim.let_go("stop_clip"));
+    rig.pass(10);
+    assert_eq!(rig.state()["session"]["stop_clip_locked"], true);
+    rig.tap("lower_3");
+    rig.wait("the third to stop", |shell| {
+        shell.session_states().len() == 2
+    });
+    rig.tap("lower_2");
+    rig.tap("lower_1");
+    rig.wait_stopped();
+}
+
+// Spec: push-2-tracks R70, R73. Session Overview, held with Layout, lights the
+// ring's block white and a block with a clip playing green, and a pad moves
+// the ring to its block.
+#[test]
+fn session_overview_lights_blocks_and_a_pad_moves_the_ring() {
+    let mut rig = Rig::sessions(12);
+    rig.run(
+        "session.set_quantization",
+        json!({ "quantization": "none" }),
+    );
+    rig.clip(10, 0);
+    rig.run("transport.play", json!({}));
+    rig.run(
+        "session.launch",
+        json!({ "track": rig.tracks()[10], "scene": rig.scenes()[0] }),
+    );
+    rig.wait_slot(10, 0, bl_engine::SlotState::Playing);
+    assert!(rig.sim.press("layout"));
+    rig.pass(300);
+    let state = rig.state();
+    assert_eq!(state["session"]["overview"], true);
+    assert_eq!(state["leds"]["pad_7_0"]["colour"], 122, "the ring's block");
+    assert_eq!(state["leds"]["pad_7_1"]["colour"], 126, "a clip plays");
+    assert_eq!(state["leds"]["pad_7_2"]["colour"], 0);
+    rig.pad(0, 1);
+    let tracks = rig.tracks();
+    assert_eq!(
+        rig.run("session.state", json!({}))["rings"][0]["tracks"][0],
+        json!(tracks[4]),
+        "the ring goes as far as the set reaches"
+    );
+    assert!(rig.sim.let_go("layout"));
+    rig.pass(10);
+    assert_eq!(rig.state()["session"]["overview"], false);
 }

@@ -975,18 +975,18 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 7.25 | todo |  |  |
 | 7.26 | done | 31 October 2026 | [#634](https://github.com/loombridge/beatlayer/pull/634): Mix Mode on Push 2 with Track Mix, Global Mix, Input & Output and Master, unfolding groups, drum racks and rack chains, and Mute, Solo, Delete and Duplicate on the lower buttons, read back in `push.state` |
 | 7.27 | todo |  |  |
-| 7.28 | todo |  |  |
+| 7.28 | done | 31 October 2026 | [#635](https://github.com/loombridge/beatlayer/pull/635): Session Mode on Push 2 launches, records and colours slots from the pads and scenes from the scene buttons, moves the ring with the arrows, Octave and Page, runs Stop Clip in every mode and shows the Session Overview, read back in `push.state`; R71 comes with Clip Mode (WP-7.27) |
 | 7.29 | done | 29 October 2026 | [#507](https://github.com/loombridge/beatlayer/pull/507): Legato, a clip's own launch quantisation with Repeat's restarts, and `session.nudge` with the Launch Properties panel's nudge buttons run in the engine, with the clip time in `session.state`; the scrub control and the mapping targets come with WP-7.3 and 7.3b |
 | 7.30 | done | 30 October 2026 | [#509](https://github.com/loombridge/beatlayer/pull/509): a `Follower` asked once per block gives a per-block song speed that clips, warped audio, notes, the metronome, automation, the loop, launch lines, scheduled commands, recording and tempo-synced devices honour, starts wait for the follower's frame and Stop cancels them, and the Control Bar's Phase Nudge Down and Up run `transport.phase_nudge`; the followers come with WP-7.12, 7.14 and 7.18, and mapping the buttons with WP-7.3b |
 | 7.31 | done | 29 October 2026 | [#508](https://github.com/loombridge/beatlayer/pull/508): the Control Bar's Tap button runs `transport.tap_tempo` with the tap law on the engine's time base, a run of taps is one undo step, and Start Transport With Tap Tempo is in Settings and Playback ▸ Options; Link, EXT and mapping the button come with WP-7.14, 7.12 and 7.3b |
 | 7.32 | done | 30 October 2026 | [#510](https://github.com/loombridge/beatlayer/pull/510): Edit ▸ Record Quantization has its nine values, saved with the set and set by `transport.set_record_quantization`; recorded notes are quantised in Arrangement takes as their own undo step, inside Session slot takes, and note by note in looping overdubs, with the menu locked during a take |
 | 7.33 | done | 29 October 2026 | [#512](https://github.com/loombridge/beatlayer/pull/512): Simpler's region is the Start and End flags in the sample's own frames, set by `device.set_sample_region` as one undo step; Classic plays S Start, S Length and S Loop Length inside the flags and One-Shot and Slice play flag to flag; the display, Crop, Normalize, the conversions and Slice to New MIDI Track read the flags, and schema 13 moves older sets over |
 | 7.33b | done | 31 October 2026 | [#525](https://github.com/loombridge/beatlayer/pull/525): Simpler's Slice mode has the Playback chooser (Mono, Poly, Thru, parameter 56, in the Slicing bank), and Slice to Drum Rack and Slice to New MIDI Track run from Simpler's title-bar and display menus as one undo step each, and by ID for agents |
-| 8.1 | todo |  |  |
+| 8.1 | done | 31 October 2026 | [#640](https://github.com/loombridge/beatlayer/pull/640): a native device's body switches between named pages, as tabs or as a shell and display, set by clicks or `device.set_page` without an undo step and read back in `device_view.state`; the page saves with the set, and the multisampler's tabs are now pages that open on their saved tab |
 | 8.2 | todo |  |  |
 | 8.3 | todo |  |  |
 | 8.4 | todo |  |  |
-| 8.5 | todo |  |  |
+| 8.5 | done | 31 October 2026 | [#644](https://github.com/loombridge/beatlayer/pull/644): `bl_dsp::physical` has modal banks for Beam, Marimba, Cantilever, Membrane, Circular Membrane and Plate and waveguides for String, Tube and Pipe on the kit's SIMD lanes, tuned within 1 cent from 40 Hz to 4 kHz at 44.1 to 96 kHz and stable to 192 kHz; the R11 damper and finger and fret positions wait on Tension |
 | 8.6 | todo |  |  |
 | 8.7 | todo |  |  |
 | 8.8 | todo |  |  |
@@ -1014,12 +1014,12 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.30 | todo |  |  |
 | 8.31 | todo |  |  |
 | 8.32 | todo |  |  |
-| 8.33 | todo |  |  |
+| 8.33 | done | 31 October 2026 | [#650](https://github.com/loombridge/beatlayer/pull/650): Delay has 12.4's LFO with six rate modes, seven waves and Morph in its expanded part, and Limiter has Maximize with Threshold and Output; saving Delay's expanded part with the set (R13) is a follow-up |
 | 8.34 | todo |  |  |
 | 8.35 | todo |  |  |
 | 8.36 | todo |  |  |
 | 8.37 | todo |  |  |
-| 8.38 | todo |  |  |
+| 8.38 | done | 31 October 2026 | [#651](https://github.com/loombridge/beatlayer/pull/651): Roar has its input section, three stages with twelve shapers and nine filters, seven routing modes, 4× oversampling, Output, Color compensation, Dry/Wet and the shaper display, with the Auto Filter's filters moved to a shared module; R11's aliasing level at 4× (8×, ADAA or the narrower test) and Mid Side's Blend are follow-ups |
 | 8.39 | todo |  |  |
 | 8.40 | todo |  |  |
 | 8.41 | todo |  |  |

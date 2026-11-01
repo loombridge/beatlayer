@@ -88,6 +88,7 @@ pub mod note_lanes;
 pub mod packages_page;
 pub mod palette;
 pub mod param_menu;
+pub mod particles;
 pub mod plugin_list;
 pub mod rack_view;
 pub mod realtime_dialog;

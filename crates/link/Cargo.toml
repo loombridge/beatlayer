@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "bl-link"
 description = "Ableton Link 4 sessions: tempo, phase, start and stop, and Link Audio."
 version.workspace = true
@@ -13,6 +14,10 @@ bl-core.workspace = true
 [build-dependencies]
 # Compiles the vendored Link 4.1.1 (see build.rs).
 cc = "1"
+
+[[test]]
+name = "link_tests"
+path = "tests/main.rs"
 
 [lints]
 workspace = true

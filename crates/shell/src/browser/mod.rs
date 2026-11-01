@@ -37,6 +37,7 @@ pub mod labels;
 pub mod listing;
 pub mod places;
 pub mod preview;
+mod similar;
 pub mod tags;
 pub mod tunings;
 
@@ -59,8 +60,9 @@ use bl_shell_spec::browser::{
     RevealArgs, SaveClipFileArgs, SaveClipFileResult, ScrubPreviewArgs, SearchArgs, Section,
     SelectArgs, SetAnalysisPausedArgs, SetCollectionArgs, SetColumnsArgs, SetFilterGroupsArgs,
     SetFilterViewArgs, SetLabelIconArgs, SetLabelShownArgs, SetPreviewArgs, SetRawArgs,
-    ShowFileArgs, ShowQuickTagsArgs, ShowTagEditorArgs, StateArgs, TagEditorRow, TagEditorRowKind,
-    TagGroupInfo, TagInfo, TagItemsArgs, TagSource, TagState, TaggedItem, TagsArgs, TagsState,
+    ShowFileArgs, ShowQuickTagsArgs, ShowSimilarArgs, ShowTagEditorArgs, SimilarArgs, StateArgs,
+    TagEditorRow, TagEditorRowKind, TagGroupInfo, TagInfo, TagItemsArgs, TagSource, TagState,
+    TaggedItem, TagsArgs, TagsState,
 };
 use bl_shell_spec::commands::{BROWSER_WIDTH, clamp_browser_width};
 use bl_shell_spec::settings::CollectFiles;
@@ -345,6 +347,9 @@ pub struct BrowserView {
     /// The file whose name is open for editing after `clip.save_file` saved
     /// it (clip files R4).
     renaming: Option<PathBuf>,
+    /// The similarity search under way, when one is (spec: sound-similarity
+    /// R12).
+    similar: Option<similar::Similar>,
     /// The tags selected in the Filter View (spec: browser-tags R20).
     filter: BTreeSet<i64>,
     /// The Filter View and the groups each label shows.
@@ -596,6 +601,7 @@ impl BrowserView {
             quick_tags: prefs.quick_tags,
             message: None,
             renaming: None,
+            similar: None,
             filter: BTreeSet::new(),
             filter_prefs: prefs.filters.clone(),
             collections: CollectionStore::default(),
@@ -1732,6 +1738,12 @@ impl BrowserView {
     /// Works out the content pane's rows again, keeping the selection.
     fn rebuild(&mut self) {
         self.note = None;
+        // A similarity search belongs to the All label it chose (spec:
+        // sound-similarity R12).
+        if self.label != Label::All {
+            self.similar = None;
+        }
+        let reference = self.reference().map(Path::to_path_buf);
         // A saved label lists what its words and tags find under the label
         // it was made under (spec: browser-tags R24).
         let label = self.base_label();
@@ -1805,12 +1817,28 @@ impl BrowserView {
         }
         if !self.search.trim().is_empty()
             || !selection.is_empty()
+            || reference.is_some()
             || matches!(label, Label::Samples | Label::Clips)
         {
             match self.scope(&label) {
                 Some((scope, only)) => {
                     let snapshot = Arc::clone(self.index.snapshot());
-                    let mut hits = self.search_hits(&snapshot, scope, only);
+                    let mut similar_note = None;
+                    let mut hits = if let Some(reference) = &reference {
+                        // Spec: sound-similarity R12. Most similar first,
+                        // whatever the columns sort by.
+                        self.similar_hits(&snapshot, reference)
+                            .unwrap_or_else(|error| {
+                                let (BrowserError::InvalidArgs(why)
+                                | BrowserError::Unavailable(why)
+                                | BrowserError::Failed(why)) = error;
+                                similar_note =
+                                    Some(format!("Similar files aren't available: {why}."));
+                                Vec::new()
+                            })
+                    } else {
+                        self.search_hits(&snapshot, scope, only)
+                    };
                     if !selection.is_empty() {
                         hits.retain(|&hit| {
                             let ids = self.file_ids(
@@ -1821,9 +1849,13 @@ impl BrowserView {
                             selection.matches(&ids)
                         });
                     }
-                    self.sort_hits(&snapshot, &mut hits);
+                    if reference.is_none() {
+                        self.sort_hits(&snapshot, &mut hits);
+                    }
                     if hits.is_empty() {
-                        self.note = Some(if self.index.indexing() {
+                        self.note = Some(if let Some(note) = similar_note {
+                            note
+                        } else if self.index.indexing() {
                             "Indexing the places\u{2026}".to_owned()
                         } else if self.search.trim().is_empty() && !selection.is_empty() {
                             "Nothing carries the selected tags.".to_owned()
@@ -2321,6 +2353,9 @@ impl BrowserView {
             columns: self.columns.clone(),
             can_back: self.can_back(),
             can_forward: self.can_forward(),
+            similar: self
+                .reference()
+                .map(|path| path.to_string_lossy().into_owned()),
         }
     }
 
@@ -2928,6 +2963,12 @@ impl BrowserView {
             ids::BACK => self.can_back(),
             ids::FORWARD => self.can_forward(),
             ids::ADD_LABEL => self.results_bar(),
+            ids::SHOW_SIMILAR => {
+                args.get("end").and_then(Value::as_bool) == Some(true)
+                    || args.get("path").is_some()
+                    || self.selected_reference().is_ok()
+            }
+            ids::SIMILAR => args.get("path").is_some() || self.selected_reference().is_ok(),
             ids::REMOVE_FOLDER => args
                 .get("path")
                 .and_then(Value::as_str)
@@ -3019,6 +3060,7 @@ impl BrowserView {
                     self.choose_saved(id)?;
                 } else {
                     self.label = label;
+                    self.similar = None;
                     self.search.clear();
                 }
                 // A place is read afresh when it's chosen.
@@ -3708,7 +3750,13 @@ impl BrowserView {
             ids::CLEAR_FILTERS => {
                 let ClearFiltersArgs { words, tags } = parse(args)?;
                 if words.unwrap_or(true) {
-                    self.search.clear();
+                    // Spec: sound-similarity R14. Ending a similarity search
+                    // goes back to the words the browser had before it.
+                    if self.reference().is_some() {
+                        self.end_similar();
+                    } else {
+                        self.search.clear();
+                    }
                 }
                 if tags.unwrap_or(true) {
                     self.filter.clear();
@@ -3768,6 +3816,15 @@ impl BrowserView {
             ids::ANALYSIS_STATE => {
                 parse::<bl_commands::NoArgs>(args)?;
                 outcome.value = to_value(&self.analysis.state());
+            }
+            ids::SIMILAR => {
+                let SimilarArgs { path } = parse(args)?;
+                outcome.value = to_value(&self.similar_list(path)?);
+            }
+            ids::SHOW_SIMILAR => {
+                let args: ShowSimilarArgs = parse(args)?;
+                self.show_similar(args)?;
+                outcome.value = state(self, ctx.audio);
             }
             ids::SET_ANALYSIS_PAUSED => {
                 let SetAnalysisPausedArgs { paused } = parse(args)?;

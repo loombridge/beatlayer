@@ -121,6 +121,7 @@ mod push;
 mod push_beats;
 mod push_clips;
 mod push_melodies;
+mod push_recording;
 mod push_simpler;
 mod rack_presets;
 mod racks;

@@ -1816,6 +1816,11 @@ pub enum Command {
         /// device has.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         articulations: Option<Vec<crate::articulation::Articulation>>,
+        /// The routes of an instrument's modulation matrix (the instrument
+        /// modulation spec, R10), which a preset of one holds; `null` to
+        /// keep the ones the device has.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        routes: Option<Vec<crate::matrix::ModRoute>>,
         /// A plug-in's MPE Mode and settings (the MPE spec, R14), which a
         /// preset of one holds; `null` to keep the ones the device has.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1989,6 +1994,28 @@ pub enum Command {
             deserialize_with = "crate::articulation::double_option"
         )]
         channel: Option<Option<u8>>,
+    },
+    /// Puts a route in a free slot of an instrument's modulation matrix (the
+    /// instrument modulation spec, R8, R10): the source and the destination
+    /// by name. The slot's amount is a parameter, which `device.set_param`
+    /// sets.
+    SetModRoute {
+        /// The device.
+        device: DeviceId,
+        /// The slot's number.
+        slot: u8,
+        /// The source's name.
+        source: String,
+        /// The destination's name.
+        destination: String,
+    },
+    /// Empties a free slot of an instrument's modulation matrix (the
+    /// instrument modulation spec, R9).
+    ClearModRoute {
+        /// The device.
+        device: DeviceId,
+        /// The slot's number.
+        slot: u8,
     },
     /// Sets the media a device plays, by content hash (WP-2.16): the
     /// sampler's sample, which the media store holds like a clip's audio.
@@ -3131,6 +3158,9 @@ impl Command {
             Self::DeleteArticulation { .. } => "Delete Articulation",
             Self::MoveArticulation { .. } => "Move Articulation",
             Self::SetArticulation { .. } => "Change Articulation",
+            // WP-8.4: Beatlayer's own names.
+            Self::SetModRoute { .. } => "Change Modulation Route",
+            Self::ClearModRoute { .. } => "Clear Modulation Route",
             Self::SetDeviceSample { media: Some(_), .. } => "Load Sample",
             Self::SetDeviceSample { media: None, .. } => "Clear Sample",
             // WP-5.15b: Warp controls and slices.
@@ -4839,6 +4869,7 @@ impl Document {
                 name,
                 shape,
                 articulations,
+                routes,
                 mpe,
             } => {
                 let mut loaded = self.device_ref(*device)?.clone();
@@ -4846,6 +4877,10 @@ impl Document {
                 loaded.shape.clone_from(shape);
                 if let Some(articulations) = articulations {
                     loaded.set_articulations(articulations.clone());
+                }
+                if let Some(routes) = routes {
+                    crate::matrix::check_routes(routes)?;
+                    loaded.routes.clone_from(routes);
                 }
                 if let Some(mpe) = mpe {
                     mpe.settings.check()?;
@@ -4965,6 +5000,13 @@ impl Document {
                 outputs.as_deref(),
                 *channel,
             ),
+            Command::SetModRoute {
+                device,
+                slot,
+                source,
+                destination,
+            } => self.set_mod_route(*device, *slot, source, destination),
+            Command::ClearModRoute { device, slot } => self.clear_mod_route(*device, *slot),
             Command::CompareSwitch { device } => {
                 if !self.device_ref(*device)?.can_compare() {
                     return Err(ModelError::NoCompare(*device));
@@ -12188,6 +12230,7 @@ mod tests {
             name: "Warm".to_owned(),
             shape: None,
             articulations: None,
+            routes: None,
             mpe: None,
         })
         .unwrap();
@@ -12202,6 +12245,7 @@ mod tests {
                 name: String::new(),
                 shape: None,
                 articulations: None,
+                routes: None,
                 mpe: None,
             }),
             ModelError::InvalidValue { .. }
@@ -14487,6 +14531,7 @@ mod tests {
             name: String::new(),
             shape: None,
             articulations: None,
+            routes: None,
             mpe: None,
         })
         .unwrap();

@@ -552,6 +552,14 @@ impl fmt::Debug for NodeData {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Articulations(pub bl_model::ArticulationList);
 
+/// An instrument's free modulation routes as node data (the instrument
+/// modulation spec, R10): resolved to places in the device type's lists on
+/// the main thread and sent when a route is set or cleared, so the change
+/// reaches the playing device without a new program. The list is of a
+/// fixed size, so nothing on the audio thread allocates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ModRoutes(pub bl_model::FreeRoutes);
+
 /// A plug-in device's MPE Mode and MPE/Multi-channel Settings as node data
 /// (the MPE spec, R14 and R18): a plug-in's node starts with MPE Mode off,
 /// and the compiler sends this when the device's is on or changes.

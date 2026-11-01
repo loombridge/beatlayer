@@ -172,9 +172,9 @@ pub use midi::{
 pub use midi_clips::{MidiClipList, MidiClipPlayer};
 pub use mixer::METER_RELEASE_DB_PER_SECOND;
 pub use node::{
-    Articulations, Block, Node, NodeConfig, NodeData, NodeEvent, NodeKey, NoteBuffer, NoteEvent,
-    NoteExpression, NoteKind, ParamValue, PluginMpeData, PluginTuningData, Segment, Segments,
-    TransportInfo, segments,
+    Articulations, Block, ModRoutes, Node, NodeConfig, NodeData, NodeEvent, NodeKey, NoteBuffer,
+    NoteEvent, NoteExpression, NoteKind, ParamValue, PluginMpeData, PluginTuningData, Segment,
+    Segments, TransportInfo, segments,
 };
 pub use offline::Offline;
 pub use processor::{Carry, Output, Processor};

@@ -33,6 +33,10 @@ use lspk_dsp::envelope::{EnvelopeBank, EnvelopeParams, StealRestart, Timing};
 use lspk_voice::{MAX_VOICES, Start, VoiceBlock, VoiceEvent, VoiceEventKind};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
+use crate::instrument::matrix::{
+    DestDef, Kind as MatrixKind, Matrix, MatrixLayout, Pick, Range as MatrixRange,
+    Rate as MatrixRate, Scope as MatrixScope, SlotDef, SourceDef,
+};
 use crate::instrument::{self, Instrument, NoteRange, Parts, Section, Sources, State};
 use crate::lfo::{Lfo, Rate, Shape, Stereo, Wave};
 
@@ -164,10 +168,41 @@ pub const INSTRUMENT_OUTPUT: ParamId = ParamId(23);
 /// rate Hi-Quality sets.
 pub const INSTRUMENT_PRESSURE_LEVEL: ParamId = ParamId(24);
 
+/// Spec: instrument modulation R1, R2. The test instrument's matrix: the
+/// level of each note (per voice, control rate, additive), a fine tuning in
+/// semitones (per voice, audio rate), a master level (global, control rate,
+/// multiplicative) and the matrix's Amount. Four free slots, one chosen and
+/// one fixed.
+pub const INSTRUMENT_NOTE_LEVEL: ParamId = ParamId(25);
+pub const INSTRUMENT_FINE_TUNE: ParamId = ParamId(26);
+pub const INSTRUMENT_MASTER: ParamId = ParamId(27);
+pub const INSTRUMENT_MATRIX_AMOUNT: ParamId = ParamId(28);
+/// The four free slots' amounts, in per cent, 0 by default.
+pub const INSTRUMENT_FREE_AMOUNTS: [ParamId; 4] =
+    [ParamId(29), ParamId(30), ParamId(31), ParamId(32)];
+/// The chosen slot's source and destination choosers and its amount.
+pub const INSTRUMENT_CHOSEN_SOURCE: ParamId = ParamId(33);
+pub const INSTRUMENT_CHOSEN_DEST: ParamId = ParamId(34);
+pub const INSTRUMENT_CHOSEN_AMOUNT: ParamId = ParamId(35);
+/// The fixed slot's source chooser (Pressure into Fine Tune by default
+/// would be a chooser's: it is fixed here, so only its amount) and amount.
+pub const INSTRUMENT_FIXED_AMOUNT: ParamId = ParamId(36);
+/// The matrix's sources, in the order the chosen slot's chooser lists them
+/// after Off.
+pub const INSTRUMENT_SOURCES: [&str; 5] =
+    ["Velocity", "Key", "Pressure", "Mod Wheel", "Pitch Bend"];
+/// The matrix's destinations, in the order the chosen slot's chooser lists
+/// them after Off.
+pub const INSTRUMENT_DESTINATIONS: [&str; 3] = ["Note Level", "Fine Tune", "Master"];
+/// The fine tuning's reach: ±12 semitones.
+pub const INSTRUMENT_FINE_RANGE: f64 = 12.0;
+
 /// What [`INSTRUMENT_OUTPUT`] chooses between, after the audio: a source of
 /// the lowest sounding voice, or a global one; or the pitch in semitones of
-/// the lowest or the highest sounding voice, frame by frame.
-pub const INSTRUMENT_OUTPUTS: [&str; 13] = [
+/// the lowest or the highest sounding voice, frame by frame; or the position
+/// on its travel that a matrix destination plays for the lowest sounding
+/// voice, after every route, frame by frame.
+pub const INSTRUMENT_OUTPUTS: [&str; 16] = [
     "Audio",
     "Velocity",
     "Release Velocity",
@@ -181,6 +216,9 @@ pub const INSTRUMENT_OUTPUTS: [&str; 13] = [
     "Aftertouch",
     "Pitch",
     "Pitch (Last)",
+    "Note Level",
+    "Fine Tune",
+    "Master",
 ];
 
 /// The most voices and the most unison copies the test instrument has.
@@ -558,6 +596,48 @@ pub fn instrument_type() -> DeviceType {
             ParamUnit::Percent,
         )
         .describe("How far a note's pressure lowers its level, read on the control rate."),
+        ParamDescriptor::continuous(
+            INSTRUMENT_NOTE_LEVEL,
+            "Note Level",
+            (0.0, 100.0),
+            100.0,
+            ParamUnit::Percent,
+        )
+        .describe("Each note's level, which matrix routes move per voice."),
+        ParamDescriptor::continuous(
+            INSTRUMENT_FINE_TUNE,
+            "Fine Tune",
+            (-INSTRUMENT_FINE_RANGE, INSTRUMENT_FINE_RANGE),
+            0.0,
+            ParamUnit::Semitones,
+        )
+        .describe("Each note's pitch, which matrix routes move per voice every frame."),
+        ParamDescriptor::continuous(
+            INSTRUMENT_MASTER,
+            "Master",
+            (0.0, 100.0),
+            100.0,
+            ParamUnit::Percent,
+        )
+        .describe("The device's level, which matrix routes scale as a global destination."),
+        ParamDescriptor::continuous(
+            INSTRUMENT_MATRIX_AMOUNT,
+            "Matrix Amount",
+            (0.0, 100.0),
+            100.0,
+            ParamUnit::Percent,
+        )
+        .describe("Scales every route's amount."),
+        route_amount(INSTRUMENT_FREE_AMOUNTS[0], "Slot 1 Amount"),
+        route_amount(INSTRUMENT_FREE_AMOUNTS[1], "Slot 2 Amount"),
+        route_amount(INSTRUMENT_FREE_AMOUNTS[2], "Slot 3 Amount"),
+        route_amount(INSTRUMENT_FREE_AMOUNTS[3], "Slot 4 Amount"),
+        ParamDescriptor::choice(INSTRUMENT_CHOSEN_SOURCE, "Mod Source", &CHOOSER_SOURCES, 0)
+            .describe("The chosen slot's modulation source."),
+        ParamDescriptor::choice(INSTRUMENT_CHOSEN_DEST, "Mod Dest", &CHOOSER_DESTINATIONS, 0)
+            .describe("The chosen slot's destination."),
+        route_amount(INSTRUMENT_CHOSEN_AMOUNT, "Mod Amount"),
+        route_amount(INSTRUMENT_FIXED_AMOUNT, "Pressure Tune Amount"),
     ];
     DeviceType::native(
         INSTRUMENT,
@@ -565,6 +645,90 @@ pub fn instrument_type() -> DeviceType {
         DeviceRole::Instrument,
     )
     .with_description(DeviceDescription::new(params).with_menu_options(&[INSTRUMENT_HI_QUALITY]))
+    .with_matrix(instrument_matrix())
+}
+
+const CHOOSER_SOURCES: [&str; 6] = [
+    "Off",
+    "Velocity",
+    "Key",
+    "Pressure",
+    "Mod Wheel",
+    "Pitch Bend",
+];
+const CHOOSER_DESTINATIONS: [&str; 4] = ["Off", "Note Level", "Fine Tune", "Master"];
+
+/// A route slot's amount: −100 % to 100 %, 0 % by default.
+fn route_amount(id: ParamId, name: &str) -> ParamDescriptor {
+    ParamDescriptor::continuous(id, name, (-100.0, 100.0), 0.0, ParamUnit::Percent)
+        .describe("How far the route's source moves its destination, in per cent of its travel.")
+}
+
+/// The test instrument's matrix (spec: instrument modulation R1, R2): the
+/// sources and destinations above, slots 0 to 3 free, slot 4 chosen and
+/// slot 5 fixed (Pressure into Fine Tune). Key into Master is refused.
+#[must_use]
+pub fn instrument_matrix() -> MatrixLayout {
+    let source = |name, range, scope| SourceDef { name, range, scope };
+    let dest = |name, param, scope, rate, kind| DestDef {
+        name,
+        param: Some(param),
+        scope,
+        rate,
+        kind,
+    };
+    let mut slots: Vec<SlotDef> = INSTRUMENT_FREE_AMOUNTS
+        .iter()
+        .map(|&amount| SlotDef {
+            source: Pick::Free,
+            dest: Pick::Free,
+            amount,
+        })
+        .collect();
+    slots.push(SlotDef {
+        source: Pick::Chosen(INSTRUMENT_CHOSEN_SOURCE),
+        dest: Pick::Chosen(INSTRUMENT_CHOSEN_DEST),
+        amount: INSTRUMENT_CHOSEN_AMOUNT,
+    });
+    slots.push(SlotDef {
+        source: Pick::Fixed(2),
+        dest: Pick::Fixed(1),
+        amount: INSTRUMENT_FIXED_AMOUNT,
+    });
+    MatrixLayout {
+        sources: vec![
+            source("Velocity", MatrixRange::Unipolar, MatrixScope::Voice),
+            source("Key", MatrixRange::Bipolar, MatrixScope::Voice),
+            source("Pressure", MatrixRange::Unipolar, MatrixScope::Voice),
+            source("Mod Wheel", MatrixRange::Unipolar, MatrixScope::Global),
+            source("Pitch Bend", MatrixRange::Bipolar, MatrixScope::Global),
+        ],
+        dests: vec![
+            dest(
+                "Note Level",
+                INSTRUMENT_NOTE_LEVEL,
+                MatrixScope::Voice,
+                MatrixRate::Control,
+                MatrixKind::Additive,
+            ),
+            dest(
+                "Fine Tune",
+                INSTRUMENT_FINE_TUNE,
+                MatrixScope::Voice,
+                MatrixRate::Audio,
+                MatrixKind::Additive,
+            ),
+            dest(
+                "Master",
+                INSTRUMENT_MASTER,
+                MatrixScope::Global,
+                MatrixRate::Control,
+                MatrixKind::Multiplicative,
+            ),
+        ],
+        slots,
+        forbidden: vec![(1, 2)],
+    }
 }
 
 /// Every test device type.
@@ -590,9 +754,7 @@ pub fn register(registry: &mut Registry) {
         Spectrogram::new(config)
     });
     add(registry, effects_type(), Effects::new);
-    add(registry, instrument_type(), |_, config| {
-        TestInstrument::new(config)
-    });
+    add(registry, instrument_type(), TestInstrument::new);
     add(registry, pages_type(), |_, _| Scope);
 }
 
@@ -861,13 +1023,20 @@ struct Voices {
     pressure_level: f32,
     velocity_curve: f64,
     key_curve: f64,
+    /// The modulation matrix, and the knobs its destinations move.
+    matrix: Matrix,
+    /// The values those knobs play, frame by frame (spec: instrument
+    /// modulation R5): automation and modulators already applied.
+    note_level: Vec<f32>,
+    fine_tune: Vec<f32>,
+    master: Vec<f32>,
 }
 
 /// The envelope's lanes per frame.
 const STRIDE: usize = MAX_VOICES.next_multiple_of(16);
 
 impl TestInstrument {
-    fn new(config: &NodeConfig) -> Self {
+    fn new(device: &Device, config: &NodeConfig) -> Self {
         let rate = config.sample_rate.as_f64();
         let frames = config.max_frames.max(1);
         let params = EnvelopeParams {
@@ -921,6 +1090,15 @@ impl TestInstrument {
                 pressure_level: 0.0,
                 velocity_curve: 0.0,
                 key_curve: 0.0,
+                matrix: Matrix::of(
+                    instrument_type()
+                        .matrix
+                        .expect("the test instrument has a matrix"),
+                    device,
+                ),
+                note_level: vec![100.0; frames],
+                fine_tune: vec![0.0; frames],
+                master: vec![100.0; frames],
             },
         }
     }
@@ -935,6 +1113,14 @@ impl NativeDevice for TestInstrument {
         engine.pressure_level = (value(INSTRUMENT_PRESSURE_LEVEL) / 100.0) as f32;
         engine.velocity_curve = value(INSTRUMENT_VELOCITY_CURVE) / 100.0;
         engine.key_curve = value(INSTRUMENT_KEY_CURVE) / 100.0;
+        let ramp = |id: ParamId| params.ramp(params.index(id).expect("the description lists it"));
+        engine.note_level[..frames].copy_from_slice(ramp(INSTRUMENT_NOTE_LEVEL));
+        engine.fine_tune[..frames].copy_from_slice(ramp(INSTRUMENT_FINE_TUNE));
+        engine.master[..frames].copy_from_slice(ramp(INSTRUMENT_MASTER));
+        engine
+            .matrix
+            .set_amount(value(INSTRUMENT_MATRIX_AMOUNT) / 100.0);
+        engine.matrix.begin(params);
         engine.out[0][..frames].fill(0.0);
         engine.out[1][..frames].fill(0.0);
         self.section.process(audio, params, engine);
@@ -954,6 +1140,9 @@ impl NativeDevice for TestInstrument {
 
     fn receive_data(&mut self, data: NodeData) {
         self.section.receive_data(&data);
+        if let Some(routes) = data.downcast_ref::<bl_engine::ModRoutes>() {
+            self.voices.matrix.set_free(routes.0);
+        }
     }
 }
 
@@ -963,6 +1152,7 @@ impl Instrument for Voices {
         match event.kind {
             VoiceEventKind::Start { start, .. } => {
                 let sources = Sources::of(voices);
+                self.matrix.start(voice);
                 self.held[voice] = 1.0 - self.pressure_level * sources.pressure(voice) as f32;
                 match start {
                     Start::Fresh => {
@@ -1011,8 +1201,25 @@ impl Instrument for Voices {
     }
 }
 
+/// What the matrix's sources read: the voices' (spec: instrument voices
+/// R15), in the order of [`INSTRUMENT_SOURCES`].
+fn reader<'a>(
+    sources: &'a Sources<'a>,
+    curves: (f64, f64),
+) -> impl Fn(usize, usize, usize) -> f64 + 'a {
+    move |source, voice, _frame| match source {
+        0 => instrument::curve(sources.velocity(voice), curves.0),
+        1 => 2.0 * instrument::curve((sources.key(voice) + 1.0) / 2.0, curves.1) - 1.0,
+        2 => sources.pressure(voice),
+        3 => sources.mod_wheel(),
+        _ => sources.pitch_bend(),
+    }
+}
+
 impl Voices {
-    /// Every active voice's copies as sines, mixed into the two outputs.
+    /// Every active voice's copies as sines, mixed into the two outputs,
+    /// each voice's level and pitch moved by the matrix's routes (spec:
+    /// instrument modulation R3 to R7).
     fn sound(
         &mut self,
         voices: &VoiceBlock,
@@ -1022,14 +1229,50 @@ impl Voices {
     ) {
         let config = *state.config();
         let copies = config.copies;
+        let read = reader(sources, (self.velocity_curve, self.key_curve));
+        self.matrix.set_oldest(state.oldest(voices));
         for voice in voices.active_voices() {
             let gain = INSTRUMENT_LEVEL * sources.velocity(voice) as f32;
             for frame in 0..frames.len() {
-                if state.control_due(frames.start + frame) {
+                let at = frames.start + frame;
+                let due = state.control_due(at);
+                if due {
                     self.held[voice] = 1.0 - self.pressure_level * sources.pressure(voice) as f32;
                 }
-                let level = self.levels[frame * STRIDE + voice] * gain * self.held[voice];
-                let pitch = state.pitch(voices, voice, frames, frame);
+                let travel =
+                    |value: f32, low: f64, high: f64| (f64::from(value) - low) / (high - low);
+                let note_level = self.matrix.position(
+                    0,
+                    travel(self.note_level[at], 0.0, 100.0),
+                    voice,
+                    at,
+                    due,
+                    &read,
+                );
+                let reach = INSTRUMENT_FINE_RANGE;
+                let fine = self.matrix.position(
+                    1,
+                    travel(self.fine_tune[at], -reach, reach),
+                    voice,
+                    at,
+                    due,
+                    &read,
+                );
+                let fine = (fine * 2.0 - 1.0) * reach;
+                let master = self.matrix.position(
+                    2,
+                    travel(self.master[at], 0.0, 100.0),
+                    voice,
+                    at,
+                    due,
+                    &read,
+                );
+                let level = self.levels[frame * STRIDE + voice]
+                    * gain
+                    * self.held[voice]
+                    * note_level as f32
+                    * master as f32;
+                let pitch = state.pitch(voices, voice, frames, frame) + fine;
                 let age = state.frames_since_start(voice, frames.start + frame);
                 for copy in 0..copies {
                     let phase = &mut self.phases[voice * INSTRUMENT_MAX_COPIES + copy];
@@ -1065,6 +1308,31 @@ impl Voices {
             (mask != 0).then(|| mask.trailing_zeros() as usize),
             (mask != 0).then(|| 31 - mask.leading_zeros() as usize),
         );
+        if self.output >= 13 {
+            let read = reader(sources, (self.velocity_curve, self.key_curve));
+            self.matrix.set_oldest(state.oldest(voices));
+            let dest = self.output - 13;
+            for frame in 0..frames.len() {
+                let at = frames.start + frame;
+                let value = lowest.map_or(0.0, |voice| {
+                    let (knob, low, high) = match dest {
+                        0 => (self.note_level[at], 0.0, 100.0),
+                        1 => (
+                            self.fine_tune[at],
+                            -INSTRUMENT_FINE_RANGE,
+                            INSTRUMENT_FINE_RANGE,
+                        ),
+                        _ => (self.master[at], 0.0, 100.0),
+                    };
+                    let base = (f64::from(knob) - low) / (high - low);
+                    self.matrix
+                        .position(dest, base, voice, at, state.control_due(at), &read)
+                });
+                self.out[0][at] = value as f32;
+                self.out[1][at] = value as f32;
+            }
+            return;
+        }
         if self.output >= 11 {
             let voice = if self.output == 11 { lowest } else { highest };
             for frame in 0..frames.len() {

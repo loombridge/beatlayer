@@ -98,7 +98,7 @@ fn play_blocks(
     notes: &[NoteEvent],
     events: &[bl_engine::NodeEvent],
 ) -> Vec<Vec<f32>> {
-    let mut signal = vec![Vec::with_capacity(frames); CHANNELS];
+    let mut signal: Vec<Vec<f32>> = (0..CHANNELS).map(|_| Vec::with_capacity(frames)).collect();
     let mut at = 0;
     while at < frames {
         let len = block.min(frames - at);

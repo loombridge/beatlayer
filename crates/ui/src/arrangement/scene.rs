@@ -352,7 +352,9 @@ fn sprocket_holes(
     colour: Color32,
 ) {
     let height = ((bottom - top) / 4.0).clamp(1.0, 3.0);
-    let first = ((from - x0 - HOLE_PITCH / 2.0) / HOLE_PITCH).ceil().max(0.0);
+    let first = ((from - x0 - HOLE_PITCH / 2.0) / HOLE_PITCH)
+        .ceil()
+        .max(0.0);
     for n in 0..MOST_HOLES {
         let left = x0 + HOLE_PITCH / 2.0 + (first + n as f32) * HOLE_PITCH;
         if left + HOLE > to {

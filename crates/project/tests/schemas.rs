@@ -482,7 +482,12 @@ fn a_video_clip_saves_and_reopens_as_a_video_clip() {
         .document()
         .track_order()
         .into_iter()
-        .find(|id| editor.document().track(*id).is_some_and(|t| t.name() == "Kick"))
+        .find(|id| {
+            editor
+                .document()
+                .track(*id)
+                .is_some_and(|t| t.name() == "Kick")
+        })
         .unwrap();
     let id = editor.new_id();
     editor
@@ -499,7 +504,11 @@ fn a_video_clip_saves_and_reopens_as_a_video_clip() {
     project.document = editor.document().clone();
     project.ids = editor.ids();
     let saved = encode_json(&project, REVISION).unwrap();
-    assert!(String::from_utf8(saved.clone()).unwrap().contains("\"video\":true"));
+    assert!(
+        String::from_utf8(saved.clone())
+            .unwrap()
+            .contains("\"video\":true")
+    );
     let (loaded, info) = decode_json(&saved, &LoadOptions::default()).unwrap();
     assert_eq!(info.schema, SCHEMA_VERSION);
     let ClipData::Audio(audio) = &loaded.document.clip(id).unwrap().data else {

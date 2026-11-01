@@ -642,10 +642,11 @@ impl<'a> Importer<'a, '_> {
         let types = &track.content_types;
         if !types.is_empty()
             && track.children.is_empty()
-            && types.iter().all(|kind| matches!(kind, ContentKind::Markers))
+            && types
+                .iter()
+                .all(|kind| matches!(kind, ContentKind::Markers))
         {
-            self.report
-                .add("a track of markers", &place, "left out");
+            self.report.add("a track of markers", &place, "left out");
             self.left_out.extend(track.info.id.clone());
             return;
         }

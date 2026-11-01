@@ -115,16 +115,17 @@ impl Shell {
             .clip_movie(found.id)
             .ok_or_else(|| failed("the clip's movie can't be read".to_owned()))?;
         let movie_time = match (at, asked) {
-            (Some(at), _) => {
-                found.movie_time_at(at, &doc.tempo_map(), movie.duration().seconds())
-            }
+            (Some(at), _) => found.movie_time_at(at, &doc.tempo_map(), movie.duration().seconds()),
             (None, time) => time.filter(|seconds| seconds.is_finite() && *seconds >= 0.0),
         };
         // Nanoseconds, so a time between two frames' starts, which is what a
         // warp map gives, lands on the frame it is in.
         let frame = movie_time
             .and_then(|seconds| {
-                movie.frame_at(Rational::new((seconds * 1e9).round() as i128, 1_000_000_000))
+                movie.frame_at(Rational::new(
+                    (seconds * 1e9).round() as i128,
+                    1_000_000_000,
+                ))
             })
             .and_then(|frame| Some((frame, movie.video()?.frame_start(frame)?)));
         Ok(to_value(&FrameAt {

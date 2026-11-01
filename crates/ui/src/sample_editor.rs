@@ -2291,7 +2291,10 @@ impl SampleEditorUi {
             let x = g.x_of_time(cue.time);
             node(
                 Id::new(("sample-cue", clip, index)),
-                Rect::from_min_max(pos2(x - 1.0, g.strip.top()), pos2(x + 1.0, g.strip.bottom())),
+                Rect::from_min_max(
+                    pos2(x - 1.0, g.strip.top()),
+                    pos2(x + 1.0, g.strip.bottom()),
+                ),
                 egui::accesskit::Role::ListItem,
                 format!("Cue {}", cue.name),
                 describe(cue.time),

@@ -117,7 +117,10 @@ fn a_dropped_movie_is_a_video_clip_that_saves_and_reopens() {
 
     let saved = scratch.path("Movie.blset");
     let result = shell
-        .run("set.save_as", json!({ "path": saved.display().to_string() }))
+        .run(
+            "set.save_as",
+            json!({ "path": saved.display().to_string() }),
+        )
         .unwrap();
     let saved = PathBuf::from(result["path"].as_str().unwrap());
     let mut again = new_shell(&scratch);
@@ -201,7 +204,11 @@ fn consolidate_reverse_and_crop_make_an_audio_clip_and_leave_the_movie() {
     let consolidated = audio(&shell, created[0]);
     assert!(!consolidated.video);
     assert_ne!(consolidated.media, reversed_media);
-    assert_eq!(std::fs::read(&movie).unwrap(), before, "the movie is intact");
+    assert_eq!(
+        std::fs::read(&movie).unwrap(),
+        before,
+        "the movie is intact"
+    );
 }
 
 // Spec: video R10, R11, R13.
@@ -223,7 +230,11 @@ fn a_warp_marker_moves_which_frame_plays_when() {
     // marker does (warping R58): 0.45 s is frame 13.
     let marker = frame_at(&mut shell, json!({ "movie_time": 0.45, "clip": clip }));
     assert_eq!((marker.frame, marker.movie_time), (Some(13), Some(0.45)));
-    assert!(shell.run("video.frame_at", json!({ "movie_time": 0.45 })).is_err());
+    assert!(
+        shell
+            .run("video.frame_at", json!({ "movie_time": 0.45 }))
+            .is_err()
+    );
     assert!(shell.run("video.frame_at", json!({})).is_err());
     assert_eq!(before.clip, Some(clip));
     assert_eq!(before.frame, Some(7));
@@ -250,9 +261,7 @@ fn a_warp_marker_moves_which_frame_plays_when() {
     assert!((after.movie_time.unwrap() - 0.45).abs() < 1e-6);
 
     // An audio clip isn't one.
-    shell
-        .run("clip.reverse", json!({ "clip": clip }))
-        .unwrap();
+    shell.run("clip.reverse", json!({ "clip": clip })).unwrap();
     assert!(
         shell
             .run("video.frame_at", json!({ "at": at, "clip": clip }))
@@ -299,7 +308,9 @@ fn the_movies_markers_are_cues() {
     let clip = drop_in(&mut shell, track, &movie, 0);
     let cues = shell.clip_cues(clip);
     assert_eq!(
-        cues.iter().map(|c| (c.time, c.name.as_str())).collect::<Vec<_>>(),
+        cues.iter()
+            .map(|c| (c.time, c.name.as_str()))
+            .collect::<Vec<_>>(),
         [(0.0, "Intro"), (0.5, "Drop")]
     );
     shell
@@ -308,7 +319,12 @@ fn the_movies_markers_are_cues() {
     let state = shell.run("clip_view.sample_editor", json!({})).unwrap();
     assert_eq!(state["cues"][1]["name"], "Drop");
     // An audio clip has none.
-    let other = drop_in(&mut shell, track, &scratch.movie("mjpeg-24f.mov"), 100_000_000);
+    let other = drop_in(
+        &mut shell,
+        track,
+        &scratch.movie("mjpeg-24f.mov"),
+        100_000_000,
+    );
     shell.run("clip.reverse", json!({ "clip": other })).unwrap();
     assert!(shell.clip_cues(other).is_empty());
 }

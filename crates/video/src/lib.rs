@@ -29,9 +29,9 @@ mod edits;
 mod error;
 #[cfg(unix)]
 pub mod ffmpeg;
+mod markers;
 #[cfg(windows)]
 mod mediafoundation;
-mod markers;
 mod mjpeg;
 mod movie;
 mod player;

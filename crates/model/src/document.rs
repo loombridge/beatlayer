@@ -464,8 +464,7 @@ impl Document {
             .filter_map(|id| self.tracks.get(&id))
             .flat_map(|track| track.clips())
             .filter(|clip| !clip.mute && clip.start <= at && at < clip.end())
-            .filter(|clip| matches!(&clip.data, ClipData::Audio(audio) if audio.video))
-            .next_back()
+            .rfind(|clip| matches!(&clip.data, ClipData::Audio(audio) if audio.video))
     }
 
     /// The spans of the Arrangement clips that lead the tempo (R43), in

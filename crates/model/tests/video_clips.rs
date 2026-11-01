@@ -191,12 +191,7 @@ fn a_looping_video_clip_plays_its_brace_again() {
     editor
         .apply(Command::CreateClip {
             track: lane,
-            clip: Clip::new(
-                id,
-                Ticks::ZERO,
-                Ticks::QUARTER * 12,
-                ClipData::Audio(data),
-            ),
+            clip: Clip::new(id, Ticks::ZERO, Ticks::QUARTER * 12, ClipData::Audio(data)),
         })
         .unwrap();
     let doc = editor.document();

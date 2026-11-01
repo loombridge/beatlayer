@@ -620,7 +620,10 @@ fn sync_samples(stss: Option<&[u8]>, count: usize) -> Result<Option<Vec<usize>>,
     Ok(Some(sync))
 }
 
-pub(crate) fn chunk_offsets(stco: Option<&[u8]>, co64: Option<&[u8]>) -> Result<Vec<u64>, VideoError> {
+pub(crate) fn chunk_offsets(
+    stco: Option<&[u8]>,
+    co64: Option<&[u8]>,
+) -> Result<Vec<u64>, VideoError> {
     if let Some(co64) = co64 {
         Ok(entries(co64, 8)?
             .map(|e| u64::from_be_bytes(e.try_into().unwrap_or_default()))
@@ -634,7 +637,11 @@ pub(crate) fn chunk_offsets(stco: Option<&[u8]>, co64: Option<&[u8]>) -> Result<
 
 /// Each sample's file offset, from the chunks' offsets, how many samples
 /// each chunk holds (`stsc`), and the samples' sizes.
-pub(crate) fn sample_offsets(stsc: &[u8], chunks: &[u64], sizes: &[u32]) -> Result<Vec<u64>, VideoError> {
+pub(crate) fn sample_offsets(
+    stsc: &[u8],
+    chunks: &[u64],
+    sizes: &[u32],
+) -> Result<Vec<u64>, VideoError> {
     let runs: Vec<(u32, u32)> = entries(stsc, 12)?
         .map(|e| (be32(e), be32(&e[4..])))
         .collect();

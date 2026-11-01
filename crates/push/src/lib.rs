@@ -15,6 +15,7 @@ pub mod buttons;
 pub mod content;
 pub mod controls;
 pub mod curve;
+pub mod device;
 pub mod display;
 pub mod encoder;
 pub mod frame;
@@ -69,14 +70,17 @@ pub fn placeholder_contents() -> MakeContents {
     Arc::new(Contents::placeholders)
 }
 
-/// The contents of the modes that are built: Note Mode's, Session Mode's,
-/// Browse Mode's and Mix Mode's own, and the placeholders for the others
-/// (`docs/specs/push-2-notes.md`, `docs/specs/push-2-tracks.md` R5, R28, R59).
+/// The contents of the modes that are built: Note Mode's, Device Mode's,
+/// Browse Mode's, Mix Mode's and Session Mode's own, and the placeholders for
+/// the others (`docs/specs/push-2-notes.md`, `docs/specs/push-2-tracks.md` R5,
+/// R15, R28, R59).
 #[must_use]
 pub fn contents() -> MakeContents {
     Arc::new(|| {
         let mut contents = Contents::placeholders();
         contents.pads[0] = Box::new(note::Note::new());
+        contents.display[content::DisplayMode::Device.index()] =
+            Box::new(device::DeviceMode::new());
         contents.display[content::DisplayMode::Browse.index()] = Box::new(browse::Browse::new());
         contents.display[content::DisplayMode::Mix.index()] = Box::new(mix::Mix::new());
         contents.pads[1] = Box::new(session::Session::new());

@@ -21,7 +21,7 @@ Live's PitchLoop89 comes in its own pack as a Max device; Beatlayer's is native,
 ## Rules
 
 - **R1.** PitchLoop89 (`beatlayer.pitchloop89`) is an audio effect with Live's name, Beatlayer's own layout and no display cell: two voice columns (A and B) and a shared column (Routing, Hold, the LFOs, Random, Input, Dry/Wet). (S1; the layout is Beatlayer's own)
-- **R2.** Each voice writes the input (raised by Input, a gain from −∞ to +12 dB, 0 dB, rule G1 and IMP-08) into a circular buffer whose length is its Bandwidth: 25, 50, 100, 200, 400 or 800 ms (100 ms by default); halving or doubling it moves a snippet's pitch by an octave against the same speed, as the page describes. (S1; the lengths are Beatlayer's own)
+- **R2.** Each voice writes the input (raised by Input, a gain from −∞ to +12 dB, 0 dB, rule G1 and IMP-08) into a circular buffer whose length is its Bandwidth (the read place stays at least 10 frames behind the write place, so a loop is Delay's share of the length plus that margin): 25, 50, 100, 200, 400 or 800 ms (100 ms by default); halving or doubling it moves a snippet's pitch by an octave against the same speed, as the page describes. (S1; the lengths are Beatlayer's own)
 - **R3.** Each voice reads its buffer from Delay (0 to 100 % of the buffer behind the write position, 50 %) at Speed (−200 to +200 %, +100 %): the read position advances by Speed per frame relative to the write position, so +100 % is no transposition, +200 % an octave up, −100 % reversed at the original pitch; the voice's output is within 5 cents of 12 log2(|Speed|) semitones on a steady tone. When the read position reaches the write position it is crossfaded over 5 ms to Delay's position again, so the snippet loops. (S1; the law is Beatlayer's own)
 - **R4.** Each voice has a 12 dB per octave low-pass (200 Hz to 20 kHz, 20 kHz) and high-pass (20 Hz to 5 kHz, 20 Hz), a Feedback (0 to 100 %, 0) returning its output to its buffer's input, and a Level (a gain from −∞ to 0 dB, rule G1). (S1; ranges are Beatlayer's own)
 - **R5.** Routing L/R gives voice A the left input and output and B the right; Sum feeds both from the input's sum and mixes both to both outputs; Cross feeds each voice's feedback into the other voice's buffer. (S1; Cross's reading is Beatlayer's own)
@@ -39,7 +39,14 @@ Live's PitchLoop89 comes in its own pack as a Max device; Beatlayer's is native,
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1, R2 | to be written in WP-8.52 | unit (description; Bandwidth's octave steps) |
-| R3 to R8 | to be written in WP-8.52 | unit (each voice's transposition within 5 cents at four speeds, reversed below 0; filters; routing paths; Hold loops; the LFOs' rates and Random follow the seed) |
-| R9, R10 | to be written in WP-8.52 | real-time trap; golden renders at four block sizes |
-| R11 to R14 | to be written in WP-8.52 | `crates/devices/tests/rules.rs`; agent API; `crates/devices/tests/banks.rs`; save and reopen; a text check |
+| R1, R2 | `crates/devices/tests/pitchloop89.rs`: `it_is_an_audio_effect_named_for_live_with_no_display`, `each_halving_of_bandwidth_loops_a_snippet_an_octave_higher` | unit (description; Bandwidth's octave steps) |
+| R3 | `pitchloop89.rs`: `each_voice_transposes_within_five_cents_and_reads_backwards_below_zero` | unit (each voice's transposition within 5 cents at four speeds, reversed below 0) |
+| R4 | `pitchloop89.rs`: `the_filters_cut_12_db_an_octave_and_level_scales_the_voice`, `feedback_returns_the_voice_to_its_buffer` | unit |
+| R5 | `pitchloop89.rs`: `the_routings_send_the_voices_where_they_say` | unit (each routing's paths) |
+| R6 | `pitchloop89.rs`: `hold_loops_what_the_buffer_holds_and_ignores_the_input_after` | unit |
+| R7 | `pitchloop89.rs`: `the_vibrato_lfo_moves_the_pitch_at_its_rate_and_depth`, `the_position_lfo_moves_delay_at_its_rate_and_depth`, `random_draws_each_voices_delay_offset_from_the_devices_seed` | unit (the LFOs' rates; Random follows the seed) |
+| R8 | `pitchloop89.rs`: `dry_wet_and_input_balance_the_signal_and_reach_silence` | unit |
+| R9, R10 | `pitchloop89.rs`: `a_render_is_bit_identical_at_four_block_sizes_and_run_after_run` (every block under the allocation trap); `rtsan/tests/devices.rs`: `pitchloop89_passes_under_rtsan` | real-time trap; renders at four block sizes |
+| R11, R13 | `crates/devices/tests/rules.rs` (G1, G2); `crates/cli/tests/agent.rs`: `an_agent_sets_pitchloop89_and_vector_delay_by_id_and_finds_them_after_a_reopen` | `rules.rs`; agent API; save and reopen |
+| R12 | `crates/devices/tests/banks.rs` | banks |
+| R14 | `cargo xtask private-terms`, which `cargo xtask check` runs | text check |

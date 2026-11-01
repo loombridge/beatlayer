@@ -19,6 +19,7 @@ bl-core = { path = "../crates/core" }
 bl-interop = { path = "../crates/interop" }
 bl-media = { path = "../crates/media" }
 bl-project = { path = "../crates/project" }
+bl-video = { path = "../crates/video" }
 libfuzzer-sys = "=0.4.13"
 
 [[bin]]
@@ -38,6 +39,13 @@ bench = false
 [[bin]]
 name = "groove_file"
 path = "fuzz_targets/groove_file.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "movie"
+path = "fuzz_targets/movie.rs"
 test = false
 doc = false
 bench = false

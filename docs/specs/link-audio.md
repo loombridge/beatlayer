@@ -45,11 +45,11 @@ Audio travels with its place on the session's beat, so the receiving side plays 
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1, R2, R3 | to be written in WP-7.16 | shell test, UI script |
-| R4 | to be written in WP-7.16 | `bl-link` test; engine test |
-| R5, R6 | to be written in WP-7.16 | engine test with a stand-in channel; `bl-link` test |
-| R7, R8, R9 | to be written in WP-7.16 | engine test, shell test, UI script |
-| R10 | to be written in WP-7.16 | shell test |
-| R11 | to be written in WP-7.16 | real-time trap, RealtimeSanitizer |
-| R12, R13 | to be written in WP-7.16 | agent API, UI script, `cargo xtask commands` |
-| R14 | to be written in WP-7.16 | `bl-link` test on the loopback network |
+| R1, R2, R3 | `bl-shell` `link::audio::the_link_audio_settings_start_as_the_spec_says_and_are_kept_across_a_relaunch` (real preference files); `bl-ui` `link::the_link_audio_section_sets_each_setting_and_lists_the_peers_in_a_table`, `the_menu_ticks_its_items_runs_their_commands_and_configures_link` | shell test, UI script |
+| R4 | `bl-link` `link_audio::a_sink_is_a_channel_on_the_other_peer_until_it_is_dropped_and_is_renamed_with_it`; `bl-engine` `link_audio::an_offered_track_is_sent_after_its_mixer_each_block_with_the_moment_it_is_heard`, `nothing_is_sent_while_link_audio_is_off`; `bl-shell` `link::audio::a_track_sent_from_one_session_is_recorded_on_the_beat_in_the_other` (a renamed track renames its channel) | `bl-link` test; engine test (blocks of 1, 61, 512 and 4,096, under the allocation trap); shell test |
+| R5, R6 | `bl-engine` `link_audio::a_peers_buffers_play_on_their_beat_plus_the_latency`, `a_channel_plays_on_both_sides_and_a_mono_one_as_identical_sides`, `a_late_buffer_is_dropped_counted_and_silent`, `an_armed_track_records_what_a_peers_channel_plays`, and the ring's own tests in `link_audio.rs`; `bl-shell` `link_audio::tests::a_mono_buffer_is_the_same_on_both_sides_and_a_stereo_one_keeps_them`, `a_peer_at_another_rate_is_converted_to_ours_keeping_its_length_in_time`; `bl-link` `link_audio::a_source_receives_the_blocks_a_sink_sends_with_the_moment_they_were_sent_on` | engine test with a stand-in channel; shell test; `bl-link` test |
+| R7, R8, R9 | `bl-engine` `link::sync_to_incoming_audio_plays_the_song_the_latency_after_the_sessions_beat`; `bl-shell` `link::audio::the_link_audio_settings_start_as_the_spec_says_and_are_kept_across_a_relaunch`, `link_audio::tests::the_latency_is_kept_in_range_and_sync_delays_only_when_on`; `bl-ui` `link::the_link_audio_section_sets_each_setting_and_lists_the_peers_in_a_table` | engine test, shell test, UI script |
+| R10 | `bl-engine` `link_audio::a_channel_that_is_not_there_or_a_link_audio_that_is_off_is_silent`; `bl-shell` `link::audio::the_chooser_lists_the_peers_and_their_channels_and_a_track_keeps_them_by_name`, `a_track_sent_from_one_session_is_recorded_on_the_beat_in_the_other` (A quits and returns) | engine test, shell test |
+| R11 | `rtsan/tests/link_audio.rs` `link_audio_sends_and_receives_under_rtsan`; every `bl-engine` `link_audio` test runs under the allocation trap, and `bl-shell` `link::audio::a_track_sent_from_one_session_is_recorded_on_the_beat_in_the_other` counts no heap operation on either audio thread | real-time trap, RealtimeSanitizer |
+| R12, R13 | `bl-agent` `link::link_audio_settings_and_a_tracks_input_are_set_by_id_and_read_back` (`link.state` and the track's routing); `bl-ui` `link::the_link_audio_section_sets_each_setting_and_lists_the_peers_in_a_table` (the controls' names, the peers table's header and cells); `cargo xtask commands` | agent API, UI script |
+| R14 | `bl-shell` `link::audio::a_track_sent_from_one_session_is_recorded_on_the_beat_in_the_other` (two sessions on the loopback network, in `bl-shell` because it needs both engines) | shell test on the loopback network |

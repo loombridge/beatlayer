@@ -60,6 +60,7 @@ The commands, by the part of their ID before its first dot:
 - [`modulation`](modulation.md)
 - [`modulator`](modulator.md)
 - [`note`](note.md)
+- [`packages`](packages.md)
 - [`pad`](pad.md)
 - [`perception`](perception.md)
 - [`plugin`](plugin.md)
@@ -356,6 +357,83 @@ Two parameters that share one control, which a switch turns between: while `swit
     "switch",
     "off",
     "on"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `AnalysisState`
+
+How far sound analysis has got (spec: sound-similarity R6, R7).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `analysed` | integer, at least 0 | yes | The audio files and presets that have a descriptor. |
+| `waiting` | integer, at least 0 | yes | The audio files and presets waiting to be analysed, the one under way included. |
+| `skipped` | integer, at least 0 | yes | The files that couldn't be analysed, and aren't tried again until they change. |
+| `paused` | boolean | yes | Whether analysis is paused: the file under way is finished, and no other is begun until it resumes. |
+| `computed` | integer, at least 0 | yes | The descriptors computed since Beatlayer started: a file whose content already had one, such as a moved copy, doesn't add to it. |
+| `current` | string or null | no | The path of the file under way. |
+| `share` | number or null | no | The share of the files that were waiting when this run began that are done, from 0 to 1; left out when nothing waits. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How far sound analysis has got (spec: sound-similarity R6, R7).",
+  "properties": {
+    "analysed": {
+      "description": "The audio files and presets that have a descriptor.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "computed": {
+      "description": "The descriptors computed since Beatlayer started: a file whose content already had one, such as a moved copy, doesn't add to it.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "current": {
+      "description": "The path of the file under way.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "paused": {
+      "description": "Whether analysis is paused: the file under way is finished, and no other is begun until it resumes.",
+      "type": "boolean"
+    },
+    "share": {
+      "description": "The share of the files that were waiting when this run began that are done, from 0 to 1; left out when nothing waits.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "skipped": {
+      "description": "The files that couldn't be analysed, and aren't tried again until they change.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "waiting": {
+      "description": "The audio files and presets waiting to be analysed, the one under way included.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "analysed",
+    "waiting",
+    "skipped",
+    "paused",
+    "computed"
   ],
   "type": "object"
 }
@@ -1954,6 +2032,63 @@ What `audio.devices` returns.
     "driver",
     "devices",
     "error"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `AudioLatency`
+
+What `link.set_audio_latency` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `ms` | number | yes | The latency in effect now, in milliseconds. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `link.set_audio_latency` returns.",
+  "properties": {
+    "ms": {
+      "description": "The latency in effect now, in milliseconds.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "ms"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `AudioName`
+
+What `link.set_audio_name` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The name in effect now. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `link.set_audio_name` returns.",
+  "properties": {
+    "name": {
+      "description": "The name in effect now.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name"
   ],
   "type": "object"
 }
@@ -10640,6 +10775,46 @@ A display cell: a graph, a spectrum, a waveform, or an envelope editor, which gr
 
 </details>
 
+### `DisplayHandle`
+
+What dragging a marker sets: where the marker sits across the cell is the horizontal parameter's travel, and up the cell is the marker's place on its series (with a vertical parameter, a drag moves that too), so a drag is the parameters' own control at another place.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `x` | [`ParamId`](#paramid) | yes | The parameter its horizontal place is. |
+| `y` | [`ParamId`](#paramid) or null | no | The parameter its vertical place is, if it has one. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What dragging a marker sets: where the marker sits across the cell is the horizontal parameter's travel, and up the cell is the marker's place on its series (with a vertical parameter, a drag moves that too), so a drag is the parameters' own control at another place.",
+  "properties": {
+    "x": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The parameter its horizontal place is."
+    },
+    "y": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ParamId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The parameter its vertical place is, if it has one."
+    }
+  },
+  "required": [
+    "x"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `DisplayInputSettings`
 
 The Display & Input page's settings.
@@ -10717,6 +10892,7 @@ A point on the display: a band's dot on an EQ's curve, or the level now on a com
 | `x` | number | yes | Its place along the axis, in the series' `x_unit`. |
 | `y` | number | yes | Its value, in the series' `unit`. |
 | `text` | string | yes | How it reads, such as `A1 Peak 1.00 kHz 3.0 dB`. |
+| `handle` | [`DisplayHandle`](#displayhandle) or null | no | The parameters dragging it sets, for a marker that is a handle. |
 
 <details><summary>JSON Schema</summary>
 
@@ -10724,6 +10900,17 @@ A point on the display: a band's dot on an EQ's curve, or the level now on a com
 {
   "description": "A point on the display: a band's dot on an EQ's curve, or the level now on a compressor's transfer curve.",
   "properties": {
+    "handle": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DisplayHandle"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The parameters dragging it sets, for a marker that is a handle."
+    },
     "name": {
       "description": "What it is, such as `A1`.",
       "type": "string"
@@ -15300,7 +15487,7 @@ The index of the places' files, built in the background.
 
 ### `Input`
 
-Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a MIDI track with an instrument, a return, or Main, tapped at `tap`; with a `chain` of an instrument or audio effect rack on that track, that chain's signal at `tap`; or with an `output`, one of an instrument's extra outputs on that track), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.
+Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a MIDI track with an instrument, a return, or Main, tapped at `tap`; with a `chain` of an instrument or audio effect rack on that track, that chain's signal at `tap`; or with an `output`, one of an instrument's extra outputs on that track), `link_audio` (a Link Audio peer's channel, by the names `peer` and `channel`), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.
 
 One of:
 
@@ -15309,6 +15496,7 @@ One of:
 - an object with `type` = `"all_ins"`: All Ins: every MIDI input port whose Track switch is on, and the computer MIDI keyboard. MIDI tracks only.
 - an object with `type` = `"computer_keyboard"`: The computer MIDI keyboard. MIDI tracks only.
 - an object with `type` = `"port"`, `name` (string): One MIDI input port, by the name the MIDI system gives it. MIDI tracks only. The track keeps the name while the port is away and receives again when a port of that name returns.
+- an object with `type` = `"link_audio"`, `peer` (string), `channel` (string): A channel another app in the Link session offers (Link Audio), by the names of the peer and the channel. Audio tracks only. The track keeps the names while the peer is away, silent, and hears them again when a peer and channel of those names return (the Link Audio spec, R10).
 - an object with `type` = `"resampling"`: Resampling: the Main output. Audio tracks only.
 - an object with `type` = `"track"`, `track` ([`TrackId`](#trackid)), `chain` ([`ChainId`](#chainid) or null), `output` ([`DeviceOutput`](#deviceoutput) or null), `tap` ([`Tap`](#tap)): Another track's signal.
 
@@ -15316,7 +15504,7 @@ One of:
 
 ```json
 {
-  "description": "Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a MIDI track with an instrument, a return, or Main, tapped at `tap`; with a `chain` of an instrument or audio effect rack on that track, that chain's signal at `tap`; or with an `output`, one of an instrument's extra outputs on that track), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.",
+  "description": "Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a MIDI track with an instrument, a return, or Main, tapped at `tap`; with a `chain` of an instrument or audio effect rack on that track, that chain's signal at `tap`; or with an `output`, one of an instrument's extra outputs on that track), `link_audio` (a Link Audio peer's channel, by the names `peer` and `channel`), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.",
   "oneOf": [
     {
       "description": "No Input.",
@@ -15389,6 +15577,29 @@ One of:
       "required": [
         "type",
         "name"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A channel another app in the Link session offers (Link Audio), by the names of the peer and the channel. Audio tracks only. The track keeps the names while the peer is away, silent, and hears them again when a peer and channel of those names return (the Link Audio spec, R10).",
+      "properties": {
+        "channel": {
+          "description": "The channel's name, as the peer shows it.",
+          "type": "string"
+        },
+        "peer": {
+          "description": "The peer's name, as the Link page lists it.",
+          "type": "string"
+        },
+        "type": {
+          "const": "link_audio",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "peer",
+        "channel"
       ],
       "type": "object"
     },
@@ -17992,6 +18203,112 @@ The Library page's settings (L-SET-016).
 
 </details>
 
+### `LinkAudioPeer`
+
+A peer in the session that has Link Audio on (`link.state`).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The peer's name. |
+| `state` | [`PeerState`](#peerstate) | yes | Whether audio is arriving from it. |
+| `buffered_ms` | number | yes | The audio buffered from it, in milliseconds. |
+| `channels` | array of string | yes | The channels it offers, in its order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A peer in the session that has Link Audio on (`link.state`).",
+  "properties": {
+    "buffered_ms": {
+      "description": "The audio buffered from it, in milliseconds.",
+      "format": "double",
+      "type": "number"
+    },
+    "channels": {
+      "description": "The channels it offers, in its order.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "name": {
+      "description": "The peer's name.",
+      "type": "string"
+    },
+    "state": {
+      "$ref": "#/$defs/PeerState",
+      "description": "Whether audio is arriving from it."
+    }
+  },
+  "required": [
+    "name",
+    "state",
+    "buffered_ms",
+    "channels"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `LinkAudioState`
+
+Link Audio's part of `link.state`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean | yes | Whether Link Audio is switched on (it streams only while Link is on too). |
+| `name` | string | yes | The name other peers see this app by. |
+| `latency_ms` | number | yes | The input latency of incoming audio, in milliseconds. |
+| `sync_to_incoming_audio` | boolean | yes | Whether Beatlayer delays its own playback by the latency. |
+| `peers` | array of [`LinkAudioPeer`](#linkaudiopeer) | yes | The peers with Link Audio on, as the Link page lists them. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Link Audio's part of `link.state`.",
+  "properties": {
+    "enabled": {
+      "description": "Whether Link Audio is switched on (it streams only while Link is on too).",
+      "type": "boolean"
+    },
+    "latency_ms": {
+      "description": "The input latency of incoming audio, in milliseconds.",
+      "format": "double",
+      "type": "number"
+    },
+    "name": {
+      "description": "The name other peers see this app by.",
+      "type": "string"
+    },
+    "peers": {
+      "description": "The peers with Link Audio on, as the Link page lists them.",
+      "items": {
+        "$ref": "#/$defs/LinkAudioPeer"
+      },
+      "type": "array"
+    },
+    "sync_to_incoming_audio": {
+      "description": "Whether Beatlayer delays its own playback by the latency.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "enabled",
+    "name",
+    "latency_ms",
+    "sync_to_incoming_audio",
+    "peers"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `LinkGroupId`
 
 The ID of a link group: a positive integer, unique within the project and never reused.
@@ -18027,6 +18344,7 @@ What `link.state` returns.
 | `show_toggle` | boolean | yes | Whether the Control Bar shows the Link toggle and its menu. |
 | `waiting_for_link` | boolean | yes | Whether a start waits for the session's phase. |
 | `starts_in` | number or null | yes | How many seconds until a waiting start begins, once it has been worked out; null otherwise. |
+| `audio` | [`LinkAudioState`](#linkaudiostate) | yes | Link Audio: its switch, name, latency, Sync to Incoming Audio and the peers. |
 
 <details><summary>JSON Schema</summary>
 
@@ -18034,6 +18352,10 @@ What `link.state` returns.
 {
   "description": "What `link.state` returns.",
   "properties": {
+    "audio": {
+      "$ref": "#/$defs/LinkAudioState",
+      "description": "Link Audio: its switch, name, latency, Sync to Incoming Audio and the peers."
+    },
     "enabled": {
       "description": "Whether Link is on: the app is in a Link session on its networks.",
       "type": "boolean"
@@ -18100,7 +18422,8 @@ What `link.state` returns.
     "start_stop_sync",
     "show_toggle",
     "waiting_for_link",
-    "starts_in"
+    "starts_in",
+    "audio"
   ],
   "type": "object"
 }
@@ -22261,25 +22584,95 @@ What `set.pack_status` returns.
 
 </details>
 
+### `PackageState`
+
+Where a package is.
+
+One of:
+
+- `"not_installed"`: Not on this computer.
+- `"queued"`: Waiting for the download before it.
+- `"downloading"`: Downloading: see `progress`.
+- `"installed"`: Installed.
+- `"removed_at_next_launch"`: Removed, but its library is loaded: its files go the next time Beatlayer starts.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Where a package is.",
+  "oneOf": [
+    {
+      "const": "not_installed",
+      "description": "Not on this computer.",
+      "type": "string"
+    },
+    {
+      "const": "queued",
+      "description": "Waiting for the download before it.",
+      "type": "string"
+    },
+    {
+      "const": "downloading",
+      "description": "Downloading: see `progress`.",
+      "type": "string"
+    },
+    {
+      "const": "installed",
+      "description": "Installed.",
+      "type": "string"
+    },
+    {
+      "const": "removed_at_next_launch",
+      "description": "Removed, but its library is loaded: its files go the next time Beatlayer starts.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `PackageStatus`
 
-A package the separation needs.
+A package of the manifest, as `packages.list` and `stems.status` give it.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `id` | string | yes | Its ID, which `packages.install` and `packages.remove` take. |
 | `name` | string | yes | Its name. |
 | `purpose` | string | yes | What it does. |
 | `version` | string | yes | Its version. |
 | `url` | string | yes | Its project's page. |
 | `size` | integer, at least 0 | yes | The download's size in bytes. |
 | `installed` | boolean | yes | Whether it's installed. |
+| `role` | string | yes | The role it fills: features share a package by role. |
+| `state` | [`PackageState`](#packagestate) | yes | Where it is. |
+| `features` | array of string | yes | The features that need it, by ID. |
+| `at_next_launch` | boolean | no | Installed, but a library in its role is already loaded, so it takes effect the next time Beatlayer starts. |
+| `progress` | number | no | While it downloads, how far it is, from 0 to 1. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A package the separation needs.",
+  "description": "A package of the manifest, as `packages.list` and `stems.status` give it.",
   "properties": {
+    "at_next_launch": {
+      "description": "Installed, but a library in its role is already loaded, so it takes effect the next time Beatlayer starts.",
+      "type": "boolean"
+    },
+    "features": {
+      "description": "The features that need it, by ID.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "id": {
+      "description": "Its ID, which `packages.install` and `packages.remove` take.",
+      "type": "string"
+    },
     "installed": {
       "description": "Whether it's installed.",
       "type": "boolean"
@@ -22288,8 +22681,17 @@ A package the separation needs.
       "description": "Its name.",
       "type": "string"
     },
+    "progress": {
+      "description": "While it downloads, how far it is, from 0 to 1.",
+      "format": "float",
+      "type": "number"
+    },
     "purpose": {
       "description": "What it does.",
+      "type": "string"
+    },
+    "role": {
+      "description": "The role it fills: features share a package by role.",
       "type": "string"
     },
     "size": {
@@ -22297,6 +22699,10 @@ A package the separation needs.
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
+    },
+    "state": {
+      "$ref": "#/$defs/PackageState",
+      "description": "Where it is."
     },
     "url": {
       "description": "Its project's page.",
@@ -22308,12 +22714,53 @@ A package the separation needs.
     }
   },
   "required": [
+    "id",
     "name",
     "purpose",
     "version",
     "url",
     "size",
-    "installed"
+    "installed",
+    "role",
+    "state",
+    "features"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PackagesStatus`
+
+What `packages.list` and the other commands return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `folder` | string | yes | Where the packages are installed. |
+| `packages` | array of [`PackageStatus`](#packagestatus) | yes | The packages of the manifest for this platform. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `packages.list` and the other commands return.",
+  "properties": {
+    "folder": {
+      "description": "Where the packages are installed.",
+      "type": "string"
+    },
+    "packages": {
+      "description": "The packages of the manifest for this platform.",
+      "items": {
+        "$ref": "#/$defs/PackageStatus"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "folder",
+    "packages"
   ],
   "type": "object"
 }
@@ -23507,6 +23954,37 @@ One of:
     {
       "const": "groove_pool",
       "description": "The Groove Pool under the list (the grooves spec R24): its keys are its own, so no browser key applies.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PeerState`
+
+Whether audio is arriving from a Link Audio peer (`link.state`).
+
+One of:
+
+- `"receiving"`: A track takes one of the peer's channels and audio is arriving.
+- `"connected"`: The peer is in the session with Link Audio on, and nothing arrives.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Whether audio is arriving from a Link Audio peer (`link.state`).",
+  "oneOf": [
+    {
+      "const": "receiving",
+      "description": "A track takes one of the peer's channels and audio is arriving.",
+      "type": "string"
+    },
+    {
+      "const": "connected",
+      "description": "The peer is in the session with Link Audio on, and nothing arrives.",
       "type": "string"
     }
   ]
@@ -24871,6 +25349,232 @@ One column of Browse Mode (push-2-tracks R14).
 
 </details>
 
+### `PushChain`
+
+A chain on one of the lower buttons while a rack's button is held.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The chain. |
+| `name` | string | yes | Its name. |
+| `selected` | boolean | yes | Whether it is the selected chain. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A chain on one of the lower buttons while a rack's button is held.",
+  "properties": {
+    "chain": {
+      "$ref": "#/$defs/ChainId",
+      "description": "The chain."
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "selected": {
+      "description": "Whether it is the selected chain.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "chain",
+    "name",
+    "selected"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushDevice`
+
+A device on one of the upper buttons in Device Mode (push-2-tracks R27).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `button` | integer, at least 0 | yes | The upper display button, from 1. |
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `name` | string | yes | Its name. |
+| `depth` | integer, at least 0 | yes | How deep it is inside racks: 0 on the track's own chain. |
+| `kind` | string | yes | What it is: `instrument`, `audio_effect`, `midi_effect`, `instrument_rack`, `audio_effect_rack`, `midi_effect_rack` or `drum_rack`. |
+| `enabled` | boolean | yes | Whether it is switched on. |
+| `selected` | boolean | yes | Whether it is the device in focus, which is the window's selected one. |
+| `unfolded` | boolean | yes | For a rack, whether its devices follow it on the buttons. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A device on one of the upper buttons in Device Mode (push-2-tracks R27).",
+  "properties": {
+    "button": {
+      "description": "The upper display button, from 1.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "depth": {
+      "description": "How deep it is inside racks: 0 on the track's own chain.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "enabled": {
+      "description": "Whether it is switched on.",
+      "type": "boolean"
+    },
+    "kind": {
+      "description": "What it is: `instrument`, `audio_effect`, `midi_effect`, `instrument_rack`, `audio_effect_rack`, `midi_effect_rack` or `drum_rack`.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "selected": {
+      "description": "Whether it is the device in focus, which is the window's selected one.",
+      "type": "boolean"
+    },
+    "unfolded": {
+      "description": "For a rack, whether its devices follow it on the buttons.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "button",
+    "device",
+    "name",
+    "depth",
+    "kind",
+    "enabled",
+    "selected",
+    "unfolded"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushDeviceMode`
+
+What Device Mode shows (push-2-tracks R27).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `devices` | array of [`PushDevice`](#pushdevice) | yes | The devices on the upper buttons, in order. |
+| `left_arrow` | boolean | yes | Whether the first upper button is an arrow that moves the devices shown back. |
+| `right_arrow` | boolean | yes | Whether the last upper button is an arrow that moves them on. |
+| `empty` | boolean | yes | Whether the track has no devices. |
+| `edit` | boolean | yes | Whether Edit Mode is on. |
+| `bank` | integer, at least 0 | yes | The bank on the encoders, from 0. |
+| `banks` | array of string | yes | Every bank's name. |
+| `bank_page` | integer, at least 0 | yes | The page of banks the lower buttons show in Edit Mode, from 0. |
+| `bank_pages` | integer, at least 0 | yes | How many pages the banks make. |
+| `params` | array of [`PushParam`](#pushparam) | yes | The parameters on the eight encoders. |
+| `chains` | array of [`PushChain`](#pushchain) | yes | The chains the lower buttons show while a rack's button is held. |
+| `mute_locked` | boolean | yes | Whether Mute is locked, so each device button switches its device. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What Device Mode shows (push-2-tracks R27).",
+  "properties": {
+    "bank": {
+      "description": "The bank on the encoders, from 0.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "bank_page": {
+      "description": "The page of banks the lower buttons show in Edit Mode, from 0.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "bank_pages": {
+      "description": "How many pages the banks make.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "banks": {
+      "description": "Every bank's name.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "chains": {
+      "description": "The chains the lower buttons show while a rack's button is held.",
+      "items": {
+        "$ref": "#/$defs/PushChain"
+      },
+      "type": "array"
+    },
+    "devices": {
+      "description": "The devices on the upper buttons, in order.",
+      "items": {
+        "$ref": "#/$defs/PushDevice"
+      },
+      "type": "array"
+    },
+    "edit": {
+      "description": "Whether Edit Mode is on.",
+      "type": "boolean"
+    },
+    "empty": {
+      "description": "Whether the track has no devices.",
+      "type": "boolean"
+    },
+    "left_arrow": {
+      "description": "Whether the first upper button is an arrow that moves the devices shown back.",
+      "type": "boolean"
+    },
+    "mute_locked": {
+      "description": "Whether Mute is locked, so each device button switches its device.",
+      "type": "boolean"
+    },
+    "params": {
+      "description": "The parameters on the eight encoders.",
+      "items": {
+        "$ref": "#/$defs/PushParam"
+      },
+      "type": "array"
+    },
+    "right_arrow": {
+      "description": "Whether the last upper button is an arrow that moves them on.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "devices",
+    "left_arrow",
+    "right_arrow",
+    "empty",
+    "edit",
+    "bank",
+    "banks",
+    "bank_page",
+    "bank_pages",
+    "params",
+    "chains",
+    "mute_locked"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `PushDisplay`
 
 What the display shows (R17 to R20).
@@ -25102,6 +25806,7 @@ One connected Push 2.
 | `setup` | [`PushSetup`](#pushsetup) | yes | The Setup menu's values. |
 | `display` | [`PushDisplay`](#pushdisplay) | yes | The display. |
 | `browse` | [`PushBrowse`](#pushbrowse) or null | yes | What Browse Mode shows, while it is the display mode. |
+| `device` | [`PushDeviceMode`](#pushdevicemode) or null | yes | What Device Mode shows, while it is the display mode. |
 | `session` | [`PushSession`](#pushsession) or null | yes | What Session Mode shows, while it is the pad mode. |
 | `mix_mode` | [`PushMix`](#pushmix) or null | yes | What Mix Mode shows, while it is the display mode. |
 | `note` | [`PushNote`](#pushnote) or null | yes | What Note Mode shows, while it is the pad mode. |
@@ -25126,6 +25831,17 @@ One connected Push 2.
     "colour_picker": {
       "description": "Whether the colour picker is open.",
       "type": "boolean"
+    },
+    "device": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushDeviceMode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What Device Mode shows, while it is the display mode."
     },
     "display": {
       "$ref": "#/$defs/PushDisplay",
@@ -25284,6 +26000,7 @@ One connected Push 2.
     "setup",
     "display",
     "browse",
+    "device",
     "session",
     "mix_mode",
     "note"
@@ -25839,6 +26556,46 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `PushParam`
+
+A parameter on one of the encoders in Device Mode.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Its name. |
+| `value` | string | yes | Its value as the device shows it. |
+| `held` | boolean | yes | Whether a macro holds it, so the encoder doesn't move it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A parameter on one of the encoders in Device Mode.",
+  "properties": {
+    "held": {
+      "description": "Whether a macro holds it, so the encoder doesn't move it.",
+      "type": "boolean"
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "value": {
+      "description": "Its value as the device shows it.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "value",
+    "held"
+  ],
+  "type": "object"
 }
 ```
 
@@ -33581,7 +34338,7 @@ What a command that switches something returns: its new state.
 
 ### `Switched`
 
-What `link.set_enabled`, `link.set_start_stop_sync` and `link.set_show_toggle` return.
+What `link.set_enabled`, `link.set_start_stop_sync`, `link.set_show_toggle`, `link.set_audio` and `link.set_sync_to_incoming_audio` return.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -33591,7 +34348,7 @@ What `link.set_enabled`, `link.set_start_stop_sync` and `link.set_show_toggle` r
 
 ```json
 {
-  "description": "What `link.set_enabled`, `link.set_start_stop_sync` and `link.set_show_toggle` return.",
+  "description": "What `link.set_enabled`, `link.set_start_stop_sync`, `link.set_show_toggle`, `link.set_audio` and `link.set_sync_to_incoming_audio` return.",
   "properties": {
     "on": {
       "description": "Whether it's on now.",

@@ -5,10 +5,13 @@
 //! only on what the data holds, so a later device draws through the same
 //! code.
 
-use bl_model::{DeviceDisplay, DeviceId, DisplaySeries};
+use bl_model::{DeviceDisplay, DeviceId, DisplayMarker, DisplaySeries, ParamDescriptor, ParamId};
 use bl_shell::Invocation;
-use egui::accesskit::Role;
-use egui::{Align2, Color32, Id, Painter, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
+use bl_shell::device_commands::DevicePanel;
+use egui::accesskit::{Action, Role};
+use egui::{
+    Align2, Color32, Event, Id, Key, Painter, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2,
+};
 use serde_json::json;
 
 use crate::main_window::UiEvent;
@@ -23,6 +26,11 @@ const INPUT: &str = "Input";
 /// The views whose names the display draws specially.
 const COLLAPSED: &str = "Collapsed";
 const ACTIVITY: &str = "Activity";
+/// The series whose markers draw as rings, an echo each (Echo's tunnel).
+const TUNNEL: &str = "Tunnel";
+/// A handle's drawn radius, and the half side of what takes a press.
+const HANDLE_RADIUS: f32 = 4.5;
+const HANDLE_HIT: f32 = 8.0;
 /// The meter's width, and what it shows between its top and its bottom, in
 /// dB of reduction.
 const METER_WIDTH: f32 = 6.0;
@@ -86,9 +94,10 @@ pub fn draw(
     id: Id,
     enabled: bool,
     display: &DeviceDisplay,
-    views: &[String],
+    panel: &DevicePanel,
     events: &mut Vec<UiEvent>,
 ) {
+    let views = &panel.description.views;
     let c = &theme.colors;
     let painter = ui.painter_at(cell);
     // Switched off, the curves turn grey (observed).
@@ -109,6 +118,8 @@ pub fn draw(
         activity(ui, &painter, area, id, ink, display);
     } else if !collapsed {
         plot(&painter, theme, area, ink, display);
+        crate::particles::draw(ui, theme, area, (id, enabled), display, panel, events);
+        handles(ui, theme, area, (id, enabled), display, panel, events);
     }
     if let Some(reading) = meter {
         let strip = Rect::from_min_max(
@@ -177,7 +188,7 @@ fn modulator_readings(
 /// responses faint, and dots where markers sit.
 fn plot(painter: &Painter, theme: &Theme, area: Rect, ink: Color32, display: &DeviceDisplay) {
     let c = &theme.colors;
-    for series in &display.series {
+    for series in display.series.iter().filter(|s| !s.values.is_empty()) {
         let at = |i: usize, v: f32| point(area, series, series.x_at(i), v);
         if series.name == SPECTRUM {
             let wide = area.width() / series.values.len().max(1) as f32;
@@ -204,13 +215,235 @@ fn plot(painter: &Painter, theme: &Theme, area: Rect, ink: Color32, display: &De
             .collect();
         painter.add(Shape::line(line, Stroke::new(1.5, colour)));
     }
-    for marker in &display.markers {
+    // The particles of a particle field and the handles draw themselves.
+    for marker in display
+        .markers
+        .iter()
+        .filter(|m| m.handle.is_none() && m.series != crate::particles::PARTICLES)
+    {
         let Some(series) = display.series(&marker.series) else {
             continue;
         };
+        if series.name == TUNNEL {
+            ring(painter, area, series, marker, ink);
+            continue;
+        }
         let at = point(area, series, marker.x, marker.y);
         painter.circle(at, 3.0, ink, Stroke::new(1.0, c.text.0));
     }
+}
+
+/// One echo of the tunnel: a ring about its channel's vanishing point, the
+/// left channel's to the left and the right's to the right, whose size
+/// follows the echo's level.
+fn ring(
+    painter: &Painter,
+    area: Rect,
+    series: &DisplaySeries,
+    marker: &DisplayMarker,
+    ink: Color32,
+) {
+    let right = marker.name.starts_with("Right");
+    let centre = pos2(
+        area.left() + area.width() * if right { 0.7 } else { 0.3 },
+        area.center().y,
+    );
+    let level = up(series, marker.y);
+    let reach = (area.height() * 0.42).min(area.width() * 0.25);
+    painter.circle_stroke(
+        centre,
+        3.0 + (reach - 3.0) * level,
+        Stroke::new(1.2, ink.gamma_multiply(0.3 + 0.7 * level)),
+    );
+}
+
+/// Where `marker`'s handle sits in `area`: across by its horizontal
+/// parameter's travel, and up by the marker's place on its series.
+#[must_use]
+pub fn handle_center(
+    area: Rect,
+    display: &DeviceDisplay,
+    marker: &DisplayMarker,
+    panel: &DevicePanel,
+) -> Option<Pos2> {
+    let handle = marker.handle?;
+    let index = panel
+        .description
+        .params
+        .iter()
+        .position(|p| p.id == handle.x)?;
+    let travel = panel.description.params[index].normalize(panel.value(index)) as f32;
+    let x = area.left() + area.width() * travel;
+    let y = point(area, display.series(&marker.series)?, marker.x, marker.y).y;
+    Some(pos2(x, y))
+}
+
+/// A drag of a handle under way: where each parameter started on its
+/// travel, and how far the pointer has moved them.
+#[derive(Clone, Copy, Debug, Default)]
+struct HandleDrag {
+    start: [f64; 2],
+    moved: [f64; 2],
+}
+
+/// The handles on the display's markers: dragged sideways they set the
+/// handle's horizontal parameter and, with one, up and down its vertical
+/// one, all as one undo step; the arrow keys and a screen reader's steps
+/// move them a step at a time.
+fn handles(
+    ui: &mut Ui,
+    theme: &Theme,
+    area: Rect,
+    (id, enabled): (Id, bool),
+    display: &DeviceDisplay,
+    panel: &DevicePanel,
+    events: &mut Vec<UiEvent>,
+) {
+    let c = &theme.colors;
+    let ink = if enabled { c.accent.0 } else { c.inactive.0 };
+    let params = &panel.description.params;
+    let place = |param: ParamId| params.iter().position(|p| p.id == param);
+    for marker in &display.markers {
+        let Some(handle) = marker.handle else {
+            continue;
+        };
+        let (Some(xi), Some(at)) = (place(handle.x), handle_center(area, display, marker, panel))
+        else {
+            continue;
+        };
+        let yi = handle.y.and_then(place);
+        let set = |index: usize, value: f64| {
+            Invocation::new(
+                "device.set_param",
+                json!({ "device": display.device, "param": params[index].id, "value": value }),
+            )
+        };
+        let hid = id.with(("handle", marker.name.as_str()));
+        let response = ui.interact(
+            Rect::from_center_size(at, vec2(HANDLE_HIT * 2.0, HANDLE_HIT * 2.0)),
+            hid,
+            Sense::click_and_drag(),
+        );
+        crate::focus::register(ui.ctx(), hid, bl_shell::Area::Detail, None);
+        if response.clicked() || response.drag_started() {
+            response.request_focus();
+        }
+        let name = crate::device_panel::gesture_name(&params[xi]);
+        let drag_id = hid.with("drag");
+        if response.drag_started() {
+            let start = |index: usize| params[index].normalize(panel.value(index));
+            ui.data_mut(|data| {
+                data.insert_temp(
+                    drag_id,
+                    HandleDrag {
+                        start: [start(xi), yi.map_or(0.0, start)],
+                        moved: [0.0; 2],
+                    },
+                );
+            });
+            events.push(UiEvent::BeginNamedGesture(name.clone()));
+        }
+        if response.dragged() {
+            let delta = response.drag_delta();
+            let drag = ui.data_mut(|data| {
+                let drag = data.get_temp_mut_or_default::<HandleDrag>(drag_id);
+                drag.moved[0] += f64::from(delta.x / area.width());
+                drag.moved[1] -= f64::from(delta.y / area.height());
+                *drag
+            });
+            for (axis, index) in [Some(xi), yi].into_iter().enumerate() {
+                let Some(index) = index else {
+                    continue;
+                };
+                let travel = (drag.start[axis] + drag.moved[axis]).clamp(0.0, 1.0);
+                let value = params[index].denormalize(travel);
+                if value != panel.value(index) {
+                    events.push(UiEvent::Invoke(set(index, value)));
+                }
+            }
+        }
+        if response.drag_stopped() {
+            ui.data_mut(|data| data.remove::<HandleDrag>(drag_id));
+            events.push(UiEvent::EndGesture);
+        }
+        // The arrow keys and a screen reader's increments, a step each.
+        let (mut across, mut up_down) = (0, 0);
+        across += ui.input(|i| {
+            i.num_accesskit_action_requests(hid, Action::Increment) as i32
+                - i.num_accesskit_action_requests(hid, Action::Decrement) as i32
+        });
+        if response.has_focus() {
+            ui.memory_mut(|m| {
+                m.set_focus_lock_filter(
+                    hid,
+                    egui::EventFilter {
+                        horizontal_arrows: true,
+                        vertical_arrows: true,
+                        ..Default::default()
+                    },
+                );
+            });
+            ui.input(|i| {
+                for event in &i.events {
+                    if let Event::Key {
+                        key, pressed: true, ..
+                    } = event
+                    {
+                        match key {
+                            Key::ArrowRight => across += 1,
+                            Key::ArrowLeft => across -= 1,
+                            Key::ArrowUp => up_down += 1,
+                            Key::ArrowDown => up_down -= 1,
+                            _ => {}
+                        }
+                    }
+                }
+            });
+        }
+        for (steps, index) in [(across, Some(xi)), (up_down, yi)] {
+            let Some(index) = index.filter(|_| steps != 0) else {
+                continue;
+            };
+            let value = crate::device_panel::step(&params[index], panel.value(index), steps);
+            if value != panel.value(index) {
+                events.push(UiEvent::BeginNamedGesture(
+                    crate::device_panel::gesture_name(&params[index]),
+                ));
+                events.push(UiEvent::Invoke(set(index, value)));
+                events.push(UiEvent::EndGesture);
+            }
+        }
+        let painter = ui.painter_at(area);
+        painter.circle(at, HANDLE_RADIUS, ink, Stroke::new(1.0, c.text.0));
+        crate::device_panel::focus_ring(
+            ui,
+            theme,
+            Rect::from_center_size(at, vec2(HANDLE_RADIUS * 2.0, HANDLE_RADIUS * 2.0)),
+            &response,
+        );
+        describe(ui, &response, marker, &params[xi], panel.value(xi));
+    }
+}
+
+/// A handle as a screen reader hears it: a slider named for its marker,
+/// reading what the marker says.
+fn describe(
+    ui: &Ui,
+    response: &egui::Response,
+    marker: &DisplayMarker,
+    param: &ParamDescriptor,
+    value: f64,
+) {
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(Role::Slider);
+        node.set_label(marker.name.clone());
+        node.set_value(marker.text.clone());
+        node.set_numeric_value(value);
+        node.set_min_numeric_value(param.min());
+        node.set_max_numeric_value(param.max());
+        node.add_action(Action::Increment);
+        node.add_action(Action::Decrement);
+    });
 }
 
 /// The Activity view: the input's level and the gain reduction, scrolling

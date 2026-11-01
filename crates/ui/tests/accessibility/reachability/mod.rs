@@ -420,6 +420,7 @@ fn every_m1_command_is_reachable_from_the_keyboard() {
     assert_eq!(
         gaps,
         [
+            "browser.set_analysis_paused",
             "chain.save_preset",
             "clip.save_file",
             "device.add_layers",

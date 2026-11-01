@@ -469,8 +469,9 @@ impl Shell {
         let browse = self.surface_browse();
         let mix = self.surface_mix();
         let doc = self.editor.document();
-        let drum = crate::devices::shown_track(&self.arrangement, doc)
-            .and_then(|track| self.devices.drum_view(doc, track));
+        let shown = crate::devices::shown_track(&self.arrangement, doc);
+        let drum = shown.and_then(|track| self.devices.drum_view(doc, track));
+        let devices = self.devices.surface_views(doc, shown);
         ReadModel {
             document,
             slots: self.session_states().to_vec(),
@@ -505,6 +506,7 @@ impl Shell {
             }),
             session_view: self.main_view == MainView::Session,
             selection_armed: self.surface.selection_armed.iter().copied().collect(),
+            devices,
             mix,
         }
     }

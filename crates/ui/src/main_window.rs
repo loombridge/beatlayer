@@ -1384,8 +1384,8 @@ impl MainWindowUi {
     }
 
     /// The Link menu (the Link spec, R19): Link, Start Stop Sync, Link Audio,
-    /// the peers that have Link Audio on, and Configure Link…. Link Audio
-    /// comes with its own package: its item is off and no peer has it on.
+    /// the peers that have Link Audio on (not clickable), and Configure
+    /// Link….
     fn link_menu_content(ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
         let ticked = |on: bool, label: &str| {
             if on {
@@ -1406,7 +1406,13 @@ impl MainWindowUi {
         if ui.button(ticked(sync, "Start Stop Sync")).clicked() {
             run(ui, link_ids::SET_START_STOP_SYNC, json!({ "on": !sync }));
         }
-        ui.add_enabled(false, egui::Button::new("Link Audio"));
+        let audio = shell.link_audio_enabled();
+        if ui.button(ticked(audio, "Link Audio")).clicked() {
+            run(ui, link_ids::SET_AUDIO, json!({ "on": !audio }));
+        }
+        for peer in shell.link_audio_peers() {
+            ui.add_enabled(false, egui::Button::new(peer.name));
+        }
         ui.separator();
         if ui.button("Configure Link…").clicked() {
             run(ui, ids::APP_SETTINGS, json!({ "page": "link" }));
@@ -1721,6 +1727,31 @@ impl MainWindowUi {
                 events.push(UiEvent::Invoke(Invocation::new(
                     remote_ids::SET_MODE,
                     json!({ "source": mapping.source, "mode": mode }),
+                )));
+            }
+        }
+        // Spec: sound-similarity R6 (L-STAT-002). While files wait to be
+        // analysed, Pause and Resume sit at the right end of the message
+        // area, left of the mapping mode chooser when that shows.
+        let analysis = shell.browser_view().analysis_state();
+        if analysis.waiting > 0
+            && let Some(message) = message
+        {
+            let right = message.right()
+                - if shell.map_controller_mapping().is_some() {
+                    156.0
+                } else {
+                    4.0
+                };
+            let rect = Rect::from_min_size(
+                pos2(right - 64.0, message.top() + 2.0),
+                egui::vec2(64.0, message.height() - 4.0),
+            );
+            let label = if analysis.paused { "Resume" } else { "Pause" };
+            if ui.put(rect, egui::Button::new(label)).clicked() {
+                events.push(UiEvent::Invoke(Invocation::new(
+                    bl_shell::browser_commands::SET_ANALYSIS_PAUSED,
+                    json!({ "paused": !analysis.paused }),
                 )));
             }
         }
@@ -2450,6 +2481,22 @@ fn look(element: Element, shell: &Shell, window: WindowKind) -> Look {
                 text: shell.note_group_status(),
                 ..Look::default()
             },
+            // Spec: sound-similarity R6. The progress of sound analysis, while
+            // files wait and nothing more urgent is said.
+            (None, None)
+                if shell.missing_files() == 0
+                    && shell.browser_view().analysis_state().waiting > 0 =>
+            {
+                let state = shell.browser_view().analysis_state();
+                Look {
+                    text: Some(format!(
+                        "Analyzing Sounds {:.0} %{}",
+                        state.share.unwrap_or(0.0) * 100.0,
+                        if state.paused { " (paused)" } else { "" }
+                    )),
+                    ..Look::default()
+                }
+            }
             (None, None) => {
                 let missing = shell.missing_files();
                 Look {

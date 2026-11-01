@@ -21,9 +21,10 @@ use bl_engine::{
 use bl_media::SampleData;
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
 use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
-use lspk_dsp::filter::{FilterBank, FilterType, VoiceParams, pitch_of};
+use lspk_dsp::filter::{FilterType, pitch_of};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
+use crate::instrument_filter::{CIRCUITS, InstrumentFilter, Per, PerFrame, Setup};
 
 /// The sampler device type's id.
 pub const SAMPLER: &str = "beatlayer.snapshot";
@@ -152,6 +153,16 @@ pub const PITCH_ENV_AMOUNT: ParamId = ParamId(55);
 /// Slice mode: how slices sound together, Mono, Poly or Thru (the sampler
 /// spec, R23). Older sets lack it and open on Mono.
 pub const PLAYBACK: ParamId = ParamId(56);
+/// The filter's circuit: Clean, OSR, MS2, SMP or PRD, for the types each
+/// plays (the instrument filter spec, R2). Older sets lack it and open on
+/// Clean.
+pub const FILTER_CIRCUIT: ParamId = ParamId(57);
+/// The filter's Drive, into every circuit but Clean on low-pass, high-pass
+/// and band-pass (R9).
+pub const FILTER_DRIVE: ParamId = ParamId(58);
+/// Where the Morph type sits between low-pass, band-pass, high-pass and
+/// notch (R10).
+pub const FILTER_MORPH: ParamId = ParamId(59);
 
 /// The Mode choices: Classic, One-Shot, then Slice.
 pub const MODES: [&str; 3] = ["Classic", "One-Shot", "Slice"];
@@ -162,7 +173,8 @@ pub const PLAYBACKS: [&str; 3] = ["Mono", "Poly", "Thru"];
 /// The Slice By choices.
 pub const SLICE_BYS: [&str; 4] = ["Transient", "Beat", "Region", "Manual"];
 
-/// The filter's Type choices: each family at its two slopes.
+/// The filter's Type choices: each family at its two slopes. Kitbag's
+/// filter offers these too.
 pub const FILTER_TYPES: [&str; 8] = [
     "Low-pass 12",
     "Low-pass 24",
@@ -172,6 +184,21 @@ pub const FILTER_TYPES: [&str; 8] = [
     "Band-pass 24",
     "Notch 12",
     "Notch 24",
+];
+
+/// Simpler's Type choices: [`FILTER_TYPES`] and Morph at its two slopes
+/// (the instrument filter spec, R1).
+pub const FILTER_TYPE_CHOICES: [&str; 10] = [
+    "Low-pass 12",
+    "Low-pass 24",
+    "High-pass 12",
+    "High-pass 24",
+    "Band-pass 12",
+    "Band-pass 24",
+    "Notch 12",
+    "Notch 24",
+    "Morph 12",
+    "Morph 24",
 ];
 
 /// The LFO's Wave choices.
@@ -405,8 +432,8 @@ pub fn sampler_type() -> DeviceType {
         .describe("Region slicing's number of equal slices."),
         ParamDescriptor::toggle(FILTER, "Filter", false)
             .describe("Runs the sample through the filter; off bypasses it."),
-        ParamDescriptor::choice(FILTER_TYPE, "Type", &FILTER_TYPES, 0).describe(
-            "The filter's low-pass, high-pass, band-pass or notch response, at 12 or \
+        ParamDescriptor::choice(FILTER_TYPE, "Type", &FILTER_TYPE_CHOICES, 0).describe(
+            "The filter's low-pass, high-pass, band-pass, notch or Morph response, at 12 or \
                        24 dB per octave.",
         ),
         ParamDescriptor::continuous(
@@ -541,6 +568,21 @@ pub fn sampler_type() -> DeviceType {
             "Slice only: Mono plays one slice at a time; Poly plays slices together, as many as \
              Voices allows; Thru plays one slice at a time on past its end to the region's end.",
         ),
+        ParamDescriptor::choice(FILTER_CIRCUIT, "Circuit", &CIRCUITS, 0).describe(
+            "The filter's circuit: Clean has no distortion of its own; OSR, MS2, SMP and \
+             PRD part as the signal and Res rise. MS2, SMP and PRD play low-pass and \
+             high-pass only; on other types the circuit plays Clean.",
+        ),
+        ParamDescriptor::continuous(FILTER_DRIVE, "Drive", (0.0, 24.0), 0.0, ParamUnit::Decibels)
+            .describe(
+                "Drives the signal into the filter's circuit, for low-pass, high-pass and \
+                 band-pass; Clean ignores it.",
+            ),
+        ParamDescriptor::continuous(FILTER_MORPH, "Morph", (0.0, 100.0), 0.0, ParamUnit::Percent)
+            .describe(
+                "Where the Morph type sits: low-pass at 0, band-pass at 25 %, high-pass at \
+                 50 %, notch at 75 %, and low-pass again at 100 %.",
+            ),
     ];
     DeviceType::native(SAMPLER, "Simpler", DeviceRole::Instrument).with_description(
         DeviceDescription::new(params)
@@ -580,7 +622,12 @@ pub fn sampler_type() -> DeviceType {
                     "Slicing",
                     &["Slice By", "Playback", "Sensitivity", "Division", "Regions"],
                 ),
-                ("Filter", &["Filter", "Type", "Freq", "Res", "Key"]),
+                (
+                    "Filter",
+                    &[
+                        "Filter", "Type", "Circuit", "Freq", "Res", "Drive", "Morph", "Key",
+                    ],
+                ),
                 (
                     "Filter Envelope",
                     &[
@@ -689,8 +736,11 @@ fn layout() -> DeviceLayout {
         &[
             (FILTER, Widget::Toggle),
             (FILTER_TYPE, Widget::Chooser),
+            (FILTER_CIRCUIT, Widget::Chooser),
             (FILTER_FREQ, Widget::Knob),
             (FILTER_RES, Widget::Knob),
+            (FILTER_DRIVE, Widget::Knob),
+            (FILTER_MORPH, Widget::Knob),
             (FILTER_KEY, Widget::Knob),
             (FILTER_ENV_ATTACK, Widget::Knob),
             (FILTER_ENV_DECAY, Widget::Knob),
@@ -811,7 +861,7 @@ pub struct Sampler {
     /// gliding voice starts.
     last_pitch: Option<f64>,
     /// The filter, one lane per voice slot.
-    filter: FilterBank,
+    filter: InstrumentFilter,
     /// How many values a frame of the per-voice buffers holds.
     stride: usize,
     /// Each voice's sample audio for the stretch, before the filter: per
@@ -827,10 +877,9 @@ pub struct Sampler {
     slices: Slices,
     /// The phase a voice's LFO starts from when Retrigger is off.
     free_phase: f64,
-    /// The filter settings last handed to the bank.
-    filter_params: VoiceParams,
-    /// The Type choice the bank's filter type holds.
-    filter_type: usize,
+    /// The filter's Res, Morph and Drive for the stretch, 0 to 1: one value
+    /// per frame.
+    filter_controls: [Vec<f32>; 3],
     /// Per-slot random state, for the LFO's Random waveform.
     rng: [u32; SLOTS],
 }
@@ -839,10 +888,10 @@ impl Sampler {
     /// Makes a sampler for `config`'s rate and block size: the filter and
     /// every buffer it needs are made here, off the audio thread.
     fn new(config: &NodeConfig) -> Self {
-        let mut filter = FilterBank::new(config.sample_rate.hz() as f32, SLOTS, 2);
-        filter.set_type(filter_type_of(0));
-        let stride = filter.stride();
         let frames = config.max_frames.max(1);
+        let filter = InstrumentFilter::new(config.sample_rate.hz() as f32, SLOTS, frames)
+            .starting_from_last_settings();
+        let stride = filter.stride();
         Self {
             data: None,
             audition: None,
@@ -857,8 +906,7 @@ impl Sampler {
             lfo: vec![0.0; frames * stride],
             slices: Slices::new(),
             free_phase: 0.0,
-            filter_params: VoiceParams::default(),
-            filter_type: 0,
+            filter_controls: core::array::from_fn(|_| vec![0.0; frames]),
             rng: core::array::from_fn(|slot| 0x9E37_79B9u32.wrapping_mul(slot as u32 + 1) | 1),
         }
     }
@@ -988,9 +1036,16 @@ impl Sampler {
             division_frames: params.value(at(SLICE_DIVISION)).max(1.0) * sixteenth,
             regions: params.value(at(SLICE_REGIONS)).max(1.0) as usize,
             filter_on: params.value(at(FILTER)) >= 0.5,
-            filter_type: (params.value(at(FILTER_TYPE)) as usize).min(FILTER_TYPES.len() - 1),
+            filter_setup: {
+                let entry =
+                    (params.value(at(FILTER_TYPE)) as usize).min(FILTER_TYPE_CHOICES.len() - 1);
+                Setup::new(
+                    entry / 2,
+                    entry % 2 == 1,
+                    params.value(at(FILTER_CIRCUIT)) as usize,
+                )
+            },
             filter_freq: params.value(at(FILTER_FREQ)),
-            filter_res: (params.value(at(FILTER_RES)) / 100.0) as f32,
             filter_key: (params.value(at(FILTER_KEY)) / 100.0) as f32,
             filter_attack_frames: frames_of(params.value(at(FILTER_ENV_ATTACK)), rate.as_f64()),
             filter_decay_frames: frames_of(params.value(at(FILTER_ENV_DECAY)), rate.as_f64()),
@@ -1164,7 +1219,7 @@ impl Sampler {
             self.free_phase
         };
         voice.lfo_random = random(&mut self.rng[slot]);
-        self.filter.reset_voice(slot, &self.filter_params);
+        self.filter.reset_voice(slot, note.offset as usize);
         self.voices[slot] = voice;
         if audition.is_none() {
             self.last_pitch = Some(pitch);
@@ -1409,34 +1464,33 @@ impl Sampler {
         }
     }
 
-    /// Applies the filter, per voice, to what [`voices_frame`] wrote.
-    fn filtered(&mut self, s: &Settings, frames: usize) {
-        if s.filter_type != self.filter_type {
-            self.filter_type = s.filter_type;
-            self.filter.set_type(filter_type_of(s.filter_type));
-        }
-        let params = VoiceParams {
-            resonance: s.filter_res.clamp(0.0, 1.0),
-            drive: 0.0,
-            saturation: 0.0,
-            character: 0.0,
-            stereo_offset: 0.0,
-            mix: 1.0,
-            level: 1.0,
-            morph_x: 0.0,
-            morph_y: 0.0,
-        };
-        if params != self.filter_params {
-            self.filter_params = params;
-            for voice in 0..SLOTS {
-                self.filter.set_params(voice, &params);
+    /// Applies the filter, per voice, to what [`voices_frame`] wrote. `ramps`
+    /// are Res, Morph and Drive at each frame, in their parameters' units.
+    fn filtered(&mut self, s: &Settings, frames: usize, ramps: [&[f32]; 3]) {
+        self.filter.set_setup(s.filter_setup);
+        // Res and Morph are percentages, Drive's decibels of the 24.
+        for ((to, from), scale) in self
+            .filter_controls
+            .iter_mut()
+            .zip(ramps)
+            .zip([100.0, 100.0, 24.0])
+        {
+            for (to, from) in to[..frames].iter_mut().zip(from) {
+                *to = from / scale;
             }
         }
-        let stride = self.stride;
-        self.filter.process_voices(
+        let [res, morph, drive] = &self.filter_controls;
+        let controls = PerFrame {
+            cutoff: &self.cutoff[..frames * self.stride],
+            res: Per::Shared(&res[..frames]),
+            morph: Per::Shared(&morph[..frames]),
+            drive: Per::Shared(&drive[..frames]),
+        };
+        self.filter.process(
             SLOTS,
-            &self.cutoff[..frames * stride],
-            &mut self.audio[..frames * 2 * stride],
+            frames,
+            &controls,
+            &mut self.audio[..frames * 2 * self.stride],
         );
     }
 
@@ -1546,7 +1600,15 @@ impl NativeDevice for Sampler {
         }
         // 2. The filter, per voice.
         if settings.filter_on {
-            self.filtered(&settings, frames);
+            self.filtered(
+                &settings,
+                frames,
+                [
+                    params.ramp(at(FILTER_RES)),
+                    params.ramp(at(FILTER_MORPH)),
+                    params.ramp(at(FILTER_DRIVE)),
+                ],
+            );
         }
         // 3. The amplitudes and pans, and the output.
         self.mixed(&settings, frames, volume, pan, left, right);
@@ -1612,9 +1674,8 @@ struct Settings {
     /// Region slicing's number of equal slices.
     regions: usize,
     filter_on: bool,
-    filter_type: usize,
+    filter_setup: Setup,
     filter_freq: f64,
-    filter_res: f32,
     /// How much the played note moves the cutoff, 0 to 1.
     filter_key: f32,
     filter_attack_frames: u32,
@@ -1662,7 +1723,8 @@ impl Settings {
     }
 }
 
-/// The kit's filter type the Type choice names.
+/// The kit's filter type the Type choice names (Kitbag's filter plays the
+/// kit's types directly).
 pub(crate) fn filter_type_of(entry: usize) -> FilterType {
     match entry {
         1 => FilterType::Lp24,

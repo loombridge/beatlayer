@@ -144,6 +144,18 @@ pub fn noise(frames: usize) -> Vec<f32> {
         .collect()
 }
 
+/// Where `signal` peaks above `level` in size, one place for each peak: the
+/// first frame of each run of frames more than 8 apart.
+pub fn peaks(signal: &[f32], level: f32) -> Vec<usize> {
+    let mut found: Vec<usize> = Vec::new();
+    for (n, s) in signal.iter().enumerate() {
+        if s.abs() > level && found.last().is_none_or(|last| n - last > 8) {
+            found.push(n);
+        }
+    }
+    found
+}
+
 /// The rows a modulator wrote over a run (WP-5.10): one `Vec` of values per
 /// row, for `frames` frames.
 pub struct Rows(pub Vec<Vec<f32>>);

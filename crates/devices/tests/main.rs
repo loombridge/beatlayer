@@ -101,6 +101,7 @@ mod tuning_engine;
 mod utility;
 mod vector_delay;
 mod vinyl_distortion;
+mod vocoder;
 mod wave_mod;
 mod wavetable;
 mod wavetables;

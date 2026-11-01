@@ -151,7 +151,22 @@ Every edit here runs the same registered command the app's own editors run, as o
 | R32 to R38 | WP-7.22: `bl-push` `note::melodic::tests::every_pad_follows_the_formulas_for_every_layout`, `fixed_finds_the_nearest_scale_note_and_octave_stops_at_the_ends`, `melodies::the_pads_colours_say_what_they_hold`, `octave_stops_within_the_keyboard_and_its_led_goes_off`, `the_scale_menu_sets_the_scale_and_the_layout_options`, `the_pads_follow_the_current_scale`, `delete_and_a_pad_delete_one_pitch_inside_the_loop`, `the_state_reports_the_options_the_set_holds`; `bl-model` `editor::tests::the_pad_layout_is_no_undo_step_and_survives_undo`, `document::tests::the_pad_layout_saves_and_loads_back`; `bl-shell` `push_melodies::the_scale_menu_changes_options_that_are_no_undo_step_and_the_state_reads_them`; `bl-agent` `push_beats::an_agent_sets_the_pad_layout_and_reads_the_melodic_state` | unit, unit (simulated Push 2), agent |
 | R39 to R44 | WP-7.22: `bl-push` `note::melodic::tests::the_sequencers_rows_and_the_strips_leds`, `melodies::layout_steps_through_the_melodic_layouts_and_shows_the_loop_pads`, `the_melodic_sequencer_edits_steps_and_moves_its_rows`, `chromatic_rows_are_semitones_and_those_outside_the_scale_are_unlit_but_usable`, `the_32_notes_select_notes_and_the_steps_take_them` | unit (simulated Push 2) |
 | R45 to R47 | WP-7.22: `bl-push` `melodies::left_and_right_select_neighbouring_tracks_and_move_the_ring`, `up_and_down_launch_the_neighbouring_scene_as_legato`, `the_arrows_belong_to_browse_mode_while_it_shows`; `bl-shell` `push_melodies::down_launches_the_next_scene_at_once_and_the_clips_take_over_the_position`; `bl-engine` `clip_launch::a_legato_launch_command_takes_over_at_once_whatever_the_clip_says` | unit (simulated Push 2), engine |
-| R48 to R60 | to be written in WP-7.23 | unit (simulated Push 2), agent |
-| R61 to R66 | to be written in WP-7.23 | unit, agent |
+| R48 | WP-7.23: `bl-shell` `push_recording::four_presses_of_record_record_a_slot_end_it_overdub_it_and_stop` | unit (simulated Push 2) |
+| R49 | WP-7.23: `bl-shell` `push_recording::with_the_arrangement_in_focus_record_and_shift_record_switch_arrangement_and_session` | unit (simulated Push 2) |
+| R50 | WP-7.23: `bl-shell` `push_recording::fixed_lengths_button_and_menu_set_its_preferences`; `bl-agent` `push_beats::an_agent_reads_recording_state_and_sets_fixed_length_and_swing` | unit (simulated Push 2), agent |
+| R51 | WP-7.23: `bl-engine` `session_recording::a_fixed_length_take_ends_by_itself`, `phrase_sync_ends_the_take_at_the_end_of_the_phrase`; `bl-shell` `push_recording::a_two_bar_fixed_length_recording_makes_a_two_bar_clip_and_ends_by_itself`, `phrase_sync_starts_the_take_part_way_into_the_clip`, `fixed_length_switched_on_mid_recording_loops_the_last_stretch` | frame by frame, unit (simulated Push 2) |
+| R52 | WP-7.23: `bl-shell` `push_recording::new_with_workflow_clip_selects_the_next_empty_slot_or_inserts_a_scene`, `new_with_workflow_scene_captures_the_other_tracks_and_selects_an_empty_slot` | unit (simulated Push 2) |
+| R53 | WP-7.23: `bl-shell` `push_recording::duplicate_in_both_workflows_makes_the_scene_or_the_copy` | unit (simulated Push 2) |
+| R54 | WP-7.23: `bl-shell` `push_recording::accent_gives_127_tapped_and_held`; `bl-agent` `push_beats::an_agent_reads_recording_state_and_sets_fixed_length_and_swing` | unit (simulated Push 2), agent |
+| R55, R56 | WP-7.23: `bl-shell` `push_recording::repeat_plays_a_held_pad_on_the_grid`, `repeat_delays_every_second_note_by_the_swing_amount` | unit (simulated Push 2) |
+| R57 | WP-7.23: `bl-shell` `push_recording::quantize_quantises_all_notes_when_none_is_selected`, `quantize_and_a_drum_pad_quantise_only_its_notes` | unit (simulated Push 2) |
+| R58 | WP-7.23: `bl-shell` `push_recording::the_quantize_menu_stays_after_a_change_until_the_next_tap` | unit (simulated Push 2) |
+| R59 | WP-7.23: `bl-shell` `push_recording::the_display_shows_the_count_in_and_the_playing_clips_progress` | unit (simulated Push 2) |
+| R60 | WP-7.21: `bl-shell` `push_beats::the_pads_notes_reach_the_armed_track_and_its_recording` | unit (simulated Push 2) |
+| R61, R65 | WP-7.23: `bl-shell` `push_recording::automate_arms_and_an_encoders_turns_are_recorded_into_the_clip` | unit (simulated Push 2) |
+| R62 | WP-7.23: `bl-shell` `push_recording::delete_and_a_touch_delete_the_envelope_or_reset_the_parameter` | unit (simulated Push 2) |
+| R63 | WP-7.23: `bl-shell` `push_recording::delete_and_automate_clear_the_clips_automation` | unit (simulated Push 2) |
+| R64 | WP-7.23: `bl-shell` `push_recording::the_dot_follows_the_playing_clips_automation` | unit (simulated Push 2) |
+| R66 | WP-7.23: `bl-shell` `push_recording::held_steps_and_a_turn_write_the_value_over_their_spans` | unit (simulated Push 2) |
 | R67 to R69 | to be written in WP-7.24 | golden frame |
 | R70 to R76 | to be written in WP-7.24 | unit (simulated Push 2), agent |

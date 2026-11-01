@@ -504,7 +504,10 @@ fn fixture() -> Project {
         mix: 0.25,
         listen: true,
     });
-    device.midi_sidechain = Some(bl_model::MidiSidechain { source: Some(keys) });
+    device.midi_sidechain = Some(bl_model::MidiSidechain {
+        source: Some(keys),
+        tap: None,
+    });
     apply(
         &mut editor,
         Command::InsertDevice {

@@ -1452,7 +1452,7 @@ fn with_result_format_toon_a_long_table_is_toon_and_anything_else_stays_compact_
     assert!(plain.text.starts_with("{\"tracks\":"), "{}", plain.text);
     assert!(
         long.text
-            .starts_with("tracks:\n  items[11]{clips,colour,delay.unit,delay.value,devices,frozen,group,id,keep_monitoring_latency,kind,mixer.arm,mixer.mute,mixer.pan,mixer.pan_mode,mixer.solo,mixer.split_left,mixer.split_right,mixer.volume,mixer.volume_db,name,tracks_inside,tuning_bypass,tuning_layout.layout}:"),
+            .starts_with("tracks:\n  items[11]{clips,colour,delay.unit,delay.value,devices,frozen,group,id,keep_monitoring_latency,kind,mixer.arm,mixer.arm_by_selection,mixer.mute,mixer.pan,mixer.pan_mode,mixer.solo,mixer.split_left,mixer.split_right,mixer.volume,mixer.volume_db,name,tracks_inside,tuning_bypass,tuning_layout.layout}:"),
         "{}",
         long.text
     );
@@ -3076,6 +3076,110 @@ fn an_agent_inserts_veer_sets_its_parameters_and_points_its_midi_sidechain_at_a_
         )
         .unwrap();
     assert!(refused.ok().is_err());
+}
+
+// Spec: corpus R11, R15 and routing R39: an agent adds Corpus, sets every
+// parameter by ID, points its MIDI source at a MIDI track with a tapping
+// point and reads them all back.
+#[test]
+fn an_agent_sets_every_corpus_parameter_and_its_midi_source_with_its_tapping_point_and_reads_them_back()
+ {
+    use bl_devices::corpus::{CORPUS, corpus_type};
+
+    let mut shell = Shell::headless();
+    shell.set_device_types(bl_devices::device_types());
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("corpus-agent").unwrap();
+    let tracks = default_tracks(&mut client);
+    let (keys, audio) = (tracks[0], tracks[2]);
+    let reply = call(
+        &mut client,
+        "run",
+        json!({ "label": "Add Corpus", "commands": [
+            { "command": "device.add",
+              "args": { "track": audio,
+                        "device": { "kind": { "native": { "device_type": CORPUS } },
+                                    "name": "Corpus", "role": "audio_effect",
+                                    "midi_sidechain": true } } },
+        ] }),
+    );
+    let device = reply["results"][0]["result"]["device"].clone();
+    // Every parameter moved to a value other than its default.
+    let description = corpus_type().description;
+    let wanted: Vec<(bl_model::ParamId, f64)> = description
+        .params
+        .iter()
+        .map(|p| {
+            let (lo, hi) = (p.min(), p.max());
+            let value = if (p.default - hi).abs() > (p.default - lo).abs() {
+                lo + 0.75 * (hi - lo)
+            } else {
+                lo + 0.25 * (hi - lo)
+            };
+            (p.id, p.clamp(value))
+        })
+        .collect();
+    let mut commands: Vec<Value> = wanted
+        .iter()
+        .map(|(param, value)| {
+            json!({ "command": "device.set_param",
+                    "args": { "device": device, "param": param, "value": value } })
+        })
+        .collect();
+    commands.push(json!({ "command": "device.set_midi_sidechain_source",
+                          "args": { "device": device, "track": keys, "tap": "pre_fx" } }));
+    call(
+        &mut client,
+        "run",
+        json!({ "label": "Set Corpus", "commands": commands }),
+    );
+    let read = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+    );
+    let params = read["results"][0]["result"]["params"].as_array().unwrap();
+    assert_eq!(
+        params.len(),
+        description.params.len(),
+        "every parameter is listed"
+    );
+    for (id, value) in &wanted {
+        let found = params
+            .iter()
+            .find(|p| p["id"] == json!(id.0))
+            .unwrap_or_else(|| panic!("parameter {id:?}"));
+        assert_eq!(found["value"], json!(value), "{}", found["name"]);
+        assert_eq!(found["automatable"], json!(true));
+    }
+    // The source and its tapping point read back from the device.
+    let query =
+        || json!({ "path": format!("device {}", device.as_u64().unwrap()), "detail": "full" });
+    let found = call(&mut client, "query", query());
+    assert_eq!(found["saved"]["midi_sidechain"]["source"], json!(keys));
+    assert_eq!(found["saved"]["midi_sidechain"]["tap"], json!("pre_fx"));
+    // Left out, the tapping point stays; the source goes with its track.
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.set_midi_sidechain_source",
+                                "args": { "device": device, "track": keys, "tap": "post_mixer" } }] }),
+    );
+    assert_eq!(
+        call(&mut client, "query", query())["saved"]["midi_sidechain"]["tap"],
+        json!("post_mixer")
+    );
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "track.delete", "args": { "track": keys } }] }),
+    );
+    let found = call(&mut client, "query", query());
+    assert!(
+        found["saved"]["midi_sidechain"].get("source").is_none(),
+        "{found}"
+    );
+    assert_eq!(found["saved"]["midi_sidechain"]["tap"], json!("post_mixer"));
 }
 
 // Spec: one-shot-drum-sampler R22 and R23 (WP-5.18): an agent adds Drum Sampler,
@@ -5565,6 +5669,91 @@ fn an_agent_adds_sets_and_reads_the_modulation_devices_by_id_and_reopens_them() 
                 "{kind}: parameter {param:?} reopened"
             );
         }
+    }
+}
+
+/// An agent reads a device's spectrogram through `device.display` as numbers
+/// in dB with its axes, as the engine published it, at any block size (the
+/// device framework spec, R46).
+#[test]
+fn an_agent_reads_a_spectrograms_grid_and_axes_through_device_display() {
+    use bl_devices::testing::{self, SPECTROGRAM, SPECTROGRAM_GRID};
+    for block in [64, 4_096] {
+        let mut registry = testing::registry();
+        bl_devices::register(&mut registry);
+        let mut host = EngineHost::with_registry(block, registry);
+        let mut types = bl_devices::device_types();
+        types.extend(testing::device_types());
+        host.client.transport().shell.set_device_types(types);
+        let device = |index: u32, name: &str, device_type: &str| {
+            json!({ "command": "device.insert",
+                    "args": { "track": {"$ref": "Track"}, "index": index,
+                              "device": { "id": {"$new": name}, "name": name,
+                                          "kind": { "native": { "device_type": device_type } },
+                                          "enabled": true, "params": [] } } })
+        };
+        host.call(
+            "run",
+            json!({ "label": "Add devices", "commands": [
+                { "command": "track.create",
+                  "args": { "id": {"$new": "Track"}, "kind": "audio", "name": "Track", "index": 0 } },
+                device(0, "Tone", bl_engine::nodes::TEST_TONE),
+                device(1, "Spectrogram", SPECTROGRAM),
+                { "command": "device.set_param",
+                  "args": { "device": {"$ref": "Tone"}, "param": 0, "value": 1000.0 } },
+                { "command": "device.set_param",
+                  "args": { "device": {"$ref": "Tone"}, "param": 1, "value": -6.0 } },
+            ] }),
+        );
+        let spectrogram = {
+            let document = host.client.transport().shell.editor().document();
+            let track = document.tracks().find(|t| t.name() == "Track").unwrap();
+            track.devices().nth(1).unwrap().id
+        };
+        host.play_to(65_536);
+        host.publish_displays();
+        let reply = host.call(
+            "run",
+            json!({ "label": "Read", "commands": [
+                { "command": "device.display", "args": { "device": spectrogram } },
+            ] }),
+        );
+        let shown = &reply["results"][0]["result"];
+        assert_eq!(shown["live"], true);
+        let grid = &shown["spectrograms"][0];
+        assert_eq!(grid["name"], "Spectrogram");
+        assert_eq!(grid["columns"], SPECTROGRAM_GRID.columns);
+        assert_eq!(grid["rows"], SPECTROGRAM_GRID.rows);
+        assert_eq!(grid["frequencies"], json!(SPECTROGRAM_GRID.frequencies));
+        assert_eq!(grid["log_frequency"], true);
+        assert_eq!(grid["levels"], json!(SPECTROGRAM_GRID.levels));
+        let values: Vec<f64> = grid["values"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect();
+        assert_eq!(
+            values.len(),
+            SPECTROGRAM_GRID.columns * SPECTROGRAM_GRID.rows
+        );
+        // The newest column peaks at the row of 1 kHz, near -6 dB.
+        let rows = SPECTROGRAM_GRID.rows;
+        let newest = &values[values.len() - rows..];
+        let (loudest, level) = newest
+            .iter()
+            .copied()
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .unwrap();
+        let [low, high] = SPECTROGRAM_GRID.frequencies.map(f64::from);
+        let hz = low * (high / low).powf(loudest as f64 / (rows - 1) as f64);
+        assert!(
+            (hz / 1_000.0).ln().abs() < 0.15,
+            "block {block}: {hz:.0} Hz"
+        );
+        assert!((-9.0..=-5.0).contains(&level), "block {block}: {level} dB");
+        assert_eq!(host.offline.heap_operations(), 0, "block {block}");
     }
 }
 

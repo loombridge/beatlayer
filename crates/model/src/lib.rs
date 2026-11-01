@@ -144,7 +144,8 @@ pub use device::{
     MidiSidechain, PluginFormat, PluginState, Sidechain, WavetableChoice, WindowFrame,
 };
 pub use device_display::{
-    DeviceDisplay, DisplayHandle, DisplayMarker, DisplayReading, DisplaySeries,
+    DeviceDisplay, DisplayHandle, DisplayMarker, DisplayReading, DisplaySeries, DisplaySpectrogram,
+    SpectrogramGrid,
 };
 pub use device_layout::{DeviceLayout, DevicePages, PageChoice};
 pub use document::{ArrangementLoop, Document, MAX_CUE_VOLUME, Settings};

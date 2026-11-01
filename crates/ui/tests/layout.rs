@@ -6,8 +6,8 @@ use std::path::PathBuf;
 
 use bl_ui::layout::mixer::Sections;
 use bl_ui::layout::{
-    ArrangementLayout, D24, ELEMENTS, Element, LINK_MENU_WIDTH, LINK_WIDTH, MINIMUM, REFERENCE,
-    ShellLayout, Strip, TITLE_BAR, layout_size, placement,
+    ArrangementLayout, D24, ELEMENTS, Element, FOLLOW_WIDTH, LINK_MENU_WIDTH, LINK_WIDTH, MINIMUM,
+    REFERENCE, ShellLayout, Strip, TITLE_BAR, layout_size, placement,
 };
 use egui::{Rect, Vec2, pos2, vec2};
 
@@ -173,7 +173,8 @@ fn groups_stretch_with_the_window_and_controls_keep_their_size() {
         // The Global Amount is hidden unless the pool holds a groove, and the
         // sync lamps and the Resync button unless an input has Sync on or
         // Show Resync Button is on, the Link toggle unless Show Link Toggle
-        // is Show, and New unless a map mode is on.
+        // is Show, the Tempo Follower toggle unless Show Tempo Follower
+        // Toggle is Show, and New unless a map mode is on.
         let hidden = matches!(
             placement.element,
             Element::GlobalAmount
@@ -183,6 +184,7 @@ fn groups_stretch_with_the_window_and_controls_keep_their_size() {
                 | Element::ResyncExternalHardware
                 | Element::LinkToggle
                 | Element::LinkMenu
+                | Element::TempoFollower
                 | Element::New
         );
         if placement.element != Element::Message && !hidden {
@@ -506,6 +508,103 @@ fn the_link_toggle_sits_before_tap_and_moves_the_tempo_group_right() {
         assert_eq!(hidden.rect(Element::TapTempo).left(), 54.0, "{what}");
         assert_eq!(hidden.rect(Element::Tempo).left(), 82.0, "{what}");
     }
+}
+
+/// The layout with the Link and Tempo Follower toggles shown or hidden.
+fn with_toggles(size: Vec2, link: bool, follow: bool) -> ShellLayout {
+    ShellLayout::compute_with_detail(
+        size,
+        true,
+        true,
+        None,
+        None,
+        bl_ui::layout::DetailViews::default()
+            .with_global_amount(true)
+            .with_link(link)
+            .with_follow(follow),
+    )
+}
+
+// Spec: tempo-follower R2; control-bar-transport R24; L-CTRL-003. The Tempo
+// Follower toggle sits after the Link toggle and its arrow and before Tap,
+// 2 points from each, and everything after it moves right by its width and
+// the gap; nothing overlaps another, at 1600 × 1000 and at 50 %, 100 % and
+// 200 % zoom, and with it hidden the group is back where it was.
+#[test]
+fn the_follow_toggle_sits_after_link_before_tap_and_moves_the_tempo_group_right() {
+    let taken = FOLLOW_WIDTH + 2.0;
+    for zoom in [0.5_f32, 1.0, 2.0] {
+        let size = layout_size(REFERENCE * zoom, zoom);
+        let what = format!("at {:.0} %", zoom * 100.0);
+        for link in [true, false] {
+            let (shown, hidden) = (
+                with_toggles(size, link, true),
+                with_toggles(size, link, false),
+            );
+            let toggle = shown.rect(Element::TempoFollower);
+            let before = if link {
+                shown.rect(Element::LinkMenu).right()
+            } else {
+                54.0 - 2.0
+            };
+            assert_eq!(
+                (toggle.left(), toggle.width()),
+                (before + 2.0, FOLLOW_WIDTH),
+                "{what}, Link {link}"
+            );
+            let tap = shown.rect(Element::TapTempo);
+            assert_eq!(tap.left(), toggle.right() + 2.0, "{what}: before Tap");
+            for element in [
+                Element::TapTempo,
+                Element::Tempo,
+                Element::NudgeDown,
+                Element::SignatureNumerator,
+                Element::GlobalAmount,
+                Element::Metronome,
+                Element::ScaleName,
+            ] {
+                assert_eq!(
+                    shown.rect(element).left(),
+                    hidden.rect(element).left() + taken,
+                    "{what}: {element:?} moves right"
+                );
+            }
+            // The middle group is pushed right by what the first gap is
+            // short of, and never left.
+            for element in [Element::Follow, Element::Play, Element::DrawMode] {
+                assert!(
+                    shown.rect(element).left() >= hidden.rect(element).left(),
+                    "{what}: {element:?}"
+                );
+            }
+            let rects: Vec<Rect> = ELEMENTS
+                .iter()
+                .zip(&shown.elements)
+                .filter(|(p, _)| p.strip == Strip::ControlBar && p.element != Element::SyncOutput)
+                .map(|(_, (_, rect))| *rect)
+                .collect();
+            for pair in rects.windows(2) {
+                assert!(pair[0].right() <= pair[1].left() + 0.01, "{what}: {pair:?}");
+            }
+            assert_eq!(hidden.rect(Element::TempoFollower).width(), 0.0, "{what}");
+        }
+    }
+}
+
+// Spec: tempo-follower R2. Where the Control Bar has no room for the toggle,
+// in the smallest window and in the second window, it hides and the tempo
+// group keeps its order.
+#[test]
+fn the_follow_toggle_hides_where_the_gaps_have_no_room_for_it() {
+    let narrow = with_toggles(MINIMUM, false, true);
+    assert_eq!(narrow.rect(Element::TempoFollower).width(), 0.0);
+    assert_eq!(narrow.rect(Element::TapTempo).left(), 54.0);
+    let second = ShellLayout::compute_second(
+        REFERENCE,
+        true,
+        bl_ui::layout::DetailViews::default().with_follow(true),
+    );
+    assert_eq!(second.rect(Element::TempoFollower).width(), 0.0);
 }
 
 // Spec: link R17. Where the Control Bar has no room for the toggle, in the

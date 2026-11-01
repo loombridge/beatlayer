@@ -29,6 +29,9 @@ pub struct SavedLabel {
     pub icon: Option<String>,
     /// The tags it keeps, by their IDs.
     pub tags: Vec<i64>,
+    /// The file whose neighbours it lists, reference first (spec:
+    /// sound-similarity R15).
+    pub reference: Option<String>,
 }
 
 impl SavedLabel {
@@ -134,15 +137,21 @@ impl LabelPrefs {
     }
 }
 
-/// A name for a new saved label: its search words and its tags' own names.
+/// A name for a new saved label: its search words and its tags' own names,
+/// after "Similar to" and the reference's name for a list of neighbours.
 #[must_use]
-pub fn default_name(search: &str, tags: &[String]) -> String {
+pub fn default_name(search: &str, tags: &[String], reference: Option<&str>) -> String {
     let mut parts: Vec<&str> = search.split_whitespace().collect();
     parts.extend(tags.iter().map(String::as_str));
-    if parts.is_empty() {
+    let name = if parts.is_empty() {
         "New Label".to_owned()
     } else {
         parts.join(" ")
+    };
+    match reference.and_then(|path| std::path::Path::new(path).file_stem()) {
+        Some(stem) if parts.is_empty() => format!("Similar to {}", stem.to_string_lossy()),
+        Some(stem) => format!("Similar to {} {name}", stem.to_string_lossy()),
+        None => name,
     }
 }
 
@@ -164,6 +173,7 @@ impl BrowserView {
                     .map(|&id| self.tags.full_name(id))
                     .filter(|name| !name.is_empty())
                     .collect(),
+                reference: saved.reference.clone(),
             })
             .collect()
     }
@@ -216,7 +226,10 @@ impl BrowserView {
     /// Keeps what the browser shows as a saved label and chooses it, its
     /// name open for editing (spec: browser-tags R24).
     pub(super) fn add_label(&mut self) -> Result<(), BrowserError> {
-        if self.search.trim().is_empty() && self.filter.is_empty() {
+        let reference = self
+            .reference()
+            .map(|path| path.to_string_lossy().into_owned());
+        if self.search.trim().is_empty() && self.filter.is_empty() && reference.is_none() {
             return Err(BrowserError::Unavailable(
                 "there is nothing to keep: type search words or select filter tags first"
                     .to_owned(),
@@ -230,11 +243,12 @@ impl BrowserView {
             .collect();
         let saved = SavedLabel {
             id,
-            name: default_name(&self.search, &names),
+            name: default_name(&self.search, &names, reference.as_deref()),
             base: self.base_label(),
             search: self.search.trim().to_owned(),
             icon: None,
             tags,
+            reference,
         };
         self.saved.push(saved);
         self.save_label(id);
@@ -250,6 +264,7 @@ impl BrowserView {
     pub(super) fn choose_saved(&mut self, id: i64) -> Result<(), BrowserError> {
         let saved = self.saved_label(id)?.clone();
         self.label = saved.label();
+        self.similar = None;
         self.search = saved.search;
         self.filter = saved
             .tags
@@ -449,6 +464,7 @@ mod tests {
             search: String::new(),
             icon: None,
             tags: Vec::new(),
+            reference: None,
         }
     }
 

@@ -54,6 +54,7 @@ pub(crate) fn volts_display(
         })
         .collect();
     DeviceDisplay {
+        spectrograms: Vec::new(),
         device,
         live: data.is_some(),
         view: None,

@@ -46,7 +46,7 @@ use crate::scale::{Scale, ScaleName};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 use crate::shared::Shared;
 use crate::track::{
-    Channel, CrossfadeAssign, Input, MidiTo, Mixer, Monitor, Output, PanMode, SendTap, Track,
+    Channel, CrossfadeAssign, Input, MidiTo, Mixer, Monitor, Output, PanMode, SendTap, Tap, Track,
     TrackDelay, TrackKind,
 };
 use crate::tuning::{Tuning, TuningNote};
@@ -2287,6 +2287,11 @@ pub enum Command {
         /// hears (its own track too), or `None` for No Input.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         track: Option<TrackId>,
+        /// Where on that track the device takes the notes (the routing
+        /// spec, R39); left out, it stays as it is. Only a device whose
+        /// type gives its MIDI sidechain a tapping point has one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tap: Option<Tap>,
     },
     /// Sets a device's sidechain gain, as linear gain (finite, at least 0).
     SetSidechainGain {
@@ -2449,6 +2454,14 @@ pub enum Command {
     /// Colours a chain with a swatch of the palette of 5 rows of 14
     /// (0 to 69), or `null` to clear its colour.
     SetChainColour {
+        /// The chain.
+        chain: ChainId,
+        /// The swatch, or `null` for none.
+        colour: Option<u8>,
+    },
+    /// Gives a drum rack's chain the swatch Push 2 shows for its pad, from
+    /// 0 to 69, or `null` to show the track's colour again.
+    SetChainPushColour {
         /// The chain.
         chain: ChainId,
         /// The swatch, or `null` for none.
@@ -3191,6 +3204,7 @@ impl Command {
             Self::MoveChain { .. } => "Move Chain",
             Self::RenameChain { .. } => "Change \"Chain Name\"",
             Self::SetChainColour { .. } => "Change Chain Color",
+            Self::SetChainPushColour { .. } => "Change Pad Color on Push",
             Self::SetChainInfo { .. } => "Change Chain Info Text",
             Self::SetChainVolume { .. } => "Change chain volume",
             Self::SetChainPan { .. } => "Change chain pan",
@@ -5180,13 +5194,19 @@ impl Document {
                 self.edit_sidechain(*device, |s| s.input = input)?;
                 self.check_routing(self.device_owner(*device)?)
             }
-            Command::SetMidiSidechainSource { device, track } => {
+            Command::SetMidiSidechainSource { device, track, tap } => {
                 let mut sidechain = self
                     .device_ref(*device)?
                     .midi_sidechain
                     .clone()
                     .ok_or(ModelError::NoMidiSidechain(*device))?;
                 sidechain.source = *track;
+                if let Some(tap) = tap {
+                    if sidechain.tap.is_none() {
+                        return Err(ModelError::NoMidiTap(*device));
+                    }
+                    sidechain.tap = Some(*tap);
+                }
                 self.device_mut(*device)?.midi_sidechain = Some(sidechain);
                 self.check_routing(self.device_owner(*device)?)
             }
@@ -5365,6 +5385,12 @@ impl Document {
                     self.chain_mut(*chain)?.colour = *colour;
                 }
                 Ok(())
+            }
+            Command::SetChainPushColour { chain, colour } => {
+                if let Some(colour) = colour {
+                    check_value("pad colour", f64::from(*colour), *colour < CHAIN_COLOURS)?;
+                }
+                self.edit_drum_chain(*chain, false, |c| c.push_colour = *colour)
             }
             Command::SetChainInfo { chain, info } => {
                 if self.chain_ref(*chain)?.info != *info {
@@ -8748,6 +8774,16 @@ impl Document {
         Ok(())
     }
 
+    /// Arms or disarms a track outside the command system:
+    /// [`Editor::follow_arm`](crate::Editor::follow_arm) calls it.
+    pub(crate) fn follow_arm(&mut self, track: TrackId, arm: bool) -> Result<(), ModelError> {
+        check_kind(self.track_ref(track)?, TrackKind::has_arm, AUDIO_OR_MIDI)?;
+        if self.track_ref(track)?.mixer.arm != arm {
+            self.track_mut(track)?.mixer.arm = arm;
+        }
+        Ok(())
+    }
+
     /// Sets the name of the preset a device holds (the plug-in list spec,
     /// R5), outside the command system:
     /// [`Editor::amend_device_preset_name`](crate::Editor::amend_device_preset_name)
@@ -9654,6 +9690,7 @@ mod tests {
         song.apply(Command::SetMidiSidechainSource {
             device: listener,
             track: Some(source),
+            tap: None,
         })
         .unwrap();
         let tapping = song.track(TrackKind::Audio, None);

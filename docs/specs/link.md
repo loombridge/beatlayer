@@ -81,4 +81,4 @@ Beatlayer builds the open-source Link library, version 4.1.1, from source, and t
 | R22 | `bl-ui` `link::the_progress_bar_fills_with_the_phase_while_stopped_with_a_peer` | UI script |
 | R23 | `bl-ui` `link::a_click_switches_link_and_the_toggle_reads_the_peers_as_they_come_and_go` (the switch and its value), `the_menu_ticks_its_items_runs_their_commands_and_configures_link` (the menu button), `the_progress_bar_fills_with_the_phase_while_stopped_with_a_peer` (the progress indicator) | UI script |
 | R24, R25 | `bl-agent` `link::link_set_show_toggle_is_set_by_id_and_read_back`; `bl-ui` `accessibility::reachability::every_m1_command_is_reachable_from_the_keyboard`, `link::the_window_asks_for_a_frame_while_the_bar_shows`; `cargo xtask commands` | agent API, UI script |
-| R26 | to be written in WP-9.13: `crates/engine/tests/tempo_follower.rs` with a stand-in session | engine test |
+| R26 | `crates/engine/tests/tempo_follower.rs`, `with_link_on_the_session_gets_the_followed_tempo`, with a stand-in session | engine test |

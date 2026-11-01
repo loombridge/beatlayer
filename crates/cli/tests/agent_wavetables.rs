@@ -137,3 +137,59 @@ fn an_agent_loads_wavetables_by_command_id_and_reads_them_back() {
     assert!(refused.is_err(), "{refused:?}");
     assert_eq!(wavetables(&mut client), after);
 }
+
+// Spec: wavetable R8, R11, R13
+#[test]
+fn an_agent_loads_a_table_into_wavetable_and_sets_position() {
+    let mut client = bl_cli_mcp(&["--autonomous"]);
+    let tracks = call(&mut client, "query", json!({ "path": "tracks" }));
+    let midi = tracks["tracks"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["kind"] == "midi")
+        .expect("a MIDI track")["id"]
+        .clone();
+    outcome(
+        &mut client,
+        "arrangement.select_tracks",
+        json!({ "tracks": [midi] }),
+    );
+    let device = outcome(
+        &mut client,
+        "device.add",
+        json!({ "device": {
+            "kind": { "native": { "device_type": "beatlayer.wavetable" } },
+            "name": "Wavetable",
+            "role": "instrument",
+        } }),
+    )["result"]["device"]
+        .clone();
+    outcome(
+        &mut client,
+        "device.load_wavetable",
+        json!({ "device": device, "oscillator": 1, "category": "Shape Morphs", "name": "Sine Folds" }),
+    );
+    // Osc 1 Position is parameter 1.
+    outcome(
+        &mut client,
+        "device.set_param",
+        json!({ "device": device, "param": 1, "value": 40.0 }),
+    );
+    let parameters = outcome(
+        &mut client,
+        "device.parameters",
+        json!({ "device": device }),
+    );
+    let position = parameters["result"]["params"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "Osc 1 Position")
+        .expect("Wavetable has Osc 1 Position")["value"]
+        .clone();
+    assert_eq!(position, json!(40.0));
+    let read = call(&mut client, "query", json!({ "id": device }));
+    assert_eq!(read["wavetables"][0]["name"], "Sine Folds", "{read}");
+    assert_eq!(read["wavetables"][0]["frames"], 48, "{read}");
+}

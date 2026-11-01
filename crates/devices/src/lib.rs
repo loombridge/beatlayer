@@ -111,6 +111,7 @@ pub mod tube;
 pub mod tuner;
 pub mod utility;
 pub mod vector_delay;
+pub mod wavetable;
 pub mod wavetables;
 pub mod wax;
 
@@ -182,6 +183,7 @@ pub use touch::{TOUCH, touch_type};
 pub use tube::{TUBE, tube_type};
 pub use tuner::{TUNER, Tuner, tuner_type};
 pub use vector_delay::{VECTOR_DELAY, vector_delay_type};
+pub use wavetable::{WAVETABLE, Wavetable, wavetable_type};
 pub use wax::{WAX, wax_type};
 
 use bl_engine::{DeviceType, Registry};
@@ -384,6 +386,7 @@ pub fn register(registry: &mut Registry) {
     looper::register(registry);
     pitchloop89::register(registry);
     vector_delay::register(registry);
+    wavetable::register(registry);
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell.

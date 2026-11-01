@@ -977,6 +977,20 @@ where
     D: NativeDevice,
     F: Fn(&Device, &NodeConfig) -> D + Send + Sync + 'static,
 {
+    add_with_data(registry, device_type, make, None);
+}
+
+/// [`add`], for a device type whose nodes are also sent the data `data`
+/// builds from the device off the audio thread (WP-8.9).
+pub fn add_with_data<D, F>(
+    registry: &mut Registry,
+    device_type: DeviceType,
+    make: F,
+    data: Option<bl_engine::DataFn>,
+) where
+    D: NativeDevice,
+    F: Fn(&Device, &NodeConfig) -> D + Send + Sync + 'static,
+{
     assert!(
         matches!(device_type.kind, DeviceKind::Native { .. }),
         "{} isn't a native device type",
@@ -986,12 +1000,16 @@ where
         panic!("{}: {problem}", device_type.name);
     }
     let description = device_type.description.clone();
-    registry.add_device(device_type, move |device, config| {
-        Box::new(NativeNode::new(
-            make(device, config),
-            &description,
-            device,
-            config,
-        ))
-    });
+    registry.add_device_with_data(
+        device_type,
+        move |device, config| {
+            Box::new(NativeNode::new(
+                make(device, config),
+                &description,
+                device,
+                config,
+            ))
+        },
+        data,
+    );
 }

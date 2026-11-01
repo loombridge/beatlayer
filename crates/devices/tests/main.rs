@@ -49,6 +49,7 @@ mod gate;
 mod gate_mod;
 mod gated_delay;
 mod grain_delay;
+mod granulator_iii;
 mod hardware;
 mod hold;
 mod instrument_filter;

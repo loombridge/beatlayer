@@ -421,9 +421,9 @@
       "made_on": "macos-aarch64",
       "sample_rate": 48000,
       "channels": 2,
-      "frames": 144000,
+      "frames": 72000,
       "bits": 24,
-      "render_hash": "fnv1a64:e3034dc7490ce1f9"
+      "render_hash": "fnv1a64:8a54627727942c35"
     },
     "scene-tempo": {
       "made_on": "macos-aarch64",

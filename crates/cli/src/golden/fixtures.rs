@@ -1033,7 +1033,7 @@ fn resonators() -> Scene {
         index: 0,
         device,
     });
-    song.finish(3.0)
+    song.finish(1.5)
 }
 
 /// A phrase through CV Instrument and CV Triggers, captured on the device

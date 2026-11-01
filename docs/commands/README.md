@@ -25666,6 +25666,84 @@ A chain on one of the lower buttons while a rack's button is held.
 
 </details>
 
+### `PushConvertTo`
+
+What `push.convert` makes a new MIDI track or drum rack of.
+
+One of:
+
+- `"simpler"`: A new MIDI track with a Simpler holding the audio clip's sample.
+- `"drum_rack"`: A new MIDI track with a drum rack holding the sample in a Simpler on its first pad.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `push.convert` makes a new MIDI track or drum rack of.",
+  "oneOf": [
+    {
+      "const": "simpler",
+      "description": "A new MIDI track with a Simpler holding the audio clip's sample.",
+      "type": "string"
+    },
+    {
+      "const": "drum_rack",
+      "description": "A new MIDI track with a drum rack holding the sample in a Simpler on its first pad.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PushConverted`
+
+What `push.convert` made.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `from` | string | yes | What was converted: `simpler` (a Classic or One-Shot Simpler made a new track with a drum rack), `slices` (a slicing Simpler became a drum rack), `pad` (a drum rack's pad made a new track) or `clip` (an audio clip made a new track). |
+| `track` | [`TrackId`](#trackid) or null | yes | The new track, unless the Simpler became a drum rack in its place. |
+| `device` | [`DeviceId`](#deviceid) | yes | The device made: the drum rack, or the Simpler the track holds. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `push.convert` made.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device made: the drum rack, or the Simpler the track holds."
+    },
+    "from": {
+      "description": "What was converted: `simpler` (a Classic or One-Shot Simpler made a new track with a drum rack), `slices` (a slicing Simpler became a drum rack), `pad` (a drum rack's pad made a new track) or `clip` (an audio clip made a new track).",
+      "type": "string"
+    },
+    "track": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrackId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The new track, unless the Simpler became a drum rack in its place."
+    }
+  },
+  "required": [
+    "from",
+    "track",
+    "device"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `PushDevice`
 
 A device on one of the upper buttons in Device Mode (push-2-tracks R27).
@@ -25758,6 +25836,7 @@ What Device Mode shows (push-2-tracks R27).
 | `params` | array of [`PushParam`](#pushparam) | yes | The parameters on the eight encoders. |
 | `chains` | array of [`PushChain`](#pushchain) | yes | The chains the lower buttons show while a rack's button is held. |
 | `mute_locked` | boolean | yes | Whether Mute is locked, so each device button switches its device. |
+| `simpler` | [`PushSimpler`](#pushsimpler) or null | yes | Simpler's main bank and Edit Mode, while a Simpler is in focus (push-2-notes R67 to R76). |
 
 <details><summary>JSON Schema</summary>
 
@@ -25830,6 +25909,17 @@ What Device Mode shows (push-2-tracks R27).
     "right_arrow": {
       "description": "Whether the last upper button is an arrow that moves them on.",
       "type": "boolean"
+    },
+    "simpler": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushSimpler"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Simpler's main bank and Edit Mode, while a Simpler is in focus (push-2-notes R67 to R76)."
     }
   },
   "required": [
@@ -25844,7 +25934,8 @@ What Device Mode shows (push-2-tracks R27).
     "bank_pages",
     "params",
     "chains",
-    "mute_locked"
+    "mute_locked",
+    "simpler"
   ],
   "type": "object"
 }
@@ -26481,6 +26572,7 @@ One of:
 
 - `"setup"`: Setup.
 - `"scale"`: Scale.
+- `"convert"`: The choices Convert offers for an audio clip.
 
 <details><summary>JSON Schema</summary>
 
@@ -26496,6 +26588,11 @@ One of:
     {
       "const": "scale",
       "description": "Scale.",
+      "type": "string"
+    },
+    {
+      "const": "convert",
+      "description": "The choices Convert offers for an audio clip.",
       "type": "string"
     }
   ]
@@ -27247,6 +27344,157 @@ The Setup menu's values (R31).
     "display_light",
     "led_brightness",
     "workflow"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushSimpler`
+
+What Device Mode shows of a Simpler (push-2-notes R67 to R76).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `empty` | boolean | yes | Whether it has no sample, which the display says. |
+| `mode` | string | yes | Its mode: `classic`, `one_shot` or `slice`. |
+| `main_bank` | boolean | yes | Whether the main bank is on the encoders. |
+| `zoom` | string | yes | How far the waveform is zoomed in, as `×1.0` for the whole sample. |
+| `zoom_around` | string | yes | What Zoom zooms around: `start`, `end`, `s_start`, `s_length` or `slice`. |
+| `region` | pair of integer, at least 0 and integer, at least 0 | yes | The Start and End flags, in frames of the sample. |
+| `slices` | integer, at least 0 | yes | How many slices Slice mode has. |
+| `selected_slice` | integer, at least 0 | yes | The selected slice, from 0. |
+| `pad_slicing` | boolean | yes | Whether Pad Slicing is on. |
+| `edit_buttons` | array of [`PushSimplerButton`](#pushsimplerbutton) | yes | Edit Mode's buttons after Back, with the upper button each is on. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What Device Mode shows of a Simpler (push-2-notes R67 to R76).",
+  "properties": {
+    "edit_buttons": {
+      "description": "Edit Mode's buttons after Back, with the upper button each is on.",
+      "items": {
+        "$ref": "#/$defs/PushSimplerButton"
+      },
+      "type": "array"
+    },
+    "empty": {
+      "description": "Whether it has no sample, which the display says.",
+      "type": "boolean"
+    },
+    "main_bank": {
+      "description": "Whether the main bank is on the encoders.",
+      "type": "boolean"
+    },
+    "mode": {
+      "description": "Its mode: `classic`, `one_shot` or `slice`.",
+      "type": "string"
+    },
+    "pad_slicing": {
+      "description": "Whether Pad Slicing is on.",
+      "type": "boolean"
+    },
+    "region": {
+      "description": "The Start and End flags, in frames of the sample.",
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      ],
+      "type": "array"
+    },
+    "selected_slice": {
+      "description": "The selected slice, from 0.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "slices": {
+      "description": "How many slices Slice mode has.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "zoom": {
+      "description": "How far the waveform is zoomed in, as `×1.0` for the whole sample.",
+      "type": "string"
+    },
+    "zoom_around": {
+      "description": "What Zoom zooms around: `start`, `end`, `s_start`, `s_length` or `slice`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "empty",
+    "mode",
+    "main_bank",
+    "zoom",
+    "zoom_around",
+    "region",
+    "slices",
+    "selected_slice",
+    "pad_slicing",
+    "edit_buttons"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushSimplerButton`
+
+One of Simpler's Edit Mode buttons.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `button` | integer, at least 0 | yes | The upper button, from 1. |
+| `name` | string | yes | What it does: `loop`, `trigger_gate`, `pad_slicing`, `split_slice`, `warp_as`, `half`, `double`, `crop` or `reverse`. |
+| `text` | string | yes | Its text. |
+| `on` | boolean | yes | Whether the setting it stands for is on. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One of Simpler's Edit Mode buttons.",
+  "properties": {
+    "button": {
+      "description": "The upper button, from 1.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "name": {
+      "description": "What it does: `loop`, `trigger_gate`, `pad_slicing`, `split_slice`, `warp_as`, `half`, `double`, `crop` or `reverse`.",
+      "type": "string"
+    },
+    "on": {
+      "description": "Whether the setting it stands for is on.",
+      "type": "boolean"
+    },
+    "text": {
+      "description": "Its text.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "button",
+    "name",
+    "text",
+    "on"
   ],
   "type": "object"
 }

@@ -1766,6 +1766,11 @@ impl Instrument for Engine {
             while active != 0 {
                 let voice = active.trailing_zeros() as usize;
                 active &= active - 1;
+                // Spec: collision R3. The envelope and the routes move the
+                // noise filter on the control grid, as long as the note lasts.
+                if state.control_due(frame) && self.raw(NOISE_ON, frame) >= 0.5 {
+                    self.tune_noise_filter(voice, frame, voices);
+                }
                 let (strike, blown) = self.excite(voice, frame);
                 self.mallet[frame * stride + voice] = strike;
                 self.blown[frame * stride + voice] = blown;

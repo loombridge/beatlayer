@@ -320,6 +320,31 @@ fn the_noise_filters_its_types_and_envelope_shape_what_it_blows() {
         swept(100.0) > 10.0 * swept(0.0),
         "a positive amount opens it"
     );
+    // The filter follows the envelope while the note lasts: a slow Attack
+    // opens it as the level rises.
+    let rising = |amount: f64| {
+        let tone = play(
+            &[
+                (MALLET_ON, 0.0),
+                (NOISE_ON, 1.0),
+                (NOISE_FILTER, 0.0),
+                (NOISE_FREQ, 300.0),
+                (NOISE_ENV_AMT, amount),
+                (NOISE_SUSTAIN, 100.0),
+                (NOISE_ATTACK, 500.0),
+                (res(0, R_DECAY), 0.05),
+                (res(0, R_MATERIAL), 100.0),
+            ],
+            48_000,
+            &[on(0, 60)],
+        )[0]
+        .clone();
+        tilt(between(&tone, 0.6, 0.9))
+    };
+    assert!(
+        rising(100.0) > 10.0 * rising(0.0),
+        "the envelope opens the filter as it rises"
+    );
 }
 
 // Spec: collision R5, R6

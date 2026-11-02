@@ -513,7 +513,9 @@ pub fn show(ui: &mut Ui, shell: &Shell, theme: &Theme, rect: Rect, events: &mut 
         ids::SET_LENGTH,
         length,
         "Set Length",
-        "Set Length",
+        // Not "Set Length": Main Properties' Set button for the clip's Length
+        // has that name, and both panels show at once.
+        "Set Note Length",
         !by_range || state.time_range,
     ) {
         events.push(call(

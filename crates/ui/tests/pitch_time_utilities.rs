@@ -139,7 +139,7 @@ fn the_panel_holds_its_controls_and_fit_to_scale_needs_scale_mode() {
         "Double",
         "Halve",
         "Duration",
-        "Set Length",
+        "Set Note Length",
         "Humanize Amount",
         "Humanize",
         "Reverse",

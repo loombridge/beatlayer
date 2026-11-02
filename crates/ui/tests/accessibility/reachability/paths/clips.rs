@@ -408,7 +408,7 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ),
         (
             "note.set_length",
-            main(utilities_shown, detail_area, "Set Length", Key::Enter),
+            main(utilities_shown, detail_area, "Set Note Length", Key::Enter),
         ),
         (
             "note.humanize",

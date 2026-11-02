@@ -1806,6 +1806,33 @@ const ENTRIES: &[Entry] = &[
             gets nothing.",
     },
     Entry {
+        id: "clip.link",
+        action: Action::Apply("link_clips"),
+        label: "Link Clips",
+        permission: Permission::Edit,
+        contexts: &[Arrangement, Session],
+        keys: &[],
+        description: "Links clips that already hold the same contents, so that from then on an \
+            edit to one clip's notes, controller envelopes, audio file, warping or gain reaches \
+            every clip of the link in the same undo step (each clip keeps its own place, length, \
+            markers, loop and name). The clips are all MIDI or all audio, each listed once, at \
+            least two; clips whose contents differ are refused, and so are clips that belong to \
+            different links. `clip.duplicate_linked` makes linked copies; this links clips that \
+            are copies already. Undo with `clip.unlink`.",
+    },
+    Entry {
+        id: "clip.unlink",
+        action: Action::Apply("unlink_clips"),
+        label: "Unlink Clip",
+        permission: Permission::Edit,
+        contexts: &[Arrangement, Session],
+        keys: &[],
+        description: "Takes clips out of their links, each keeping the contents it has; later \
+            edits to its contents change only that clip. A link left with one clip ends, and \
+            that clip is independent. A clip that is in no link is left as it is. The query \
+            tool's `clip.link` shows a clip's link.",
+    },
+    Entry {
         id: "clip.set_mute",
         action: Action::Apply("set_clip_mute"),
         label: "Activate/Deactivate Clip",

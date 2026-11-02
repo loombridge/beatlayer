@@ -10,6 +10,7 @@ mod command_registry;
 mod device_media;
 mod drum_racks;
 mod grooves;
+mod linked_clips;
 mod linked_tracks;
 mod macros;
 mod metronome;

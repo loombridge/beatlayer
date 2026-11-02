@@ -111,6 +111,11 @@ object_id!(
     "link group"
 );
 object_id!(
+    /// The ID of a link of clips that share their contents (WP-6.44).
+    LinkId,
+    "link"
+);
+object_id!(
     /// The ID of a locator.
     LocatorId,
     "locator"

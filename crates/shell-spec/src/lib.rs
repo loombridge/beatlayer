@@ -53,6 +53,7 @@
 //!   (WP-5.13): adding layers from files, Snap, Normalize, and its views.
 //! - [`pads`]: a drum rack's pad view and the commands on pads (WP-5.6).
 //! - [`tracks`]: Duplicate Track Without Clips (WP-2.19b, IMP-12).
+//! - [`linked_clips`]: Duplicate as Linked Clip (WP-6.44, IMP-21).
 //! - [`session_launch`]: the global launch quantisation and its enabled
 //!   switch (WP-3.2), which the Control Bar's Quantization Menu shows.
 //! - [`transport`]: what the Control Bar's transport section shows
@@ -134,6 +135,7 @@ pub mod freeze;
 pub mod groove;
 pub mod keymap;
 pub mod link;
+pub mod linked_clips;
 pub mod locator;
 pub mod menus;
 pub mod midi_files;
@@ -208,6 +210,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     autosampler::register(registry)?;
     cv::register(registry)?;
     tracks::register(registry)?;
+    linked_clips::register(registry)?;
     session_view::register(registry)?;
     session_launch::register(registry)?;
     session_record::register(registry)?;

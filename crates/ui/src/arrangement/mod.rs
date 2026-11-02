@@ -525,6 +525,11 @@ impl ArrangementUi {
         self.stats
     }
 
+    /// The clips the last frame drew, each with its rectangle on screen.
+    pub fn shown_clips(&self) -> impl Iterator<Item = (bl_model::ClipId, Rect)> + '_ {
+        self.shown.iter().map(|shown| (shown.clip, shown.rect))
+    }
+
     /// The block the GPU callback reads, for hosts and benchmarks that
     /// render offscreen.
     #[must_use]
@@ -685,6 +690,7 @@ impl ArrangementUi {
             ));
         self.draw_labels(ui, doc, theme, lanes);
         let lanes_response = self.lanes_input(ui, shell, view, doc, &layout, horizontal, events);
+        self.link_marks(ui, theme, doc, lanes, events);
         // WP-1.8b: right-clicking a clip or the lanes opens their menu.
         if lanes_response.secondary_clicked()
             && let Some(pos) = lanes_response.interact_pointer_pos()
@@ -951,13 +957,48 @@ impl ArrangementUi {
             if clip.name.is_empty() {
                 continue;
             }
-            painter.with_clip_rect(label.rect.intersect(lanes)).text(
+            // Spec: linked-clips R10. A linked clip's name stops short of its
+            // link mark.
+            let room = if clip.link.is_some() {
+                crate::link_mark::rect(label.rect).map_or(label.rect, |mark| {
+                    Rect::from_min_max(label.rect.min, pos2(mark.left(), label.rect.bottom()))
+                })
+            } else {
+                label.rect
+            };
+            painter.with_clip_rect(room.intersect(lanes)).text(
                 pos2(label.rect.left() + 3.0, label.rect.center().y),
                 Align2::LEFT_CENTER,
                 &clip.name,
                 theme.small_font(),
                 theme.colors.clip_text.0,
             );
+        }
+    }
+
+    /// Spec: linked-clips R10. The link mark at the right end of each linked
+    /// clip's title bar, over the lanes' own input so that clicking it selects
+    /// the link's clips and nothing else.
+    fn link_marks(
+        &self,
+        ui: &Ui,
+        theme: &Theme,
+        doc: &Document,
+        lanes: Rect,
+        events: &mut Vec<UiEvent>,
+    ) {
+        for label in &self.labels {
+            let Some(clip) = doc.clip(label.clip).filter(|clip| clip.link.is_some()) else {
+                continue;
+            };
+            let Some(area) = crate::link_mark::rect(label.rect.intersect(lanes)) else {
+                continue;
+            };
+            let id = egui::Id::new(("link-mark", clip.id));
+            let others = doc.linked_clip_ids(clip.id).len();
+            if crate::link_mark::show(ui, id, area, theme.colors.clip_text.0, others, events) {
+                crate::link_mark::select_link(doc, clip.id, events);
+            }
         }
     }
 
@@ -2673,7 +2714,11 @@ impl ArrangementUi {
                 } else {
                     &clip.name
                 };
-                node.set_label(name.to_owned());
+                node.set_label(if clip.link.is_some() {
+                    crate::link_mark::described(name, doc.linked_clip_ids(clip.id).len())
+                } else {
+                    name.to_owned()
+                });
                 if let Some((_, text)) = shell.info_text_shown(InfoTarget::Clip(clip.id)) {
                     node.set_description(text);
                 }

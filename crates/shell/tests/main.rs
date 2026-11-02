@@ -113,6 +113,7 @@ mod packs;
 mod pedal;
 mod pitch_time_utilities;
 mod plugin_list;
+mod plugin_presets;
 mod plugin_scanning;
 mod plugins;
 mod plugins_au;

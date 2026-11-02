@@ -75,7 +75,7 @@ pub struct ChainPreset {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Saved {
     /// A device's state.
-    Device(Preset),
+    Device(Box<Preset>),
     /// A whole rack.
     Rack(Box<RackPreset>),
     /// One chain.
@@ -223,7 +223,7 @@ impl Saved {
             serde_json::from_slice(bytes).map_err(|e| invalid(e.to_string()))?;
         let schema = value.get("schema").and_then(serde_json::Value::as_u64);
         if value.get("rack").is_none() && value.get("chain").is_none() {
-            return Preset::decode(bytes).map(Self::Device);
+            return Preset::decode(bytes).map(|preset| Self::Device(Box::new(preset)));
         }
         if value.get("format").and_then(serde_json::Value::as_str) != Some(PRESET_FORMAT) {
             return Err(invalid(format!("its format isn't \"{PRESET_FORMAT}\"")));
@@ -431,7 +431,7 @@ mod tests {
         let preset = Preset::of(&device);
         assert_eq!(
             Saved::decode(&preset.encode()).unwrap(),
-            Saved::Device(preset)
+            Saved::Device(Box::new(preset))
         );
         let (rack, samples) = nested();
         assert!(matches!(

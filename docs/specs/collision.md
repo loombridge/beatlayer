@@ -1,6 +1,6 @@
 # Collision: mallet and noise exciters, two resonators, LFOs and the MIDI/MPE tab
 
-- **Status:** draft
+- **Status:** built (WP-8.21), except R6's X-Y control and R10's Copy buttons, which have no control kind in the device layout yet: the command, `collision.copy_resonator`, is built and tested
 - **Work packages:** WP-8.21 (this spec, R1 to R20). The resonators are [the physical models](physical-models.md); voices and per-note bends are [the instruments' voice section](instrument-voices.md); the routings ride on [the instruments' modulation matrix](instrument-modulation.md); the tabs are [the device framework](device-framework.md)'s pages (R41 to R45)
 - **Parity-matrix row:** Instruments: Collision, Tension, Electric (Collision)
 - **Checked against:** the Live 12 reference manual (online edition), read 30 October 2026 (chapter 31, section 31.2: 31.2.1 to 31.2.6.1; 31.2.7 holds tips, not behaviour)
@@ -50,13 +50,19 @@ The device's sections sit on tabs: Mallet, Noise, Resonator 1, Resonator 2, LFO 
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1, R17 | `crates/devices/tests/banks.rs`; `crates/devices/tests/rules.rs`; to be written in WP-8.21 (layout test) | unit |
-| R2, R3, R4 | to be written in WP-8.21 | unit under the real-time trap (the strike's width and spectrum; the noise filter) |
-| R5, R6, R7, R8, R9 | to be written in WP-8.21 | render under the real-time trap (each type at its pitch; controls moving it) |
-| R10 | to be written in WP-8.21 | shell test; agent API; `cargo xtask commands` |
-| R11 | to be written in WP-8.21 | unit (series and parallel; the worst case bounded) |
-| R12, R13, R14, R16 | to be written in WP-8.21 | render (each source reaching its destinations) |
-| R15 | to be written in WP-8.21 | render |
-| R18 | to be written in WP-8.21 | benchmark against the device budget |
-| R19 | to be written in WP-8.21 | render at block sizes 1, 64, 512 and 4,096; repeated renders identical |
-| R20 | to be written in WP-8.21 | render |
+| R1, R17 | `crates/devices/tests/collision.rs`, `collision_is_an_instrument_with_its_tabs_its_matrix_and_every_parameter_banked`, `the_factory_presets_set_parameters_the_device_has_and_sound`; `crates/devices/tests/banks.rs`; `crates/devices/tests/rules.rs` | unit (tabs, matrix, banks, presets) |
+| R2 | `crates/devices/tests/collision.rs`, `a_stiffer_mallet_excites_the_upper_partials_and_noise_adds_to_them`; `crates/devices/src/collision.rs`, `the_strike_is_a_raised_cosine_whose_width_stiffness_sets` | unit under the real-time trap (the strike's width and spectrum) |
+| R3 | `crates/devices/tests/collision.rs`, `the_noise_filters_its_types_and_envelope_shape_what_it_blows` | render under the real-time trap (the noise filter and envelope) |
+| R4 | `crates/devices/tests/collision.rs`, `with_both_exciters_off_or_both_resonators_off_it_is_silent` | render |
+| R5 | `crates/devices/tests/collision.rs`, `each_type_rings_at_the_notes_pitch` | render under the real-time trap (each type at its pitch) |
+| R6 | `crates/devices/tests/collision.rs`, `decay_material_inharm_the_positions_and_radius_move_what_rings`, `controls_that_dont_apply_to_a_type_change_nothing` | render under the real-time trap (controls moving it; the others changing nothing) |
+| R7 | `crates/devices/tests/collision.rs`, `note_off_mutes_a_resonator_when_its_note_ends` | render |
+| R8 | `crates/devices/tests/collision.rs`, `pitch_is_the_notes_times_key_plus_tune_fine_and_a_pitch_envelope` | render |
+| R9 | `crates/devices/tests/collision.rs`, `gain_pan_and_bleed_mix_each_resonator` | render |
+| R10 | `crates/shell/tests/collision.rs`, `copy_sends_every_setting_of_a_resonator_to_the_other_in_one_undo_step`, `copy_refuses_a_resonator_that_isnt_there_and_a_device_that_isnt_a_collision`; `crates/agent/tests/collision.rs`, `an_agent_sets_and_reads_back_every_parameter_copies_a_resonator_and_reads_the_routes`; `cargo xtask commands` | shell test; agent API |
+| R11 | `crates/devices/tests/collision.rs`, `series_and_parallel_link_the_resonators_and_the_worst_case_stays_bounded` | render (series and parallel; the worst case bounded) |
+| R12, R13, R14, R16 | `crates/devices/tests/collision.rs`, `an_lfo_moves_its_destinations_by_its_shape_rate_and_amount`, `the_midi_sources_reach_their_destinations`, `key_and_vel_move_the_controls_the_manual_names`; `crates/devices/src/collision.rs`, `every_chooser_lists_off_then_the_destinations_by_their_parameters_names` | render (each source reaching its destinations) |
+| R15 | `crates/devices/tests/collision.rs`, `voices_retrigger_and_volume_follow_the_global_section` | render |
+| R18 | `crates/devices/tests/collision.rs`, `sixteen_voices_with_both_resonators_at_medium_render_inside_the_device_budget` | benchmark against the device budget (judged at `BL_TEST_DEPTH=full`) |
+| R19 | `crates/devices/tests/collision.rs`, `the_output_is_the_same_at_every_block_size_and_run_after_run` | render at block sizes 1, 64, 512 and 4,096; repeated renders identical |
+| R20 | `crates/devices/tests/collision.rs`, `a_held_pipe_or_tube_blown_with_noise_keeps_sounding_until_the_key_ends` | render |

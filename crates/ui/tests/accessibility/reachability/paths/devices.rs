@@ -686,6 +686,15 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                 "`device.clear_route`, which puts the slot's amount back to 0 %",
             )),
         ),
+        // Collision's resonator tabs' Copy buttons: the device layout has no
+        // button control yet.
+        (
+            "collision.copy_resonator",
+            Exception(LaterView(
+                "the Copy buttons of Collision's resonator tabs, once the device layout has a \
+                 button control (WP-8.21)",
+            )),
+        ),
         (
             "device.set_route",
             Exception(LaterView(

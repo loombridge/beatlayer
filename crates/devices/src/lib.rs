@@ -35,6 +35,7 @@ pub mod beat_repeat;
 pub mod bus_compressor;
 pub mod channel_eq;
 pub mod chorus_ensemble;
+pub mod collision;
 pub mod color_limiter;
 pub mod compressor;
 pub mod corpus;
@@ -354,6 +355,7 @@ pub fn register(registry: &mut Registry) {
     polysynth::register(registry);
     electric::register(registry);
     meld::register(registry);
+    collision::register(registry);
     operator::register(registry);
     analog::register(registry);
     limiter::register(registry);

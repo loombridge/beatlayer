@@ -1060,7 +1060,13 @@ impl Section {
         // per-note bend over its own range.
         settings.mpe.enabled = cfg.note_pb;
         settings.mpe.bend_range = cfg.note_range.clamp(0.0, 96.0);
-        let wheel = cfg.pb_range.clamp(0.0, 96.0);
+        // A device without a PB Range (Collision) has no wheel bend: the
+        // wheel is only a modulation source there.
+        let wheel = if self.parts.pb_range.is_some() {
+            cfg.pb_range.clamp(0.0, 96.0)
+        } else {
+            0.0
+        };
         settings.bend_up = wheel;
         settings.bend_down = -wheel;
     }

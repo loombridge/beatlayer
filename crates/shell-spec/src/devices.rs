@@ -179,6 +179,10 @@ pub const SET_ROUTE: &str = "device.set_route";
 /// matrix.
 pub const CLEAR_ROUTE: &str = "device.clear_route";
 
+/// `collision.copy_resonator`: copies every setting of one of Collision's
+/// resonators to the other.
+pub const COPY_RESONATOR: &str = "collision.copy_resonator";
+
 /// `articulation.list`: the articulations an Articulation Map holds.
 pub const ARTICULATION_LIST: &str = "articulation.list";
 /// `articulation.learn`: arms a row's Learn button.
@@ -244,6 +248,7 @@ pub const IDS: &[&str] = &[
     RACK_SELECT_VARIATION,
     SET_ROUTE,
     CLEAR_ROUTE,
+    COPY_RESONATOR,
     ARTICULATION_LIST,
     ARTICULATION_LEARN,
 ];
@@ -1376,6 +1381,29 @@ pub struct ClearRouteArgs {
     /// The destination of the route to clear, with its source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub destination: Option<String>,
+}
+
+/// Arguments of `collision.copy_resonator`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CopyResonatorArgs {
+    /// The Collision; the selected device if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The resonator to copy from, 1 or 2; its settings go to the other.
+    pub from: u8,
+}
+
+/// What `collision.copy_resonator` returns: the Collision and the
+/// resonators it copied between.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ResonatorCopied {
+    /// The device.
+    pub device: DeviceId,
+    /// The resonator copied from, 1 or 2.
+    pub from: u8,
+    /// The resonator copied to, 1 or 2.
+    pub to: u8,
 }
 
 /// What `device.set_route` and `device.clear_route` return: the slot they
@@ -3001,6 +3029,19 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .args::<ClearRouteArgs>()
             .result::<RouteChanged>(),
+        CommandSpec::new(COPY_RESONATOR, "Copy Resonator")
+            .description(
+                "Copies every setting of one of Collision's two resonators to the other, as \
+                 the Copy buttons of its resonator tabs do: `from` is 1 to copy Resonator 1 \
+                 into Resonator 2, or 2 to copy Resonator 2 into Resonator 1. The device is a \
+                 Collision, by ID or the selected one. Every parameter of the resonator is \
+                 copied, its switch included, and the device's `params` read back the result. \
+                 One undo step (Copy Resonator).",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<CopyResonatorArgs>()
+            .result::<ResonatorCopied>(),
         CommandSpec::new(ARTICULATION_LIST, "List Articulations")
             .description(
                 "Reports the articulations an Articulation Map holds, in order: each with its \

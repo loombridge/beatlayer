@@ -165,6 +165,8 @@ pub use bl_shell_spec::link as link_commands;
 /// (WP-9.13).
 pub use bl_shell_spec::tempo_follower as tempo_follower_commands;
 
+/// The chord lane's view command IDs and their argument types (WP-6.48).
+pub use bl_shell_spec::chord_lane as chord_lane_commands;
 /// The envelope keys' command IDs and their argument and result types
 /// (WP-6.26).
 pub use bl_shell_spec::envelope_keys as envelope_commands;

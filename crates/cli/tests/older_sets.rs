@@ -1233,6 +1233,54 @@ fn the_locators_and_the_song_start_time_are_saved_and_load_again() {
     assert_eq!(loaded.document.song_start_ticks(), Some(Ticks::WHOLE * 2));
 }
 
+// Spec: chord-lane R10. A set saved before the chord lane has no regions and
+// no track following it, writes neither, and reads both again once set.
+#[test]
+fn a_set_saved_before_the_chord_lane_loads_with_no_regions_and_no_track_following() {
+    let (mut editor, clip) = midi_clip_song();
+    let track = editor.document().clip_track(clip).unwrap();
+    let saved = encode_json(&project_of(&editor), 2).unwrap();
+    let value: Value = serde_json::from_slice(&saved).unwrap();
+    assert!(value["document"]["settings"].get("chord_lane").is_none());
+    assert!(!String::from_utf8_lossy(&saved).contains("follow_chord_lane"));
+    assert!(value["window_views"].get("chord_lane").is_none());
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert!(loaded.document.chord_lane().is_empty());
+    assert!(!loaded.document.track(track).unwrap().follow_chord_lane());
+    loaded.document.check_invariants().unwrap();
+
+    let region = editor.new_id();
+    editor
+        .apply(Command::AddChordRegion {
+            region: bl_model::ChordRegion::new(region, Ticks::WHOLE, Ticks::WHOLE * 2),
+        })
+        .unwrap();
+    editor
+        .apply(Command::SetFollowChordLane {
+            track,
+            follow: true,
+        })
+        .unwrap();
+    let kept = project_of(&editor).with_window_views(bl_model::WindowViews {
+        chord_lane: true,
+        ..bl_model::WindowViews::default()
+    });
+    let saved = encode_json(&kept, 2).unwrap();
+    let value: Value = serde_json::from_slice(&saved).unwrap();
+    assert_eq!(
+        value["document"]["settings"]["chord_lane"][0]["end"],
+        2 * Ticks::WHOLE.get()
+    );
+    assert_eq!(
+        value["window_views"],
+        json!({ "session": false, "second_window": false, "chord_lane": true })
+    );
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert_eq!(loaded.document.chord_lane().len(), 1);
+    assert!(loaded.document.track(track).unwrap().follow_chord_lane());
+    assert_eq!(loaded.window_views, kept.window_views);
+}
+
 /// A project holding `editor`'s document.
 fn project_of(editor: &Editor) -> Project {
     Project {
@@ -1736,6 +1784,7 @@ fn a_set_saved_before_the_second_window_opens_in_the_arrangement_with_one_window
     let kept = project_of(&editor).with_window_views(bl_model::WindowViews {
         session: true,
         second_window: true,
+        ..bl_model::WindowViews::default()
     });
     let saved = encode_json(&kept, 2).unwrap();
     let value: Value = serde_json::from_slice(&saved).unwrap();

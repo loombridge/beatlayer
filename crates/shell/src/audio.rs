@@ -409,6 +409,10 @@ pub struct EngineTransport {
     pub take: Option<TakeBounds>,
     /// The take running now, as far as it has got (WP-3.11).
     pub take_so_far: Option<TakeBounds>,
+    /// Whether a Play Selection that stops at the selection's end plays, so
+    /// the Arrangement loop doesn't apply and the Loop switch shows off (the
+    /// transport spec, R35).
+    pub loop_suspended: bool,
     /// Whether an outside tempo leads (the transport spec, R24), so Phase
     /// Nudge is disabled and refused (R29).
     pub following: bool,
@@ -1336,6 +1340,7 @@ impl AudioHost {
                 running: false,
                 playing: false,
                 clock: 0,
+                loop_suspended: false,
                 following: false,
                 waiting_start: false,
                 waiting_frame: None,
@@ -1352,6 +1357,7 @@ impl AudioHost {
                 running,
                 playing: false,
                 clock: state.clock,
+                loop_suspended: false,
                 following: false,
                 waiting_start: false,
                 waiting_frame: None,
@@ -1371,6 +1377,7 @@ impl AudioHost {
             counting_in: state.counting_in,
             take: state.take,
             take_so_far: state.take_so_far,
+            loop_suspended: state.loop_suspended,
             following: state.following.is_some(),
             waiting_start: state.waiting_start,
             waiting_frame: state.waiting_frame,

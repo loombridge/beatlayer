@@ -820,3 +820,80 @@ fn playback_options_switches_start_transport_with_tap_tempo_and_ticks_while_on()
     assert_eq!(state_of(&h).checked, Some(false));
     h.shell.audio_mut().stop();
 }
+
+// Spec: transport R35, R36 (S-TRANS-003, S-TRANS-004). Space plays the
+// Arrangement's time selection and on past its end; Option-Space (Ctrl-Space
+// elsewhere) plays it and stops on its end, with the Loop switch off until it
+// has.
+#[test]
+fn space_plays_the_time_selection_and_option_space_stops_at_its_end() {
+    let mut h = Harness::manual(Window::Main);
+    h.settle();
+    let track = h.shell.editor().document().top_level().next().unwrap();
+    let (start, end) = (BAR * 2, BAR * 2 + BAR / 4);
+    h.shell
+        .run(
+            "arrangement.select_time",
+            json!({ "start": start, "end": end, "tracks": [track] }),
+        )
+        .unwrap();
+    h.shell
+        .run("transport.set_loop_enabled", json!({ "enabled": true }))
+        .unwrap();
+    h.settle();
+    let marker = state(&mut h.shell).insert_marker;
+    let option = if cfg!(target_os = "macos") {
+        Modifiers::ALT
+    } else {
+        Modifiers::CTRL
+    };
+
+    press(&mut h, Key::Space, option);
+    wait(&mut h, "playback", |h| h.engine.playing);
+    assert!(
+        !state(&mut h.shell).loop_on,
+        "the Loop switch is off while it plays"
+    );
+    assert!(h.engine.position >= start);
+    wait(&mut h, "the stop at the end", |h| !h.engine.playing);
+    let stopped = state(&mut h.shell);
+    assert_eq!(stopped.position, end);
+    assert_eq!(stopped.insert_marker, marker);
+    assert!(stopped.loop_on, "the Loop switch is back on");
+
+    // Space plays from the selection's start again and on past its end.
+    press(&mut h, Key::Space, Modifiers::NONE);
+    wait(&mut h, "playback", |h| h.engine.playing);
+    assert!(state(&mut h.shell).loop_on);
+    wait(&mut h, "the play past the end", |h| h.engine.position > end);
+    assert!(h.engine.playing);
+    press(&mut h, Key::Space, Modifiers::NONE);
+    wait(&mut h, "the stop", |h| !h.engine.playing);
+    assert_eq!(state(&mut h.shell).insert_marker, marker);
+    h.shell.audio_mut().stop();
+}
+
+// Spec: transport R10, R35. With no time selection Option-Space plays from
+// the insert marker and doesn't stop.
+#[test]
+fn option_space_without_a_time_selection_plays_from_the_insert_marker_and_goes_on() {
+    let mut h = Harness::manual(Window::Main);
+    h.settle();
+    h.shell
+        .run("transport.locate", json!({ "position": BAR * 2 }))
+        .unwrap();
+    let option = if cfg!(target_os = "macos") {
+        Modifiers::ALT
+    } else {
+        Modifiers::CTRL
+    };
+    press(&mut h, Key::Space, option);
+    wait(&mut h, "playback", |h| h.engine.playing);
+    wait(&mut h, "a beat of playing", |h| {
+        h.engine.position > BAR * 2 + Ticks::QUARTER
+    });
+    assert!(h.engine.playing);
+    press(&mut h, Key::Space, Modifiers::NONE);
+    wait(&mut h, "the stop", |h| !h.engine.playing);
+    h.shell.audio_mut().stop();
+}

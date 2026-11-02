@@ -3,6 +3,7 @@
 //! 1,700 binaries and 170 GB a worktree. Add a test file here as `mod`;
 //! `cargo xtask check` fails on a file in tests/ that isn't listed.
 
+mod chord_lane;
 mod clip_params;
 mod colours;
 mod command_registry;

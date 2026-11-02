@@ -847,6 +847,9 @@ pub struct Shell {
     /// The engine's insert marker when the shell last looked, so a move of
     /// it reaches the Arrangement View once (WP-1.18).
     seen_insert_marker: Option<Ticks>,
+    /// Whether the engine plays a Play Selection to the selection's end, so
+    /// the Loop switch shows off (the transport spec, R35).
+    loop_suspended: bool,
     /// Whether a person's gesture (a drag on a value) holds a transaction
     /// open, so its document commands are one undo step.
     gesture: bool,
@@ -1084,12 +1087,19 @@ fn clip_marker_command(id: &str) -> bool {
 /// Whether `id` is one of the Arrangement's own clip drags, which the
 /// document runs per frame as gestures: stretching a warped clip's edge (the
 /// warping spec, R47), sliding a clip's contents (R54) and dragging a fade's
-/// handles (the audio clips spec, R27), each one undo step however far the drag
+/// handles (the audio clips spec, R27), and drawing or moving a chord lane
+/// region (the chord lane spec, R3), each one undo step however far the drag
 /// goes.
 fn arrangement_clip_command(id: &str) -> bool {
     matches!(
         id,
-        "clip.stretch" | "clip.slide_contents" | "clip.set_fades" | "arrangement.set_crossfade"
+        "clip.stretch"
+            | "clip.slide_contents"
+            | "clip.set_fades"
+            | "arrangement.set_crossfade"
+            // Spec: chord-lane R3. Drawing, moving and resizing a region.
+            | "chord_lane.add_region"
+            | "chord_lane.move_region"
     )
 }
 
@@ -1113,6 +1123,8 @@ fn marker_label(id: &str) -> &'static str {
         "clip.stretch" => "Stretch clip",
         "clip.slide_contents" => "Slide clip contents",
         "clip.set_fades" | "arrangement.set_crossfade" => "Change Fade",
+        "chord_lane.add_region" => "Add Chord Region",
+        "chord_lane.move_region" => "Move Chord Region",
         model::SET_MIDI_REGION | "clip.set_region" => "Change clip region",
         model::SET_MIDI_LOOP | "clip.set_loop" => "Change clip loop",
         "clip.insert_warp_marker" | "clip.move_warp_markers" => "Move warp markers",
@@ -1436,6 +1448,7 @@ impl Shell {
             envelope_control_focused: false,
             au,
             seen_insert_marker: None,
+            loop_suspended: false,
             gesture: false,
             mixer: MixerView::new(),
             session: SessionView::new(),
@@ -1879,6 +1892,9 @@ impl Shell {
         }
         if locator_ids::handles(id) {
             return self.run_locator(id, args);
+        }
+        if bl_shell_spec::chord_lane::handles(id) {
+            return self.run_chord_lane(id, args);
         }
         if note_ids::is_preview_or_mode(id) || id == note_ids::STEP_RECORD {
             // Spec: step-recording. The Preview switch, previews, step

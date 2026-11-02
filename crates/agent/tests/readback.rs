@@ -89,6 +89,28 @@ fn fixture() -> Project {
         },
     );
 
+    // Spec: chord-lane R2, R5, R10. A region, and a track that follows it.
+    let region: bl_model::ChordRegionId = editor.new_id();
+    apply(
+        &mut editor,
+        Command::AddChordRegion {
+            region: bl_model::ChordRegion {
+                id: region,
+                start: Ticks(BAR),
+                end: Ticks(3 * BAR),
+                scale: bl_model::Scale::new(2, bl_model::ScaleName::Dorian),
+                transpose: 2,
+            },
+        },
+    );
+    apply(
+        &mut editor,
+        Command::SetFollowChordLane {
+            track: keys,
+            follow: true,
+        },
+    );
+
     // The song.
     apply(
         &mut editor,

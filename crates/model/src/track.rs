@@ -815,6 +815,9 @@ pub struct Track {
     /// The user's own info text (Edit Info Text); empty for none (the Info
     /// View spec, R9).
     pub(crate) info_text: String,
+    /// Whether the track plays its Arrangement clips through the chord lane
+    /// (WP-6.48; the chord lane spec, R5). Off in a new track.
+    pub(crate) follow_chord_lane: bool,
 }
 
 impl Track {
@@ -842,6 +845,7 @@ impl Track {
             tuning_layout: crate::TuningLayout::default(),
             link: None,
             info_text: String::new(),
+            follow_chord_lane: false,
         }
     }
 
@@ -894,6 +898,12 @@ impl Track {
     #[must_use]
     pub fn id(&self) -> TrackId {
         self.id
+    }
+
+    /// Whether the track plays its Arrangement clips through the chord lane.
+    #[must_use]
+    pub const fn follow_chord_lane(&self) -> bool {
+        self.follow_chord_lane
     }
 
     /// The track's own info text, empty for none.
@@ -1282,6 +1292,7 @@ impl Track {
             || self.delay != other.delay
             || self.keep_monitoring_latency != other.keep_monitoring_latency
             || self.tuning_bypass != other.tuning_bypass
+            || self.follow_chord_lane != other.follow_chord_lane
             || self.tuning_layout != other.tuning_layout
             || self.link != other.link
             || self.removed_stop_buttons != other.removed_stop_buttons

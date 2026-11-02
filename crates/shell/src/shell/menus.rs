@@ -37,6 +37,7 @@ use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::envelope_keys as envelope_key_ids;
 use bl_shell_spec::export as export_ids;
 use bl_shell_spec::freeze as freeze_ids;
+use bl_shell_spec::linked_clips as linked_ids;
 use bl_shell_spec::locator as locator_ids;
 use bl_shell_spec::midi_tools as tool_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
@@ -570,6 +571,22 @@ impl Shell {
         match id {
             model::UNDO => return self.editor.can_undo(),
             model::REDO => return self.editor.can_redo(),
+            // Spec: linked-clips R1, R8. Duplicate as Linked Clip needs a
+            // clip; Unlink Clip a linked one.
+            linked_ids::DUPLICATE_LINKED | linked_ids::UNLINK => {
+                let clips: Vec<bl_model::ClipId> = args
+                    .get("clips")
+                    .and_then(|clips| serde_json::from_value(clips.clone()).ok())
+                    .unwrap_or_else(|| self.scale_targets());
+                let doc = self.editor.document();
+                return if id == linked_ids::UNLINK {
+                    clips
+                        .iter()
+                        .any(|clip| doc.clip(*clip).is_some_and(|clip| clip.link.is_some()))
+                } else {
+                    !clips.is_empty()
+                };
+            }
             // Spec: midi-tools R19. Apply Transformation/Generator is
             // disabled while no MIDI clip shows.
             tool_ids::APPLY => {

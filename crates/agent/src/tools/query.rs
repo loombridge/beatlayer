@@ -391,6 +391,11 @@ impl View<'_> {
         if let Some((scene, _)) = slot {
             value["scene"] = json!(scene);
         }
+        // Spec: linked-clips R14. The clip's link and the other clips in it.
+        value["link"] = clip.link.map_or(
+            Value::Null,
+            |link| json!({ "id": link, "others": self.document.linked_clip_ids(clip.id) }),
+        );
         if self.detail == Detail::Full {
             value["saved"] = self.saved(clip);
         }

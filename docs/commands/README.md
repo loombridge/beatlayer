@@ -5611,6 +5611,7 @@ A clip on a track's arrangement lane.
 | `groove` | [`GrooveId`](#grooveid) or null | no | The clip's groove (WP-6.19): one of the set's Groove Pool, or none. It changes when the clip's notes play, or where its audio plays, and nothing in the clip itself until it is committed. |
 | `info_text` | string | no | The user's own info text (Edit Info Text), which the Info View shows while the pointer is over the clip; empty for none, and left out of the saved set then (the Info View spec, R9). |
 | `launch` | [`ClipLaunch`](#cliplaunch) | no | The clip's launch settings (WP-3.4), which only a Session clip's launching reads. The defaults for a clip saved without them. |
+| `link` | [`LinkId`](#linkid) or null | no | The link the clip belongs to (WP-6.44, the linked clips spec, R2): the clips of one link hold the same contents (R3), whatever edit reaches one of them (R4). `None` for an independent clip, which is what a set saved before linked clips holds. |
 | `offset` | [`Ticks`](#ticks) | no | How far into its contents a MIDI clip starts: its notes are placed from `start - offset`, and the part before the clip's start doesn't play. 0 (or left out) plays the contents from their beginning. Never negative. Splitting a MIDI clip or trimming its left edge changes it, so each part plays what it played before. An audio clip's is always 0: its Start marker moves instead, as Live's does. |
 | `scale` | [`Scale`](#scale) | no | The clip's scale (WP-6.7): its Scale Mode switch, its root and its scale name. It never changes what the clip plays; it tells the rest of the set which keys belong. A clip off at C, in Major, writes nothing, so a set saved before the scales loads unchanged. |
 
@@ -5667,6 +5668,17 @@ A clip on a track's arrangement lane.
     "length": {
       "$ref": "#/$defs/Ticks",
       "description": "How long the clip is. Always positive."
+    },
+    "link": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LinkId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The link the clip belongs to (WP-6.44, the linked clips spec, R2): the clips of one link hold the same contents (R3), whatever edit reaches one of them (R4). `None` for an independent clip, which is what a set saved before linked clips holds."
     },
     "mute": {
       "description": "Whether the clip is switched off, so it stays in place but doesn't play.",
@@ -18695,6 +18707,25 @@ Type: integer, at least 1.
 ```json
 {
   "description": "The ID of a link group: a positive integer, unique within the project and never reused.",
+  "format": "uint64",
+  "minimum": 1,
+  "type": "integer"
+}
+```
+
+</details>
+
+### `LinkId`
+
+The ID of a link: a positive integer, unique within the project and never reused.
+
+Type: integer, at least 1.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The ID of a link: a positive integer, unique within the project and never reused.",
   "format": "uint64",
   "minimum": 1,
   "type": "integer"

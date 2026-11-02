@@ -692,6 +692,40 @@ impl Shell {
         result
     }
 
+    /// Runs `clip.duplicate_linked` (the linked clips spec, R1): in the
+    /// Session View when the clips given sit in slots, or, with none given,
+    /// when that view has the focus; in the Arrangement otherwise.
+    pub(super) fn run_linked_clips(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        let bl_shell_spec::linked_clips::DuplicateLinkedArgs { clips } = Self::args(id, args)?;
+        let before = self.editor.document().clone();
+        let in_slots = match clips.as_deref() {
+            Some([first, ..]) => before
+                .clip_track(*first)
+                .and_then(|track| before.track(track))
+                .is_some_and(|track| track.slots().any(|(_, held)| held.id == *first)),
+            _ => self
+                .active_contexts()
+                .contains(&bl_commands::Context::Session),
+        };
+        let result = if in_slots {
+            crate::session_clips::duplicate_linked(&mut self.editor, &mut self.session, clips)
+        } else {
+            editing::duplicate_linked(
+                &mut self.editor,
+                &mut self.arrangement,
+                clips,
+                self.prefs.create_fades_on_clip_edges.0,
+            )
+        }
+        .map_err(|failure| edit_error(id, failure));
+        if *self.editor.document() != before {
+            self.dirty = true;
+            self.document_changed();
+        }
+        self.touch();
+        result.map(|result| to_value(&result))
+    }
+
     /// Before a paste, takes from a clipboard copied in another set what
     /// only means something there (the set exchange spec, R6).
     pub(super) fn leave_set_before_paste(&mut self, id: &str) {

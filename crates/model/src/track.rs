@@ -48,6 +48,7 @@ fn frozen_output_clip(output: crate::freeze::FrozenOutput) -> Clip {
         groove: None,
         colour: None,
         info_text: String::new(),
+        link: None,
     }
 }
 

@@ -52,6 +52,7 @@ mod keymap_sweep;
 mod launch_panel;
 mod layout;
 mod link;
+mod linked_clips;
 mod locator;
 mod macros;
 mod main_properties;

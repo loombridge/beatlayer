@@ -24,6 +24,21 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             )),
         ),
         (
+            "clip.link",
+            Exception(AgentOnly(
+                "the building block of Edit \u{25b8} Duplicate as Linked Clip, which a person reaches \
+                 from the menu (the linked clips spec, R14)",
+            )),
+        ),
+        (
+            "clip.unlink",
+            Exception(Equivalent(
+                "the clip's context menu, opened with the Context Menu key or Shift-F10 \
+                 (S-CTX-002) on the selected clip: its Unlink Clip row, enabled while the clip is \
+                 linked (the linked clips spec, R8)",
+            )),
+        ),
+        (
             "clip.set_scale",
             main(a_clip_selected, control_bar, "Scale Mode", Key::Enter),
         ),

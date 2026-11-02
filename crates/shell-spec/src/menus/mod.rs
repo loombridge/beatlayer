@@ -108,6 +108,15 @@ pub const D24: &str = "D24";
 /// records Live's menus.
 pub const IMP_12: &str = "IMP-12";
 
+/// The row of Beatlayer's own Duplicate as Linked Clip (IMP-21), after
+/// Duplicate Track Without Clips in the Edit menu and after Duplicate in the
+/// clips' context menus: an improvement, so not a row of menus.md.
+pub const IMP_21: &str = "IMP-21";
+
+/// The row of Beatlayer's own Unlink Clip (IMP-21), after Duplicate as Linked
+/// Clip in the clips' context menus.
+pub const IMP_21_UNLINK: &str = "IMP-21-unlink";
+
 /// The row of Beatlayer's own Return Tracks Scroll with Tracks (IMP-01),
 /// straight after Return Tracks in the Mixer Controls submenu and in the
 /// Arrangement Track Controls submenu: an improvement, so not one of

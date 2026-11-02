@@ -22,7 +22,8 @@ use crate::comping::COPY_TO_MAIN_LANE;
 use crate::devices::{
     COMPARE_COPY, COMPARE_SWITCH, SAVE_DEFAULT_PRESET, SET_FLOATING, SET_ROLE, UNGROUP,
 };
-use crate::menus::{Action, IMP_12, MenuItem, Row, SEPARATOR, items};
+use crate::linked_clips::{DUPLICATE_LINKED, UNLINK as UNLINK_CLIP};
+use crate::menus::{Action, IMP_12, IMP_21, IMP_21_UNLINK, MenuItem, Row, SEPARATOR, items};
 use crate::midi_files::EXPORT as EXPORT_MIDI_CLIP;
 use crate::notes::{CHOP as CHOP_NOTES, SPLIT as SPLIT_NOTES};
 use crate::slice::OPEN as SLICE_TO_MIDI;
@@ -53,6 +54,9 @@ const CLIP: &[Row] = &[
     ("C-CLIP-ARR-001", "Cut", Key(&["S-EDIT-001"])),
     ("C-CLIP-ARR-002", "Copy", Key(&["S-EDIT-002"])),
     ("C-CLIP-ARR-003", "Duplicate", Key(&["S-EDIT-004"])),
+    // IMP-21 places both straight after Duplicate.
+    (IMP_21, "Duplicate as Linked Clip", Cmd(DUPLICATE_LINKED)),
+    (IMP_21_UNLINK, "Unlink Clip", Cmd(UNLINK_CLIP)),
     ("C-CLIP-ARR-004", "Delete", Key(&["S-EDIT-005"])),
     SEPARATOR,
     (
@@ -564,6 +568,8 @@ const CLIP_SES: &[Row] = &[
     ("C-CLIP-SES-001", "Cut", Key(&["S-EDIT-001"])),
     ("C-CLIP-SES-002", "Copy", Key(&["S-EDIT-002"])),
     ("C-CLIP-SES-003", "Duplicate", Key(&["S-EDIT-004"])),
+    (IMP_21, "Duplicate as Linked Clip", Cmd(DUPLICATE_LINKED)),
+    (IMP_21_UNLINK, "Unlink Clip", Cmd(UNLINK_CLIP)),
     ("C-CLIP-SES-004", "Delete", Key(&["S-EDIT-005"])),
     SEPARATOR,
     ("C-CLIP-SES-005", "Rename", Key(&["S-EDIT-008"])),

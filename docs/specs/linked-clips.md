@@ -1,6 +1,6 @@
 # Linked clips
 
-- **Status:** draft
+- **Status:** implemented (every rule has a passing test)
 - **Work packages:** WP-6.44 (R1 to R16)
 - **Parity-matrix row:** none (Beatlayer's own); [the improvements](../05-improvements.md), IMP-21 (linked clips)
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026, chapter 6 "Arrangement View" (sections 6.7, 6.12, 6.13 and 6.14) and chapter 7 "Session View"; the Live 12 release notes, 12.0 to 12.4.6; the UI parity reference's [menus.md](../ui-parity/menus.md) M-EDIT-006, C-CLIP-SES and C-CLIP-ARR
@@ -39,8 +39,8 @@ This spec covers which settings a link shares, which edits reach every linked cl
 - **R10.** A linked clip shows a link mark, a glyph of Beatlayer's own, at the right end of its title bar in the Arrangement and at the right of its slot in the Session View, in the clip's text colour, and beside its name in the Clip View. While the pointer is over the mark the Status Bar says how many other clips the clip is linked to. Clicking the mark selects every clip of its link in that view. (S1)
 - **R11.** Assistive technology reads a linked clip's name with "linked" and the number of clips in its link, and the mark as a button that selects them. (S7)
 - **R12.** The engine plays each linked clip as it would play an independent clip with the same contents and settings: a render of a set with linked clips is the same to the bit as a render of the set with every link undone. (S1, S7)
-- **R13.** The set saves each link's shared contents once and each linked clip names its link, with its own settings beside it; loading gives back the links and every clip as it was. A set saved before linked clips loads unchanged, with no links. A clip that names a link the set doesn't hold, or a link whose clips aren't all of one kind, doesn't load. (S7)
-- **R14.** `clip.duplicate_linked` takes the clips to copy and, for each, its copy's ID and, optionally, where the copy goes (a track and a start, or a track and a scene); left out, R1's place. `clip.unlink` takes the clips. Both are `edit` and read back through the query tool's `clip` object, whose `link` field gives the clip's link and the IDs of the other clips in it (`null` for an independent clip). (S7)
+- **R13.** The set saves each link's shared contents once, in its `links` list, and each linked clip names its link, with its own settings beside it and its contents left empty; loading gives back the links and every clip as it was. A set saved before linked clips loads unchanged, with no links. A clip that names a link the set doesn't hold, or a link whose clips aren't all of one kind, doesn't load. (S7)
+- **R14.** `clip.duplicate_linked` takes the clips to copy, or, left out, the selected clips, and puts each copy where R1 says; its result names the copies it created. `clip.unlink` takes the clips. `clip.link`, which `clip.duplicate_linked` runs for each copy, takes clips that already hold the same contents and links them, and refuses clips whose contents differ, clips of two kinds and clips of two links. All three are `edit` and read back through the query tool's `clip` object, whose `link` field gives the clip's link and the IDs of the other clips in it (`null` for an independent clip). (S7)
 - **R15.** Through the agent API, an edit to a linked clip's contents reaches every clip in its link as R4 says, and its result names every clip it changed. A command whose class depends on what it removes (a `clip.set_data` that leaves fewer notes) counts what it removes from every clip in the link. (S7)
 - **R16.** Linked clips and linked tracks are separate. A clip on a linked track (S2, WP-6.23) can belong to a link of clips; moving it moves the clips on the linked tracks as linked-track editing says, and changing its contents changes its link's clips as R4 says. (S2, S1)
 
@@ -48,19 +48,19 @@ This spec covers which settings a link shares, which edits reach every linked cl
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.44 | |
-| R2 | to be written in WP-6.44 | |
-| R3 | to be written in WP-6.44 | |
-| R4 | to be written in WP-6.44 | |
-| R5 | to be written in WP-6.44 | |
-| R6 | to be written in WP-6.44 | |
-| R7 | to be written in WP-6.44 | |
-| R8 | to be written in WP-6.44 | |
-| R9 | to be written in WP-6.44 | |
-| R10 | to be written in WP-6.44 | |
-| R11 | to be written in WP-6.44 | |
-| R12 | to be written in WP-6.44 | |
-| R13 | to be written in WP-6.44 | |
-| R14 | to be written in WP-6.44 | |
-| R15 | to be written in WP-6.44 | |
-| R16 | to be written in WP-6.44 | |
+| R1 | `crates/shell/tests/linked_clips.rs`, `duplicate_as_linked_clip_puts_a_linked_copy_after_the_clip_in_one_step`, `in_the_session_view_the_copy_goes_to_the_first_empty_slot_below`; `crates/ui/tests/linked_clips.rs`, `the_items_sit_after_duplicate_in_the_edit_menu_and_the_clips_menus` | headless, UI script |
+| R2 | `crates/model/tests/linked_clips.rs`, `only_clips_that_hold_the_same_contents_link`; `crates/model/tests/undo_properties.rs`, `undo_all_then_redo_all` | unit, property |
+| R3 | `crates/model/tests/linked_clips.rs`, `a_clip_keeps_its_own_place_markers_and_name`, `a_warp_marker_moved_on_one_linked_audio_clip_moves_on_both` | unit |
+| R4 | `crates/model/tests/linked_clips.rs`, `a_note_edit_on_one_of_three_linked_clips_reaches_all_three_in_one_undo_step`, `a_warp_marker_moved_on_one_linked_audio_clip_moves_on_both`, `a_reverse_mirrors_each_linked_clips_own_markers`; `crates/model/tests/undo_properties.rs`, `undo_all_then_redo_all` | unit, property |
+| R5 | `crates/model/tests/linked_clips.rs`, `crop_leaves_the_others_notes_whole` | unit |
+| R6 | `crates/model/tests/linked_clips.rs`, `a_split_gives_two_clips_in_the_link`; `crates/shell/tests/linked_clips.rs`, `splitting_a_linked_clip_keeps_both_parts_in_the_link` | unit, headless |
+| R7 | `crates/model/tests/linked_clips.rs`, `a_clip_made_by_a_command_is_independent`; `crates/shell/tests/linked_clips.rs`, `duplicate_makes_an_independent_copy` | unit, headless |
+| R8 | `crates/model/tests/linked_clips.rs`, `unlinking_and_deleting_down_to_one_clip_end_the_link`; `crates/shell/tests/linked_clips.rs`, `unlink_clip_takes_a_clip_out_and_the_link_ends_with_one_left`, `the_menus_offer_the_items_while_there_is_something_to_act_on` | unit, headless |
+| R9 | `crates/model/tests/linked_clips.rs`, `moving_a_clip_keeps_it_in_its_link`, `unlinking_and_deleting_down_to_one_clip_end_the_link` | unit |
+| R10 | `crates/ui/tests/linked_clips.rs`, `a_linked_clips_slot_is_named_with_its_link_and_its_mark_selects_the_link`, `a_linked_clips_title_bar_in_the_arrangement_has_the_mark_and_it_selects_the_link` | UI script |
+| R11 | `crates/ui/tests/linked_clips.rs`, `a_linked_clips_slot_is_named_with_its_link_and_its_mark_selects_the_link`, `a_linked_clips_title_bar_in_the_arrangement_has_the_mark_and_it_selects_the_link` | UI script |
+| R12 | `crates/cli/tests/older_sets.rs`, `a_render_of_a_set_with_linked_clips_equals_the_same_set_unlinked` | engine |
+| R13 | `crates/model/tests/linked_clips.rs`, `a_set_saves_each_links_contents_once_and_loads_the_links_back`; `crates/cli/tests/older_sets.rs`, `a_set_saved_before_linked_clips_loads_unchanged_and_links_round_trip` | unit, project |
+| R14 | `crates/cli/tests/agent_linked_clips.rs`, `an_agent_links_edits_and_unlinks_clips_and_reads_the_link_back`; `crates/model/tests/command_registry.rs`, `every_command_runs_by_id`; `crates/agent/tests/readback.rs`, `every_query_readback_the_command_table_names_is_in_a_real_full_result` | agent, unit |
+| R15 | `crates/cli/tests/agent_linked_clips.rs`, `an_agent_links_edits_and_unlinks_clips_and_reads_the_link_back` | agent |
+| R16 | `crates/shell/tests/linked_clips.rs`, `linked_clips_and_linked_tracks_work_side_by_side` | headless |

@@ -2146,3 +2146,120 @@ fn a_set_saved_before_the_region_plays_the_same_frames_at_either_rate() {
         plays("Slice", (from + (to - from) / 2, to));
     }
 }
+
+// Spec: linked-clips R13
+#[test]
+fn a_set_saved_before_linked_clips_loads_unchanged_and_links_round_trip() {
+    let (mut editor, clip) = midi_clip_song();
+    let track = editor.document().clip_track(clip).unwrap();
+    let saved = encode_json(&project_of(&editor), 1).unwrap();
+    let value: Value = serde_json::from_slice(&saved).unwrap();
+    assert!(value["document"].get("links").is_none(), "{value}");
+    assert!(
+        value["document"]["tracks"][0]["clips"][0]
+            .get("link")
+            .is_none()
+    );
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert_eq!(loaded.document, *editor.document());
+    assert_eq!(loaded.document.clip(clip).unwrap().link, None);
+
+    // Two linked clips with a note each save the note once, name their link,
+    // and load back linked.
+    let copy = editor.new_id();
+    let mut data = bl_model::MidiData::default();
+    data.notes
+        .push_back(bl_model::Note::new(71, Ticks::ZERO, Ticks(240), 100));
+    editor
+        .apply(Command::SetClipData {
+            clip,
+            data: ClipData::Midi(data.clone()),
+        })
+        .unwrap();
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(copy, Ticks::WHOLE * 2, Ticks::WHOLE, ClipData::Midi(data)),
+        })
+        .unwrap();
+    editor
+        .apply(Command::LinkClips {
+            clips: vec![clip, copy],
+        })
+        .unwrap();
+    let saved = encode_json(&project_of(&editor), 1).unwrap();
+    let text = String::from_utf8(saved.clone()).unwrap();
+    assert_eq!(
+        text.matches("\"key\":71").count(),
+        1,
+        "the note is saved once"
+    );
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert_eq!(loaded.document, *editor.document());
+    assert_eq!(
+        loaded.document.clip(copy).unwrap().link,
+        loaded.document.clip(clip).unwrap().link
+    );
+    assert!(loaded.document.clip(copy).unwrap().link.is_some());
+    loaded.document.check_invariants().unwrap();
+    assert_eq!(encode_json(&loaded, 1).unwrap(), saved);
+}
+
+// Spec: linked-clips R12
+#[test]
+fn a_render_of_a_set_with_linked_clips_equals_the_same_set_unlinked() {
+    let mut editor = Editor::new();
+    let mut clips = Vec::new();
+    for (index, start) in [Ticks::ZERO, Ticks::WHOLE * 2].into_iter().enumerate() {
+        let track = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Audio,
+                name: format!("Audio {index}"),
+                parent: None,
+                index,
+            })
+            .unwrap();
+        let clip = editor.new_id();
+        editor
+            .apply(Command::CreateClip {
+                track,
+                clip: Clip::new(
+                    clip,
+                    start,
+                    Ticks::WHOLE,
+                    ClipData::Audio(AudioData::new(MEDIA)),
+                ),
+            })
+            .unwrap();
+        clips.push(clip);
+    }
+    editor
+        .apply(Command::LinkClips {
+            clips: clips.clone(),
+        })
+        .unwrap();
+    // Warp goes on through one clip and reaches both; a gain does too.
+    editor
+        .apply(Command::SetClipWarp {
+            clip: clips[0],
+            warp: true,
+        })
+        .unwrap();
+    editor
+        .apply(Command::SetClipGain {
+            clip: clips[1],
+            gain: 0.5,
+        })
+        .unwrap();
+    let linked = render(editor.document());
+    assert!(linked.iter().any(|&s| s != 0.0));
+    editor
+        .apply(Command::UnlinkClips {
+            clips: clips.clone(),
+        })
+        .unwrap();
+    assert_eq!(editor.document().clip(clips[0]).unwrap().link, None);
+    assert_eq!(linked, render(editor.document()), "the same to the bit");
+}

@@ -70,6 +70,7 @@ impl Object {
             ],
             Self::Device => &["compare", "cv", "matrix", "wavetables"],
             Self::Track => &["linked"],
+            Self::Clip => &["link"],
             _ => &[],
         }
     }

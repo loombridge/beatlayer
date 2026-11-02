@@ -1444,6 +1444,34 @@ fn saved_forms_come_a_page_at_a_time() {
     );
 }
 
+/// The fixture with a copy of its first MIDI clip, linked with it (the
+/// linked clips spec, R14): the set saves a link's contents once, so the
+/// tests that compare a clip's notes with the set's keep the plain fixture.
+fn with_linked_clips(mut project: Project) -> Project {
+    let mut editor = Editor::from_document(project.document.clone(), project.ids);
+    let (track, clip) = editor
+        .document()
+        .tracks()
+        .find_map(|track| {
+            let clip = track.clips().find(|clip| !clip.data.is_audio())?;
+            Some((track.id(), clip.clone()))
+        })
+        .expect("the fixture has a MIDI clip");
+    let twin = Clip {
+        id: editor.new_id(),
+        start: clip.end(),
+        ..clip.clone()
+    };
+    let linked = vec![clip.id, twin.id];
+    editor
+        .apply(Command::CreateClip { track, clip: twin })
+        .unwrap();
+    editor.apply(Command::LinkClips { clips: linked }).unwrap();
+    project.document = editor.document().clone();
+    project.ids = editor.ids();
+    project
+}
+
 /// Whether `field` (dotted names, `[]` after a list) is in `value`, looking
 /// through a page's `items`.
 fn present(value: &Value, field: &str) -> bool {
@@ -1474,7 +1502,7 @@ fn present(value: &Value, field: &str) -> bool {
 fn every_query_readback_the_command_table_names_is_in_a_real_full_result() {
     use bl_commands::readback::{Object, READBACK, Readback};
 
-    let project = fixture();
+    let project = with_linked_clips(fixture());
     let document = serde_json::to_value(&project.document).unwrap();
     let mut client = open(&project, "declared");
     let (tracks, clips, devices) = saved_parts(&document);

@@ -2042,7 +2042,8 @@ impl ArrangementUi {
         if brace.clicked() {
             invoke(events, edit_ids::SELECT_LOOP_BRACE, json!({}));
         }
-        brace.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Loop Brace"));
+        brace
+            .widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Arrangement Loop Brace"));
         if brace.secondary_clicked() {
             self.menus.open_brace();
         }

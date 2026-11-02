@@ -168,6 +168,21 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                  Arrangement's keyboard runs directly (the time editing spec, R32)",
             )),
         ),
+        // The loop brace (WP-6.73).
+        (
+            "arrangement.select_loop_brace",
+            Exception(Equivalent(
+                "Tab reaches the brace in the Arrangement's Tab order and Enter selects it \
+                 (the transport spec, R32)",
+            )),
+        ),
+        (
+            "arrangement.set_loop_brace",
+            Exception(Equivalent(
+                "a drag of the brace's ends or bar, which the brace's keys do from the \
+                 keyboard (`arrangement.nudge_loop_brace`, the transport spec, R33)",
+            )),
+        ),
         // The time-signature lane (WP-6.61).
         (
             "arrangement.select_time_signature_change",

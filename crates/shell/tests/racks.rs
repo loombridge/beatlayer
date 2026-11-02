@@ -376,7 +376,7 @@ fn group_wraps_the_selection_in_the_kind_that_holds_it() {
     )
     .unwrap();
     assert_eq!(steps(&shell), before + 1);
-    assert_eq!(last_step(&shell), "Group");
+    assert_eq!(last_step(&shell), "Group Devices");
     let doc = shell.editor().document();
     let rack = doc.device(grouped.rack).unwrap();
     assert_eq!(rack.rack_kind(), Some(RackKind::AudioEffect));

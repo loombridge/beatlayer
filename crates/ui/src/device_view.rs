@@ -494,13 +494,39 @@ impl DeviceViewUi {
             .active_contexts()
             .contains(&bl_commands::Context::DeviceView)
         {
-            let step = ui.input_mut(|i| {
-                i32::from(i.consume_key(egui::Modifiers::NONE, Key::ArrowRight))
-                    - i32::from(i.consume_key(egui::Modifiers::NONE, Key::ArrowLeft))
+            // Shift grows the selection by the neighbouring device; plain
+            // keys select one, from the edge of the run in that direction.
+            let (grow, step) = ui.input_mut(|i| {
+                let grow = i32::from(i.consume_key(egui::Modifiers::SHIFT, Key::ArrowRight))
+                    - i32::from(i.consume_key(egui::Modifiers::SHIFT, Key::ArrowLeft));
+                let step = i32::from(i.consume_key(egui::Modifiers::NONE, Key::ArrowRight))
+                    - i32::from(i.consume_key(egui::Modifiers::NONE, Key::ArrowLeft));
+                (grow, step)
             });
-            let at = state.devices.iter().position(|d| d.selected);
+            let selected: Vec<usize> = state
+                .devices
+                .iter()
+                .enumerate()
+                .filter(|(_, d)| d.selected)
+                .map(|(at, _)| at)
+                .collect();
+            if let (Some(&first), Some(&last)) = (selected.first(), selected.last())
+                && grow != 0
+            {
+                let edge = if grow > 0 { last + 1 } else { first.wrapping_sub(1) };
+                if let Some(next) = state.devices.get(edge) {
+                    let mut run: Vec<_> = state.selection.clone();
+                    run.push(next.id);
+                    invoke(events, ids::SELECT, json!({ "devices": run }));
+                }
+            }
+            let at = if step > 0 {
+                selected.last()
+            } else {
+                selected.first()
+            };
             let to = match at {
-                Some(at) => i64::try_from(at).ok().map(|at| at + i64::from(step)),
+                Some(at) => i64::try_from(*at).ok().map(|at| at + i64::from(step)),
                 None if step > 0 => Some(0),
                 None => i64::try_from(state.devices.len()).ok().map(|n| n - 1),
             };
@@ -920,11 +946,22 @@ impl DeviceViewUi {
             if !window && !frame.floating {
                 invoke(events, ids::FOLD, json!({ "device": frame.id }));
             }
-        } else if (response.clicked()
-            || response.secondary_clicked()
-            || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))))
-            && !frame.selected
+        } else if response.clicked() && ui.input(|i| i.modifiers.shift) {
+            // Spec: device-chains R47 (S-DEV-004). Shift-click selects the
+            // range from the device clicked on its own, and never fewer.
+            invoke(
+                events,
+                ids::SELECT,
+                json!({ "device": frame.id, "range": true }),
+            );
+        } else if (response.clicked() && shell.devices().selection().len() > 1)
+            || ((response.clicked()
+                || response.secondary_clicked()
+                || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))))
+                && !frame.selected)
         {
+            // A click inside several selected devices selects that one alone;
+            // a right-click keeps them for the menu.
             invoke(events, ids::SELECT, select());
         }
         response.context_menu(|ui| self.menu(ui, shell, frame, events));

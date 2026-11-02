@@ -1225,6 +1225,7 @@ impl ArrangementView {
         self.selected_lane = from.selected_lane;
         self.selected_breakpoint = from.selected_breakpoint;
         self.selected_signature = from.selected_signature;
+        self.selected_chord_region = from.selected_chord_region;
     }
 
     /// Drops selected clips the document no longer has.

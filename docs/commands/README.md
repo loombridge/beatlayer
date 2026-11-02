@@ -38,6 +38,7 @@ The commands, by the part of their ID before its first dot:
 - [`automation`](automation.md)
 - [`browser`](browser.md)
 - [`chain`](chain.md)
+- [`chord_lane`](chord_lane.md)
 - [`clip`](clip.md)
 - [`clip_view`](clip_view.md)
 - [`control_surface`](control_surface.md)
@@ -1065,6 +1066,7 @@ What the Arrangement View shows: every view command returns it.
 | `selected_tracks` | array of [`TrackId`](#trackid) | yes | The selected tracks, top to bottom. |
 | `selected_clips` | array of [`ClipId`](#clipid) | yes | The selected clips (WP-1.8b), in the order they were selected. The editing commands act on these when there are any, and on the time selection otherwise. |
 | `selected_locators` | array of [`LocatorId`](#locatorid) | yes | The selected locators (WP-6.24), in the order they were selected. The locator commands act on these. |
+| `chord_lane` | boolean | yes | Whether the chord lane shows (WP-6.48; the chord lane spec, R1). |
 | `time_selection` | [`TimeRange`](#timerange) or null | yes | The selected span of time on the selected tracks, if any. |
 | `folded_tracks` | array of [`TrackId`](#trackid) | yes | The folded tracks. |
 | `zoom_back_steps` | integer, at least 0 | yes | How many views `arrangement.zoom_back` can go back to. |
@@ -1075,6 +1077,7 @@ What the Arrangement View shows: every view command returns it.
 | `show_return_tracks` | boolean | yes | Whether the return tracks' rows show in the lanes. |
 | `automation_lanes` | array of [`AutomationLane`](#automationlane) | no | Each track's automation lanes, for the tracks whose lanes aren't as a new track's (the main lane showing its volume, and no lanes of its own): the choosers' choices, the lanes of their own and whether they show (the automation spec, R32). |
 | `selected_breakpoint` | [`SelectedBreakpoint`](#selectedbreakpoint) or null | no | The breakpoint selected in that lane (WP-6.26), if any: `automation.select_breakpoint` sets it. |
+| `selected_chord_region` | [`ChordRegionId`](#chordregionid) or null | no | The selected chord region (WP-6.48), if any: Delete deletes it. |
 | `selected_fade` | [`FadeHandleState`](#fadehandlestate) or null | no | The selected fade handle (WP-6.51), if any: Delete deletes its fade. |
 | `selected_lane` | [`Lane`](#lane) or null | no | The automation lane that has the keyboard (WP-6.26): the one the last click, or Up and Down, selected, while Automation Mode is on. The keys of the automation editing spec's R20 to R26 act on its envelope. |
 | `selected_take_lanes` | array of [`TakeLaneId`](#takelaneid) | no | The take lanes whose headers are selected (the comping spec, R26), in the order they were selected. Their tracks are selected tracks too. |
@@ -1101,6 +1104,11 @@ What the Arrangement View shows: every view command returns it.
     },
     "automation_mode": {
       "description": "Whether Automation Mode is on: each track shows its automation lane under its lane, with the device and parameter choosers.",
+      "type": "boolean"
+    },
+    "chord_lane": {
+      "default": false,
+      "description": "Whether the chord lane shows (WP-6.48; the chord lane spec, R1).",
       "type": "boolean"
     },
     "folded_tracks": {
@@ -1153,6 +1161,17 @@ What the Arrangement View shows: every view command returns it.
         }
       ],
       "description": "The breakpoint selected in that lane (WP-6.26), if any: `automation.select_breakpoint` sets it."
+    },
+    "selected_chord_region": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ChordRegionId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The selected chord region (WP-6.48), if any: Delete deletes it."
     },
     "selected_clips": {
       "default": [],
@@ -1292,6 +1311,7 @@ What the Arrangement View shows: every view command returns it.
     "selected_tracks",
     "selected_clips",
     "selected_locators",
+    "chord_lane",
     "time_selection",
     "folded_tracks",
     "zoom_back_steps",
@@ -5529,6 +5549,79 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `ChordRegion`
+
+One stretch of the song and what it does to the tracks that follow the lane.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | [`ChordRegionId`](#chordregionid) | yes | The region's ID. |
+| `start` | [`Ticks`](#ticks) | yes | Where it starts, on the song's beats: 1.1.1 or later. |
+| `end` | [`Ticks`](#ticks) | yes | Where it ends, which it doesn't include: after its start. |
+| `scale` | [`Scale`](#scale) | no | Its scale: the current scale of the following tracks' devices while the song plays through it. A scale with `enabled` false is no scale, and leaves the clips' own. |
+| `transpose` | integer from -128 to 127 | no | How far it moves the notes of the following tracks: degrees of each clip's scale where the clip has Scale Mode on, semitones where it is off. From -24 to 24. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "One stretch of the song and what it does to the tracks that follow the lane.",
+  "properties": {
+    "end": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it ends, which it doesn't include: after its start."
+    },
+    "id": {
+      "$ref": "#/$defs/ChordRegionId",
+      "description": "The region's ID."
+    },
+    "scale": {
+      "$ref": "#/$defs/Scale",
+      "description": "Its scale: the current scale of the following tracks' devices while the song plays through it. A scale with `enabled` false is no scale, and leaves the clips' own."
+    },
+    "start": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it starts, on the song's beats: 1.1.1 or later."
+    },
+    "transpose": {
+      "description": "How far it moves the notes of the following tracks: degrees of each clip's scale where the clip has Scale Mode on, semitones where it is off. From -24 to 24.",
+      "format": "int8",
+      "maximum": 127,
+      "minimum": -128,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "id",
+    "start",
+    "end"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ChordRegionId`
+
+The ID of a chord region: a positive integer, unique within the project and never reused.
+
+Type: integer, at least 1.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The ID of a chord region: a positive integer, unique within the project and never reused.",
+  "format": "uint64",
+  "minimum": 1,
+  "type": "integer"
 }
 ```
 
@@ -16167,6 +16260,8 @@ One row of the content pane.
 | `details` | [`ItemDetails`](#itemdetails) or null | no | What the optional columns show for it, left out while none shows (spec: browser-tags R27). |
 | `folder` | string or null | no | In search results, the folder it's in, relative to its place. |
 | `format` | [`PluginFormat`](#pluginformat) or null | no | For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11). |
+| `hidden` | boolean | no | For a plug-in, whether it is hidden, which the row draws dimmed while Show Hidden Plug-Ins is on (spec: browser-tags R43); left out otherwise. |
+| `nested` | array of integer, at least 0 | no | The collections of the person's own it is in, by their numbers (8 and up); left out while it is in none (spec: browser-tags R46, R48). |
 
 <details><summary>JSON Schema</summary>
 
@@ -16231,6 +16326,10 @@ One row of the content pane.
       ],
       "description": "For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11)."
     },
+    "hidden": {
+      "description": "For a plug-in, whether it is hidden, which the row draws dimmed while Show Hidden Plug-Ins is on (spec: browser-tags R43); left out otherwise.",
+      "type": "boolean"
+    },
     "kind": {
       "$ref": "#/$defs/ItemKind",
       "description": "What it is."
@@ -16238,6 +16337,15 @@ One row of the content pane.
     "name": {
       "description": "Its name, as the Name column shows it.",
       "type": "string"
+    },
+    "nested": {
+      "description": "The collections of the person's own it is in, by their numbers (8 and up); left out while it is in none (spec: browser-tags R46, R48).",
+      "items": {
+        "format": "uint32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
     },
     "open": {
       "default": false,
@@ -16888,7 +16996,7 @@ One of:
 
 ### `Label`
 
-A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{"folder": "/its/path"}`, or a saved label, as `{"saved": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{"collection": 3}`.
+A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{"folder": "/its/path"}`, or a saved label, as `{"saved": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{"collection": 3}`, or a collection of the person's own inside one, numbered from 8.
 
 One of:
 
@@ -16909,13 +17017,13 @@ One of:
 - `"current_project"`: The open set's project folder.
 - an object with `folder` (string): A folder the person added to Places, by its path.
 - an object with `saved` (integer): A saved label, by its ID (spec: browser-tags R24).
-- an object with `collection` (integer from 0 to 255): A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34).
+- an object with `collection` (integer, at least 0): A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34); a collection inside another is numbered from 8 (R45).
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{\"folder\": \"/its/path\"}`, or a saved label, as `{\"saved\": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{\"collection\": 3}`.",
+  "description": "A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{\"folder\": \"/its/path\"}`, or a saved label, as `{\"saved\": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{\"collection\": 3}`, or a collection of the person's own inside one, numbered from 8.",
   "oneOf": [
     {
       "const": "all",
@@ -17021,11 +17129,10 @@ One of:
     },
     {
       "additionalProperties": false,
-      "description": "A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34).",
+      "description": "A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34); a collection inside another is numbered from 8 (R45).",
       "properties": {
         "collection": {
-          "format": "uint8",
-          "maximum": 255,
+          "format": "uint32",
           "minimum": 0,
           "type": "integer"
         }
@@ -17053,6 +17160,8 @@ A label as the sidebar lists it.
 | `available` | boolean | yes | Whether its folder can be read now (a place) or it has content (a Library label). A missing folder is listed greyed, as in Live. |
 | `shown` | boolean | yes | Whether the sidebar shows it: the person can hide Library labels and saved labels (spec: browser-tags R26). |
 | `icon` | string or null | no | The icon the person gave it, from [`LABEL_ICONS`] (spec: browser-tags R25). |
+| `open` | boolean | no | For a collection that holds others, whether its list is open in the sidebar. |
+| `parent` | [`Label`](#label) or null | no | For a collection inside another, the one it is in (spec: browser-tags R45, R48). |
 | `path` | string or null | no | For a place, its folder; `null` for Current Project while the set has never been saved. |
 
 <details><summary>JSON Schema</summary>
@@ -17079,6 +17188,21 @@ A label as the sidebar lists it.
     "name": {
       "description": "Its name.",
       "type": "string"
+    },
+    "open": {
+      "description": "For a collection that holds others, whether its list is open in the sidebar.",
+      "type": "boolean"
+    },
+    "parent": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Label"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "For a collection inside another, the one it is in (spec: browser-tags R45, R48)."
     },
     "path": {
       "description": "For a place, its folder; `null` for Current Project while the set has never been saved.",

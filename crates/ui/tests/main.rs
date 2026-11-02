@@ -18,6 +18,7 @@ mod browser_collections;
 mod browser_edge;
 mod browser_filters;
 mod capture_midi;
+mod chord_lane;
 mod clip_edge_fades;
 mod clip_envelope;
 mod clip_files;

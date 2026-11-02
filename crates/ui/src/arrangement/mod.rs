@@ -3055,7 +3055,11 @@ impl ArrangementUi {
         // Spec: arranger-track R7, R10, R11. With a section selected, Cmd-R
         // renames it, Cmd-D duplicates it and Delete deletes it, unless its
         // name is being typed.
-        if !view.selected_sections().is_empty() && !arranger::is_renaming(ui.ctx()) {
+        // Not while a text field has the keyboard: Delete there edits text.
+        if !view.selected_sections().is_empty()
+            && !arranger::is_renaming(ui.ctx())
+            && !ui.ctx().egui_wants_keyboard_input()
+        {
             let pressed = |wanted: Key, command: bool| {
                 ui.input(|i| {
                     i.events.iter().any(|event| {

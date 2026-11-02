@@ -190,14 +190,26 @@ impl Document {
 
     /// Opens `length` at `at` in the sections: those at or after `at` move
     /// later and one across it is lengthened (R13).
-    pub(crate) fn insert_section_time(&mut self, at: Ticks, length: Ticks) {
+    pub(crate) fn insert_section_time(
+        &mut self,
+        at: Ticks,
+        length: Ticks,
+    ) -> Result<(), ModelError> {
         for section in &mut self.settings.sections {
-            if section.start >= at {
-                section.start += length;
+            let (start, len) = if section.start >= at {
+                (section.start.checked_add(length), Some(section.length))
             } else if section.end() > at {
-                section.length += length;
-            }
+                (Some(section.start), section.length.checked_add(length))
+            } else {
+                continue;
+            };
+            let (Some(start), Some(len)) = (start, len) else {
+                return Err(ModelError::PositionOverflow);
+            };
+            check_span(start, len)?;
+            (section.start, section.length) = (start, len);
         }
+        Ok(())
     }
 
     /// Closes `start..end` in the sections: the part inside goes, a section
@@ -279,7 +291,7 @@ mod tests {
     fn time_edits_lengthen_cut_and_move_sections() {
         let mut doc = song();
         doc.settings.sections = vec![section(100, 10, 10), section(101, 30, 10)];
-        doc.insert_section_time(Ticks(15), Ticks(5));
+        doc.insert_section_time(Ticks(15), Ticks(5)).unwrap();
         let spans = |doc: &Document| -> Vec<(i64, i64)> {
             doc.sections()
                 .iter()

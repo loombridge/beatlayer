@@ -39,6 +39,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("locator.move", query(Song, "settings.locators")),
     ("locator.rename", query(Song, "settings.locators")),
     ("locator.set_info_text", query(Song, "settings.locators")),
+    ("arrangement.arranger_track", read("arrangement.state", "arranger_track")),
     ("arranger.add_section", query(Song, "settings.sections")),
     ("arranger.sections_from_locators", query(Song, "settings.sections")),
     ("arranger.rename_section", query(Song, "settings.sections")),

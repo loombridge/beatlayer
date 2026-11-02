@@ -294,7 +294,7 @@ fn every_arranger_command_is_registered_with_its_class() {
         (ids::REMOVE_SECTION, Permission::Edit),
         (ids::DELETE_SECTION, Permission::Destructive),
         (ids::SELECT_SECTION, Permission::Read),
-        (ids::ARRANGER_TRACK, Permission::Read),
+        (ids::ARRANGER_TRACK, Permission::Edit),
     ] {
         let spec = registry.get(id).unwrap_or_else(|| panic!("{id}"));
         assert_eq!(spec.permission, Some(class), "{id}");

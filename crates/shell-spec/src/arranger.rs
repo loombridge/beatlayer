@@ -6,8 +6,9 @@
 //! each one undo step; deleting one with its time is destructive. Moving,
 //! copying, duplicating and deleting are the …Time commands over the
 //! section's span, run inside one transaction ([`crate::editing`], the time
-//! editing spec). Selecting and showing the lane change no section, so they
-//! are in the read class. Positions are ticks or bars, beats, and sixteenths
+//! editing spec). Selecting changes no section, so it is in the read class;
+//! showing the lane changes what the set saves, so it is an edit with no undo
+//! step. Positions are ticks or bars, beats, and sixteenths
 //! ([`Position`]). [`register`] adds the specs, which are pure data, so
 //! `cargo xtask` can check them and list them in the command reference;
 //! `bl-shell` runs them by ID. The behaviour is in the arranger track spec.
@@ -341,9 +342,10 @@ fn specs() -> Vec<CommandSpec> {
             .description(
                 "Shows or hides the arranger track, the lane of sections above the \
                  Arrangement's tracks (`on`; left out, it toggles). It is hidden in a new \
-                 set, and whether it shows is saved with the set. It is no undo step.",
+                 set, and whether it shows is saved with the set. It is no undo step. \
+                 Because it changes what the set saves, it is in the edit class.",
             )
-            .permission(Permission::Read)
+            .permission(Permission::Edit)
             .context(Arrangement)
             .args::<SwitchArgs>()
             .result::<ArrangementState>(),

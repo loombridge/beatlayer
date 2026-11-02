@@ -109,7 +109,7 @@ impl Document {
             self.add_arrangement_clip(place, &right)?;
         }
         self.each_envelope(|envelope| envelope.insert_time(at, length))?;
-        self.insert_section_time(at, length);
+        self.insert_section_time(at, length)?;
 
         let mut points = tempo_breakpoints(&tempo);
         insert_tempo_time(&mut points, at, length)?;

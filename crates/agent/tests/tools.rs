@@ -182,6 +182,7 @@ fn discovery_lists_areas_searches_and_describes_with_schemas() {
             "track.freeze",
             "track.group",
             "track.link",
+            "track.list_empty",
             "track.move",
             "track.paste",
             "track.paste_bounced_audio",

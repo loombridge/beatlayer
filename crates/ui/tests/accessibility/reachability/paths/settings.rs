@@ -453,6 +453,19 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                 Key::Enter,
             ),
         ),
+        // The view options (the view options spec, R10 and R15): the wheel's
+        // switch in Display & Input, and the read of the empty tracks. The
+        // note colours and the mark are View menu items.
+        (
+            "settings.set_wheel_adjusts_values",
+            settings(
+                "display-input",
+                nothing,
+                "Adjust Values with Mouse Wheel",
+                Key::Enter,
+            ),
+        ),
+        ("track.list_empty", Exception(Query)),
         // The Shortcuts page (the custom shortcuts spec, R8 and R10): the
         // Remove and Reset buttons.
         (

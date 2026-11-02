@@ -2332,9 +2332,30 @@ pub fn run(
                 start,
                 length,
                 insert_marker,
+                selected,
             } = parse(args)?;
             let at = insert_marker.unwrap_or(LoopBraceEnd::Start);
-            move_loop_brace(editor, view, start, length, at)
+            // A brace already shorter than a beat (the Loop Length field allows
+            // it) can still be moved by its bar, keeping its length.
+            let kept = length == editor.document().settings().arrangement_loop.length;
+            if start.is_negative() || (length < beat_at(editor.document(), start) && !kept) {
+                return Err(invalid(
+                    "the loop must start at 1.1.1 or later and be at least a beat long",
+                ));
+            }
+            editor.move_loop_brace(start, length);
+            let doc = editor.document();
+            // A drag keeps the selected tracks: the time selection is the
+            // brace's span on them (the transport spec, R34).
+            let tracks = view.selected_tracks().to_vec();
+            view.select_span(tracks, start, start + length);
+            view.insert_marker = if at == LoopBraceEnd::End {
+                start + length
+            } else {
+                start
+            };
+            view.loop_brace = selected;
+            Ok(to_value(&view.state(doc)))
         }
         ids::INSERT_SILENCE
         | ids::CUT_TIME
@@ -2393,18 +2414,22 @@ fn nudged_brace(
     let (start, length) = (brace.start, brace.length);
     let step = view.grid_step(doc);
     let signatures = &doc.settings().time_signatures;
-    let shorter = |length: Ticks| length.max(Ticks::SIXTEENTH);
+    let shorter = |length: Ticks| length.max(beat_at(doc, start));
+    // With snapping off, the keys go by one screen point (R33).
+    let point = view.point_ticks(doc);
+    let line = |later: bool| {
+        if view.grid().snap {
+            grid_line(signatures, step, start, later)
+        } else if later {
+            start + point
+        } else {
+            (start - point).max(Ticks::ZERO)
+        }
+    };
+    let step = if view.grid().snap { step.ticks } else { point };
     match by {
-        LoopBraceMove::Left => (
-            grid_line(signatures, step, start, false),
-            length,
-            LoopBraceEnd::Start,
-        ),
-        LoopBraceMove::Right => (
-            grid_line(signatures, step, start, true),
-            length,
-            LoopBraceEnd::Start,
-        ),
+        LoopBraceMove::Left => (line(false), length, LoopBraceEnd::Start),
+        LoopBraceMove::Right => (line(true), length, LoopBraceEnd::Start),
         LoopBraceMove::Earlier => (
             (start - length).max(Ticks::ZERO),
             length,
@@ -2413,9 +2438,17 @@ fn nudged_brace(
         LoopBraceMove::Later => (start + length, length, LoopBraceEnd::Start),
         LoopBraceMove::Halve => (start, shorter(Ticks(length.get() / 2)), LoopBraceEnd::End),
         LoopBraceMove::Double => (start, length + length, LoopBraceEnd::End),
-        LoopBraceMove::Shorten => (start, shorter(length - step.ticks), LoopBraceEnd::End),
-        LoopBraceMove::Lengthen => (start, length + step.ticks, LoopBraceEnd::End),
+        LoopBraceMove::Shorten => (start, shorter(length - step), LoopBraceEnd::End),
+        LoopBraceMove::Lengthen => (start, length + step, LoopBraceEnd::End),
     }
+}
+
+/// The length of a beat in the bar at `at`: the shortest the loop brace gets.
+fn beat_at(doc: &Document, at: Ticks) -> Ticks {
+    doc.settings()
+        .time_signatures
+        .signature_at(at)
+        .beat_length()
 }
 
 /// The grid line next before or after `at`: `at` itself when there is none

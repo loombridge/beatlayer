@@ -539,6 +539,12 @@ impl ArrangementView {
         grid::snap(&doc.settings().time_signatures, self.grid_step(doc), at)
     }
 
+    /// One screen point at the current zoom, in ticks: what the loop brace's
+    /// keys step by while snapping is off.
+    pub(crate) fn point_ticks(&self, doc: &Document) -> Ticks {
+        Ticks((self.horizontal(doc).ticks_per_point.round() as i64).max(1))
+    }
+
     fn signature_at_left(&self, doc: &Document, horizontal: Horizontal) -> TimeSignature {
         doc.settings()
             .time_signatures

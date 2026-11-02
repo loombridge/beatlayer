@@ -228,7 +228,9 @@ fn dragging_an_end_or_the_bar_sets_the_brace_on_the_grid_in_no_undo_step() {
         let target = 8 * BAR + 3 * step;
         drag(&mut h, (end, -1.0), (target + step / 4, 0.0));
         assert_eq!(brace(&mut h), (2 * BAR, target - 2 * BAR), "{grid} end");
-        assert_eq!(state(&mut h).insert_marker.get(), target, "{grid} end");
+        let now = state(&mut h);
+        assert_eq!(now.insert_marker.get(), target, "{grid} end");
+        assert!(!now.loop_brace_selected, "{grid} end");
         // The left end.
         let start = 3 * BAR + 2 * step;
         drag(&mut h, (2 * BAR, 1.0), (start - step / 4, 0.0));
@@ -242,8 +244,11 @@ fn dragging_an_end_or_the_bar_sets_the_brace_on_the_grid_in_no_undo_step() {
             (start + length / 2 + (moved - start) + step / 4, 0.0),
         );
         assert_eq!(brace(&mut h), (moved, length), "{grid} bar");
-        let time = state(&mut h).time_selection.unwrap();
+        let now = state(&mut h);
+        let time = now.time_selection.unwrap();
         assert_eq!((time.start.get(), time.end.get()), (moved, moved + length));
+        assert_eq!(now.insert_marker.get(), moved, "{grid} bar");
+        assert!(now.loop_brace_selected, "{grid} bar");
         assert_eq!(steps(&h), before, "{grid}: no undo step");
     }
 }
@@ -260,4 +265,14 @@ fn dragging_with_snapping_off_sets_the_end_where_the_pointer_is() {
     let (_, length) = brace(&mut h);
     assert_ne!(length % BEAT, 0, "the end isn't on the grid: {length}");
     assert!((length - target).abs() < BAR / 8, "{length} near {target}");
+}
+
+#[test]
+fn dragging_an_end_past_the_other_stops_at_a_beat() {
+    let mut h = open(2 * BAR, 4 * BAR, "quarter");
+    drag(&mut h, (6 * BAR, -1.0), (BAR, 0.0));
+    assert_eq!(brace(&mut h), (2 * BAR, BEAT));
+    let mut h = open(2 * BAR, 4 * BAR, "quarter");
+    drag(&mut h, (2 * BAR, 1.0), (8 * BAR, 0.0));
+    assert_eq!(brace(&mut h), (6 * BAR - BEAT, BEAT));
 }

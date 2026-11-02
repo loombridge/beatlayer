@@ -566,6 +566,10 @@ pub struct SetLoopBraceArgs {
     /// Where the insert marker goes. Left out, the start.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub insert_marker: Option<LoopBraceEnd>,
+    /// Whether the brace is selected after it: a drag of its bar selects it,
+    /// a drag of an end doesn't.
+    #[serde(default)]
+    pub selected: bool,
 }
 
 /// What an edit did, and what's selected afterwards.
@@ -995,12 +999,13 @@ fn specs() -> Vec<CommandSpec> {
             "Set Loop Brace",
             Permission::Edit,
             "Puts the Arrangement's loop brace at `start` for `length` ticks, as dragging its \
-             ends or its bar does, and selects it: the span becomes the time selection on \
-             every track, and the insert marker goes to the brace's start or, with \
-             `insert_marker` `end`, its end. The Loop switch stays as it is, and unlike \
+             ends or its bar does. The span becomes the time selection on the selected tracks \
+             only, and the insert marker goes to the brace's start or, with `insert_marker` \
+             `end`, its end. The brace is selected afterwards only with `selected` (dragging \
+             its bar), not after dragging an end. The Loop switch stays as it is, and unlike \
              `transport.set_loop` it is no undo step. The start must be 0 (1.1.1) or later and \
-             the length more than 0. Read the brace back with `transport.state` (`loop_start`, \
-             `loop_length`).",
+             the length at least a beat. Read the brace back with `transport.state` \
+             (`loop_start`, `loop_length`).",
         )
         .args::<SetLoopBraceArgs>()
         .result::<ArrangementState>(),

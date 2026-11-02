@@ -214,7 +214,7 @@ fn brace_part(rect: Rect, x: f32) -> BracePart {
 
 /// Where dragging the brace's `part` to `at` puts it, snapped to the grid
 /// while snapping is on, and where the insert marker goes (the transport
-/// spec, R34). An end can't pass the other: the brace stays a sixteenth long.
+/// spec, R34). An end can't pass the other: the brace stays a beat long.
 fn dragged_brace(
     view: &ArrangementView,
     doc: &Document,
@@ -223,16 +223,18 @@ fn dragged_brace(
 ) -> (Ticks, Ticks, &'static str) {
     let (part, start, length, grab) = drag;
     let end = start + length;
+    let beat = doc
+        .settings()
+        .time_signatures
+        .signature_at(start)
+        .beat_length();
     match part {
         BracePart::Start => {
-            let to = view
-                .snap(doc, at)
-                .min(end - Ticks::SIXTEENTH)
-                .max(Ticks::ZERO);
+            let to = view.snap(doc, at).min(end - beat).max(Ticks::ZERO);
             (to, end - to, "start")
         }
         BracePart::End => {
-            let to = view.snap(doc, at).max(start + Ticks::SIXTEENTH);
+            let to = view.snap(doc, at).max(start + beat);
             (start, to - start, "end")
         }
         BracePart::Bar => {
@@ -2008,7 +2010,6 @@ impl ArrangementUi {
         if brace.drag_started()
             && let Some(pos) = ui.input(|i| i.pointer.press_origin())
         {
-            invoke(events, edit_ids::SELECT_LOOP_BRACE, json!({}));
             self.drag = Some(Drag::Brace {
                 part: brace_part(rect, pos.x),
                 start: transport.loop_start,
@@ -2031,7 +2032,7 @@ impl ArrangementUi {
                 invoke(
                     events,
                     edit_ids::SET_LOOP_BRACE,
-                    json!({ "start": to, "length": long, "insert_marker": marker }),
+                    json!({ "start": to, "length": long, "insert_marker": marker, "selected": part == BracePart::Bar }),
                 );
             }
         }

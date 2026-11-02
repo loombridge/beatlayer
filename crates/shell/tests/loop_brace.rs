@@ -196,6 +196,13 @@ fn a_drag_sets_the_brace_and_puts_the_insert_marker_where_asked_in_no_undo_step(
     // Spec: transport R34 (I-DRAG-019).
     let mut shell = open(0, 4 * BAR);
     let steps = shell.editor().undo_history().len();
+    let first = doc(&shell).track_order()[0];
+    state(
+        &mut shell,
+        view_ids::SELECT_TRACKS,
+        json!({ "tracks": [first] }),
+    );
+    // An end: the insert marker at the dragged end, the brace not selected.
     let end = state(
         &mut shell,
         ids::SET_LOOP_BRACE,
@@ -204,22 +211,69 @@ fn a_drag_sets_the_brace_and_puts_the_insert_marker_where_asked_in_no_undo_step(
     assert_eq!(brace(&mut shell), (0, 8 * BAR));
     assert_eq!(end.insert_marker.get(), 8 * BAR);
     assert_eq!(span(&end), Some((0, 8 * BAR)));
-    assert!(end.loop_brace_selected);
+    assert!(!end.loop_brace_selected);
+    assert_eq!(end.selected_tracks, vec![first], "the selected track only");
+    // The bar: the insert marker at the start, the brace selected.
     let bar = state(
         &mut shell,
         ids::SET_LOOP_BRACE,
-        json!({ "start": 3 * BEAT, "length": 8 * BAR }),
+        json!({ "start": 3 * BEAT, "length": 8 * BAR, "selected": true }),
     );
     assert_eq!(brace(&mut shell), (3 * BEAT, 8 * BAR));
     assert_eq!(bar.insert_marker.get(), 3 * BEAT);
+    assert!(bar.loop_brace_selected);
+    assert_eq!(bar.selected_tracks, vec![first]);
     assert_eq!(shell.editor().undo_history().len(), steps);
     for bad in [
         json!({ "start": -1, "length": BAR }),
         json!({ "start": 0, "length": 0 }),
+        json!({ "start": 0, "length": BEAT - 1 }),
     ] {
         assert!(shell.run(ids::SET_LOOP_BRACE, bad).is_err());
     }
     assert_eq!(brace(&mut shell), (3 * BEAT, 8 * BAR));
+    // A brace the Loop Length field made shorter than a beat moves by its bar.
+    shell
+        .run(
+            "transport.set_loop",
+            json!({ "start": 0, "length": BEAT / 4 }),
+        )
+        .unwrap();
+    state(
+        &mut shell,
+        ids::SET_LOOP_BRACE,
+        json!({ "start": BAR, "length": BEAT / 4, "selected": true }),
+    );
+    assert_eq!(brace(&mut shell), (BAR, BEAT / 4));
+}
+
+#[test]
+fn with_snapping_off_the_keys_go_by_one_screen_point_and_the_shortest_loop_is_a_beat() {
+    // Spec: transport R33.
+    let mut shell = open(2 * BAR, 4 * BAR);
+    state(
+        &mut shell,
+        view_ids::SET_GRID,
+        json!({ "fixed": "quarter", "snap": false }),
+    );
+    let point = shell
+        .arrangement()
+        .horizontal(doc(&shell))
+        .ticks_per_point
+        .round() as i64;
+    state(&mut shell, ids::SELECT_LOOP_BRACE, json!({}));
+    press(&mut shell, "right");
+    assert_eq!(brace(&mut shell), (2 * BAR + point, 4 * BAR));
+    press(&mut shell, "left");
+    assert_eq!(brace(&mut shell), (2 * BAR, 4 * BAR));
+    press(&mut shell, "lengthen");
+    assert_eq!(brace(&mut shell), (2 * BAR, 4 * BAR + point));
+    press(&mut shell, "shorten");
+    assert_eq!(brace(&mut shell), (2 * BAR, 4 * BAR));
+    for _ in 0..4 {
+        press(&mut shell, "halve");
+    }
+    assert_eq!(brace(&mut shell), (2 * BAR, BAR / 4), "a beat at least");
 }
 
 #[test]

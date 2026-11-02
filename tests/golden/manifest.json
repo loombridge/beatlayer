@@ -521,6 +521,14 @@
       "bits": 24,
       "render_hash": "fnv1a64:5c64fa15b51bc1d1"
     },
+    "tension": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 168000,
+      "bits": 24,
+      "render_hash": "fnv1a64:9ebd0ea953f69479"
+    },
     "transposition-envelope-beats": {
       "made_on": "macos-aarch64",
       "sample_rate": 48000,

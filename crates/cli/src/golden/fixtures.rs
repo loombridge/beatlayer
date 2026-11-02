@@ -580,6 +580,12 @@ pub(super) const FIXTURES: &[Fixture] = &[
                 pickup at four times the rate, the damper and the release.",
         build: electric,
     },
+    Fixture {
+        name: "tension",
+        about: "A bowed line with vibrato, the body and a filter, and a plucked chord with its \
+                damper, on Tension: the exciters, the string, the pickup and the termination.",
+        build: tension,
+    },
 ];
 
 /// A song under construction.
@@ -1024,6 +1030,81 @@ fn electric() -> Scene {
         ),
     });
     song.finish(4.5)
+}
+
+/// Spec: tension R1 to R13, R17. A bowed line and a plucked chord on Tension.
+fn tension() -> Scene {
+    use bl_devices::tension::{
+        BODY_ON, BODY_SIZE, BODY_TYPE, C, EXC_TYPE, FILTER_MODE, FILTER_ON, TENSION, VIB_ON,
+    };
+    let mut song = Song::new();
+    let beat = Ticks::QUARTER.0;
+    let mut play =
+        |name: &str, params: &[(bl_model::ParamId, f64)], notes: &[(u8, i64, i64, u8)]| {
+            let track = song.track(TrackKind::Midi, name, None);
+            let mut device = Device::new(
+                song.editor.new_id(),
+                "Tension",
+                DeviceKind::Native {
+                    device_type: TENSION.to_owned(),
+                },
+            );
+            for &(param, value) in params {
+                device.params.insert(param, value);
+            }
+            song.apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device,
+            });
+            let notes = notes
+                .iter()
+                .map(|&(key, start, length, velocity)| {
+                    bl_model::Note::new(
+                        key,
+                        Ticks(start * beat / 2),
+                        Ticks(length * beat / 2),
+                        velocity,
+                    )
+                })
+                .collect::<Vec<_>>();
+            let clip = song.editor.new_id();
+            song.apply(Command::CreateClip {
+                track,
+                clip: Clip::new(
+                    clip,
+                    Ticks::ZERO,
+                    Ticks::QUARTER * 8,
+                    ClipData::Midi(bl_model::MidiData::new(notes)),
+                ),
+            });
+        };
+    play(
+        "Bow",
+        &[
+            (EXC_TYPE, 0.0),
+            (VIB_ON, 1.0),
+            (BODY_ON, 1.0),
+            (BODY_TYPE, 3.0),
+            (BODY_SIZE, 3.0),
+            (FILTER_ON, 1.0),
+            (FILTER_MODE, 1.0),
+            (C::FilterFreq.id(), 2_500.0),
+            (C::VibDelay.id(), 200.0),
+        ],
+        &[(48, 0, 4, 90), (55, 4, 4, 70), (52, 8, 4, 100)],
+    );
+    play(
+        "Plucked",
+        &[(EXC_TYPE, 3.0), (BODY_ON, 1.0), (BODY_TYPE, 1.0)],
+        &[
+            (60, 0, 4, 100),
+            (64, 0, 4, 80),
+            (67, 0, 4, 80),
+            (72, 8, 3, 110),
+        ],
+    );
+    song.finish(3.5)
 }
 
 /// Spec: echo R19. A drum loop through Echo with every stage on.

@@ -75,6 +75,26 @@ impl Default for WaveguideParams {
     }
 }
 
+/// What a voice's damper and terminating finger are set to (R11).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Fittings {
+    /// Where the damper meets the guide, from 0 (an end) to 0.5 (the middle).
+    pub damper: f32,
+    /// How much of the wave the terminating finger and fret reflect, 0 to 1:
+    /// at 1 every harmonic, below it a low-pass in the loop that takes the
+    /// high harmonics and leaves the note where it is.
+    pub end: f32,
+}
+
+impl Default for Fittings {
+    fn default() -> Self {
+        Self {
+            damper: 0.25,
+            end: 1.0,
+        }
+    }
+}
+
 /// A nonlinear interaction at the excitation position: a bow's friction, a
 /// hammer's or a plectrum's contact (R11). It reads the guide's velocity
 /// there and returns a force, which is added to the voice's excitation.
@@ -82,8 +102,26 @@ pub trait Interaction {
     /// Whether the bank needs to call it at all: `()` says no.
     const ACTIVE: bool = true;
 
+    /// Whether the bank reads the guide at the damper's position and calls
+    /// [`damp`](Self::damp).
+    const DAMPED: bool = false;
+
     /// The force on `voice` when the guide moves at `velocity` there.
     fn force(&mut self, voice: usize, velocity: f32) -> f32;
+
+    /// The force of a damper at [`Fittings::damper`], when the guide moves
+    /// at `velocity` there: a loss and a kick, at a place of its own (R11).
+    fn damp(&mut self, _voice: usize, _velocity: f32) -> f32 {
+        0.0
+    }
+
+    /// Called once a frame for each voice, before the others: whether the
+    /// bank need read the guide and call [`force`](Self::force), and
+    /// [`damp`](Self::damp), for `voice` this frame. A voice whose exciter
+    /// has left the string and whose damper is up costs nothing.
+    fn needs(&mut self, _voice: usize) -> (bool, bool) {
+        (true, Self::DAMPED)
+    }
 }
 
 impl Interaction for () {
@@ -95,11 +133,17 @@ impl Interaction for () {
 }
 
 /// Every parameter moved by smoothing, in the order the controls hold them.
-const CONTROLS: usize = 9;
+const CONTROLS: usize = 11;
 const HZ: usize = 0;
 const DECAY: usize = 1;
-/// The bits of the controls that change the loop.
-const LOOP_BITS: u32 = 0b0011_1111;
+/// The damper's position and the end's reflection are the last two controls.
+const DAMPER: usize = 9;
+const END: usize = 10;
+/// The bits of the controls that change the loop: the six that set its note,
+/// decay and loss, and the end's.
+const LOOP_BITS: u32 = 0b100_0011_1111;
+/// The largest pole of the termination's low-pass.
+const MAX_END_POLE: f64 = 0.6;
 
 /// The loop's largest gain: below 1 at every frequency (R13).
 const LOOP_GAIN: f64 = 0.9999;
@@ -127,6 +171,8 @@ pub struct WaveguideBank {
     kind: Kind,
     lowest: f64,
     mask: usize,
+    /// How many voices are run: the first `active` of `voices`.
+    active: usize,
     /// Where this frame is written in the rings.
     cursor: usize,
     phase: usize,
@@ -134,25 +180,34 @@ pub struct WaveguideBank {
     /// The loop's signal and the excitation's history, `rings × stride`.
     ring_s: Vec<f32>,
     ring_u: Vec<f32>,
+    /// The damper's force history, as `ring_u` holds the exciter's, and for
+    /// each voice how many frames it has been since the damper gave a force:
+    /// once the history is all zeros its tap is skipped.
+    ring_d: Vec<f32>,
+    quiet_d: Vec<u32>,
     // Per voice (`stride` values): the loop.
     delay: Vec<u32>,
     thiran: Vec<f32>,
     disperse: Vec<f32>,
     pole: Vec<f32>,
+    /// The termination's low-pass: its pole and 1 minus it.
+    end_pole: Vec<f32>,
+    end_gain: Vec<f32>,
     gain: Vec<f32>,
     sign: Vec<f32>,
     /// How much of the excitation the loop takes.
     drive: Vec<f32>,
-    // Per voice: the three taps' delays in samples, the excitation's and the
-    // two listening positions', and how much each moves per frame; and the
-    // loop's length in samples.
-    tap_delay: [Vec<f32>; 3],
-    tap_step: [Vec<f32>; 3],
+    // Per voice: the four taps' delays in samples, the excitation's, the two
+    // listening positions' and the damper's, and how much each moves per
+    // frame; and the loop's length in samples.
+    tap_delay: [Vec<f32>; 4],
+    tap_step: [Vec<f32>; 4],
     length_samples: Vec<f32>,
     // Per voice: the filters' states.
     z_thiran: Vec<f32>,
     z_disperse: [Vec<f32>; 2],
     z_pole: Vec<f32>,
+    z_end: Vec<f32>,
 }
 
 impl WaveguideBank {
@@ -183,15 +238,26 @@ impl WaveguideBank {
             kind,
             lowest: f64::from(lowest_hz),
             mask: rings - 1,
+            active: voices,
             cursor: 0,
             phase: 0,
-            controls: vec![Controls::new(controls_of(&WaveguideParams::default())); voices],
+            controls: vec![
+                Controls::new(controls_of(
+                    &WaveguideParams::default(),
+                    &Fittings::default()
+                ));
+                voices
+            ],
             ring_s: vec![0.0; rings * stride],
             ring_u: vec![0.0; rings * stride],
+            ring_d: vec![0.0; rings * stride],
+            quiet_d: vec![u32::MAX; stride],
             delay: vec![1; stride],
             thiran: zeros(),
             disperse: zeros(),
             pole: zeros(),
+            end_pole: zeros(),
+            end_gain: vec![1.0; stride],
             gain: zeros(),
             sign: vec![1.0; stride],
             drive: zeros(),
@@ -201,6 +267,7 @@ impl WaveguideBank {
             z_thiran: zeros(),
             z_disperse: std::array::from_fn(|_| zeros()),
             z_pole: zeros(),
+            z_end: zeros(),
         };
         for voice in 0..voices {
             bank.design(voice, true);
@@ -236,7 +303,40 @@ impl WaveguideBank {
     ///
     /// If `voice` is out of range.
     pub fn set_params(&mut self, voice: usize, params: &WaveguideParams) {
-        self.controls[voice].target = controls_of(params);
+        let kept = self.controls[voice].target;
+        let mut target = controls_of(params, &Fittings::default());
+        target[DAMPER..].copy_from_slice(&kept[DAMPER..]);
+        self.controls[voice].target = target;
+    }
+
+    /// Puts `voice` at `hz` at once, redesigning its loop now: for a pitch the
+    /// caller moves itself in steps, as a vibrato does, where moving it
+    /// through the smoother would redesign the loop every control step.
+    ///
+    /// # Panics
+    ///
+    /// If `voice` is out of range.
+    pub fn set_pitch(&mut self, voice: usize, hz: f32) {
+        let value = sane(hz, 1.0, 1e6, 220.0).ln();
+        self.controls[voice].target[HZ] = value;
+        self.controls[voice].current[HZ] = value;
+        self.design(voice, false);
+    }
+
+    /// Moves `voice`'s damper position and end smoothly towards `fittings`.
+    ///
+    /// # Panics
+    ///
+    /// If `voice` is out of range.
+    pub fn set_fittings(&mut self, voice: usize, fittings: &Fittings) {
+        let target = controls_of(&WaveguideParams::default(), fittings);
+        self.controls[voice].target[DAMPER..].copy_from_slice(&target[DAMPER..]);
+    }
+
+    /// Runs only the first `voices` voices: the rest hold their state and
+    /// give no output. At least one, and at most the bank's.
+    pub fn set_active(&mut self, voices: usize) {
+        self.active = voices.clamp(1, self.voices);
     }
 
     /// Sets `voice` to `params` with nothing moving and nothing ringing: the
@@ -246,7 +346,22 @@ impl WaveguideBank {
     ///
     /// If `voice` is out of range.
     pub fn reset_voice(&mut self, voice: usize, params: &WaveguideParams) {
-        self.controls[voice] = Controls::new(controls_of(params));
+        self.reset_voice_with(voice, params, &Fittings::default());
+    }
+
+    /// As [`reset_voice`](Self::reset_voice), with the damper and the end set
+    /// to `fittings`.
+    ///
+    /// # Panics
+    ///
+    /// If `voice` is out of range.
+    pub fn reset_voice_with(
+        &mut self,
+        voice: usize,
+        params: &WaveguideParams,
+        fittings: &Fittings,
+    ) {
+        self.controls[voice] = Controls::new(controls_of(params, fittings));
         self.clear(voice);
         self.delay[voice] = 0;
         self.design(voice, true);
@@ -257,8 +372,10 @@ impl WaveguideBank {
         for row in 0..=self.mask {
             self.ring_s[row * self.stride + voice] = 0.0;
             self.ring_u[row * self.stride + voice] = 0.0;
+            self.ring_d[row * self.stride + voice] = 0.0;
         }
-        for state in [&mut self.z_thiran, &mut self.z_pole]
+        self.quiet_d[voice] = u32::MAX;
+        for state in [&mut self.z_thiran, &mut self.z_pole, &mut self.z_end]
             .into_iter()
             .chain(&mut self.z_disperse)
         {
@@ -335,7 +452,7 @@ impl WaveguideBank {
     fn tick(&mut self) {
         let alpha = smoothing(self.rate);
         let last = self.cursor.wrapping_sub(1) & self.mask;
-        for voice in 0..self.voices {
+        for voice in 0..self.active {
             // A voice whose last value isn't a number, or has blown up, starts again from silence.
             if self.ring_s[last * self.stride + voice].abs() > BLOWN
                 || self.ring_s[last * self.stride + voice].is_nan()
@@ -350,7 +467,7 @@ impl WaveguideBank {
                 self.place_taps(voice, false);
             }
         }
-        for state in [&mut self.z_thiran, &mut self.z_pole]
+        for state in [&mut self.z_thiran, &mut self.z_pole, &mut self.z_end]
             .into_iter()
             .chain(&mut self.z_disperse)
         {
@@ -366,6 +483,7 @@ impl WaveguideBank {
         let (mut material, inharm) = (c[2].clamp(0.0, 1.0), c[3].clamp(0.0, 1.0));
         let (opening, radius) = (c[4].clamp(0.0, 1.0), c[5].clamp(0.0, 1.0));
         let stiffness = inharm * STIFFNESS;
+        let end_pole = (1.0 - c[END].clamp(0.0, 1.0)) * MAX_END_POLE;
 
         let (negative, mut decay_scale, open_ends) = match self.kind {
             Kind::String => (false, 1.0, 0.0),
@@ -420,7 +538,9 @@ impl WaveguideBank {
         let mut gain;
         loop {
             let co = fundamental.cos();
-            gain = target * (1.0 - 2.0 * pole * co + pole * pole).sqrt() / (1.0 - pole);
+            // The termination's low-pass takes a little of the fundamental too: make it up.
+            let ended = (1.0 - 2.0 * end_pole * co + end_pole * end_pole).sqrt() / (1.0 - end_pole);
+            gain = target * ended * (1.0 - 2.0 * pole * co + pole * pole).sqrt() / (1.0 - pole);
             if gain <= LOOP_GAIN || pole < 1e-3 {
                 break;
             }
@@ -438,6 +558,7 @@ impl WaveguideBank {
             let mismatch = |a: f64| {
                 SECTIONS * (all_pass_delay(there, a) - all_pass_delay(fundamental, a))
                     + (low_pass_delay(there, pole) - low_pass_delay(fundamental, pole))
+                    + (low_pass_delay(there, end_pole) - low_pass_delay(fundamental, end_pole))
                     - want
             };
             let budget = (0.35 * length / SECTIONS).max(1.0);
@@ -461,8 +582,9 @@ impl WaveguideBank {
         }
 
         // The delay that's left for the ring and the fractional all-pass.
-        let fixed =
-            low_pass_delay(fundamental, pole) + SECTIONS * all_pass_delay(fundamental, disperse);
+        let fixed = low_pass_delay(fundamental, pole)
+            + low_pass_delay(fundamental, end_pole)
+            + SECTIONS * all_pass_delay(fundamental, disperse);
         let left = (length - fixed).max(1.5);
         // Keep the ring's delay while the fractional part stays usable, so a moving control doesn't jump the read point; a low note sits in the middle of that range, where the all-pass is accurate however it moves. shortcut: a pitch move of more than a sample or two jumps the read point once per sample of it (a small click), where a cross-fade would hide it.
         let (centre, widest) = if fundamental < 0.3 {
@@ -492,6 +614,8 @@ impl WaveguideBank {
         self.thiran[at] = ((lo + hi) / 2.0) as f32;
         self.disperse[at] = disperse as f32;
         self.pole[at] = pole as f32;
+        self.end_pole[at] = end_pole as f32;
+        self.end_gain[at] = (1.0 - end_pole) as f32;
         self.gain[at] = (gain * (1.0 - pole)) as f32;
         self.sign[at] = if negative { -1.0 } else { 1.0 };
         self.drive[at] = (RESONANCE_GAIN * (1.0 - target)).min(1.0) as f32;
@@ -499,7 +623,7 @@ impl WaveguideBank {
         self.place_taps(voice, snap);
     }
 
-    /// Sets the three taps' delays from the excitation and listening
+    /// Sets the four taps' delays from the excitation, listening and damper
     /// positions: `p` of the round trip each (R11). A tap moves to its new
     /// delay over the next [`CONTROL`] frames, a fraction of a sample at a
     /// time, unless `snap` puts it there at once.
@@ -508,7 +632,7 @@ impl WaveguideBank {
         let length = f64::from(self.length_samples[voice]);
         // A tap reads four samples round its delay: at least one back.
         let most = (self.mask - 2) as f64;
-        for (tap, position) in [c[6], c[7], c[8]].into_iter().enumerate() {
+        for (tap, position) in [c[6], c[7], c[8], c[DAMPER]].into_iter().enumerate() {
             let target = ((position.clamp(0.0, 0.5) * length).clamp(1.0, most)) as f32;
             if snap {
                 self.tap_delay[tap][voice] = target;
@@ -532,7 +656,7 @@ fn low_pass_delay(w: f64, p: f64) -> f64 {
 }
 
 /// A voice's controls as the smoother holds them.
-fn controls_of(params: &WaveguideParams) -> [f64; CONTROLS] {
+fn controls_of(params: &WaveguideParams, fittings: &Fittings) -> [f64; CONTROLS] {
     [
         sane(params.hz, 1.0, 1e6, 220.0).ln(),
         sane(params.decay, 1e-3, 60.0, 1.0).ln(),
@@ -543,6 +667,8 @@ fn controls_of(params: &WaveguideParams) -> [f64; CONTROLS] {
         sane(params.excite, 0.0, 0.5, 0.25),
         sane(params.pickup_l, 0.0, 0.5, 0.25),
         sane(params.pickup_r, 0.0, 0.5, 0.25),
+        sane(fittings.damper, 0.0, 0.5, 0.25),
+        sane(fittings.end, 0.0, 1.0, 1.0),
     ]
 }
 
@@ -643,7 +769,7 @@ impl<I: Interaction> Kernel for Run<'_, I> {
             interaction,
         } = self;
         let (stride, mask) = (bank.stride, bank.mask);
-        let groups = bank.voices.div_ceil(S::LANES);
+        let groups = bank.active.div_ceil(S::LANES);
         let mut done = 0;
         while done < frames {
             let chunk = (frames - done).min(CONTROL - bank.phase);
@@ -654,13 +780,21 @@ impl<I: Interaction> Kernel for Run<'_, I> {
                     // The excitation is scaled by the loop's resonance; an interaction's force is not.
                     let mut u =
                         S::load(&input[frame * stride + lane..]) * S::load(&bank.drive[lane..]);
+                    let mut need = [(false, false); LANES];
                     if I::ACTIVE {
+                        for (i, wanted) in need.iter_mut().enumerate().take(S::LANES) {
+                            let voice = lane + i;
+                            if voice < bank.active {
+                                *wanted = interaction.needs(voice);
+                            }
+                        }
                         let mut forced = [0.0; LANES];
                         u.store(&mut forced);
                         for (i, value) in forced.iter_mut().enumerate().take(S::LANES) {
-                            let voice = lane + i;
-                            if voice < bank.voices {
-                                let force = interaction.force(voice, bank.velocity(voice, cursor));
+                            if need[i].0 {
+                                let voice = lane + i;
+                                let force =
+                                    interaction.force(voice, bank.velocity(voice, cursor, 6));
                                 *value += if force.is_finite() {
                                     force.clamp(-16.0, 16.0)
                                 } else {
@@ -671,6 +805,43 @@ impl<I: Interaction> Kernel for Run<'_, I> {
                         u = S::load(&forced);
                     }
                     u.store(&mut bank.ring_u[cursor * stride + lane..]);
+                    let mut damped = S::splat(0.0);
+                    if I::DAMPED {
+                        let mut forced = [0.0; LANES];
+                        // The history is whole once it has had a ring's length of zeros.
+                        let mut idle = true;
+                        for (i, value) in forced.iter_mut().enumerate().take(S::LANES) {
+                            let voice = lane + i;
+                            if need[i].1 {
+                                let force =
+                                    interaction.damp(voice, bank.velocity(voice, cursor, DAMPER));
+                                *value = if force.is_finite() {
+                                    force.clamp(-16.0, 16.0)
+                                } else {
+                                    0.0
+                                };
+                            }
+                            bank.quiet_d[voice] = if *value == 0.0 {
+                                bank.quiet_d[voice].saturating_add(1)
+                            } else {
+                                0
+                            };
+                            idle &= bank.quiet_d[voice] as usize > mask;
+                        }
+                        if !idle {
+                            let d = S::load(&forced);
+                            d.store(&mut bank.ring_d[cursor * stride + lane..]);
+                            damped = d - tap::<S>(
+                                &bank.ring_d,
+                                mask,
+                                stride,
+                                cursor,
+                                &mut bank.tap_delay[3],
+                                &bank.tap_step[3],
+                                lane,
+                            );
+                        }
+                    }
                     let excited = tap::<S>(
                         &bank.ring_u,
                         mask,
@@ -690,7 +861,14 @@ impl<I: Interaction> Kernel for Run<'_, I> {
                         S::load(&bank.gain[lane..]) * wave,
                     );
                     low.store(&mut bank.z_pole[lane..]);
-                    let wave = low * S::load(&bank.sign[lane..]) + (u - excited) * S::splat(0.5);
+                    // The termination's low-pass: a pole of 0 passes it as it is.
+                    let low = S::load(&bank.end_pole[lane..]).mul_add(
+                        S::load(&bank.z_end[lane..]),
+                        S::load(&bank.end_gain[lane..]) * low,
+                    );
+                    low.store(&mut bank.z_end[lane..]);
+                    let wave =
+                        low * S::load(&bank.sign[lane..]) + (u - excited + damped) * S::splat(0.5);
                     // A value below half of `TINY` becomes exactly zero and one up to `TINY` is faded out, keeping denormals out of the rings (R14).
                     let keep = wave.abs().mul_add(S::splat(2.0 / TINY), S::splat(-1.0));
                     let wave = wave * keep.max(S::splat(0.0)).min(S::splat(1.0));
@@ -728,9 +906,9 @@ impl WaveguideBank {
     /// ever damps: at every harmonic a round trip's delay is a whole number
     /// of cycles, so the comb's mirror image is the same comb read a round
     /// trip back with its taps swapped.
-    fn velocity(&self, voice: usize, cursor: usize) -> f32 {
+    fn velocity(&self, voice: usize, cursor: usize, control: usize) -> f32 {
         let length = f64::from(self.length_samples[voice]);
-        let back = self.controls[voice].current[6].clamp(0.0, 0.5) * length;
+        let back = self.controls[voice].current[control].clamp(0.0, 0.5) * length;
         let at = |delay: f64| {
             let whole = delay.floor();
             let fraction = (delay - whole) as f32;

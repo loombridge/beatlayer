@@ -162,6 +162,9 @@ impl ChordLane {
         events: &mut Vec<UiEvent>,
     ) {
         let view = shell.arrangement();
+        let doc = shell.editor().document();
+        let signatures = &doc.settings().time_signatures;
+        let horizontal = view.horizontal(doc);
         let chosen = view.selected_chord_region() == Some(region.id);
         let name = region.name();
         let id = region_id(region.id);
@@ -174,18 +177,8 @@ impl ChordLane {
             node.set_description(format!(
                 "From {} to {}. Delete deletes it; its context menu sets the scale and the \
                  transposition.",
-                shell
-                    .editor()
-                    .document()
-                    .settings()
-                    .time_signatures
-                    .to_bbs(region.start),
-                shell
-                    .editor()
-                    .document()
-                    .settings()
-                    .time_signatures
-                    .to_bbs(region.end),
+                signatures.to_bbs(region.start),
+                signatures.to_bbs(region.end),
             ));
         });
         crate::focus::register_above(
@@ -250,11 +243,7 @@ impl ChordLane {
 
         // The edges resize it.
         for end in [false, true] {
-            let x = lane.left()
-                + shell
-                    .arrangement()
-                    .horizontal(shell.editor().document())
-                    .x(if end { region.end } else { region.start }) as f32;
+            let x = lane.left() + horizontal.x(if end { region.end } else { region.start }) as f32;
             if x < lane.left() - EDGE || x > lane.right() + EDGE {
                 continue;
             }

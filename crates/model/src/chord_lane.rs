@@ -85,12 +85,6 @@ impl ChordRegion {
         };
         format!("{scale} {:+}", self.transpose)
     }
-
-    /// Whether `tick` is inside the region.
-    #[must_use]
-    pub fn holds(&self, tick: Ticks) -> bool {
-        self.start <= tick && tick < self.end
-    }
 }
 
 /// Refuses a transposition outside -24 to 24.

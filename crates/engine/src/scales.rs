@@ -192,6 +192,9 @@ impl TrackScale {
                     }
                 }
                 let near = &near[..count];
+                // `shortcut:` a block that more chord regions than this touch
+                // ignores the rest; raise it if a real lane ever packs that many
+                // regions inside one block.
                 let mut regions = [Span::NONE; NEAR];
                 let mut held = 0;
                 for span in lane.filter(|span| span.start < until && span.end > from) {

@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use bl_model::{DeviceId, PluginFormat, TrackId, TrackKind};
+use bl_model::{DeviceId, TrackId};
 use bl_shell::browser_commands::{self as browser_ids, BrowserState, Item, ItemKind};
 use bl_shell::plugin_commands::{self as ids, PluginInfo, PluginLoaded};
 use bl_shell::{Area, Shell};
@@ -487,7 +487,7 @@ fn an_audio_units_preset_file_lists_and_loads_into_the_unit() {
     let key = browser(&mut shell)
         .rows
         .into_iter()
-        .find(|row| row.name == name && row.format == Some(PluginFormat::AudioUnit))
+        .find(|row| row.name == name && row.format == Some(bl_model::PluginFormat::AudioUnit))
         .map(|row| row.path)
         .expect("the unit's row");
     assert!(!row(&mut shell, &key).unwrap().presets);
@@ -497,7 +497,7 @@ fn an_audio_units_preset_file_lists_and_loads_into_the_unit() {
         .editor()
         .document()
         .tracks()
-        .find(|t| t.kind() == TrackKind::Audio)
+        .find(|t| t.kind() == bl_model::TrackKind::Audio)
         .map(bl_model::Track::id)
         .unwrap();
     let device = load_row(&mut shell, &key, track).device;

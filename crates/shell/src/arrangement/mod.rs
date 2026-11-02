@@ -10,6 +10,7 @@
 //! edits that act on it are in [`editing`] (WP-1.8b), whose behaviour is in
 //! the arrangement editing spec.
 
+pub mod arranger;
 pub mod automation;
 pub mod comping;
 pub mod editing;
@@ -27,7 +28,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use bl_core::time::{Ticks, TimeSignature};
 use bl_model::{
-    AutomationTarget, ClipId, Document, LaneViews, LocatorId, TakeLaneId, TrackId, TrackKind,
+    AutomationTarget, ClipId, Document, LaneViews, LocatorId, SectionId, TakeLaneId, TrackId,
+    TrackKind,
 };
 use bl_shell_spec::arrangement::{
     self as ids, ArrangementState, FadeHandle, FadeHandleState, FoldArgs, FoldGroupsArgs,
@@ -184,6 +186,10 @@ pub struct ArrangementView {
     selected_clips: Vec<ClipId>,
     /// The selected locators (WP-6.24): see [`locator`].
     selected_locators: Vec<LocatorId>,
+    /// The selected sections of the arranger track (WP-6.45), and the time
+    /// selection selecting them made.
+    selected_sections: Vec<SectionId>,
+    sections_span: Option<(Ticks, Ticks)>,
     /// The position of the selected time-signature marker (WP-6.61): see
     /// [`locator`].
     selected_signature: Option<Ticks>,
@@ -277,6 +283,8 @@ impl ArrangementView {
             selected: Vec::new(),
             selected_clips: Vec::new(),
             selected_locators: Vec::new(),
+            selected_sections: Vec::new(),
+            sections_span: None,
             selected_signature: None,
             selected_take_lanes: Vec::new(),
             shown_take_lanes: BTreeSet::new(),
@@ -594,6 +602,54 @@ impl ArrangementView {
         self.selected_locators = locators;
     }
 
+    /// The selected sections, in the order they were selected (WP-6.45).
+    /// They stay selected only while their span is still the time selection
+    /// and no clip or locator is, so selecting anything else drops them and
+    /// Delete no longer deletes a section's time (R6, R11).
+    #[must_use]
+    pub fn selected_sections(&self) -> &[SectionId] {
+        if self.time_selection == self.sections_span
+            && self.selected_clips.is_empty()
+            && self.selected_locators.is_empty()
+        {
+            &self.selected_sections
+        } else {
+            &[]
+        }
+    }
+
+    /// Selects sections, as clicking one does, and makes their span the
+    /// time selection on every track (the arranger track spec, R6). An empty
+    /// list clears the section selection and leaves the rest.
+    pub fn select_sections(&mut self, doc: &Document, sections: Vec<SectionId>) {
+        let spans: Vec<_> = sections
+            .iter()
+            .filter_map(|id| doc.section(*id))
+            .map(|section| (section.start, section.end()))
+            .collect();
+        if let (Some(start), Some(end)) = (
+            spans.iter().map(|span| span.0).min(),
+            spans.iter().map(|span| span.1).max(),
+        ) {
+            let lanes = doc
+                .track_order()
+                .iter()
+                .map(|&track| Lane::Track { track })
+                .collect();
+            self.select_span_on(lanes, start, end);
+            self.selected_locators.clear();
+            self.selected_signature = None;
+            self.sections_span = self.time_selection;
+        }
+        self.selected_sections = sections;
+    }
+
+    /// Drops selected sections the document no longer has.
+    pub fn forget_missing_sections(&mut self, doc: &Document) {
+        self.selected_sections
+            .retain(|id| doc.section(*id).is_some());
+    }
+
     /// Drops selected locators, and a selected time-signature marker, the
     /// document no longer has.
     pub fn forget_missing_locators(&mut self, doc: &Document) {
@@ -908,6 +964,7 @@ impl ArrangementView {
         self.selected.retain(|id| doc.track(*id).is_some());
         self.forget_missing_clips(doc);
         self.forget_missing_locators(doc);
+        self.forget_missing_sections(doc);
         self.folded.retain(|id| doc.track(*id).is_some());
         self.heights.retain(|id, _| doc.track(*id).is_some());
         self.forget_missing_take_lanes(doc);
@@ -1501,6 +1558,8 @@ impl ArrangementView {
             selected_tracks: self.selected.clone(),
             selected_clips: self.selected_clips.clone(),
             selected_locators: self.selected_locators.clone(),
+            selected_sections: self.selected_sections().to_vec(),
+            arranger_track: doc.settings().arranger_track,
             selected_time_signature: self.selected_signature,
             selected_take_lanes: self.selected_take_lanes.clone(),
             shown_take_lanes: self.shown_take_lanes.iter().copied().collect(),

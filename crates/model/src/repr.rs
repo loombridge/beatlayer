@@ -285,6 +285,10 @@ impl TryFrom<DocumentRepr> for Document {
             settings.arrangement_loop.length,
         )?;
         check_locators(&settings.locators)?;
+        crate::section::check_sections(&settings.sections)?;
+        for section in &settings.sections {
+            loader.claim(section.id.0)?;
+        }
         crate::remote::check_all(&settings.remote)?;
         if let Some(tuning) = &settings.tuning {
             tuning.check()?;

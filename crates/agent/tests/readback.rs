@@ -944,6 +944,22 @@ fn fixture() -> Project {
             start: Some(bl_model::SongStart::Locator(locator)),
         },
     );
+    // WP-6.45: a section and the arranger track, so the format writes
+    // `sections` and `arranger_track`.
+    let section: bl_model::SectionId = editor.new_id();
+    apply(
+        &mut editor,
+        Command::AddSection {
+            section: bl_model::SongSection {
+                id: section,
+                start: Ticks::WHOLE,
+                length: Ticks::WHOLE,
+                name: "Verse".to_owned(),
+                colour: 3,
+            },
+        },
+    );
+    apply(&mut editor, Command::SetArrangerTrack { shown: true });
     // WP-4.14: a frozen track, so the format writes `frozen`.
     apply(
         &mut editor,
@@ -1114,6 +1130,8 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "punch_out",
                 "midi_overdub",
                 "locators",
+                "sections.0.name",
+                "arranger_track",
                 "song_start",
                 "grooves.pool.0.name",
                 "grooves.global_amount",

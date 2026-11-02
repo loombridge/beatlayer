@@ -11,6 +11,7 @@ mod agent_settings;
 mod apcs;
 mod ara;
 mod arrangement;
+mod arranger;
 mod articulation_map;
 mod assistant;
 mod assistant_panel;

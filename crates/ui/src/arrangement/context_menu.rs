@@ -45,6 +45,10 @@ pub enum MenuKind {
     Breakpoint,
     /// An envelope's line: Add Value (C-TIME-026).
     Line,
+    /// The arranger track away from a section (IMP-22).
+    Arranger,
+    /// A section's (IMP-22).
+    Section,
 }
 
 /// The two menus and which one is open.
@@ -186,6 +190,16 @@ impl ContextMenus {
         self.scrub_at = Some(at);
     }
 
+    /// A right-click in the arranger track away from a section.
+    pub fn open_arranger(&mut self) {
+        self.kind = MenuKind::Arranger;
+    }
+
+    /// A right-click on a section, which is selected.
+    pub fn open_section(&mut self) {
+        self.kind = MenuKind::Section;
+    }
+
     /// A right-click on the loop brace.
     pub fn open_brace(&mut self) {
         self.kind = MenuKind::Brace;
@@ -235,6 +249,8 @@ impl ContextMenus {
             MenuKind::Brace => context_menus::arrangement_brace_in(),
             MenuKind::FragmentaryBar => context_menus::arrangement_fragmentary_bar_in(),
             MenuKind::Signature => context_menus::arrangement_signature_in(),
+            MenuKind::Arranger => context_menus::arrangement_arranger_in(),
+            MenuKind::Section => context_menus::arrangement_section_in(),
             MenuKind::Breakpoint | MenuKind::Line => return,
         };
         let menu = &menu;
@@ -279,6 +295,23 @@ impl ContextMenus {
                         events,
                         "clip.set_colour",
                         json!({ "clips": selected, "colour": colour }),
+                    );
+                    ui.close();
+                }
+            } else if item.row == context_menus::SECTION_COLOUR_ROW {
+                // Spec: arranger-track R7. The palette colours the section.
+                let doc = shell.editor().document();
+                let current = shell
+                    .arrangement()
+                    .selected_sections()
+                    .first()
+                    .and_then(|section| doc.section(*section))
+                    .map(|section| section.colour);
+                if let Some(colour) = crate::palette::show(ui, theme, "section-colour", current) {
+                    invoke(
+                        events,
+                        bl_shell::arranger_commands::SET_SECTION_COLOUR,
+                        json!({ "colour": colour }),
                     );
                     ui.close();
                 }

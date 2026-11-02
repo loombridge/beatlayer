@@ -1619,6 +1619,9 @@ pub mod header_columns {
 /// How tall the time-signature lane is (L-ARR-004).
 pub const SIGNATURE_LANE: f32 = 11.0;
 
+/// The height of the arranger track's lane (L-ARR-023).
+pub const ARRANGER_LANE: f32 = 18.0;
+
 /// How tall the bar numbers are, above the time-signature lane inside the
 /// beat-time ruler.
 const BAR_NUMBERS: f32 = 12.0;
@@ -1642,6 +1645,11 @@ pub struct ArrangementLayout {
     /// its bar numbers and the loop brace, while the set has signature
     /// changes (L-ARR-004).
     pub signature_lane: Option<Rect>,
+    /// The arranger track, across the lanes at the top of the track lanes,
+    /// while it shows (L-ARR-023).
+    pub arranger: Option<Rect>,
+    /// The arranger track's header, in the header column (L-ARR-023).
+    pub arranger_header: Option<Rect>,
     /// Set Locator (L-ARR-010, first row).
     pub set_locator: Rect,
     /// Automation Mode (L-ARR-010, first row).
@@ -1725,6 +1733,8 @@ impl ArrangementLayout {
                 pos2(lanes_right, top(115.0) + shift),
             ),
             signature_lane: None,
+            arranger: None,
+            arranger_header: None,
             set_locator: row(1299.0, 1335.0, 82.0),
             automation_mode: row(1340.0, 1356.0, 82.0),
             lock_envelopes: row(1360.0, 1376.0, 82.0),
@@ -1801,6 +1811,8 @@ impl ArrangementLayout {
         .into_iter()
         .chain(self.overview.as_mut())
         .chain(self.signature_lane.as_mut())
+        .chain(self.arranger.as_mut())
+        .chain(self.arranger_header.as_mut())
         {
             rect.min.y = rect.min.y.clamp(top, bottom);
             rect.max.y = rect.max.y.clamp(top, bottom);
@@ -1823,6 +1835,23 @@ impl ArrangementLayout {
         self.scrub = self.scrub.translate(vec2(0.0, SIGNATURE_LANE));
         self.lanes.min.y += SIGNATURE_LANE;
         self.headers.min.y += SIGNATURE_LANE;
+        self.fitted()
+    }
+
+    /// The same layout with the arranger track showing (L-ARR-023): a row
+    /// at the top of the track lanes, under the rulers, the scrub area and
+    /// the time-signature lane, and the lanes and their headers start under
+    /// it. Apply it after [`Self::with_signature_lane`].
+    #[must_use]
+    pub fn with_arranger_lane(mut self) -> Self {
+        let top = self.lanes.top();
+        let row = |left: f32, right: f32| {
+            Rect::from_min_max(pos2(left, top), pos2(right, top + ARRANGER_LANE))
+        };
+        self.arranger = Some(row(self.lanes.left(), self.lanes.right()));
+        self.arranger_header = Some(row(self.headers.left(), self.headers.right()));
+        self.lanes.min.y += ARRANGER_LANE;
+        self.headers.min.y += ARRANGER_LANE;
         self.fitted()
     }
 

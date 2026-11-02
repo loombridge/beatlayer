@@ -34,6 +34,9 @@
 //! - [`locator`]: the Arrangement's locators (WP-6.24): adding, deleting,
 //!   moving, renaming and describing them, looping to the next one, the
 //!   song start time, and the jumps between them.
+//! - [`arranger`]: the arranger track (WP-6.45): making, renaming,
+//!   colouring, resizing, moving, copying, duplicating, removing and
+//!   deleting sections, selecting them, and showing the lane.
 //! - [`notes`]: the Clip View's note-editing commands (WP-2.3): selecting
 //!   the MIDI Note Editor's notes, drawing, deleting, moving and resizing
 //!   them.
@@ -103,6 +106,7 @@
 
 pub mod agent;
 pub mod arrangement;
+pub mod arranger;
 pub mod assistant;
 pub mod audio;
 pub mod audio_editing;
@@ -182,6 +186,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     clip_envelope_editing::register(registry)?;
     groove::register(registry)?;
     locator::register(registry)?;
+    arranger::register(registry)?;
     notes::register(registry)?;
     transport::register(registry)?;
     mixer_view::register(registry)?;

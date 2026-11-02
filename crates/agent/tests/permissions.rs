@@ -403,6 +403,42 @@ fn an_agent_s_delete_time_asks_first_and_copy_time_and_insert_silence_don_t() {
 }
 
 #[test]
+fn an_agent_s_delete_section_asks_first_and_the_other_arranger_edits_don_t() {
+    // Spec: agent-permissions R1; arranger-track R11, R15. Deleting a
+    // section removes its time from every track, so an agent asks; removing
+    // only the section, duplicating it and selecting it don't.
+    let (mut client, ..) = two_clips(4);
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "arranger.add_section",
+                               "args": { "start": "2.1.1", "end": "4.1.1" } }] }),
+    );
+    let went = attempt(&mut client, "arranger.delete_section", &json!({}));
+    assert_eq!(
+        went,
+        Went {
+            asked: true,
+            permission: "destructive".to_owned()
+        }
+    );
+    for (command, permission) in [
+        ("arranger.duplicate_section", "edit"),
+        ("arranger.remove_section", "edit"),
+    ] {
+        let went = attempt(&mut client, command, &json!({}));
+        assert_eq!(
+            went,
+            Went {
+                asked: false,
+                permission: permission.to_owned()
+            },
+            "{command}"
+        );
+    }
+}
+
+#[test]
 fn a_drop_from_the_browser_over_clips_is_destructive_as_well_as_external() {
     // Spec: agent-permissions R3. Its files aren't read before the person
     // allows it, so a drop is destructive when a clip on its track ends

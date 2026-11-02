@@ -107,6 +107,7 @@ mod routing;
 mod sample_edits;
 mod scale;
 mod scene;
+mod section;
 mod shared;
 mod spelling;
 mod track;
@@ -176,7 +177,7 @@ pub use groove::{
 };
 pub use ids::{
     ChainId, ClipId, ContentHash, DeviceId, GrooveId, LinkGroupId, LocatorId, ParamId,
-    ParseContentHashError, SceneId, TakeLaneId, TrackId,
+    ParseContentHashError, SceneId, SectionId, TakeLaneId, TrackId,
 };
 /// The persistent collections the document's public types hold.
 pub use imbl::{OrdMap, Vector};
@@ -210,6 +211,7 @@ pub use repr::{SavedSong, saved_schema};
 pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange, SampleRegion};
 pub use scale::{CHROMATIC, Scale, ScaleName};
 pub use scene::{DEFAULT_SCENE_COUNT, SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
+pub use section::{SongSection, next_section_colour, next_section_name};
 pub use spelling::NoteSpelling;
 pub use track::{
     Channel, CrossfadeAssign, DeviceOutput, Input, MAX_TRACK_DELAY_MS, MAX_TRACK_DELAY_SAMPLES,

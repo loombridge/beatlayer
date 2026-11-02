@@ -6,7 +6,7 @@ use egui::Key;
 
 pub(crate) fn entries() -> Vec<(&'static str, Path)> {
     use Path::Exception;
-    use Reason::{Equivalent, LaterView, Live, Query};
+    use Reason::{Equivalent, Gap, LaterView, Live, Query};
     vec![
         (
             "transport.play",
@@ -334,6 +334,115 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             Exception(Equivalent(
                 "the shell's locator.loop_to_next, which a locator's context menu runs (the time \
                  editing spec, R9 and R13)",
+            )),
+        ),
+        // The arranger track's commands (the arranger track spec, R14).
+        (
+            "arranger.add_section",
+            Exception(Equivalent(
+                "Create Section in the arranger track's context menu, which the context-menu \
+                 key opens while the lane has the keyboard (the arranger track spec, R5, R14)",
+            )),
+        ),
+        (
+            "arranger.sections_from_locators",
+            Exception(Equivalent(
+                "Create Sections From Locators in the arranger track's context menu, which the \
+                 context-menu key opens while the lane has the keyboard (the arranger track \
+                 spec, R5, R14)",
+            )),
+        ),
+        (
+            "arranger.rename_section",
+            Exception(Equivalent(
+                "Cmd-R while a section is selected, which the Arrangement's keyboard runs \
+                 directly (the arranger track spec, R7, R14)",
+            )),
+        ),
+        (
+            "arranger.duplicate_section",
+            Exception(Equivalent(
+                "Cmd-D while a section is selected, which the Arrangement's keyboard runs \
+                 directly (the arranger track spec, R10, R14)",
+            )),
+        ),
+        (
+            "arranger.delete_section",
+            Exception(Equivalent(
+                "the Delete key while a section is selected, which the Arrangement's keyboard \
+                 runs directly (the arranger track spec, R11, R14)",
+            )),
+        ),
+        (
+            "arranger.remove_section",
+            Exception(Equivalent(
+                "Remove Section in a section's context menu, which the context-menu key opens \
+                 (the arranger track spec, R11, R14)",
+            )),
+        ),
+        (
+            "arranger.set_section_colour",
+            Exception(Equivalent(
+                "the colour palette in a section's context menu, which the context-menu key \
+                 opens (the arranger track spec, R7, R14)",
+            )),
+        ),
+        (
+            "arranger.move_section",
+            Exception(Equivalent(
+                "Move Earlier and Move Later in a section's context menu, which the \
+                 context-menu key opens (the arranger track spec, R12, R14)",
+            )),
+        ),
+        (
+            "arranger.select_section",
+            Exception(Equivalent(
+                "Tab reaches the sections in the Arrangement's Tab order and selects the one \
+                 reached (the arranger track spec, R14)",
+            )),
+        ),
+        (
+            "arranger.copy_section",
+            Exception(Gap(
+                "copying a section to another place is Option-dragging it; Duplicate (Cmd-D) \
+                 is its keyboard form, after the section; the spec gives the keyboard no \
+                 other way (the arranger track spec, R9, R14)",
+            )),
+        ),
+        (
+            "arranger.resize_section",
+            Exception(Gap(
+                "an edge is dragged with the pointer; the spec gives the keyboard no way to \
+                 resize a section (the arranger track spec, R7, R14)",
+            )),
+        ),
+        (
+            "song.add_section",
+            Exception(Equivalent(
+                "the shell's arranger.add_section, which dragging across the lane and Create \
+                 Section run (the arranger track spec, R5, R15)",
+            )),
+        ),
+        (
+            "song.edit_section",
+            Exception(Equivalent(
+                "the shell's arranger.rename_section, arranger.set_section_colour and \
+                 arranger.resize_section, which Cmd-R, a section's menu and dragging an edge \
+                 run (the arranger track spec, R7, R15)",
+            )),
+        ),
+        (
+            "song.remove_section",
+            Exception(Equivalent(
+                "the shell's arranger.remove_section, which a section's context menu runs (the \
+                 arranger track spec, R11, R15)",
+            )),
+        ),
+        (
+            "song.set_arranger_track",
+            Exception(Equivalent(
+                "arrangement.arranger_track, which View ▸ Arranger Track runs (the arranger \
+                 track spec, R1, R15)",
             )),
         ),
         (

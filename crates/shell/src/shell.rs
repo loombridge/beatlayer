@@ -49,6 +49,7 @@ use bl_plugin_host::lv2::Lv2Host;
 use bl_plugin_host::scan::Scanner;
 use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::arrangement as view_ids;
+use bl_shell_spec::arranger as arranger_ids;
 use bl_shell_spec::audio_editing as audio_ids;
 use bl_shell_spec::automation as automation_ids;
 use bl_shell_spec::autosampler as autosampler_ids;
@@ -431,6 +432,10 @@ pub enum Effect {
     /// person types the new name; Return runs `locator.rename` with it
     /// (WP-6.24; the time editing spec, R8).
     RenameLocator(bl_model::LocatorId),
+    /// Start renaming a section in the arranger track, where the person
+    /// types the new name; Return runs `arranger.rename_section` with it
+    /// (WP-6.45; the arranger track spec, R7).
+    RenameSection(bl_model::SectionId),
     /// Start typing a new signature for the time-signature marker at this
     /// position, in the lane under the beat-time ruler; Return runs
     /// `arrangement.edit_time_signature` with it (WP-6.61; the time editing
@@ -1876,6 +1881,9 @@ impl Shell {
         }
         if locator_ids::handles(id) {
             return self.run_locator(id, args);
+        }
+        if arranger_ids::handles(id) {
+            return self.run_arranger(id, args);
         }
         if note_ids::is_preview_or_mode(id) || id == note_ids::STEP_RECORD {
             // Spec: step-recording. The Preview switch, previews, step

@@ -472,6 +472,7 @@ impl Editor {
         let mut start = open.start;
         start.settings.cue_mode = self.document.settings.cue_mode;
         start.settings.pad_layout = self.document.settings.pad_layout;
+        start.settings.arranger_track = self.document.settings.arranger_track;
         if start == self.document && !open.keep {
             return Ok(false);
         }
@@ -580,8 +581,9 @@ impl Editor {
         let mut document = *document;
         // Cue mode is no undo step, so undoing keeps it as it is.
         document.settings.cue_mode = self.document.settings.cue_mode;
-        // Nor is the pad layout.
+        // Nor is the pad layout, or whether the arranger track shows.
         document.settings.pad_layout = self.document.settings.pad_layout;
+        document.settings.arranger_track = self.document.settings.arranger_track;
         // The current scale follows a selection or a clip that starts, and
         // that is no undo step either, so a step that didn't change the
         // scale leaves it as it is.
@@ -632,6 +634,7 @@ impl Editor {
         let mut document = *document;
         document.settings.cue_mode = self.document.settings.cue_mode;
         document.settings.pad_layout = self.document.settings.pad_layout;
+        document.settings.arranger_track = self.document.settings.arranger_track;
         // A step that changed the scale brings it back; one that didn't
         // leaves it as it is.
         match scale {

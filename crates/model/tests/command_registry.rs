@@ -16,9 +16,9 @@ use bl_model::{
     GrooveId, GrooveNote, HardwareLatency, Input, LaunchMode, LaunchQuantization, Locator,
     LocatorId, MacroStyle, MacroTarget, MetronomeRhythm, MetronomeSound, MidiData, MidiTo,
     MixerParam, ModelError, Monitor, NewTakeLane, Note, Output, PanMode, ParamId, PluginFormat,
-    Preserve, RackKind, RecordQuantization, SceneId, SendTap, SongStart, TakeClip, TakeClipData,
-    TakeLaneId, Tap, TonesUpdate, TrackDelay, TrackId, TrackKind, Tuning, TuningNote, WarpFrom,
-    WarpMode, WarpPoint,
+    Preserve, RackKind, RecordQuantization, SceneId, SectionId, SendTap, SongStart, TakeClip,
+    TakeClipData, TakeLaneId, Tap, TonesUpdate, TrackDelay, TrackId, TrackKind, Tuning, TuningNote,
+    WarpFrom, WarpMode, WarpPoint,
 };
 use serde_json::{Value, json};
 
@@ -70,7 +70,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        280,
+        284,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -110,7 +110,7 @@ fn every_document_command_is_registered() {
              set_global_groove_amount, set_auto_load_groove and set_clip_groove, WP-6.9 \
              five for tunings: set_tuning, remove_tuning, set_tuning_reference, \
              set_tuning_range and set_tuning_bypass, WP-6.9b the two for tunings on plug-ins and controllers: set_plugin_tuning and set_tuning_layout, WP-6.22 move_clip_to_lane, and WP-6.24b \
-             the two for time: insert_time and delete_time, and WP-6.23 set_track_links, and WP-6.30b the five for colours: set_track_colour, assign_colour_to_clips, assign_colour_to_grouped, set_clip_colour and set_scene_colour, and WP-6.57 the two for clearing envelopes: clear_track_automation and clear_device_automation, and WP-6.58 the four for info text: set_track_info_text, set_clip_info_text, set_scene_info_text and set_device_info_text, and WP-7.1 set_remote_mappings, and WP-7.32 set_record_quantization, and WP-7.33 set_device_region, and WP-7.17 set_cv_calibration, and WP-8.8 set_device_wavetable, and the copy fixes set_automation_enabled, and WP-7.21 set_chain_push_colour, and WP-7.22 set_pad_layout, and WP-8.4 the two for modulation routes: set_mod_route and clear_mod_route, and WP-9.10 set_similarity_reference"
+             the two for time: insert_time and delete_time, and WP-6.23 set_track_links, and WP-6.30b the five for colours: set_track_colour, assign_colour_to_clips, assign_colour_to_grouped, set_clip_colour and set_scene_colour, and WP-6.57 the two for clearing envelopes: clear_track_automation and clear_device_automation, and WP-6.58 the four for info text: set_track_info_text, set_clip_info_text, set_scene_info_text and set_device_info_text, and WP-7.1 set_remote_mappings, and WP-7.32 set_record_quantization, and WP-7.33 set_device_region, and WP-7.17 set_cv_calibration, and WP-8.8 set_device_wavetable, and the copy fixes set_automation_enabled, and WP-7.21 set_chain_push_colour, and WP-7.22 set_pad_layout, and WP-8.4 the two for modulation routes: set_mod_route and clear_mod_route, and WP-9.10 set_similarity_reference, and WP-6.45 the four for the arranger track: add_section, remove_section, edit_section and set_arranger_track"
     );
 
     for op in &ops {
@@ -2550,6 +2550,19 @@ fn every_command_runs_by_id() {
     );
     agent.run("song.delete_locator", json!({ "locator": chorus }));
 
+    // Sections (WP-6.45): adding, editing, showing the lane, and removing.
+    let verse: SectionId = agent.new_id();
+    agent.run(
+        "song.add_section",
+        json!({ "section": { "id": verse, "start": bar * 4, "length": bar, "name": "Verse", "colour": 3 } }),
+    );
+    agent.run(
+        "song.edit_section",
+        json!({ "section": verse, "name": "Chorus", "colour": 5, "length": bar * 2 }),
+    );
+    agent.run("song.set_arranger_track", json!({ "shown": true }));
+    agent.run("song.remove_section", json!({ "section": verse }));
+
     // Time (WP-6.24b): opening a bar of silence on every track at 1.1.1, then
     // closing a quarter note after it.
     let before = agent.editor.document().clone();
@@ -2655,6 +2668,7 @@ fn schemas_match_what_commands_serialise() {
     let scene = SceneId(fresh());
     let scene_copy = SceneId(fresh());
     let locator = LocatorId(fresh());
+    let section = SectionId(fresh());
     let groove = GrooveId(fresh());
     let notes = MidiData::new([Note::new(127, Ticks::ZERO, Ticks::QUARTER, 1)]);
     let mut plugin = Device::new(
@@ -2761,6 +2775,33 @@ fn schemas_match_what_commands_serialise() {
             },
         ),
         ("song.delete_locator", Command::DeleteLocator { locator }),
+        (
+            "song.add_section",
+            Command::AddSection {
+                section: bl_model::SongSection {
+                    id: section,
+                    start: Ticks::WHOLE,
+                    length: Ticks::WHOLE,
+                    name: "Verse".to_owned(),
+                    colour: 3,
+                },
+            },
+        ),
+        (
+            "song.edit_section",
+            Command::EditSection {
+                section,
+                name: Some("Chorus".to_owned()),
+                colour: Some(5),
+                start: None,
+                length: Some(Ticks::WHOLE * 2),
+            },
+        ),
+        ("song.remove_section", Command::RemoveSection { section }),
+        (
+            "song.set_arranger_track",
+            Command::SetArrangerTrack { shown: true },
+        ),
         (
             "song.insert_time",
             Command::InsertTime {

@@ -198,6 +198,66 @@ const LOCATOR: &[Row] = &[
     ),
 ];
 
+/// The row of Beatlayer's own arranger track menus (IMP-22), which hold
+/// Create Section and Create Sections From Locators in the lane's, and
+/// Rename, Move Earlier, Move Later, Remove Section and Delete Section in a
+/// section's: improvements, so not rows of menus.md.
+pub const IMP_22: &str = "IMP-22";
+
+/// The row of a section's menu that holds the colour palette, drawn by the
+/// UI (the arranger track spec, R7).
+pub const SECTION_COLOUR_ROW: &str = "IMP-22-colour";
+
+/// The arranger track's own menu (IMP-22): the lane away from a section.
+const ARRANGER: &[Row] = &[
+    (
+        "IMP-22-create",
+        "Create Section",
+        Cmd(crate::arranger::ADD_SECTION),
+    ),
+    (
+        "IMP-22-from-locators",
+        "Create Sections From Locators",
+        Cmd(crate::arranger::SECTIONS_FROM_LOCATORS),
+    ),
+];
+
+/// A section's menu (IMP-22).
+const SECTION: &[Row] = &[
+    (
+        "IMP-22-rename",
+        "Rename Section",
+        Cmd(crate::arranger::RENAME_SECTION),
+    ),
+    (
+        SECTION_COLOUR_ROW,
+        "Colour palette",
+        Cmd(crate::arranger::SET_SECTION_COLOUR),
+    ),
+    SEPARATOR,
+    (
+        "IMP-22-earlier",
+        "Move Earlier",
+        Choice(crate::arranger::MOVE_SECTION, "{\"with\":\"earlier\"}"),
+    ),
+    (
+        "IMP-22-later",
+        "Move Later",
+        Choice(crate::arranger::MOVE_SECTION, "{\"with\":\"later\"}"),
+    ),
+    SEPARATOR,
+    (
+        "IMP-22-remove",
+        "Remove Section",
+        Cmd(crate::arranger::REMOVE_SECTION),
+    ),
+    (
+        "IMP-22-delete",
+        "Delete Section",
+        Cmd(crate::arranger::DELETE_SECTION),
+    ),
+];
+
 /// The loop brace's menu (C-TIME-023).
 const BRACE: &[Row] = &[(
     "C-TIME-023c",
@@ -1211,6 +1271,18 @@ pub fn arrangement_fragmentary_bar_in() -> Vec<MenuItem> {
 #[must_use]
 pub fn arrangement_signature_in() -> Vec<MenuItem> {
     items(SIGNATURE)
+}
+
+/// The arranger track's menu away from a section (IMP-22).
+#[must_use]
+pub fn arrangement_arranger_in() -> Vec<MenuItem> {
+    items(ARRANGER)
+}
+
+/// A section's menu (IMP-22).
+#[must_use]
+pub fn arrangement_section_in() -> Vec<MenuItem> {
+    items(SECTION)
 }
 
 /// The loop brace's menu (C-TIME-023).

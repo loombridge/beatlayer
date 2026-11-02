@@ -1,7 +1,7 @@
 //! The View menu.
 
 use super::Action::{Choice, Command as Cmd, Omitted, Shortcut as Key, Submenu};
-use super::{Action, D24, IMP_01, IMP_25, IMP_25_CLOSE_WINDOWS, Row, SEPARATOR};
+use super::{Action, D24, IMP_01, IMP_22, IMP_25, IMP_25_CLOSE_WINDOWS, Row, SEPARATOR};
 use crate::arrangement::{SHOW_IN_OUT, SHOW_RETURN_TRACKS, SHOW_VOLUME};
 use crate::assistant::VIEW_TOGGLE_ASSISTANT;
 use crate::clip_properties::ARRANGE_PANELS;
@@ -154,6 +154,11 @@ pub(super) const VIEW: &[Row] = &[
     ),
     SEPARATOR,
     ("M-VIEW-034", "Overview", Key(&["S-VIEW-011"])),
+    (
+        IMP_22,
+        "Arranger Track",
+        Cmd(crate::arranger::ARRANGER_TRACK),
+    ),
     (
         "M-VIEW-035",
         "Scene Tempo and Time Signature",

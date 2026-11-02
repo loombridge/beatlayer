@@ -116,6 +116,11 @@ object_id!(
     "locator"
 );
 object_id!(
+    /// The ID of a section of the song (WP-6.45).
+    SectionId,
+    "section"
+);
+object_id!(
     /// The ID of a groove in the Groove Pool (WP-6.19).
     GrooveId,
     "groove"

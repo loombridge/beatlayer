@@ -207,7 +207,9 @@ impl Shell {
                     .unwrap_or_default(),
             },
             automation_record_mode: self.prefs.automation_record_mode,
+            multiple_plug_in_windows: self.prefs.multiple_plug_in_windows.0,
             auto_hide_plug_in_windows: self.auto_hide_plug_in_windows(),
+            auto_open_plug_in_windows: self.prefs.auto_open_plug_in_windows.0,
             plug_ins: self.plugin_settings(),
             agents: AgentsPageSettings {
                 server: server.server,
@@ -639,6 +641,18 @@ impl Shell {
                 let SwitchArgs { on } = Self::args(id, args)?;
                 self.prefs.auto_hide_plug_in_windows = OnByDefault(on);
                 self.apply_plug_in_windows();
+                self.save_preferences();
+                Ok(to_value(&SwitchResult { on }))
+            }
+            ids::SETTINGS_SET_MULTIPLE_PLUG_IN_WINDOWS => {
+                let SwitchArgs { on } = Self::args(id, args)?;
+                self.prefs.multiple_plug_in_windows = OnByDefault(on);
+                self.save_preferences();
+                Ok(to_value(&SwitchResult { on }))
+            }
+            ids::SETTINGS_SET_AUTO_OPEN_PLUG_IN_WINDOWS => {
+                let SwitchArgs { on } = Self::args(id, args)?;
+                self.prefs.auto_open_plug_in_windows = OnByDefault(on);
                 self.save_preferences();
                 Ok(to_value(&SwitchResult { on }))
             }

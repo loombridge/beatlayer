@@ -300,7 +300,7 @@ impl TransportFields {
                 let on = match element {
                     Element::PunchIn => punch_in_on(shell),
                     Element::PunchOut => punch_out_on(shell),
-                    _ => loop_on(shell),
+                    _ => loop_on(shell) && !shell.loop_suspended(),
                 };
                 return Some(Look {
                     on,

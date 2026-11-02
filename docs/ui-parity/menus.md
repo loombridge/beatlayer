@@ -170,7 +170,7 @@ Commands the manual places in the Create menu for other focus: Insert Silence (A
 |---|---|---|---|---|---|
 | M-PLAY-001 | Play | Space | S-TRANS-001 | | Toggles with Stop |
 | M-PLAY-002 | Continue Playback | ⇧Space | S-TRANS-002 | | |
-| M-PLAY-003 | Play From Insert Marker | ⌥Space | S-ARR-032 | | Shown with the Session View focused; S-TRANS-003 binds the same keys from the manual |
+| M-PLAY-003 | Play From Insert Marker | ⌥Space | S-ARR-032 | | Shown with the Session View focused; S-TRANS-003 binds the same keys from the manual. With a time selection in the Arrangement it plays the selection and stops at its end (WP-6.74) |
 | M-PLAY-004 | Return Play Position to 1.1.1 | | | | No key shown; the manual's Home key (S-TRANS-005) moves the insert marker to the start |
 | M-PLAY-005 | Move Insert Marker To Playhead | ⇧⌘Space | S-ARR-033 | | |
 | M-PLAY-006 | Options ▸ | | | | Submenu, rows M-PLAY-006a to 006d |

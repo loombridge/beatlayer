@@ -166,6 +166,14 @@ pub struct Preferences {
     /// as Live's plug-in windows do. On by default, as observed in Live
     /// 12.4.6.
     pub auto_hide_plug_in_windows: OnByDefault,
+    /// Multiple Plug-In Windows (Plug-Ins, Plug-In Windows, L-SET-017):
+    /// while it's off, opening a plug-in's window closes the other
+    /// plug-in windows (WP-6.75). On by default, as observed in Live 12.
+    pub multiple_plug_in_windows: OnByDefault,
+    /// Auto-Open Plug-In Windows (Plug-Ins, Plug-In Windows, L-SET-017):
+    /// inserting a plug-in device opens its window (WP-6.75). On by
+    /// default, as observed in Live 12.
+    pub auto_open_plug_in_windows: OnByDefault,
     /// The plug-ins the browser hides, as `format/plugin_id` keys
     /// (WP-2.9, IMP-07). A set that uses a hidden plug-in still loads it.
     pub hidden_plugins: BTreeSet<String>,

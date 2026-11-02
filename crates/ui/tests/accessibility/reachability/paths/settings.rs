@@ -432,8 +432,16 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             ),
         ),
         (
+            "settings.set_multiple_plug_in_windows",
+            settings("plug-ins", nothing, "Multiple Plug-In Windows", Key::Enter),
+        ),
+        (
             "settings.set_auto_hide_plug_in_windows",
             settings("plug-ins", nothing, "Auto-Hide Plug-In Windows", Key::Enter),
+        ),
+        (
+            "settings.set_auto_open_plug_in_windows",
+            settings("plug-ins", nothing, "Auto-Open Plug-In Windows", Key::Enter),
         ),
         (
             "settings.set_outline_view_in_focus",

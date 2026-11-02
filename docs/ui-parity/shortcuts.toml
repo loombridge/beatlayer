@@ -3159,8 +3159,8 @@ win = ["Ctrl+Space"]
 kind = "key"
 trigger = "press"
 milestone = "M6"
-source = "manual 42.20"
-notes = "Live 12.4.3's Playback menu shows these keys beside Play From Insert Marker (S-ARR-032), with the Session View focused. Moved to M6 by WP-6.70: The manual gives Option+Space (Ctrl+Space) two actions, this one and Play From Insert Marker (S-ARR-032), without saying when each applies; it needs an observation of Live. WP-6.74 builds it."
+source = "manual 42.20; observed in 12.4.16 (macOS), 1 November 2026"
+notes = "Live 12.4.3's Playback menu shows these keys beside Play From Insert Marker (S-ARR-032), with the Session View focused. Moved to M6 by WP-6.70, when it wasn't known when each of the two actions applies. WP-6.74 builds it: with a time selection the key plays it and stops at its end, and with none it plays from the insert marker."
 
 [[shortcut]]
 id = "S-TRANS-004"
@@ -3171,9 +3171,9 @@ win = ["Space"]
 kind = "key"
 trigger = "press"
 milestone = "M6"
-source = "manual 42.20"
+source = "manual 42.20; observed in 12.4.16 (macOS), 1 November 2026"
 same_as = "S-TRANS-001"
-notes = "Same key as Play: with a time selection, playback starts from it. Moved to M6 by WP-6.70: It is the same key as Play, and the manual does not say what Play does with a time selection beyond starting from it; it needs an observation of Live. WP-6.74 builds it."
+notes = "Same key as Play: with a time selection, playback starts from its start and goes on past its end. Moved to M6 by WP-6.70, when it wasn't known what Play does with a time selection. WP-6.74 builds it."
 
 [[shortcut]]
 id = "S-TRANS-005"

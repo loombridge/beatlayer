@@ -847,6 +847,9 @@ pub struct Shell {
     /// The engine's insert marker when the shell last looked, so a move of
     /// it reaches the Arrangement View once (WP-1.18).
     seen_insert_marker: Option<Ticks>,
+    /// Whether the engine plays a Play Selection to the selection's end, so
+    /// the Loop switch shows off (the transport spec, R35).
+    loop_suspended: bool,
     /// Whether a person's gesture (a drag on a value) holds a transaction
     /// open, so its document commands are one undo step.
     gesture: bool,
@@ -1445,6 +1448,7 @@ impl Shell {
             envelope_control_focused: false,
             au,
             seen_insert_marker: None,
+            loop_suspended: false,
             gesture: false,
             mixer: MixerView::new(),
             session: SessionView::new(),

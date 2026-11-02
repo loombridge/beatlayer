@@ -77,6 +77,17 @@ pub enum TransportCommand {
     Play,
     /// Plays from the insert marker, whatever the song's start time is.
     PlayFromInsertMarker,
+    /// Plays from `start`, leaving the insert marker where it is (the
+    /// transport spec, R35, R36). With an `end` after `start`, the song
+    /// stops on that frame, the Arrangement loop doesn't apply until it
+    /// does, and a stop or a new start ends the run early. Without one it
+    /// plays on as Play does, from the song start time if the set has one.
+    PlaySelection {
+        /// Where playback starts, in ticks.
+        start: Ticks,
+        /// Where it stops, if it stops.
+        end: Option<Ticks>,
+    },
     /// While playing, stops, keeping the song position for
     /// [`Continue`](Self::Continue). While stopped, returns the insert
     /// marker and the song position to 1.1.1 (tick 0), as a second press of

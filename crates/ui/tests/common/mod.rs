@@ -329,6 +329,8 @@ impl Harness {
         // Spec: view-options R1. The middle button pans the area under the
         // pointer, so egui never sees it.
         bl_ui::middle::take(&mut input, &self.ctx);
+        // Spec: view-options R10 to R13. The wheel over a control is its own.
+        let wheel = bl_ui::wheel::take(&mut input, &self.ctx, self.shell.wheel_adjusts_values());
         // As the app does: the keys go to a value being typed as to a text
         // field, and the frame draws what the engine last published.
         let text_focused = self.ctx.text_edit_focused() || self.main.is_typing();
@@ -392,6 +394,9 @@ impl Harness {
             };
         });
         output.textures_delta.clear();
+        for gesture in wheel {
+            gesture.run(&mut self.shell);
+        }
         for invocation in invocations {
             let _ = self.shell.invoke(&invocation.id, invocation.args.clone());
             self.events.push(UiEvent::Invoke(invocation));
@@ -532,6 +537,7 @@ impl Harness {
             ..Default::default()
         };
         bl_ui::middle::take(&mut input, &side.ctx);
+        let wheel = bl_ui::wheel::take(&mut input, &side.ctx, self.shell.wheel_adjusts_values());
         let text_focused = side.ctx.text_edit_focused() || side.ui.is_typing();
         side.dispatcher
             .leave_space_to_focus(bl_ui::clip_panels::tab_has_focus(&side.ctx));
@@ -545,6 +551,9 @@ impl Harness {
             ui_events = ui.show(root, shell, theme, title_bar, None);
         });
         output.textures_delta.clear();
+        for gesture in wheel {
+            gesture.run(&mut self.shell);
+        }
         for invocation in invocations {
             let _ = self.shell.invoke(&invocation.id, invocation.args.clone());
             self.events.push(UiEvent::Invoke(invocation));
@@ -783,6 +792,30 @@ pub fn painted_rects(output: &FullOutput) -> Vec<(Rect, Color32)> {
     fn walk(shape: &egui::Shape, out: &mut Vec<(Rect, Color32)>) {
         match shape {
             egui::Shape::Rect(rect) => out.push((rect.rect, rect.fill)),
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    walk(shape, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, &mut out);
+    }
+    out
+}
+
+/// Every circle a frame strokes, as its centre and radius.
+pub fn stroked_circles(output: &FullOutput) -> Vec<(Pos2, f32)> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<(Pos2, f32)>) {
+        match shape {
+            egui::Shape::Circle(circle)
+                if !circle.stroke.is_empty() && circle.fill == Color32::TRANSPARENT =>
+            {
+                out.push((circle.center, circle.radius));
+            }
             egui::Shape::Vec(shapes) => {
                 for shape in shapes {
                     walk(shape, out);

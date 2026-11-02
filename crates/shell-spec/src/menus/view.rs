@@ -1,7 +1,7 @@
 //! The View menu.
 
 use super::Action::{Choice, Command as Cmd, Omitted, Shortcut as Key, Submenu};
-use super::{Action, D24, IMP_01, IMP_25, IMP_25_CLOSE_WINDOWS, Row, SEPARATOR};
+use super::{Action, D24, IMP_01, IMP_25, IMP_25_CLOSE_WINDOWS, IMP_34, IMP_35, Row, SEPARATOR};
 use crate::arrangement::{SHOW_IN_OUT, SHOW_RETURN_TRACKS, SHOW_VOLUME};
 use crate::assistant::VIEW_TOGGLE_ASSISTANT;
 use crate::clip_properties::ARRANGE_PANELS;
@@ -21,6 +21,7 @@ use crate::mixer_view::{
     SENDS as MIXER_SENDS, TOGGLE as MIXER_TOGGLE, TRACK_OPTIONS as MIXER_TRACK_OPTIONS,
     VOLUME as MIXER_VOLUME,
 };
+use crate::view_options::{SET_MARK_EMPTY_TRACKS, SET_NOTE_COLORS};
 
 pub(super) const VIEW: &[Row] = &[
     ("M-VIEW-001", "Full Screen", Cmd(VIEW_FULL_SCREEN)),
@@ -167,9 +168,26 @@ pub(super) const VIEW: &[Row] = &[
         "Show Selected Grouped Track",
         Key(&["S-TRACK-010"]),
     ),
+    (IMP_34, "Mark Empty Tracks", Cmd(SET_MARK_EMPTY_TRACKS)),
     SEPARATOR,
     ("M-VIEW-039", "Fold to Notes", Key(&["S-NOTE-038"])),
     ("M-VIEW-040", "Fold to Scale", Key(&["S-NOTE-039"])),
+    (IMP_35, "Note Colors", Submenu),
+    (
+        "IMP-35a",
+        "By Velocity",
+        Choice(SET_NOTE_COLORS, r#"{"colors":"velocity"}"#),
+    ),
+    (
+        "IMP-35b",
+        "By Pitch Class",
+        Choice(SET_NOTE_COLORS, r#"{"colors":"pitch_class"}"#),
+    ),
+    (
+        "IMP-35c",
+        "By Scale Degree",
+        Choice(SET_NOTE_COLORS, r#"{"colors":"scale_degree"}"#),
+    ),
     SEPARATOR,
     ("M-VIEW-041", "Show Chains", Key(&["S-DEV-012"])),
     ("M-VIEW-042", "Hide Chains", Key(&["S-DEV-013"])),

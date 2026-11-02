@@ -115,5 +115,6 @@ pub mod track_menu;
 pub mod tuning_layout_dialog;
 pub mod tuning_section;
 pub mod undo_history_panel;
+pub mod wheel;
 pub mod widgets;
 pub mod window;

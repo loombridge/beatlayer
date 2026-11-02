@@ -162,6 +162,7 @@ pub mod tracks;
 pub mod transport;
 pub mod tunings;
 pub mod video;
+pub mod view_options;
 pub mod warping;
 
 use bl_commands::{RegisterError, Registry};
@@ -227,6 +228,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     link::register(registry)?;
     sync::register(registry)?;
     tempo_follower::register(registry)?;
+    view_options::register(registry)?;
     search::register(registry)
 }
 

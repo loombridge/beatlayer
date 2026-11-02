@@ -407,6 +407,11 @@ fn each_settings_command_reads_back_from_settings_state() {
         "settings.set_permanent_scrub_areas",
         json!({ "on": false }),
     );
+    run(
+        &mut client,
+        "settings.set_wheel_adjusts_values",
+        json!({ "on": true }),
+    );
     run(&mut client, "view.set_zoom", json!({ "percent": 150 }));
     run(&mut client, "focus.toggle_tab_navigation", json!({}));
     run(&mut client, "focus.toggle_wrap_navigation", json!({}));
@@ -487,6 +492,7 @@ fn each_settings_command_reads_back_from_settings_state() {
             "permanent_scrub_areas": false,
             "use_tab_key_to_move_focus": true,
             "wrap_tab_navigation": false,
+            "wheel_adjusts_values": true,
         })
     );
     assert_eq!(

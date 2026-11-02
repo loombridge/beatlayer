@@ -4154,3 +4154,153 @@ fn a_held_ruler_preview_ends_when_the_clip_view_leaves_the_note_editor() {
         "the held preview ends once the editor gives way"
     );
 }
+
+// Note colours (WP-6.49; the view options spec, R2 to R5).
+
+/// The colour each of `notes` is painted in, in the order given, with the
+/// editor's frame as it is.
+fn fills(n: &mut Notes, notes: &[Note]) -> Vec<egui::Color32> {
+    let grid = n.grid();
+    let (start, length) = (n.marker(), n.length());
+    let output = n.h.settle();
+    let top = n.h.main.clip_view().top();
+    let rects = common::painted_rects(&output);
+    notes
+        .iter()
+        .map(|note| {
+            let rect = note_rect(grid, start, length, top, note);
+            rects
+                .iter()
+                .find(|(r, _)| *r == rect)
+                .map(|(_, colour)| *colour)
+                .unwrap_or_else(|| panic!("the note at key {} is painted", note.key))
+        })
+        .collect()
+}
+
+// Spec: view-options R3, R4.
+#[test]
+fn by_pitch_class_every_c_has_one_hue_and_a_softer_note_is_paler() {
+    let step = n_step();
+    let mut muted = Note::new(61, step * 4, step, 127);
+    muted.mute = true;
+    let notes = vec![
+        Note::new(60, Ticks::ZERO, step, 127),
+        Note::new(72, Ticks::ZERO, step, 127),
+        Note::new(62, Ticks::ZERO, step, 127),
+        Note::new(60, step * 2, step, 40),
+        muted,
+    ];
+    let mut n = set(notes.clone());
+    n.h.shell
+        .run("view.set_note_colors", json!({ "colors": "pitch_class" }))
+        .unwrap();
+    let painted = fills(&mut n, &notes);
+    let hues = &n.h.theme.colors.pitch_hues;
+    assert_eq!(painted[0], hues[0].0, "C is the first hue");
+    assert_eq!(painted[1], hues[0].0, "and so is the C an octave up");
+    assert_eq!(painted[2], hues[2].0, "D is the third");
+    assert_eq!(
+        painted[3],
+        bl_ui::theme::note_colour(hues[0].0, 40),
+        "a softer C is paler, in the same hue"
+    );
+    assert_ne!(painted[3], painted[0]);
+    assert_eq!(
+        painted[4], n.h.theme.colors.clip_muted.0,
+        "a deactivated note stays grey"
+    );
+}
+
+// Spec: view-options R3.
+#[test]
+fn by_scale_degree_colours_the_clips_degrees_and_greys_the_rest() {
+    let step = n_step();
+    let notes = vec![
+        Note::new(62, Ticks::ZERO, step, 127),
+        Note::new(69, Ticks::ZERO, step, 127),
+        Note::new(65, Ticks::ZERO, step, 127),
+        Note::new(63, Ticks::ZERO, step, 127),
+        Note::new(50, step * 2, step, 127),
+    ];
+    let mut n = set(notes.clone());
+    scale_on(&mut n, 2, "minor");
+    n.h.shell
+        .run("view.set_note_colors", json!({ "colors": "scale_degree" }))
+        .unwrap();
+    let painted = fills(&mut n, &notes);
+    let colours = &n.h.theme.colors;
+    assert_eq!(
+        painted[0], colours.pitch_hues[0].0,
+        "D, the root, takes the first hue"
+    );
+    assert_eq!(
+        painted[1], colours.pitch_hues[4].0,
+        "A, the fifth, the fifth"
+    );
+    assert_eq!(painted[2], colours.pitch_hues[2].0, "F, the third degree");
+    assert_eq!(painted[3], colours.out_of_scale.0, "D# isn't in D minor");
+    assert_eq!(
+        painted[4], colours.pitch_hues[0].0,
+        "the root in any octave"
+    );
+
+    // With Scale Mode off the notes are coloured by velocity.
+    n.h.shell
+        .run(
+            "clip.set_scale",
+            json!({ "clips": [n.clip], "enabled": false }),
+        )
+        .unwrap();
+    let painted = fills(&mut n, &notes);
+    let track = n.doc().clip_track(n.clip).expect("the clip's track");
+    let face = bl_ui::arrangement::scene::track_colour(&n.h.theme, n.doc(), track);
+    assert!(painted.iter().all(|colour| *colour == face), "{painted:?}");
+}
+
+// Spec: view-options R5.
+#[test]
+fn a_note_is_named_for_assistive_technology_with_its_pitch_velocity_and_degree() {
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(69, Ticks::ZERO, step, 100),
+        Note::new(63, Ticks::ZERO, step, 64),
+    ]);
+    scale_on(&mut n, 2, "minor");
+    let note_nodes = |n: &mut Notes| -> Vec<(String, String)> {
+        let output = n.h.settle();
+        Harness::nodes(&output)
+            .into_iter()
+            .filter(|node| node.label.contains(" velocity "))
+            .map(|node| (node.label.clone(), node.value.clone()))
+            .collect()
+    };
+    for colors in ["velocity", "pitch_class"] {
+        n.h.shell
+            .run("view.set_note_colors", json!({ "colors": colors }))
+            .unwrap();
+        let named = note_nodes(&mut n);
+        assert_eq!(named.len(), 2, "{named:?}");
+        assert!(
+            named
+                .iter()
+                .any(|(label, _)| label.ends_with(" velocity 100"))
+        );
+        assert!(
+            named.iter().all(|(_, value)| value.is_empty()),
+            "no degree unless the colours are by degree: {named:?}"
+        );
+    }
+    n.h.shell
+        .run("view.set_note_colors", json!({ "colors": "scale_degree" }))
+        .unwrap();
+    let named = note_nodes(&mut n);
+    let value_of = |velocity: &str| {
+        named
+            .iter()
+            .find(|(label, _)| label.ends_with(velocity))
+            .map(|(_, value)| value.clone())
+    };
+    assert_eq!(value_of("velocity 100").as_deref(), Some("degree 5"));
+    assert_eq!(value_of("velocity 64").as_deref(), Some("not in the scale"));
+}

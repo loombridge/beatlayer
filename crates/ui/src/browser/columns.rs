@@ -3,7 +3,7 @@
 //! column's name, and moving a column by dragging it.
 
 use bl_shell::Shell;
-use bl_shell::browser_commands::{self as ids, Column, ItemDetails};
+use bl_shell::browser_commands::{self as ids, Column, ItemDetails, Label};
 use egui::accesskit::{Role, SortDirection};
 use egui::{Align2, DragAndDrop, Id, Rect, Sense, Stroke, Ui, pos2, vec2};
 use serde_json::json;
@@ -361,6 +361,21 @@ impl BrowserUi {
                 json!({ "file_extensions": !state.file_extensions }),
             );
             ui.close();
+        }
+        // Spec: browser-tags R43. Under the Plug-Ins label only.
+        if *shell.browser_view().label() == Label::PlugIns {
+            let shown = shell.plugin_settings().show_hidden;
+            let mark = if shown { "\u{2714} " } else { "" };
+            let response = ui.button(format!("{mark}Show Hidden Plug-Ins"));
+            crate::menus::register_item(ui.ctx(), &response);
+            if response.clicked() {
+                invoke(
+                    events,
+                    bl_shell::plugin_commands::SETTINGS,
+                    json!({ "show_hidden": !shown }),
+                );
+                ui.close();
+            }
         }
     }
 }

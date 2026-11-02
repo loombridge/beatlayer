@@ -10,7 +10,7 @@
 //! which Live doesn't have. It follows Plug-Ins, the page whose plug-ins
 //! are the other way another program drives the app.
 
-use bl_model::{LaunchMode, LaunchQuantization, TakeoverMode};
+use bl_model::{LaunchMode, LaunchQuantization, PluginFormat, TakeoverMode};
 use bl_project::registry as recovery_ids;
 use bl_shell::assistant::AssistantProvider;
 use bl_shell::audio::{
@@ -1486,6 +1486,36 @@ fn plug_ins_page(
                 json!({ field: on }),
             )));
         }
+    }
+    // Spec: browser-tags R44. None, then the formats this platform lists.
+    let rect = rows.row(ui, "Preferred Plug-In Format", SettingsLayout::CHOOSER);
+    let mut formats = vec![("None", None), ("CLAP", Some(PluginFormat::Clap))];
+    formats.push(("VST3", Some(PluginFormat::Vst3)));
+    if cfg!(target_os = "macos") {
+        formats.push(("Audio Units", Some(PluginFormat::AudioUnit)));
+    }
+    let formats: Vec<Choice<Option<PluginFormat>>> = formats
+        .into_iter()
+        .map(|(label, value)| Choice {
+            label: label.to_owned(),
+            value,
+            leds: NO_LEDS,
+        })
+        .collect();
+    if let Some(format) = chooser(
+        ui,
+        theme,
+        "preferred-plug-in-format",
+        "Preferred Plug-In Format",
+        rect,
+        &formats,
+        Some(&sources.format_preference),
+        true,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            bl_shell::plugin_commands::SETTINGS,
+            json!({ "format_preference": format }),
+        )));
     }
     rows.heading(ui, "Plug-In Windows");
     rows.pending(

@@ -133,8 +133,15 @@ impl BrowserView {
     /// holds now.
     #[must_use]
     pub fn catalogue(&self) -> Catalogue {
+        // Spec: browser-tags R42. Hot-swap never lists a hidden plug-in.
+        let plugins: Vec<ScannedPlugin> = self
+            .plugins
+            .iter()
+            .filter(|p| !self.hidden_plugins.contains(&p.key()))
+            .cloned()
+            .collect();
         let by_key: std::collections::HashMap<String, &ScannedPlugin> =
-            self.plugins.iter().map(|p| (p.key(), p)).collect();
+            plugins.iter().map(|p| (p.key(), p)).collect();
         let collections = (1..=COLLECTIONS.len() as u8)
             .map(|number| {
                 self.collections
@@ -156,7 +163,7 @@ impl BrowserView {
         Catalogue {
             snapshot: Arc::clone(self.index.snapshot()),
             user_library: self.user_library.clone(),
-            plugins: self.plugins.clone(),
+            plugins,
             collections,
         }
     }

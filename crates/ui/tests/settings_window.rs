@@ -304,3 +304,36 @@ fn the_warp_fades_rows_are_live_in_lives_order() {
         );
     }
 }
+
+// Spec: browser-tags R44; L-SET-017. The Plug-Ins page has Preferred Plug-In
+// Format after the Plug-In Sources rows: None in a new install, then each
+// choice, and back to None.
+#[test]
+fn the_plug_ins_page_has_a_preferred_format_row_that_goes_back_to_none() {
+    let mut h = Harness::manual(Window::Settings);
+    h.shell
+        .run("app.settings", json!({ "page": SettingsPage::PlugIns }))
+        .unwrap();
+    h.settings.refresh();
+    let nodes = Harness::nodes(&h.settle());
+    let row = Harness::node(&nodes, "Preferred Plug-In Format");
+    assert_eq!(row.role, Role::ComboBox);
+    assert_eq!(row.value, "None");
+    let sources = Harness::node(&nodes, "Use VST3 Plug-In System Folders");
+    assert!(
+        row.bounds.unwrap().y0 > sources.bounds.unwrap().y0,
+        "after the Plug-In Sources rows"
+    );
+    let chooser = Id::new(("chooser", "preferred-plug-in-format"));
+    h.accesskit(chooser, Action::Focus);
+    h.settle();
+    h.key(Key::ArrowDown, Modifiers::NONE);
+    h.settle();
+    assert_eq!(
+        h.shell.plugin_settings().format_preference,
+        Some(bl_model::PluginFormat::Clap)
+    );
+    h.key(Key::ArrowUp, Modifiers::NONE);
+    h.settle();
+    assert_eq!(h.shell.plugin_settings().format_preference, None);
+}

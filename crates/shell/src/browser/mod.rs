@@ -318,6 +318,10 @@ pub struct BrowserView {
     /// The plug-ins the scanner found (WP-2.9), already filtered by the
     /// hidden and format preferences; the Plug-Ins label lists them.
     plugins: Vec<ScannedPlugin>,
+    /// The hidden plug-ins' keys (spec: browser-tags R41): in `plugins` only
+    /// while Show Hidden Plug-Ins is on, drawn dimmed; hot-swap never lists
+    /// them.
+    hidden_plugins: BTreeSet<String>,
     /// The tag groups, the tags in them, and the items that carry them
     /// (spec: browser-tags R6 to R9).
     tags: TagStore,
@@ -601,6 +605,7 @@ impl BrowserView {
             focus_requests: 0,
             waker,
             plugins: Vec::new(),
+            hidden_plugins: BTreeSet::new(),
             tags: TagStore::new(),
             db: None,
             saved_files: HashMap::new(),
@@ -650,9 +655,10 @@ impl BrowserView {
 
     /// Sets the plug-ins the Plug-Ins label lists (WP-2.9). The shell
     /// passes what the scanner found, already filtered by the hidden and
-    /// format preferences.
-    pub fn set_plugins(&mut self, plugins: Vec<ScannedPlugin>) {
+    /// format preferences, and the keys of the hidden ones.
+    pub fn set_plugins(&mut self, plugins: Vec<ScannedPlugin>, hidden: BTreeSet<String>) {
         self.plugins = plugins;
+        self.hidden_plugins = hidden;
         self.generation += 1;
         // Beatlayer gives each plug-in's vendor a tag in the Creator group
         // (spec: browser-tags R7).
@@ -679,7 +685,11 @@ impl BrowserView {
         // tags, each time the scanner reports it.
         ops.extend(self.give_plugin_auto_tags());
         self.save_tags(ops);
-        if self.label == Label::PlugIns {
+        // A collection or a saved label can list plug-ins too.
+        if matches!(
+            self.label,
+            Label::PlugIns | Label::Collection(_) | Label::Saved(_)
+        ) {
             self.rebuild();
         }
     }
@@ -1736,6 +1746,7 @@ impl BrowserView {
                 clip_kind: entry.clip,
                 details: None,
                 collections: Vec::new(),
+                hidden: false,
             });
             if open && entry.kind == ItemKind::Set {
                 self.set_rows(&entry.path, depth.saturating_add(1), out);
@@ -1767,6 +1778,7 @@ impl BrowserView {
             clip_kind: None,
             details: None,
             collections: Vec::new(),
+            hidden: false,
         });
     }
 
@@ -1896,6 +1908,7 @@ impl BrowserView {
                     clip_kind: None,
                     details: None,
                     collections: Vec::new(),
+                    hidden: false,
                 })
                 .filter(|item| self.item_passes(&selection, &builtin, item))
                 .collect();
@@ -2043,6 +2056,7 @@ impl BrowserView {
                             clip_kind: None,
                             details: None,
                             collections: Vec::new(),
+                            hidden: false,
                         });
                         if open {
                             self.list_into(&path, 1, &mut items);
@@ -2135,6 +2149,7 @@ impl BrowserView {
             clip_kind: None,
             details: None,
             collections: Vec::new(),
+            hidden: false,
         };
         let mut items: Vec<Item> = tunings::BUNDLED
             .iter()
@@ -2179,6 +2194,7 @@ impl BrowserView {
     /// each naming its vendor.
     fn plugin_rows(&mut self) -> Vec<Item> {
         let query = self.search.trim().to_lowercase();
+        let hidden = self.hidden_plugins.clone();
         let row = |p: &ScannedPlugin, depth: u16, folder: Option<String>| Item {
             path: plugin_key(p),
             name: p.name.clone(),
@@ -2190,6 +2206,7 @@ impl BrowserView {
             clip_kind: None,
             details: None,
             collections: Vec::new(),
+            hidden: hidden.contains(&p.key()),
         };
         let mut items = Vec::new();
         if !query.is_empty() || !self.applied_selection().is_empty() {
@@ -2224,6 +2241,7 @@ impl BrowserView {
                 clip_kind: None,
                 details: None,
                 collections: Vec::new(),
+                hidden: false,
             });
             if open {
                 items.extend(
@@ -2302,6 +2320,7 @@ impl BrowserView {
                     clip_kind: clip_kind_of(entry.kind, &snapshot.path(hit)),
                     details: None,
                     collections: Vec::new(),
+                    hidden: false,
                 }
             }
         };
@@ -2335,6 +2354,16 @@ impl BrowserView {
     #[must_use]
     pub fn selected(&self) -> &[PathBuf] {
         &self.selected
+    }
+
+    /// The keys, as `plugin.hide` takes them, of the selected plug-in rows.
+    #[must_use]
+    pub fn selected_plugin_keys(&self) -> Vec<String> {
+        self.selected
+            .iter()
+            .filter_map(|path| self.plugin(path))
+            .map(ScannedPlugin::key)
+            .collect()
     }
 
     /// Whether an item is selected.
@@ -4415,7 +4444,7 @@ mod tests {
             plugin(PluginFormat::AudioUnit, "aufx/dely/appl", &["aufx", "dely"]),
             plugin(PluginFormat::Lv2, "urn:d", &["FilterPlugin"]),
             plugin(PluginFormat::Clap, "none", &["audio-effect", "glitch"]),
-        ]);
+        ], BTreeSet::new());
         let function = |key: &str| -> Vec<String> {
             view.carried_tags(key)
                 .into_iter()
@@ -4428,5 +4457,19 @@ mod tests {
         assert_eq!(function("au/aufx/dely/appl"), ["Function|Delay"]);
         assert_eq!(function("lv2/urn:d"), ["Function|Filter"]);
         assert!(function("clap/none").is_empty());
+    }
+    // Spec: browser-tags R42. Hot-swap's lists never offer a hidden plug-in,
+    // even while Show Hidden Plug-Ins lists it in the browser.
+    #[test]
+    fn hot_swap_never_lists_a_hidden_plug_in() {
+        use bl_control::browse::Catalogue as _;
+        let mut view = BrowserView::new(&BrowserPrefs::default(), Waker::default());
+        let shown = plugin(PluginFormat::Clap, "a", &[]);
+        let hidden = plugin(PluginFormat::Clap, "b", &[]);
+        let keys = BTreeSet::from([hidden.key()]);
+        view.set_plugins(vec![shown, hidden], keys);
+        assert_eq!(view.plugin_rows().len(), 2, "the browser lists both");
+        let listed = view.catalogue().children(Label::PlugIns.key().as_str(), None);
+        assert_eq!(listed.len(), 1, "{listed:?}");
     }
 }

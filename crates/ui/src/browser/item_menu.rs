@@ -1,6 +1,7 @@
 //! A browser item's context menu (spec: browser R25, browser-tags R35;
 //! C-BROWSER-001 to C-BROWSER-011, C-BROWSER-014): Show in Places, Show in
-//! Finder, Show Similar Files, Clear All Colors and the seven collections.
+//! Finder, Show Similar Files, Clear All Colors, the seven collections, and
+//! Hide Plug-In.
 
 use std::path::Path;
 
@@ -130,6 +131,24 @@ pub(super) fn show(ui: &mut Ui, shell: &Shell, item: &Item, events: &mut Vec<UiE
         .clicked()
         {
             invoke(events, ids::SET_COLLECTION, json!({ "collection": number }));
+            ui.close();
+        }
+    }
+    // Spec: browser-tags R41. Hide Plug-In or Show Plug-In, at the end of a
+    // plug-in row's menu, after Gray (7) (Live 12.4.16).
+    if item.kind == ItemKind::Plugin {
+        ui.separator();
+        let label = if item.hidden {
+            "Show Plug-In"
+        } else {
+            "Hide Plug-In"
+        };
+        if add(ui, Button::new(label), true).clicked() {
+            invoke(
+                events,
+                bl_shell::plugin_commands::HIDE,
+                json!({ "keys": view.selected_plugin_keys(), "hidden": !item.hidden }),
+            );
             ui.close();
         }
     }

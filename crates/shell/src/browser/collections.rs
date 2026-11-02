@@ -230,6 +230,7 @@ impl BrowserView {
                     clip_kind: None,
                     details: None,
                     collections: Vec::new(),
+                    hidden: self.hidden_plugins.contains(&plugin.key()),
                 });
             } else if let Some(device) = device_by_id(&key) {
                 plugins.push(Item {
@@ -243,6 +244,7 @@ impl BrowserView {
                     clip_kind: None,
                     details: None,
                     collections: Vec::new(),
+                    hidden: false,
                 });
             } else if let Some(entry) = Self::collected_entry(&key) {
                 entries.push(entry);
@@ -263,6 +265,7 @@ impl BrowserView {
                 clip_kind: entry.clip,
                 details: None,
                 collections: Vec::new(),
+                hidden: false,
             }));
         } else {
             self.push_entries(entries, 0, &mut items);

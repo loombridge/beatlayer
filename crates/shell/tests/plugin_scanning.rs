@@ -491,3 +491,155 @@ fn hidden_plug_ins_leave_the_browser_and_come_back_with_show_hidden() {
         .unwrap();
     assert_eq!(state(&mut shell).total_rows, 1);
 }
+
+// Spec: browser-tags R41, R42, R43. `plugin.hide` hides and shows plug-ins
+// by key, read back in `plugin.settings`; a hidden plug-in leaves the
+// Plug-Ins label, search, a collection and a saved label, and a vendor
+// folder with nothing left; Show Hidden Plug-Ins lists it again, dimmed,
+// and a set that uses it still loads it.
+#[test]
+fn hide_plug_in_takes_a_plug_in_out_of_every_list_and_show_hidden_brings_it_back() {
+    if !ready() {
+        eprintln!("beatlayer-scan wasn't built; skipping (build the workspace's bins)");
+        return;
+    }
+    let mut shell = Shell::headless();
+    let bundle = bl_test_clap::bundle().to_string_lossy().into_owned();
+    shell
+        .run(ids::SCAN, json!({ "paths": [bundle.clone()] }))
+        .unwrap();
+    let row = format!("{bundle}#{}", bl_test_clap::PLUGIN_ID);
+    let key = format!("clap/{}", bl_test_clap::PLUGIN_ID);
+    let rows = |shell: &mut Shell| browser_state(shell).rows;
+
+    // In a collection and a saved label, found by a search.
+    shell
+        .run(browser_ids::SELECT, json!({ "paths": [row.clone()] }))
+        .unwrap();
+    shell
+        .run(browser_ids::SET_COLLECTION, json!({ "collection": 2 }))
+        .unwrap();
+    shell
+        .run(browser_ids::OPEN_PLACE, json!({ "label": "plug_ins" }))
+        .unwrap();
+    shell
+        .run(browser_ids::SEARCH, json!({ "query": "test" }))
+        .unwrap();
+    assert_eq!(rows(&mut shell).len(), 1);
+    shell.run(browser_ids::ADD_LABEL, json!({})).unwrap();
+    shell
+        .run(browser_ids::SEARCH, json!({ "query": "" }))
+        .unwrap();
+
+    // Hide it: one edit, read back in the settings.
+    let settings: PluginSettings = serde_json::from_value(
+        shell
+            .run(ids::HIDE, json!({ "keys": [key.clone()], "hidden": true }))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(settings.hidden, vec![key.clone()]);
+    shell
+        .run(browser_ids::OPEN_PLACE, json!({ "label": "plug_ins" }))
+        .unwrap();
+    assert!(rows(&mut shell).is_empty(), "no vendor folder is left");
+    shell
+        .run(browser_ids::SEARCH, json!({ "query": "test" }))
+        .unwrap();
+    assert!(rows(&mut shell).is_empty(), "search skips it");
+    shell
+        .run(browser_ids::SEARCH, json!({ "query": "" }))
+        .unwrap();
+    shell
+        .run(
+            browser_ids::OPEN_PLACE,
+            json!({ "label": { "collection": 2 } }),
+        )
+        .unwrap();
+    assert!(rows(&mut shell).is_empty(), "the collection skips it");
+    shell
+        .run(browser_ids::OPEN_PLACE, json!({ "label": browser_ids::Label::Saved(1) }))
+        .unwrap();
+    assert!(rows(&mut shell).is_empty(), "the saved label skips it");
+
+    // A set that uses it loads it.
+    let track = shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|t| t.kind() == bl_model::TrackKind::Midi)
+        .map(bl_model::Track::id)
+        .unwrap();
+    shell
+        .run(ids::LOAD, json!({ "path": bundle, "track": track }))
+        .unwrap();
+
+    // Show Hidden Plug-Ins lists it again, dimmed, and the collection too.
+    shell
+        .run(ids::SETTINGS, json!({ "show_hidden": true }))
+        .unwrap();
+    let listed = rows(&mut shell);
+    assert_eq!(listed.len(), 1, "{listed:?}");
+    assert!(listed[0].hidden);
+    shell
+        .run(
+            browser_ids::OPEN_PLACE,
+            json!({ "label": { "collection": 2 } }),
+        )
+        .unwrap();
+    assert!(rows(&mut shell)[0].hidden);
+
+    // Show it again: no longer hidden.
+    let settings: PluginSettings = serde_json::from_value(
+        shell
+            .run(ids::HIDE, json!({ "keys": [key], "hidden": false }))
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(settings.hidden.is_empty());
+    assert!(!rows(&mut shell)[0].hidden);
+}
+
+// Spec: browser-tags R44. The preference matches by name and vendor, and
+// `plugin.settings` sets it back to none, which lists both formats.
+#[test]
+fn the_format_preference_can_be_cleared_and_none_lists_every_format() {
+    if !ready() {
+        eprintln!("beatlayer-scan wasn't built; skipping (build the workspace's bins)");
+        return;
+    }
+    let mut shell = Shell::headless();
+    let clap = bl_test_clap::bundle().to_string_lossy().into_owned();
+    let vst3 = bl_test_vst3::bundle().to_string_lossy().into_owned();
+    shell
+        .run(ids::SCAN, json!({ "paths": [clap, vst3] }))
+        .unwrap();
+    shell
+        .run(ids::SETTINGS, json!({ "vst3_system_folders": true }))
+        .unwrap();
+    let settings: PluginSettings =
+        serde_json::from_value(shell.run(ids::SETTINGS, json!({})).unwrap()).unwrap();
+    assert_eq!(settings.format_preference, None, "none in a new install");
+    let listed = |shell: &mut Shell| -> usize {
+        shell
+            .run(browser_ids::OPEN_PLACE, json!({ "label": "plug_ins" }))
+            .unwrap();
+        shell
+            .run(browser_ids::SEARCH, json!({ "query": "test" }))
+            .unwrap();
+        browser_state(shell).rows.len()
+    };
+    assert_eq!(listed(&mut shell), 2, "none shows both formats");
+    shell
+        .run(ids::SETTINGS, json!({ "format_preference": "vst3" }))
+        .unwrap();
+    assert_eq!(listed(&mut shell), 1, "VST3 preferred shows it once");
+    let settings: PluginSettings = serde_json::from_value(
+        shell
+            .run(ids::SETTINGS, json!({ "format_preference": null }))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(settings.format_preference, None);
+    assert_eq!(listed(&mut shell), 2);
+}

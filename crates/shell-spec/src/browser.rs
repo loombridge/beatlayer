@@ -523,6 +523,10 @@ pub struct Item {
     /// order; left out while it is in none (spec: browser-tags R35, R40).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub collections: Vec<u8>,
+    /// For a plug-in, whether it is hidden, which the row draws dimmed while
+    /// Show Hidden Plug-Ins is on (spec: browser-tags R43); left out otherwise.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
 }
 
 /// What an item's optional columns show (spec: browser-tags R27); a value

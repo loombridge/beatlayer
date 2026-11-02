@@ -2291,6 +2291,12 @@ impl BrowserUi {
         } else {
             theme.colors.text.0.gamma_multiply(0.92)
         };
+        // Spec: browser-tags R43. A hidden plug-in's row is dimmed.
+        let text_colour = if item.hidden {
+            text_colour.gamma_multiply(0.5)
+        } else {
+            text_colour
+        };
         // Spec: plugin-scanning R11. A plug-in's row shows its format as a
         // badge before its name, as Live's does.
         let mut name_left = indent + 12.0;

@@ -610,3 +610,63 @@ fn choosing_a_collection_lists_its_items() {
         "the chosen collection is selected in the sidebar"
     );
 }
+
+// Spec: browser-tags R41, R43; L-BRW-016. A plug-in row's menu ends with
+// Hide Plug-In, after Gray (7); it hides the plug-in and the Content Options
+// menu's Show Hidden Plug-Ins lists it again, where the row's menu offers
+// Show Plug-In.
+#[test]
+fn a_plug_in_rows_menu_hides_it_and_content_options_shows_hidden_plug_ins() {
+    if bl_plugin_host::scan::scan_program().is_none() {
+        eprintln!("beatlayer-scan wasn't built; skipping (build the workspace's bins)");
+        return;
+    }
+    let scratch = Scratch::new("hide");
+    let (mut h, _) = harness(&scratch);
+    let bundle = text(&bl_test_clap::bundle());
+    h.shell
+        .run(
+            bl_shell::plugin_commands::SCAN,
+            json!({ "paths": [bundle.clone()] }),
+        )
+        .unwrap();
+    h.shell
+        .run(ids::OPEN_PLACE, json!({ "label": "plug_ins" }))
+        .unwrap();
+    h.shell
+        .run(ids::SEARCH, json!({ "query": "gain echo" }))
+        .unwrap();
+    let nodes = look(&mut h);
+    right_click(&mut h, centre_of(&nodes, Role::ListItem, bl_test_clap::PLUGIN_NAME));
+    let nodes = look(&mut h);
+    let top = |label: &str| {
+        nodes
+            .iter()
+            .find(|n| n.role == Role::Button && n.label.starts_with(label))
+            .unwrap_or_else(|| panic!("no {label:?}"))
+            .bounds
+            .unwrap()
+            .y0
+    };
+    assert!(top("Gray") < top("Hide Plug-In"), "after Gray");
+    h.click(button(&nodes, "Hide Plug-In"));
+    let hidden = h.shell.plugin_settings().hidden;
+    assert_eq!(hidden, [format!("clap/{}", bl_test_clap::PLUGIN_ID)]);
+    assert!(state(&mut h).rows.is_empty(), "hidden: left out");
+
+    // Show Hidden Plug-Ins, in Content Options under the Plug-Ins label.
+    let nodes = look(&mut h);
+    h.click(centre_of(&nodes, Role::Button, "Content Options"));
+    let nodes = look(&mut h);
+    h.click(button(&nodes, "Show Hidden Plug-Ins"));
+    assert!(h.shell.plugin_settings().show_hidden);
+    let shown = state(&mut h);
+    assert!(shown.rows[0].hidden, "listed again, dimmed");
+    // Its menu offers Show Plug-In.
+    let nodes = look(&mut h);
+    right_click(&mut h, centre_of(&nodes, Role::ListItem, bl_test_clap::PLUGIN_NAME));
+    let nodes = look(&mut h);
+    h.click(button(&nodes, "Show Plug-In"));
+    assert!(h.shell.plugin_settings().hidden.is_empty());
+    assert!(!state(&mut h).rows[0].hidden);
+}

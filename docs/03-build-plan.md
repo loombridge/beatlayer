@@ -942,7 +942,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 6.71 | done | 22 October 2026 | [#320](https://github.com/loombridge/beatlayer/pull/320); the Export Audio/Video dialog on ⇧⌘R and the File menu, with a progress window and Cancel, exports on a worker thread, and Convert to Mono, Encode MP3 beside a PCM file and Create Analysis File ([export](specs/export.md) R28 to R45) |
 | 6.72 | done | 25 October 2026 | [#475](https://github.com/loombridge/beatlayer/pull/475); the Clip View's panels arrange horizontally, vertically or automatically from the View menu, the title bar's menu and an edge drag, fold on a double-click of the title bar, and Option+8 reaches the selected panel |
 | 6.73 | todo |  |  |
-| 6.74 | todo |  |  |
+| 6.74 | done | 2 November 2026 | [#760](https://github.com/loombridge/beatlayer/pull/760); with a time selection, Space plays from its start and goes on past its end, and Option-Space plays from its start and stops on its end frame with the loop set aside until it stops; both keys are pressed in a UI script |
 | 6.75 | todo |  |  |
 | 6.76 | todo |  |  |
 | 7.1 | done | 29 October 2026 | [#501](https://github.com/loombridge/beatlayer/pull/501): MIDI and key mappings are saved with the set and leave with a deleted target, the remote input keeps mapped messages off tracks through a lock-free table on the MIDI thread, mapped messages are applied on the main thread as hand moves with placeholder value laws for WP-7.2 to replace, and the `remote.*` commands read back |

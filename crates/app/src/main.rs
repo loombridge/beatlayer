@@ -64,7 +64,8 @@ pub struct Args {
 }
 
 enum Parsed {
-    Run(Args),
+    // Boxed: `Args` is over 200 bytes on Windows, which trips clippy.
+    Run(Box<Args>),
     Exit(ExitCode),
 }
 
@@ -141,7 +142,7 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
             path => parsed.set = Some(path.into()),
         }
     }
-    Ok(Parsed::Run(parsed))
+    Ok(Parsed::Run(Box::new(parsed)))
 }
 
 fn main() -> ExitCode {
@@ -149,7 +150,7 @@ fn main() -> ExitCode {
         Ok(Parsed::Exit(code)) => code,
         Ok(Parsed::Run(args)) => match match &args.screenshot {
             Some(path) => screenshot::run(&args, path),
-            None => host::run(args),
+            None => host::run(*args),
         } {
             Ok(()) => ExitCode::SUCCESS,
             Err(message) => {

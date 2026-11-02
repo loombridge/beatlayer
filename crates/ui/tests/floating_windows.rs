@@ -251,31 +251,33 @@ fn the_plug_ins_page_switches_the_plug_in_windows() {
     h.shell
         .run("app.settings", json!({ "page": SettingsPage::PlugIns }))
         .unwrap();
-    let labels: [(&str, fn(&Shell) -> bool); 3] = [
-        ("Multiple Plug-In Windows", Shell::multiple_plug_in_windows),
-        (
-            "Auto-Hide Plug-In Windows",
-            Shell::auto_hide_plug_in_windows,
-        ),
-        (
-            "Auto-Open Plug-In Windows",
-            Shell::auto_open_plug_in_windows,
-        ),
-    ];
+    let state = |shell: &Shell| {
+        [
+            shell.multiple_plug_in_windows(),
+            shell.auto_hide_plug_in_windows(),
+            shell.auto_open_plug_in_windows(),
+        ]
+    };
     // In Live's order: the rows sit one below the other.
+    let labels = [
+        "Multiple Plug-In Windows",
+        "Auto-Hide Plug-In Windows",
+        "Auto-Open Plug-In Windows",
+    ];
     let nodes = Harness::nodes(&h.settle());
     let tops: Vec<f64> = labels
         .iter()
-        .map(|(label, _)| Harness::node(&nodes, label).bounds.unwrap().y0)
+        .map(|label| Harness::node(&nodes, label).bounds.unwrap().y0)
         .collect();
     assert!(tops.windows(2).all(|pair| pair[0] < pair[1]), "{tops:?}");
-    for (label, read) in labels {
+    assert_eq!(state(&h.shell), [true; 3], "on in a new install");
+    for (row, label) in labels.into_iter().enumerate() {
         let nodes = Harness::nodes(&h.settle());
         let switch = Harness::node(&nodes, label);
         assert!(!switch.disabled, "{label}");
-        assert!(read(&h.shell), "{label}: on in a new install");
         h.click(bounds(switch).center());
         h.settle();
-        assert!(!read(&h.shell), "{label}: the press switched it off");
+        assert!(!state(&h.shell)[row], "{label}: the press switched it off");
     }
+    assert_eq!(state(&h.shell), [false; 3]);
 }

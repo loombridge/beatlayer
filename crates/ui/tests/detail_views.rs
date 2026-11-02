@@ -308,7 +308,7 @@ fn double_clicking_a_session_slot_shows_the_clip_view() {
     assert_eq!(shows(&h), (true, false));
 }
 
-// Spec: detail-views R13. A selected scene's Scene View takes the place of
+// Spec: detail-views R13. An open Scene View takes the place of
 // the top view showing: the Device View's alone, the Clip View's with both.
 #[test]
 fn the_scene_view_takes_the_top_views_place() {
@@ -318,7 +318,10 @@ fn the_scene_view_takes_the_top_views_place() {
         .unwrap();
     let scene = h.shell.editor().document().scenes().next().unwrap().id;
     h.shell
-        .run("session.select", json!({ "scene": scene }))
+        .run(
+            "session.select",
+            json!({ "scene": scene, "scene_view": true }),
+        )
         .unwrap();
     let scene_view_id = bl_ui::scene_view::scene_view_id().accesskit_id();
     let nodes = Harness::nodes(&h.settle());

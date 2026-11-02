@@ -42,6 +42,7 @@ The commands, by the part of their ID before its first dot:
 - [`chord_lane`](chord_lane.md)
 - [`clip`](clip.md)
 - [`clip_view`](clip_view.md)
+- [`collision`](collision.md)
 - [`control_surface`](control_surface.md)
 - [`cv`](cv.md)
 - [`device`](device.md)
@@ -31553,6 +31554,52 @@ What `set.close_dawproject_report` returns.
 
 </details>
 
+### `ResonatorCopied`
+
+What `collision.copy_resonator` returns: the Collision and the resonators it copied between.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `from` | integer from 0 to 255 | yes | The resonator copied from, 1 or 2. |
+| `to` | integer from 0 to 255 | yes | The resonator copied to, 1 or 2. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `collision.copy_resonator` returns: the Collision and the resonators it copied between.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "from": {
+      "description": "The resonator copied from, 1 or 2.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "to": {
+      "description": "The resonator copied to, 1 or 2.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "from",
+    "to"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Restored`
 
 What `set.restore` returns.
@@ -34311,6 +34358,7 @@ What `session.state` and its commands return: what the grid has selected.
 | `scroll_y` | number | yes | How far the scenes are scrolled down, in points at 100%. |
 | `launches` | array of [`SlotLaunch`](#slotlaunch) | no | The slots the engine has queued, playing or recording, with what each is doing. Empty in the grid's own state; `session.state` fills it in. |
 | `rings` | array of [`RingBox`](#ringbox) | no | The control surfaces' session rings, by track and scene ID, in the Control Surfaces table's row order (control surfaces R28, session view R38). Empty in the grid's own state; `session.state` fills it in. |
+| `scene_view` | [`SceneId`](#sceneid) or null | no | The scene whose Scene View is open in the detail area. |
 
 <details><summary>JSON Schema</summary>
 
@@ -34331,6 +34379,17 @@ What `session.state` and its commands return: what the grid has selected.
         "$ref": "#/$defs/RingBox"
       },
       "type": "array"
+    },
+    "scene_view": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SceneId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The scene whose Scene View is open in the detail area."
     },
     "scenes": {
       "description": "The selected scenes (their launch buttons or names).",

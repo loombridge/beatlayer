@@ -475,7 +475,7 @@ fn the_results_bar_clears_and_keeps_a_search() {
     h.click(centre_of(&nodes, Role::Button, "Mine|A"));
     let nodes = look(&mut h);
     let bar = Harness::node(&nodes, "Results");
-    assert_eq!(bar.value, "1 filter");
+    assert_eq!(bar.value, "1 Filter");
     // The bar sits between the Filter View and the header row.
     let (filters, header) = (
         Harness::node(&nodes, "Filter View").bounds.unwrap(),
@@ -509,6 +509,33 @@ fn the_results_bar_clears_and_keeps_a_search() {
     assert_eq!(h.shell.browser_view().search_text(), "");
     assert!(h.shell.browser_view().filter_tags().is_empty());
     let _ = (search_id(), add_label_id(), clear_filters_id());
+}
+
+// Spec: browser-tags R22.
+#[test]
+fn the_results_bar_counts_two_tags_and_goes_after_clear() {
+    let scratch = Scratch::new("results-count");
+    let mut h = harness(&scratch);
+    let nodes = look(&mut h);
+    h.click(centre_of(&nodes, Role::Button, "Mine|A"));
+    let nodes = look(&mut h);
+    click_with(&mut h, centre_of(&nodes, Role::Button, "Mine|B"), command());
+    let nodes = look(&mut h);
+    assert_eq!(Harness::node(&nodes, "Results").value, "2 Filters");
+    // Clear is a text button and Add Label sits right of it, both inside the bar.
+    let bar = Harness::node(&nodes, "Results").bounds.unwrap();
+    let clear = Harness::node(&nodes, "Clear").bounds.unwrap();
+    let add = Harness::node(&nodes, "Add Label").bounds.unwrap();
+    assert!(clear.x1 <= add.x0 && add.x1 <= bar.x1);
+    assert!(bar.y0 <= clear.y0 && clear.y1 <= bar.y1);
+    assert!(
+        clear.x1 - clear.x0 > clear.y1 - clear.y0,
+        "Clear is wider than tall"
+    );
+    h.click(centre_of(&nodes, Role::Button, "Clear"));
+    let nodes = look(&mut h);
+    assert!(!nodes.iter().any(|n| n.label == "Results"));
+    assert!(h.shell.browser_view().filter_tags().is_empty());
 }
 
 // Spec: browser-tags R22.

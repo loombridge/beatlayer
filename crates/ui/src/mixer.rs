@@ -452,8 +452,16 @@ impl MixerUi {
             // gives the mixer; Left and Right then move the selection.
             let group = column_id(of, track);
             let focus = column_ui.interact(clip, group, Sense::focusable_noninteractive());
+            // Spec: session-view R26. Selecting a scene highlights the Main
+            // track.
+            let main_of_scene = column.kind == ColumnKind::Main
+                && of == MixerOf::Session
+                && !shell.session().state().scenes.is_empty();
             column_ui.ctx().accesskit_node_builder(group, |node| {
                 node.set_role(Role::Group);
+                if main_of_scene {
+                    node.set_selected(true);
+                }
                 node.set_label(t.name().to_owned());
                 node.set_bounds(bounds(clip));
             });
@@ -480,7 +488,7 @@ impl MixerUi {
                     .accessibility_parent(group),
             );
             let painter = column_ui.painter();
-            let fill = if selected.contains(&track) {
+            let fill = if selected.contains(&track) || main_of_scene {
                 theme.colors.lane_selected.0
             } else {
                 theme.colors.lane.0
@@ -909,8 +917,7 @@ fn title_bars(
 /// Resizes a column by dragging its title bar's edge (R36, I-DRAG-004,
 /// I-DRAG-005): a track's or a scrolling return's right edge, and a pinned
 /// return's or Main's left, the edge that moves with the pointer. With
-/// Option (Alt) held it resizes every track's column; dragging Main's edge
-/// also shows the scene tempo and signature fields. Each step runs
+/// Option (Alt) held it resizes every track's column. Each step runs
 /// `mixer_view.set_column_width`, which is no undo step.
 fn width_drags(
     ui: &Ui,
@@ -972,14 +979,6 @@ fn width_drags(
                 json!({ "track": track, "width": start + moved })
             };
             if dx != 0.0 {
-                // Dragging Main's edge reveals the scene tempo and
-                // signature fields (I-DRAG-005).
-                if column.kind == ColumnKind::Main && !view.scene_tempo() {
-                    events.push(UiEvent::Invoke(Invocation::new(
-                        ids::SCENE_TEMPO,
-                        json!({ "shown": true }),
-                    )));
-                }
                 events.push(UiEvent::Invoke(Invocation::new(
                     ids::SET_COLUMN_WIDTH,
                     args,

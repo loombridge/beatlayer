@@ -439,3 +439,30 @@ fn a_warp_marker_moved_on_one_linked_audio_clip_moves_on_both() {
     editor.undo().unwrap();
     assert_eq!(audio_of(&editor, b).warp_markers, before);
 }
+
+// Spec: linked-clips R3, R4
+#[test]
+fn new_contents_with_warp_off_take_each_linked_clips_markers_back_to_seconds() {
+    let (mut editor, [a, b]) = warped_pair();
+    editor
+        .apply(Command::SetClipWarp {
+            clip: a,
+            warp: true,
+        })
+        .unwrap();
+    assert!(audio_of(&editor, b).warp);
+    // Unwarped contents with no warp map: the other clip's markers leave
+    // the map they were in, not the new one.
+    let mut data = AudioData::new(ContentHash([5; 32]));
+    data.end = Some(8.0);
+    editor
+        .apply(Command::SetClipData {
+            clip: a,
+            data: ClipData::Audio(data),
+        })
+        .unwrap();
+    let audio = audio_of(&editor, b);
+    assert!(!audio.warp);
+    assert_eq!(audio.end, Some(8.0));
+    editor.document().check_invariants().unwrap();
+}

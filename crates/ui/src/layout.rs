@@ -1336,8 +1336,8 @@ pub const FILTER_VIEW_HEIGHT: f32 = 120.0;
 pub const FILTER_VIEW_GAP: f32 = 4.0;
 
 /// How high the Results bar is (L-BRW-008). Live's isn't measured; this is
-/// Beatlayer's own.
-pub const RESULTS_BAR_HEIGHT: f32 = 18.0;
+/// Beatlayer's own, tall enough for its rounded buttons.
+pub const RESULTS_BAR_HEIGHT: f32 = 22.0;
 
 /// Which of the content pane's optional parts show, which decide where the
 /// column header row and the list go.

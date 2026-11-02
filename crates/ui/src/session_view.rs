@@ -1204,6 +1204,18 @@ impl GridUi {
             response.request_focus();
             let modifiers = ui.input(|i| i.modifiers);
             select(events, None, Some(scene), click_mode(modifiers));
+            // Spec: session-view R26 (I-CLICK-036). A double-click on the
+            // scene's number opens its Scene View.
+            if response.double_clicked()
+                && ui
+                    .input(|i| i.pointer.interact_pos())
+                    .is_some_and(|at| row.number.contains(at))
+            {
+                events.push(UiEvent::Invoke(Invocation::new(
+                    ids::SELECT,
+                    json!({ "scene": scene, "scene_view": true }),
+                )));
+            }
         }
         // Spec: session-context-menus R3, R14. A right-click on the scene's
         // launch button, name or number, or the keys while the grid has the

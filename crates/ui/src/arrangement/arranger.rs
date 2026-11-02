@@ -32,6 +32,11 @@ pub fn lane_id() -> Id {
     Id::new("arrangement-arranger")
 }
 
+/// The lane's own widget, which the keyboard reaches after the sections.
+pub fn lane_focus_id() -> Id {
+    lane_id().with("background")
+}
+
 /// A section's ID, in the lane.
 pub fn section_id(section: SectionId) -> Id {
     Id::new(("arrangement-section", section))
@@ -103,6 +108,8 @@ pub(super) struct ArrangerLane {
     /// The sections that have a widget this frame, in time order, for the
     /// Arrangement's Tab order (the arranger track spec, R14).
     pub tab: Vec<Id>,
+    /// The lane's own widget, which comes after the sections in that order.
+    pub tab_lane: Option<Id>,
 }
 
 impl ArrangerLane {
@@ -119,6 +126,7 @@ impl ArrangerLane {
         events: &mut Vec<UiEvent>,
     ) {
         self.tab.clear();
+        self.tab_lane = None;
         ui.scope_builder(
             UiBuilder::new().id_salt("arranger-track").max_rect(lane),
             |ui| {
@@ -159,11 +167,25 @@ impl ArrangerLane {
             self.drag = None;
         }
         // The lane itself, under the sections' widgets.
-        let background = ui.interact(lane, lane_id().with("background"), Sense::click_and_drag());
+        let background = ui.interact(lane, lane_focus_id(), Sense::click_and_drag());
         if background.secondary_clicked() {
             menus.open_arranger();
         }
         background.context_menu(|ui| menus.show(ui, theme, shell, events));
+        // Spec: arranger-track R14. The lane takes the keyboard after the
+        // sections, and the context-menu key opens its menu.
+        self.tab_lane = Some(background.id);
+        if background.has_focus() && crate::menus::context_menu_keys(ui) {
+            menus.open_arranger();
+            crate::menus::open_keyboard_context_menu(
+                ui.ctx(),
+                background.id,
+                lane.left_top() + egui::vec2(4.0, 4.0),
+            );
+        }
+        crate::menus::keyboard_context_menu(&background, |ui| {
+            menus.show(ui, theme, shell, events);
+        });
         if background.clicked() && !view.selected_sections().is_empty() {
             invoke(events, ids::SELECT_SECTION, json!({ "sections": [] }));
         }

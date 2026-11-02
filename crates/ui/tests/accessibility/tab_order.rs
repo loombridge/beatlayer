@@ -1,7 +1,7 @@
 //! Tab, the neighbour keys and where the focus goes.
 
 use crate::accessibility::helpers::*;
-use crate::common::command;
+use crate::common::{Harness, command};
 use bl_model::TrackId;
 use bl_shell::Area;
 use bl_shell::arrangement_commands::ArrangementState;
@@ -235,10 +235,39 @@ fn tab_reaches_the_sections_in_time_order_straight_after_lock_envelopes() {
         .position(|id| *id == bl_ui::arrangement::lock_envelopes_id())
         .expect("Lock Envelopes is in the order");
     assert_eq!(order[lock + 1..=lock + 3], sections[..]);
+    // The lane itself follows them, and its context-menu key opens the menu
+    // that creates sections.
     assert_eq!(
         order[lock + 4],
+        bl_ui::arrangement::arranger::lane_focus_id()
+    );
+    assert_eq!(
+        order[lock + 5],
         bl_ui::arrangement::optimize_height_id(),
-        "Optimize Height follows the sections"
+        "Optimize Height follows the lane"
+    );
+    for _ in 0..40 {
+        if focused_id(&h) == Some(bl_ui::arrangement::arranger::lane_focus_id()) {
+            break;
+        }
+        press(&mut h, Key::Tab, Modifiers::NONE);
+    }
+    assert_eq!(
+        focused_id(&h),
+        Some(bl_ui::arrangement::arranger::lane_focus_id())
+    );
+    h.frame(vec![egui::Event::Key {
+        key: Key::F10,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::SHIFT,
+    }]);
+    let nodes = Harness::nodes(&h.settle());
+    assert!(
+        nodes
+            .iter()
+            .any(|n| n.label == "Create Sections From Locators")
     );
 }
 

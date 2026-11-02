@@ -854,6 +854,7 @@ impl ArrangementUi {
             );
         } else {
             self.arranger_lane.tab.clear();
+            self.arranger_lane.tab_lane = None;
         }
 
         // The playhead, over the rulers and the lanes.
@@ -2465,7 +2466,12 @@ impl ArrangementUi {
             // after Automation Mode.
             crate::focus::register(ui.ctx(), id, bl_shell::Area::MainView, None);
             // Spec: arranger-track R14. The sections follow it, in time order.
-            for section in &self.arranger_lane.tab {
+            for section in self
+                .arranger_lane
+                .tab
+                .iter()
+                .chain(&self.arranger_lane.tab_lane)
+            {
                 crate::focus::register(ui.ctx(), *section, bl_shell::Area::MainView, None);
             }
             response.widget_info(|| {

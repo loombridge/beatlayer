@@ -67,5 +67,10 @@ path = "tests/main.rs"
 name = "electric"
 harness = false
 
+# Tension against the device budget, run by hand: `cargo bench -p bl-devices --bench tension`.
+[[bench]]
+name = "tension"
+harness = false
+
 [lints]
 workspace = true

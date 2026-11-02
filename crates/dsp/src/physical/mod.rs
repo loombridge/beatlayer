@@ -28,7 +28,7 @@ mod waveguide;
 
 pub use modal::{ModalBank, ModalParams};
 pub use shapes::{ModalTable, Quality, Shape};
-pub use waveguide::{Interaction, Kind, WaveguideBank, WaveguideParams};
+pub use waveguide::{Fittings, Interaction, Kind, WaveguideBank, WaveguideParams};
 
 #[cfg(test)]
 mod tests;

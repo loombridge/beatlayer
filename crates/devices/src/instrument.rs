@@ -79,8 +79,10 @@ pub struct Parts {
     pub legato: Option<ParamId>,
     /// A device that always plays Mono legato (R7).
     pub always_legato: bool,
-    /// Glide Time ([`glide_time`]).
+    /// Glide Time ([`glide_time`]), and the switch of a device whose
+    /// portamento has one: off, a note doesn't glide.
     pub glide_time: Option<ParamId>,
+    pub glide_on: Option<ParamId>,
     /// Glide Mode, Portamento or Glissando ([`glide_mode`]), and Prop
     /// ([`glide_prop`]).
     pub glide_mode: Option<ParamId>,
@@ -100,6 +102,10 @@ pub struct Parts {
     pub retrigger: Option<ParamId>,
     /// Unison's copies, Detune, Spread and Delay (R11 to R13).
     pub unison_voices: Option<ParamId>,
+    /// The switch of a device whose unison has one (off, one copy), and
+    /// whether its Voices is a choice of 2 or 4 copies, by index.
+    pub unison_on: Option<ParamId>,
+    pub unison_choice: bool,
     pub unison_detune: Option<ParamId>,
     pub unison_spread: Option<ParamId>,
     pub unison_delay: Option<ParamId>,
@@ -394,14 +400,23 @@ impl Config {
                 _ => StealPriority::Newest,
             },
             retrigger: get(parts.retrigger, 0.0) >= 0.5,
-            glide_secs: (get(parts.glide_time, 0.0) * 1e-3) as f32,
+            glide_secs: if get(parts.glide_on, 1.0) >= 0.5 {
+                (get(parts.glide_time, 0.0) * 1e-3) as f32
+            } else {
+                0.0
+            },
             glide_prop: get(parts.glide_prop, 0.0) >= 0.5,
             glissando: get(parts.glide_mode, 0.0) >= 0.5,
             glide_always: !parts.glide_only_held && get(parts.glide_legato, 0.0) < 0.5,
             poly_glide: parts.poly_glide,
             scale_aware: get(parts.use_scale, 0.0) >= 0.5,
             glide_scale: get(parts.use_scale, 0.0) >= 0.5 && get(parts.scale_and, 1.0) >= 0.5,
-            copies: (get(parts.unison_voices, 1.0) as usize).clamp(1, copies_max),
+            copies: if get(parts.unison_on, 1.0) < 0.5 {
+                1
+            } else {
+                let n = get(parts.unison_voices, 1.0) as usize;
+                (if parts.unison_choice { 2 + 2 * n } else { n }).clamp(1, copies_max)
+            },
             detune: get(parts.unison_detune, 0.0) as f32,
             spread: (get(parts.unison_spread, 0.0) / 100.0) as f32,
             delay_ms: get(parts.unison_delay, 0.0) as f32,

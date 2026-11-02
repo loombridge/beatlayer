@@ -251,7 +251,7 @@ impl ClipViewUi {
                     name: clip.name.clone(),
                     colour: clip
                         .colour
-                        .map_or(theme.colors.accent.0, |swatch| theme.swatch(swatch)),
+                        .map_or(theme.colors.accent.0, |swatch| theme.colour(swatch)),
                     scale: clip.scale,
                     midi: midi.clone(),
                     clip_start: clip.start,

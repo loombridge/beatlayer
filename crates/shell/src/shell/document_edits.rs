@@ -732,6 +732,28 @@ impl Shell {
         }
     }
 
+    /// Runs the arranger track's commands.
+    pub(super) fn run_arranger(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        // Spec: arranger-track R1 to R12. Sections are part of the set; the
+        // moves, copies and deletes are the …Time operations.
+        let before = self.editor.document().clone();
+        let edge_fades = self.create_fades_on_clip_edges();
+        let result = crate::arrangement::arranger::run(
+            id,
+            args,
+            &mut self.editor,
+            &mut self.arrangement,
+            edge_fades,
+        )
+        .map_err(|failure| edit_error(id, failure));
+        if *self.editor.document() != before {
+            self.dirty = true;
+            self.document_changed();
+        }
+        self.touch();
+        result
+    }
+
     /// Runs the locator commands.
     pub(super) fn run_locator(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         // Spec: time-editing R1 to R13. The locators are part of the

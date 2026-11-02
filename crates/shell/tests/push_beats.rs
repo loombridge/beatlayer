@@ -302,7 +302,7 @@ fn rgb(rig: &Rig, pad: &str) -> [u8; 3] {
 /// The colour of a swatch of the default track palette.
 fn swatch(rig: &Rig, track: TrackId) -> [u8; 3] {
     let colour = rig.shell.editor().document().track(track).unwrap().colour();
-    bl_model::swatch_rgb(&bl_model::DEFAULT_TRACK_PALETTE, colour)
+    colour.rgb(&bl_model::DEFAULT_TRACK_PALETTE)
 }
 
 fn dark(rig: &Rig) -> bool {
@@ -659,7 +659,7 @@ fn clip_colour(rig: &Rig) -> [u8; 3] {
     let doc = rig.shell.editor().document();
     let (id, _) = rig.clip().unwrap();
     let swatch = doc.clip(id).unwrap().colour.unwrap();
-    bl_model::swatch_rgb(&bl_model::DEFAULT_TRACK_PALETTE, swatch)
+    swatch.rgb(&bl_model::DEFAULT_TRACK_PALETTE)
 }
 
 // Spec: push-2-notes R21 to R23. A step with a note is the clip's colour,

@@ -2,7 +2,8 @@
 
 use super::Action::{Choice, Command as Cmd, Omitted, Shortcut as Key, Submenu};
 use super::{
-    Action, D24, IMP_01, IMP_25, IMP_25_CLOSE_WINDOWS, IMP_33, IMP_34, IMP_35, Row, SEPARATOR,
+    Action, D24, IMP_01, IMP_22, IMP_25, IMP_25_CLOSE_WINDOWS, IMP_33, IMP_34, IMP_35, Row,
+    SEPARATOR,
 };
 use crate::arrangement::{SHOW_IN_OUT, SHOW_RETURN_TRACKS, SHOW_VOLUME};
 use crate::assistant::VIEW_TOGGLE_ASSISTANT;
@@ -158,7 +159,12 @@ pub(super) const VIEW: &[Row] = &[
     ),
     SEPARATOR,
     ("M-VIEW-034", "Overview", Key(&["S-VIEW-011"])),
-    // IMP-33's switch, straight after Overview, with no key.
+    (
+        IMP_22,
+        "Arranger Track",
+        Cmd(crate::arranger::ARRANGER_TRACK),
+    ),
+    // IMP-33's switch, after the Arranger Track's, with no key.
     (IMP_33, "Chord Lane", Cmd(VIEW_CHORD_LANE)),
     (
         "M-VIEW-035",

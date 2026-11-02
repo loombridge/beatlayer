@@ -12,7 +12,7 @@ use bl_model::PluginFormat;
 pub use bl_shell_spec::midi_io::PortDirection;
 pub use bl_shell_spec::settings::{
     Appearance, AutomationRecordMode, BRIGHTNESS, BUNDLED_THEME, COLOR_HUE, COLOR_INTENSITY,
-    ClipColour, CollectFiles, DefaultWarpMode, GRID_LINE_INTENSITY, LaunchPrefs,
+    ClipColour, CollectFiles, CustomColours, DefaultWarpMode, GRID_LINE_INTENSITY, LaunchPrefs,
     LoopWarpShortSamples, SessionAutomationTracks, SettingsPage, TakeoverMode, ThemeLook, Tone,
     WarpPrefs, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor, zoom_percent,
     zoom_step,

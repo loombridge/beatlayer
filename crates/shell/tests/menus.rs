@@ -106,6 +106,8 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         commands::SETTINGS_SET_DEFAULT_TRACK_COLOUR,
         commands::SETTINGS_SET_REDUCED_AUTOMATIC_COLOURS,
         commands::SETTINGS_SET_CLIP_COLOUR,
+        commands::SETTINGS_SET_NEW_TRACKS_TAKE_GROUP_COLOUR,
+        commands::SETTINGS_USE_CUSTOM_COLOUR,
         // The Record, Warp & Launch page's switch (the audio clips spec,
         // R22).
         commands::SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,

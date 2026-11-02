@@ -102,7 +102,7 @@ struct TrackRepr {
     /// The track's colour (the themes spec, R14). Sets saved before
     /// WP-6.30b have none, which loads as `id mod 14` (R21).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    colour: Option<u8>,
+    colour: Option<crate::Colour>,
     /// The track's own info text (the Info View spec, R9). Sets saved
     /// before WP-6.58 have none.
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -295,6 +295,10 @@ impl TryFrom<DocumentRepr> for Document {
             settings.arrangement_loop.length,
         )?;
         check_locators(&settings.locators)?;
+        crate::section::check_sections(&settings.sections)?;
+        for section in &settings.sections {
+            loader.claim(section.id.0)?;
+        }
         crate::chord_lane::check_all(&settings.chord_lane)?;
         // The engine looks a note's region up by its order.
         settings.chord_lane.sort_by_key(|region| region.start);
@@ -334,7 +338,7 @@ impl TryFrom<DocumentRepr> for Document {
             for scene in scenes {
                 loader.claim(scene.id.0)?;
                 if let Some(colour) = scene.colour {
-                    crate::colour::check_swatch("scene colour", colour)?;
+                    colour.check("scene colour")?;
                 }
                 scene.follow.check()?;
             }
@@ -487,7 +491,7 @@ impl Loader {
         track.tuning_layout = repr.tuning_layout;
         track.link = repr.link;
         if let Some(colour) = repr.colour {
-            crate::colour::check_swatch("track colour", colour)?;
+            colour.check("track colour")?;
             track.colour = colour;
         }
         track.frozen = repr.frozen;
@@ -909,7 +913,7 @@ mod tests {
                 },
             ),
         ]);
-        wet_chain.colour = Some(12);
+        wet_chain.colour = Some(12.into());
         wet_chain.info = "the wet one".to_owned();
         wet_chain.mixer.volume = 0.5;
         wet_chain.mixer.pan = -0.25;

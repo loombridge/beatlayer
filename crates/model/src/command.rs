@@ -21,6 +21,7 @@ use crate::clip::{
     TakeLane, clip_entry, crossfades,
 };
 use crate::clip_param::ClipParam;
+use crate::colour::Colour;
 use crate::device::{Device, DeviceKind, DeviceRole, WavetableChoice};
 use crate::document::Document;
 use crate::error::ModelError;
@@ -29,7 +30,7 @@ use crate::follow::FollowPatch;
 use crate::groove::{GLOBAL_AMOUNT_MAX, Groove, GrooveBase, check_percent};
 use crate::ids::{
     ChainId, ChordRegionId, ClipId, ContentHash, DeviceId, GrooveId, LinkGroupId, LocatorId,
-    ParamId, SceneId, TakeLaneId, TrackId,
+    ParamId, SceneId, SectionId, TakeLaneId, TrackId,
 };
 use crate::launch::{ClipLaunch, LaunchMode, LaunchQuantization};
 use crate::layers::{
@@ -45,6 +46,7 @@ use crate::record_quantization::RecordQuantization;
 use crate::sample_edits::{SampleEdit, SampleRange, SampleRegion};
 use crate::scale::{Scale, ScaleName};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
+use crate::section::SongSection;
 use crate::shared::Shared;
 use crate::track::{
     Channel, CrossfadeAssign, Input, MidiTo, Mixer, Monitor, Output, PanMode, SendTap, Tap, Track,
@@ -350,6 +352,42 @@ pub enum Command {
         #[serde(default)]
         clips: Vec<ClipId>,
     },
+    /// Adds a section to the arranger track (the arranger track spec, R3 and
+    /// R5). A section with no name of its own is named "Section" and the
+    /// next whole number.
+    AddSection {
+        /// The section, with a new ID.
+        section: SongSection,
+    },
+    /// Removes a section and nothing else: the tracks stay as they are (R11).
+    RemoveSection {
+        /// The section.
+        section: SectionId,
+    },
+    /// Changes a section's name, colour, start or length, leaving what is
+    /// left out as it was (R7). The tracks stay as they are.
+    EditSection {
+        /// The section.
+        section: SectionId,
+        /// The new name.
+        #[serde(default)]
+        name: Option<String>,
+        /// The new colour, a swatch from 0 to 69.
+        #[serde(default)]
+        colour: Option<u8>,
+        /// The new start: 0 (1.1.1) or later.
+        #[serde(default)]
+        start: Option<Ticks>,
+        /// The new length: more than 0. A span that would overlap another
+        /// section is refused.
+        #[serde(default)]
+        length: Option<Ticks>,
+    },
+    /// Shows or hides the arranger track (R1). It is no undo step.
+    SetArrangerTrack {
+        /// Whether the track shows.
+        shown: bool,
+    },
     /// Switches Punch-In on or off: with it on, recording into the
     /// Arrangement starts at the loop brace's start, whether or not the Loop
     /// switch is on.
@@ -433,8 +471,8 @@ pub enum Command {
     SetTrackColour {
         /// The tracks, each listed once.
         tracks: Vec<TrackId>,
-        /// The swatch.
-        colour: u8,
+        /// The swatch, or a `#RRGGBB` colour.
+        colour: Colour,
     },
     /// Gives every clip of each track its track's colour: in the
     /// Arrangement, in its Session slots and in its take lanes. Tracks that
@@ -1001,8 +1039,8 @@ pub enum Command {
     SetClipColour {
         /// The clips, each listed once.
         clips: Vec<ClipId>,
-        /// The swatch.
-        colour: u8,
+        /// The swatch, or a `#RRGGBB` colour.
+        colour: Colour,
     },
     /// Changes a clip's length, keeping its start.
     SetClipLength {
@@ -1752,7 +1790,7 @@ pub enum Command {
         /// The scenes, each listed once.
         scenes: Vec<SceneId>,
         /// The swatch, or `null` for none.
-        colour: Option<u8>,
+        colour: Option<Colour>,
     },
 
     /// Puts a clip in a track's Session slot at `scene`: what Insert Empty
@@ -2545,8 +2583,8 @@ pub enum Command {
     SetChainColour {
         /// The chain.
         chain: ChainId,
-        /// The swatch, or `null` for none.
-        colour: Option<u8>,
+        /// The swatch, or a `#RRGGBB` colour, or `null` for none.
+        colour: Option<Colour>,
     },
     /// Gives a drum rack's chain the swatch Push 2 shows for its pad, from
     /// 0 to 69, or `null` to show the track's colour again.
@@ -2705,7 +2743,7 @@ pub enum Command {
         /// The macro, numbered from 1.
         macro_number: u8,
         /// The swatch, or `null` for none.
-        colour: Option<u8>,
+        colour: Option<Colour>,
     },
     /// Sets a macro's info text (macros spec, R14). Empty clears it.
     SetMacroInfo {
@@ -3039,6 +3077,10 @@ impl Command {
             Self::SetSongStart { .. } => "Set Song Start Time",
             Self::InsertTime { .. } => "Insert Silence",
             Self::DeleteTime { .. } => "Delete Time",
+            Self::AddSection { .. } => "Add Section",
+            Self::RemoveSection { .. } => "Remove Section",
+            Self::EditSection { .. } => "Edit Section",
+            Self::SetArrangerTrack { .. } => "Arranger Track",
             Self::SetPunchIn { .. } => "Punch-In",
             Self::SetPunchOut { .. } => "Punch-Out",
             Self::SetMetronomeEnabled { .. } => "Metronome",
@@ -3313,7 +3355,7 @@ impl Command {
             // WP-5.1. Beatlayer's own names, after the device ones.
             Self::InsertChainDevice { .. } => "Insert Device",
             Self::MoveDeviceToChain { .. } => "Move Device",
-            Self::GroupDevices { .. } => "Group",
+            Self::GroupDevices { .. } => "Group Devices",
             Self::UngroupDevice { .. } => "Ungroup",
             Self::SetDeviceEnabledAll { .. } => "Change \"Device On\"",
             Self::AddChain { .. } => "Insert Chain",
@@ -3384,7 +3426,10 @@ impl Command {
     /// Nor is the pad layout a controller plays the scale in.
     #[must_use]
     pub fn records_undo(&self) -> bool {
-        !matches!(self, Self::SetCueMode { .. } | Self::SetPadLayout { .. })
+        !matches!(
+            self,
+            Self::SetCueMode { .. } | Self::SetPadLayout { .. } | Self::SetArrangerTrack { .. }
+        )
     }
 
     /// The undo step's name for this command run on `before`: the same as
@@ -3476,6 +3521,7 @@ impl Command {
             Self::GroupDevices { rack, .. } => rack.ids(),
             Self::CreateScene { id, .. } => vec![id.0],
             Self::AddLocator { locator } => vec![locator.id.0],
+            Self::AddSection { section } => vec![section.id.0],
             Self::AddChordRegion { region } => vec![region.id.0],
             Self::InsertTime { clips, .. } | Self::DeleteTime { clips, .. } => {
                 clips.iter().map(|clip| clip.0).collect()
@@ -3574,6 +3620,19 @@ impl Document {
             }
             Command::InsertTime { at, length, clips } => self.insert_time(*at, *length, clips),
             Command::DeleteTime { start, end, clips } => self.delete_time(*start, *end, clips),
+            Command::AddSection { section } => self.add_section(section.clone()),
+            Command::RemoveSection { section } => self.remove_section(*section),
+            Command::EditSection {
+                section,
+                name,
+                colour,
+                start,
+                length,
+            } => self.edit_section(*section, name.as_deref(), *colour, *start, *length),
+            Command::SetArrangerTrack { shown } => {
+                self.settings.arranger_track = *shown;
+                Ok(())
+            }
             Command::AddLocator { locator } => self.add_locator(locator.clone()),
             // Spec: chord-lane R2 to R5.
             Command::AddChordRegion { region } => self.add_chord_region(*region),
@@ -3709,7 +3768,7 @@ impl Document {
                 Ok(())
             }
             Command::SetTrackColour { tracks, colour } => {
-                crate::colour::check_swatch("track colour", *colour)?;
+                colour.check("track colour")?;
                 for track in each_once(tracks, |t| t.0)? {
                     self.track_ref(track)?;
                     self.colour_track(track, *colour)?;
@@ -4285,7 +4344,7 @@ impl Document {
             } => self.move_clip_to_lane(*clip, *track, *lane, *start),
             Command::MoveClips { clips, by } => self.move_clips(clips, *by),
             Command::SetClipColour { clips, colour } => {
-                crate::colour::check_swatch("clip colour", *colour)?;
+                colour.check("clip colour")?;
                 for clip in each_once(clips, |c| c.0)? {
                     if self.clip_ref(clip)?.colour != Some(*colour) {
                         self.clip_mut(clip)?.colour = Some(*colour);
@@ -4902,7 +4961,7 @@ impl Document {
             }
             Command::SetSceneColour { scenes, colour } => {
                 if let Some(colour) = colour {
-                    crate::colour::check_swatch("scene colour", *colour)?;
+                    colour.check("scene colour")?;
                 }
                 for id in each_once(scenes, |s| s.0)? {
                     let position = self.scene_position(id).ok_or(ModelError::NoSuchScene(id))?;
@@ -5566,7 +5625,7 @@ impl Document {
             }
             Command::SetChainColour { chain, colour } => {
                 if let Some(colour) = colour {
-                    check_value("chain colour", f64::from(*colour), *colour < CHAIN_COLOURS)?;
+                    colour.check("chain colour")?;
                 }
                 if self.chain_ref(*chain)?.colour != *colour {
                     self.chain_mut(*chain)?.colour = *colour;
@@ -5730,7 +5789,7 @@ impl Document {
                 colour,
             } => {
                 if let Some(colour) = colour {
-                    check_value("macro colour", f64::from(*colour), *colour < CHAIN_COLOURS)?;
+                    colour.check("macro colour")?;
                 }
                 self.edit_macro(*rack, *macro_number, |m| m.colour = *colour)
             }
@@ -8968,7 +9027,7 @@ impl Document {
             .ok_or(ModelError::NoSuchClip(id))
     }
 
-    fn colour_track(&mut self, id: TrackId, colour: u8) -> Result<(), ModelError> {
+    fn colour_track(&mut self, id: TrackId, colour: Colour) -> Result<(), ModelError> {
         if self.track_ref(id)?.colour != colour {
             self.track_mut(id)?.colour = colour;
         }
@@ -8977,7 +9036,7 @@ impl Document {
 
     /// Colours every clip a track holds: its Arrangement lane, its Session
     /// slots and its take lanes.
-    fn colour_clips_of(&mut self, id: TrackId, colour: u8) -> Result<(), ModelError> {
+    fn colour_clips_of(&mut self, id: TrackId, colour: Colour) -> Result<(), ModelError> {
         let clips: Vec<ClipId> = self
             .track_ref(id)?
             .all_clips()
@@ -9187,7 +9246,7 @@ impl Document {
         Ok(())
     }
 
-    fn check_fresh(&self, id: Id) -> Result<(), ModelError> {
+    pub(crate) fn check_fresh(&self, id: Id) -> Result<(), ModelError> {
         if self.contains(id) {
             Err(ModelError::IdInUse(id))
         } else {
@@ -9632,7 +9691,7 @@ pub(crate) fn check_marker_order(audio: &AudioData) -> Result<(), ModelError> {
 /// playing (the audio clips spec, R16).
 pub(crate) fn check_clip(clip: &Clip) -> Result<(), ModelError> {
     if let Some(colour) = clip.colour {
-        crate::colour::check_swatch("clip colour", colour)?;
+        colour.check("clip colour")?;
     }
     check_offset(clip.offset)?;
     if clip.data.is_audio() && clip.offset != Ticks::ZERO {

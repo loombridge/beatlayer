@@ -207,6 +207,13 @@ pub const SETTINGS_SET_DEFAULT_TRACK_COLOUR: &str = "settings.set_default_track_
 pub const SETTINGS_SET_REDUCED_AUTOMATIC_COLOURS: &str = "settings.set_reduced_automatic_colours";
 /// `settings.set_clip_colour`: choose Clip Color.
 pub const SETTINGS_SET_CLIP_COLOUR: &str = "settings.set_clip_colour";
+/// `settings.set_new_tracks_take_group_colour`: switch New Tracks Take Group
+/// Color (the themes spec, R30).
+pub const SETTINGS_SET_NEW_TRACKS_TAKE_GROUP_COLOUR: &str =
+    "settings.set_new_tracks_take_group_colour";
+/// `settings.use_custom_colour`: put a colour in the row of custom colours,
+/// or mark it as used (the themes spec, R28).
+pub const SETTINGS_USE_CUSTOM_COLOUR: &str = "settings.use_custom_colour";
 /// `settings.set_create_fades_on_clip_edges`: switch Create Fades on Clip
 /// Edges.
 pub const SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES: &str = "settings.set_create_fades_on_clip_edges";
@@ -376,6 +383,8 @@ pub const IDS: &[&str] = &[
     SETTINGS_SET_DEFAULT_TRACK_COLOUR,
     SETTINGS_SET_REDUCED_AUTOMATIC_COLOURS,
     SETTINGS_SET_CLIP_COLOUR,
+    SETTINGS_SET_NEW_TRACKS_TAKE_GROUP_COLOUR,
+    SETTINGS_USE_CUSTOM_COLOUR,
     SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
     SETTINGS_SET_RETUNE_ON_TUNING_LOAD,
     SETTINGS_SET_SNAP_AUTOMATION_TO_GRID,
@@ -567,6 +576,15 @@ pub struct SwatchArgs {
     /// A swatch of the palette of 5 rows of 14, from 0 to 69.
     #[schemars(range(min = 0, max = 69))]
     pub colour: u8,
+}
+
+/// Arguments of `settings.use_custom_colour`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CustomColourArgs {
+    /// The colour, `#RRGGBB`.
+    #[schemars(regex(pattern = "^#[0-9A-Fa-f]{6}$"))]
+    pub colour: String,
 }
 
 /// Arguments of `settings.set_clip_colour`.
@@ -2224,6 +2242,35 @@ fn specs() -> Vec<CommandSpec> {
             .permission(Permission::Edit)
             .context(Settings)
             .args::<ClipColourArgs>()
+            .result::<()>(),
+        CommandSpec::new(
+            SETTINGS_SET_NEW_TRACKS_TAKE_GROUP_COLOUR,
+            "New Tracks Take Group Color",
+        )
+        .description(
+            "Switches New Tracks Take Group Color, off in a new install. On, a track made \
+             inside a group (inserted among the group's tracks, or made by dropping a file, a \
+             device or clips among them) takes the group's colour instead of an automatic or \
+             default one; a track moved into a group, and the tracks Group Tracks puts into a \
+             new group, keep their colours. Kept for the next start; changes nothing in the \
+             set.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<SwitchArgs>()
+        .result::<()>(),
+        CommandSpec::new(SETTINGS_USE_CUSTOM_COLOUR, "Use Custom Color")
+            .description(
+                "Records a colour of one's own, `#RRGGBB`, in the row of 14 custom colours \
+                 under every palette: a colour the row holds is marked as used last, any other \
+                 goes into the first empty place, or into the place of the colour used longest \
+                 ago when the row is full. The row is kept for the next start and is the same \
+                 in every set; it changes nothing in the set, and colouring something is \
+                 `track.set_colour` and the other colour commands, which take `#RRGGBB` too.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<CustomColourArgs>()
             .result::<()>(),
         CommandSpec::new(SETTINGS_SET_COLOR_HUE, "Color Hue")
             .description(

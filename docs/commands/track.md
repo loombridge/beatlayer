@@ -462,7 +462,7 @@ Result: [`ChangeSet`](README.md#changeset).
 
 **Change Track Color**. Permission: `edit`. Contexts: `track-headers`.
 
-Colours tracks, Main and the returns among them, with swatch `colour` of the palette of 5 rows of 14 (0 to 69, numbered from the top row's left, row by row: swatch 14 is row 2, colour 1). Their clips keep their colours. A colour is never heard: the engine gets nothing.
+Colours tracks, Main and the returns among them, with swatch `colour` of the palette of 5 rows of 14 (0 to 69, numbered from the top row's left, row by row: swatch 14 is row 2, colour 1), or a colour of one's own as `#RRGGBB`, saved as written and drawn as it is, whatever the theme. Their clips keep their colours. A colour is never heard: the engine gets nothing.
 
 Default keys: none.
 
@@ -471,7 +471,7 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `tracks` | array of [`TrackId`](README.md#trackid) | yes | The tracks, each listed once. |
-| `colour` | integer from 0 to 255 | yes | The swatch. |
+| `colour` | [`Colour`](README.md#colour) | yes | The swatch, or a `#RRGGBB` colour. |
 
 Result: [`ChangeSet`](README.md#changeset).
 

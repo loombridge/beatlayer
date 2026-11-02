@@ -677,6 +677,76 @@ fn a_plug_in_rows_menu_hides_it_and_content_options_shows_hidden_plug_ins() {
     assert!(!state(&mut h).rows[0].hidden);
 }
 
+// Spec: plugin-scanning R15 (L-BRW-016). A plug-in with a preset saved from
+// it has a fold triangle on its row; clicking it lists the preset beneath.
+#[test]
+fn a_plug_ins_fold_triangle_lists_its_presets() {
+    if bl_plugin_host::scan::scan_program().is_none() {
+        eprintln!("beatlayer-scan wasn't built; skipping (build the workspace's bins)");
+        return;
+    }
+    let scratch = Scratch::new("presets");
+    let root = scratch.0.join("User Library");
+    create_user_library(&root).unwrap();
+    let plugin = bl_model::Device::new(
+        bl_model::DeviceId(bl_core::id::Id::new(7).unwrap()),
+        bl_test_clap::PLUGIN_NAME,
+        bl_model::DeviceKind::Plugin {
+            format: bl_model::PluginFormat::Clap,
+            plugin_id: bl_test_clap::PLUGIN_ID.to_owned(),
+        },
+    );
+    bl_project::preset::Preset::of(&plugin)
+        .save(&root.join("Presets/Audio Effects/Test Gain Echo/Mine.blpreset"))
+        .unwrap();
+    let mut h = Harness::manual_with_title_bar(Window::Main);
+    h.shell.set_user_library(Some(root));
+    assert!(
+        h.shell
+            .wait_for_browser_index(std::time::Duration::from_secs(20))
+    );
+    h.shell
+        .run(
+            bl_shell::plugin_commands::SCAN,
+            json!({ "paths": [text(bl_test_clap::bundle())] }),
+        )
+        .unwrap();
+    h.shell
+        .run(ids::OPEN_PLACE, json!({ "label": "plug_ins" }))
+        .unwrap();
+    h.shell
+        .run(ids::SEARCH, json!({ "query": "gain echo" }))
+        .unwrap();
+    h.shell.set_focused_area(bl_shell::Area::Browser);
+    let row = state(&mut h).rows[0].clone();
+    assert!(row.presets && !row.open, "{row:?}");
+
+    // A click on the triangle, at the row's left, opens it.
+    let nodes = look(&mut h);
+    let bounds = nodes
+        .iter()
+        .find(|n| n.role == Role::ListItem && n.label == bl_test_clap::PLUGIN_NAME)
+        .and_then(|n| n.bounds)
+        .expect("the plug-in's row");
+    h.click(pos2(
+        (bounds.x0 + 8.0) as f32,
+        ((bounds.y0 + bounds.y1) / 2.0) as f32,
+    ));
+    let rows = state(&mut h).rows;
+    assert!(rows[0].open, "{rows:?}");
+    assert_eq!(
+        (rows[1].kind, rows[1].name.as_str(), rows[1].depth),
+        (bl_shell::browser_commands::ItemKind::Preset, "Mine", 1)
+    );
+    let nodes = look(&mut h);
+    assert!(
+        nodes
+            .iter()
+            .any(|n| n.role == Role::ListItem && n.label == "Mine"),
+        "the preset is drawn under the row"
+    );
+}
+
 /// Drags from one point to another, in steps, and settles.
 fn drag(h: &mut Harness, from: Pos2, to: Pos2) {
     h.frame(vec![Event::PointerMoved(from)]);

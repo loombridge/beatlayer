@@ -32,6 +32,7 @@ The commands, by the part of their ID before its first dot:
 - [`app`](app.md)
 - [`ara`](ara.md)
 - [`arrangement`](arrangement.md)
+- [`arranger`](arranger.md)
 - [`articulation`](articulation.md)
 - [`assistant`](assistant.md)
 - [`audio`](audio.md)
@@ -1075,11 +1076,13 @@ What the Arrangement View shows: every view command returns it.
 | `show_in_out` | boolean | yes | Whether the track headers show their In/Out column. |
 | `show_volume` | boolean | yes | Whether the track headers show their volume, pan, and sends. |
 | `show_return_tracks` | boolean | yes | Whether the return tracks' rows show in the lanes. |
+| `arranger_track` | boolean | no | Whether the arranger track shows above the track lanes (WP-6.45). |
 | `automation_lanes` | array of [`AutomationLane`](#automationlane) | no | Each track's automation lanes, for the tracks whose lanes aren't as a new track's (the main lane showing its volume, and no lanes of its own): the choosers' choices, the lanes of their own and whether they show (the automation spec, R32). |
 | `selected_breakpoint` | [`SelectedBreakpoint`](#selectedbreakpoint) or null | no | The breakpoint selected in that lane (WP-6.26), if any: `automation.select_breakpoint` sets it. |
 | `selected_chord_region` | [`ChordRegionId`](#chordregionid) or null | no | The selected chord region (WP-6.48), if any: Delete deletes it. |
 | `selected_fade` | [`FadeHandleState`](#fadehandlestate) or null | no | The selected fade handle (WP-6.51), if any: Delete deletes its fade. |
 | `selected_lane` | [`Lane`](#lane) or null | no | The automation lane that has the keyboard (WP-6.26): the one the last click, or Up and Down, selected, while Automation Mode is on. The keys of the automation editing spec's R20 to R26 act on its envelope. |
+| `selected_sections` | array of [`SectionId`](#sectionid) | no | The selected sections of the arranger track (WP-6.45), in the order they were selected. The arranger commands act on these. |
 | `selected_take_lanes` | array of [`TakeLaneId`](#takelaneid) | no | The take lanes whose headers are selected (the comping spec, R26), in the order they were selected. Their tracks are selected tracks too. |
 | `selected_time_signature` | [`Ticks`](#ticks) or null | no | The position of the selected time-signature marker (WP-6.61), if any: Delete deletes it and Cmd-R types its signature. |
 | `shown_take_lanes` | array of [`TrackId`](#trackid) | no | The tracks whose take lanes show (the comping spec, R24). |
@@ -1091,6 +1094,10 @@ What the Arrangement View shows: every view command returns it.
 {
   "description": "What the Arrangement View shows: every view command returns it.",
   "properties": {
+    "arranger_track": {
+      "description": "Whether the arranger track shows above the track lanes (WP-6.45).",
+      "type": "boolean"
+    },
     "automation_arm": {
       "description": "Whether Automation Arm is on: while Arrangement Record runs, moving a control writes its values into the parameter's envelope.",
       "type": "boolean"
@@ -1211,6 +1218,13 @@ What the Arrangement View shows: every view command returns it.
       },
       "type": "array"
     },
+    "selected_sections": {
+      "description": "The selected sections of the arranger track (WP-6.45), in the order they were selected. The arranger commands act on these.",
+      "items": {
+        "$ref": "#/$defs/SectionId"
+      },
+      "type": "array"
+    },
     "selected_take_lanes": {
       "description": "The take lanes whose headers are selected (the comping spec, R26), in the order they were selected. Their tracks are selected tracks too.",
       "items": {
@@ -1320,6 +1334,43 @@ What the Arrangement View shows: every view command returns it.
     "show_in_out",
     "show_volume",
     "show_return_tracks"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ArrangerResult`
+
+What an arranger command did: the sections selected afterwards, and whether it was recorded as an undo step.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `selected_sections` | array of [`SectionId`](#sectionid) | yes | The sections selected afterwards. |
+| `undo_step` | boolean | yes | Whether the edit was recorded as an undo step: false when it changed nothing. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What an arranger command did: the sections selected afterwards, and whether it was recorded as an undo step.",
+  "properties": {
+    "selected_sections": {
+      "description": "The sections selected afterwards.",
+      "items": {
+        "$ref": "#/$defs/SectionId"
+      },
+      "type": "array"
+    },
+    "undo_step": {
+      "description": "Whether the edit was recorded as an undo step: false when it changed nothing.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "selected_sections",
+    "undo_step"
   ],
   "type": "object"
 }
@@ -4424,7 +4475,7 @@ One chain of a rack: its own name, colour, info text and mixer, and its devices 
 | `name` | string | yes | The chain's name. |
 | `audio_to` | [`TrackId`](#trackid) or null | no | Where a return chain's output goes: one of the set's return tracks, or the rack's own output while there is none (drum racks spec, R8). |
 | `choke` | integer or null | no | The choke group a drum rack's chain is in, from 1 to 16, or none. |
-| `colour` | integer or null | no | The chain's colour: an index into the palette of 5 rows of 14 swatches, from 0 to 69, or none. |
+| `colour` | [`Colour`](#colour) or null | no | The chain's colour: an index into the palette of 5 rows of 14 swatches, from 0 to 69, or none. |
 | `devices` | array of [`Device`](#device) | no | The chain's devices, in signal order. |
 | `info` | string | no | The info text the user gave the chain (Edit Info Text). |
 | `is_return` | boolean | no | Whether this is one of a drum rack's return chains, which sit after its drum chains (drum racks spec, R7). |
@@ -4463,14 +4514,15 @@ One chain of a rack: its own name, colour, info text and mixer, and its devices 
       ]
     },
     "colour": {
-      "description": "The chain's colour: an index into the palette of 5 rows of 14 swatches, from 0 to 69, or none.",
-      "format": "uint8",
-      "maximum": 255,
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Colour"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The chain's colour: an index into the palette of 5 rows of 14 swatches, from 0 to 69, or none."
     },
     "devices": {
       "default": [],
@@ -4813,7 +4865,7 @@ One row of a rack's chain list (racks spec, R21).
 |---|---|---|---|
 | `id` | [`ChainId`](#chainid) | yes | The chain. |
 | `name` | string | yes | Its name. |
-| `colour` | integer or null | yes | Its colour, a swatch of the palette of 5 rows of 14, if it has one. |
+| `colour` | [`Colour`](#colour) or null | yes | Its colour, a swatch of the palette of 5 rows of 14 or a `#RRGGBB` colour, if it has one. |
 | `enabled` | boolean | yes | Its Chain Activator. |
 | `solo` | boolean | yes | Whether it's soloed. |
 | `hot_swap` | boolean | yes | Whether it's armed for hot-swap by its Hot-Swap button. |
@@ -4832,14 +4884,15 @@ One row of a rack's chain list (racks spec, R21).
   "description": "One row of a rack's chain list (racks spec, R21).",
   "properties": {
     "colour": {
-      "description": "Its colour, a swatch of the palette of 5 rows of 14, if it has one.",
-      "format": "uint8",
-      "maximum": 255,
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Colour"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its colour, a swatch of the palette of 5 rows of 14 or a `#RRGGBB` colour, if it has one."
     },
     "drum": {
       "anyOf": [
@@ -5025,7 +5078,7 @@ A chain folded out as a strip in the mixers (racks spec, R27): the chain, the ra
 | `has_mixer` | boolean | yes | Whether the chain has Volume and Pan: all but a MIDI effect rack's chains do. |
 | `enabled` | boolean | yes | Whether the chain's activator is on. |
 | `solo` | boolean | yes | Whether the chain is soloed. |
-| `colour` | integer or null | no | The chain's colour, a swatch of the palette of 5 rows of 14, if it has one. |
+| `colour` | [`Colour`](#colour) or null | no | The chain's colour, a swatch of the palette of 5 rows of 14, if it has one. |
 | `nested` | [`RackFold`](#rackfold) or null | no | The rack inside this chain, if it has one whose chains fold out too (racks spec, R27): a fold button on this strip shows its chains. |
 
 <details><summary>JSON Schema</summary>
@@ -5039,14 +5092,15 @@ A chain folded out as a strip in the mixers (racks spec, R27): the chain, the ra
       "description": "The chain."
     },
     "colour": {
-      "description": "The chain's colour, a swatch of the palette of 5 rows of 14, if it has one.",
-      "format": "uint8",
-      "maximum": 255,
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Colour"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The chain's colour, a swatch of the palette of 5 rows of 14, if it has one."
     },
     "enabled": {
       "description": "Whether the chain's activator is on.",
@@ -5699,7 +5753,7 @@ A clip on a track's arrangement lane.
 | `length` | [`Ticks`](#ticks) | yes | How long the clip is. Always positive. |
 | `mute` | boolean | yes | Whether the clip is switched off, so it stays in place but doesn't play. |
 | `data` | [`ClipData`](#clipdata) | yes | What the clip plays. |
-| `colour` | integer or null | no | The clip's colour, a swatch from 0 to 69 (the themes spec, R14). A clip handed to a command without one takes its track's colour as it goes in, and a set saved before colours gives each clip its track's on loading, so a clip in a document always has one. |
+| `colour` | [`Colour`](#colour) or null | no | The clip's colour, a swatch from 0 to 69 or a `#RRGGBB` colour (the themes spec, R14, R29). A clip handed to a command without one takes its track's colour as it goes in, and a set saved before colours gives each clip its track's on loading, so a clip in a document always has one. |
 | `envelopes` | array of [`ClipEnvelope`](#clipenvelope) | no | The clip's envelopes (WP-3.15): one per parameter of its track it modulates, in target order. Empty for a clip with none, which is what a set saved before this package holds. |
 | `groove` | [`GrooveId`](#grooveid) or null | no | The clip's groove (WP-6.19): one of the set's Groove Pool, or none. It changes when the clip's notes play, or where its audio plays, and nothing in the clip itself until it is committed. |
 | `info_text` | string | no | The user's own info text (Edit Info Text), which the Info View shows while the pointer is over the clip; empty for none, and left out of the saved set then (the Info View spec, R9). |
@@ -5714,14 +5768,15 @@ A clip on a track's arrangement lane.
   "description": "A clip on a track's arrangement lane.",
   "properties": {
     "colour": {
-      "description": "The clip's colour, a swatch from 0 to 69 (the themes spec, R14). A clip handed to a command without one takes its track's colour as it goes in, and a set saved before colours gives each clip its track's on loading, so a clip in a document always has one.",
-      "format": "uint8",
-      "maximum": 255,
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Colour"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip's colour, a swatch from 0 to 69 or a `#RRGGBB` colour (the themes spec, R14, R29). A clip handed to a command without one takes its track's colour as it goes in, and a set saved before colours gives each clip its track's on loading, so a clip in a document always has one."
     },
     "data": {
       "$ref": "#/$defs/ClipData",
@@ -7137,6 +7192,36 @@ One of:
     {
       "const": "ask",
       "description": "Ask first, with Copy, Don't Copy and Cancel.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `Colour`
+
+A swatch of the palette of 5 rows of 14 (0 to 69, numbered from the top row's left, row by row), or a colour of one's own as `#RRGGBB`.
+
+One of:
+
+- integer from 0 to 69
+- string matching `^#[0-9A-Fa-f]{6}$`
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A swatch of the palette of 5 rows of 14 (0 to 69, numbered from the top row's left, row by row), or a colour of one's own as `#RRGGBB`.",
+  "oneOf": [
+    {
+      "maximum": 69,
+      "minimum": 0,
+      "type": "integer"
+    },
+    {
+      "pattern": "^#[0-9A-Fa-f]{6}$",
       "type": "string"
     }
   ]
@@ -8591,6 +8676,73 @@ A cue the Sample Editor shows (the video spec, R12): a marker embedded in a vide
   "required": [
     "time",
     "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `CustomColours`
+
+The row of custom colours under every palette (themes R28): 14 places, each empty or a colour of the person's own, and the order the places were last used in, which says what a full row gives up.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `places` | array of [`Colour`](#colour) or null | yes | The places, from the first: a `#RRGGBB` colour or null. |
+| `used` | array of integer from 0 to 255 | yes | The places that hold a colour, from the one used longest ago to the one used last. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The row of custom colours under every palette (themes R28): 14 places, each empty or a colour of the person's own, and the order the places were last used in, which says what a full row gives up.",
+  "properties": {
+    "places": {
+      "default": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "description": "The places, from the first: a `#RRGGBB` colour or null.",
+      "items": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Colour"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "type": "array"
+    },
+    "used": {
+      "default": [],
+      "description": "The places that hold a colour, from the one used longest ago to the one used last.",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "places",
+    "used"
   ],
   "type": "object"
 }
@@ -10508,7 +10660,8 @@ What `device_view.state` returns.
 | `track` | [`TrackId`](#trackid) or null | yes | The track whose chain shows: the selected track, or `null` with no track selected. |
 | `track_kind` | [`TrackKind`](#trackkind) or null | yes | That track's kind. |
 | `devices` | array of [`DeviceFrame`](#deviceframe) | yes | Its devices, in signal order. |
-| `selected` | [`DeviceId`](#deviceid) or null | yes | The selected device, if it's in this chain. |
+| `selected` | [`DeviceId`](#deviceid) or null | yes | The first selected device, if it's in this chain. |
+| `selection` | array of [`DeviceId`](#deviceid) | yes | Every selected device in this chain, in order: one run of neighbouring devices (device chains R47). |
 | `hot_swap` | [`HotSwap`](#hotswap) or null | yes | The device being hot-swapped, on any track, and what the browser's bar says ("Swapping Audio Effect"). |
 | `can_paste` | boolean | yes | Whether the clipboard holds a device to paste. |
 | `can_paste_chain` | boolean | yes | Whether the chain clipboard holds chains to paste. |
@@ -10604,7 +10757,15 @@ What `device_view.state` returns.
           "type": "null"
         }
       ],
-      "description": "The selected device, if it's in this chain."
+      "description": "The first selected device, if it's in this chain."
+    },
+    "selection": {
+      "default": [],
+      "description": "Every selected device in this chain, in order: one run of neighbouring devices (device chains R47).",
+      "items": {
+        "$ref": "#/$defs/DeviceId"
+      },
+      "type": "array"
     },
     "track": {
       "anyOf": [
@@ -10634,6 +10795,7 @@ What `device_view.state` returns.
     "track_kind",
     "devices",
     "selected",
+    "selection",
     "hot_swap",
     "can_paste",
     "can_paste_chain",
@@ -16262,6 +16424,7 @@ One row of the content pane.
 | `format` | [`PluginFormat`](#pluginformat) or null | no | For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11). |
 | `hidden` | boolean | no | For a plug-in, whether it is hidden, which the row draws dimmed while Show Hidden Plug-Ins is on (spec: browser-tags R43); left out otherwise. |
 | `nested` | array of integer, at least 0 | no | The collections of the person's own it is in, by their numbers (8 and up); left out while it is in none (spec: browser-tags R46, R48). |
+| `presets` | boolean | no | For a plug-in, whether it has presets listed under its row, which its fold triangle opens (the plug-in scanning spec, R15); `open` says whether they are listed. Left out otherwise. |
 
 <details><summary>JSON Schema</summary>
 
@@ -16355,6 +16518,10 @@ One row of the content pane.
     "path": {
       "description": "Its path on disk; in the Plug-Ins label, the row's key instead: a vendor folder's is `plug-ins:/` and the vendor, a plug-in's is its file, `#`, and its identifier (the plug-in scanning spec, R11).",
       "type": "string"
+    },
+    "presets": {
+      "description": "For a plug-in, whether it has presets listed under its row, which its fold triangle opens (the plug-in scanning spec, R15); `open` says whether they are listed. Left out otherwise.",
+      "type": "boolean"
     }
   },
   "required": [
@@ -19436,7 +19603,7 @@ One macro's saved settings beside its value (macros spec, R10, R14, R16, R21 and
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `colour` | integer or null | no | A swatch of the palette of 5 rows of 14, from 0 to 69, or none. |
+| `colour` | [`Colour`](#colour) or null | no | A swatch of the palette of 5 rows of 14, from 0 to 69, or none. |
 | `info` | string | no | The info text the user gave it (Edit Info Text). |
 | `name` | string | no | The name Rename gave it; empty for its default name (R10). |
 | `randomize_excluded` | boolean | no | Whether Randomize leaves it alone (R16). |
@@ -19451,14 +19618,15 @@ One macro's saved settings beside its value (macros spec, R10, R14, R16, R21 and
   "description": "One macro's saved settings beside its value (macros spec, R10, R14, R16, R21 and R30). A macro's value is a parameter of its rack, in `Device::params`.",
   "properties": {
     "colour": {
-      "description": "A swatch of the palette of 5 rows of 14, from 0 to 69, or none.",
-      "format": "uint8",
-      "maximum": 255,
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Colour"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A swatch of the palette of 5 rows of 14, from 0 to 69, or none."
     },
     "info": {
       "description": "The info text the user gave it (Edit Info Text).",
@@ -19502,7 +19670,7 @@ One macro as `rack.macros` reports it.
 |---|---|---|---|
 | `number` | integer from 0 to 255 | yes | Its number, from 1. |
 | `name` | string | yes | Its name: Rename's, its one parameter's, or "Macro N" (macros spec, R10). |
-| `colour` | integer or null | yes | Its colour: a swatch of the palette of 5 rows of 14, or null. |
+| `colour` | [`Colour`](#colour) or null | yes | Its colour: a swatch of the palette of 5 rows of 14, a `#RRGGBB` colour, or null. |
 | `value` | number | yes | Its value, from 0 to 1. |
 | `text` | string | yes | How it reads: its parameter's value and unit, 0 to 127, or a shared unit (R10). |
 | `style` | [`MacroStyle`](#macrostyle) | yes | How it is drawn and which positions it takes (R21). |
@@ -19518,14 +19686,15 @@ One macro as `rack.macros` reports it.
   "description": "One macro as `rack.macros` reports it.",
   "properties": {
     "colour": {
-      "description": "Its colour: a swatch of the palette of 5 rows of 14, or null.",
-      "format": "uint8",
-      "maximum": 255,
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Colour"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its colour: a swatch of the palette of 5 rows of 14, a `#RRGGBB` colour, or null."
     },
     "mappings": {
       "description": "What it drives, in the order the mappings were made (R9).",
@@ -22117,6 +22286,37 @@ A multisampler's views and selection, as `device_view.state` reports them (R30).
     "layers"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `Neighbour`
+
+The section a Move Earlier or Move Later swaps with.
+
+One of:
+
+- `"earlier"`: The section before it.
+- `"later"`: The section after it.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The section a Move Earlier or Move Later swaps with.",
+  "oneOf": [
+    {
+      "const": "earlier",
+      "description": "The section before it.",
+      "type": "string"
+    },
+    {
+      "const": "later",
+      "description": "The section after it.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -28305,7 +28505,7 @@ What a pad or a Scene/Grid button shows in Session Mode (push-2-tracks R73).
 |---|---|---|---|
 | `shows` | string | yes | Of a pad in the slots: `none` (no track or scene), `empty`, `stopped`, `queued`, `playing`, `stopping` or `recording`. Of a pad in Session Overview: `none`, `ring`, `playing` or `block`. Of a Scene/Grid button: `none`, `empty` or `clip`; in the overview, `none`, `part` or `shown`. |
 | `clip` | [`ClipId`](#clipid) or null | yes | The clip in the pad's slot. |
-| `colour` | integer or null | yes | The swatch of the clip's colour, or of the scene's. |
+| `colour` | [`Colour`](#colour) or null | yes | The clip's colour, or the scene's: a swatch or `#RRGGBB`. |
 
 <details><summary>JSON Schema</summary>
 
@@ -28325,14 +28525,15 @@ What a pad or a Scene/Grid button shows in Session Mode (push-2-tracks R73).
       "description": "The clip in the pad's slot."
     },
     "colour": {
-      "description": "The swatch of the clip's colour, or of the scene's.",
-      "format": "uint8",
-      "maximum": 255,
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Colour"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip's colour, or the scene's: a swatch or `#RRGGBB`."
     },
     "shows": {
       "description": "Of a pad in the slots: `none` (no track or scene), `empty`, `stopped`, `queued`, `playing`, `stopping` or `recording`. Of a pad in Session Overview: `none`, `ring`, `playing` or `block`. Of a Scene/Grid button: `none`, `empty` or `clip`; in the overview, `none`, `part` or `shown`.",
@@ -33687,6 +33888,25 @@ One of:
 
 </details>
 
+### `SectionId`
+
+The ID of a section: a positive integer, unique within the project and never reused.
+
+Type: integer, at least 1.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The ID of a section: a positive integer, unique within the project and never reused.",
+  "format": "uint64",
+  "minimum": 1,
+  "type": "integer"
+}
+```
+
+</details>
+
 ### `SelectEdge`
 
 Which edge of the current scene to select (S-SES-020 to S-SES-022).
@@ -35565,6 +35785,61 @@ One slot: a track's column and a scene's row.
   "required": [
     "track",
     "scene"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SongSection`
+
+A section of the song.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | [`SectionId`](#sectionid) | yes | The section's ID. |
+| `start` | [`Ticks`](#ticks) | yes | Where it starts: 0 (1.1.1) or later. |
+| `length` | [`Ticks`](#ticks) | yes | How long it is: more than 0. |
+| `name` | string | yes | Its name, which may be empty. |
+| `colour` | integer from 0 to 255 | yes | Its colour, a swatch from 0 to 69 (the themes spec, R14). |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A section of the song.",
+  "properties": {
+    "colour": {
+      "description": "Its colour, a swatch from 0 to 69 (the themes spec, R14).",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "id": {
+      "$ref": "#/$defs/SectionId",
+      "description": "The section's ID."
+    },
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "How long it is: more than 0."
+    },
+    "name": {
+      "description": "Its name, which may be empty.",
+      "type": "string"
+    },
+    "start": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it starts: 0 (1.1.1) or later."
+    }
+  },
+  "required": [
+    "id",
+    "start",
+    "length",
+    "name",
+    "colour"
   ],
   "type": "object"
 }
@@ -38161,6 +38436,8 @@ Theme & Colors in `settings.state` (themes R12).
 | `default_track_colour` | integer from 0 to 255 | yes | Default Track Color, a swatch from 0 to 69, which new tracks take while Auto-Assign Track Colors is off. |
 | `reduced_automatic_colours` | boolean | yes | Reduced Automatic Colors. |
 | `clip_colour` | [`ClipColour`](#clipcolour) | yes | Clip Color. |
+| `new_tracks_take_group_colour` | boolean | yes | New Tracks Take Group Color (themes R30). |
+| `custom_colours` | [`CustomColours`](#customcolours) | yes | The row of custom colours under every palette (themes R28). |
 | `appearance` | [`Appearance`](#appearance) | yes | The Appearance chosen. |
 | `drawn_appearance` | [`Appearance`](#appearance) | yes | The appearance drawn now, `light` or `dark`: Follow System resolved. |
 | `themes` | array of string | yes | The themes the Theme chooser offers, in its order. |
@@ -38209,6 +38486,29 @@ Theme & Colors in `settings.state` (themes R12).
       "minimum": -32768,
       "type": "integer"
     },
+    "custom_colours": {
+      "$ref": "#/$defs/CustomColours",
+      "default": {
+        "places": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "used": []
+      },
+      "description": "The row of custom colours under every palette (themes R28)."
+    },
     "default_track_colour": {
       "default": 12,
       "description": "Default Track Color, a swatch from 0 to 69, which new tracks take while Auto-Assign Track Colors is off.",
@@ -38232,6 +38532,11 @@ Theme & Colors in `settings.state` (themes R12).
     "high_contrast": {
       "default": false,
       "description": "High Contrast.",
+      "type": "boolean"
+    },
+    "new_tracks_take_group_colour": {
+      "default": false,
+      "description": "New Tracks Take Group Color (themes R30).",
       "type": "boolean"
     },
     "reduced_automatic_colours": {
@@ -38269,6 +38574,8 @@ Theme & Colors in `settings.state` (themes R12).
     "default_track_colour",
     "reduced_automatic_colours",
     "clip_colour",
+    "new_tracks_take_group_colour",
+    "custom_colours",
     "appearance",
     "drawn_appearance",
     "themes"

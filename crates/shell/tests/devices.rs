@@ -280,6 +280,194 @@ fn cut_copy_paste_and_duplicate() {
     assert_eq!(titles(&shell), ["Test Pass-Through"]);
 }
 
+/// Four devices on the selected track, in order, with the first selected.
+fn four(shell: &mut Shell) -> [DeviceId; 4] {
+    let ids = [gain(), through(), gain(), through()].map(|device| add(shell, device).device);
+    shell
+        .invoke("device.select", json!({ "device": ids[0] }))
+        .unwrap();
+    ids
+}
+
+fn chain(shell: &Shell) -> Vec<DeviceId> {
+    state(shell).devices.into_iter().map(|d| d.id).collect()
+}
+
+fn selection(shell: &Shell) -> Vec<DeviceId> {
+    state(shell).selection
+}
+
+fn steps(shell: &Shell) -> usize {
+    shell.editor().undo_history().len()
+}
+
+fn undo(shell: &mut Shell) {
+    shell.invoke("edit.undo", json!({})).unwrap();
+}
+
+// Spec: device-chains R47
+#[test]
+fn shift_click_selects_a_range_that_only_grows() {
+    let Set { mut shell, .. } = set();
+    let [a, b, c, d] = four(&mut shell);
+    let select = |shell: &mut Shell, args: Value| shell.invoke("device.select", args);
+
+    select(&mut shell, json!({ "device": c, "range": true })).unwrap();
+    assert_eq!(selection(&shell), [a, b, c]);
+    let frames = state(&shell).devices;
+    assert_eq!(
+        frames.iter().map(|f| f.selected).collect::<Vec<_>>(),
+        [true, true, true, false]
+    );
+    assert_eq!(state(&shell).selected, Some(a));
+
+    // Inside the selection, a Shift-click changes nothing.
+    select(&mut shell, json!({ "device": b, "range": true })).unwrap();
+    assert_eq!(selection(&shell), [a, b, c]);
+
+    // Clicking a device on its own, as Cmd-click does, selects that one alone.
+    select(&mut shell, json!({ "device": d })).unwrap();
+    assert_eq!(selection(&shell), [d]);
+    select(&mut shell, json!({ "device": c, "range": true })).unwrap();
+    assert_eq!(selection(&shell), [c, d]);
+    // Growing back over devices already selected takes in the new ones.
+    select(&mut shell, json!({ "device": a, "range": true })).unwrap();
+    assert_eq!(selection(&shell), [a, b, c, d]);
+    select(&mut shell, json!({ "device": b })).unwrap();
+    assert_eq!(selection(&shell), [b]);
+}
+
+// Spec: device-chains R47
+#[test]
+fn device_select_takes_neighbouring_devices_and_reads_them_back() {
+    let Set { mut shell, .. } = set();
+    let [a, b, c, _] = four(&mut shell);
+    let select = |shell: &mut Shell, devices: Vec<DeviceId>| {
+        shell.invoke("device.select", json!({ "devices": devices }))
+    };
+
+    // Shift-Right grows by the neighbour, and a plain key selects one.
+    select(&mut shell, vec![a, b]).unwrap();
+    assert_eq!(selection(&shell), [a, b]);
+    select(&mut shell, vec![c, a, b]).unwrap();
+    assert_eq!(selection(&shell), [a, b, c], "in chain order");
+    assert_eq!(state(&shell).selected, Some(a));
+    let read = shell.invoke("device_view.state", json!({})).unwrap();
+    assert_eq!(read["selection"], json!([a, b, c]));
+
+    assert!(select(&mut shell, vec![a, c]).is_err(), "not neighbours");
+    assert_eq!(selection(&shell), [a, b, c]);
+    shell
+        .invoke("device.select", json!({ "device": b }))
+        .unwrap();
+    assert_eq!(selection(&shell), [b]);
+}
+
+// Spec: device-chains R47
+#[test]
+fn moving_a_selected_device_away_leaves_the_anchor_selected() {
+    let Set {
+        mut shell, audio, ..
+    } = set();
+    let [a, b, c, d] = four(&mut shell);
+    shell
+        .invoke("device.select", json!({ "devices": [a, b] }))
+        .unwrap();
+    shell
+        .invoke(
+            "device.move",
+            json!({ "device": a, "track": audio, "index": 3 }),
+        )
+        .unwrap();
+    assert_eq!(chain(&shell), [b, c, d, a]);
+    assert_eq!(selection(&shell), [a]);
+}
+
+// Spec: device-chains R47
+#[test]
+fn the_commands_act_on_every_selected_device() {
+    let Set { mut shell, .. } = set();
+    let [a, b, c, d] = four(&mut shell);
+    let run = |shell: &mut Shell| {
+        shell
+            .invoke("device.select", json!({ "devices": [b, c] }))
+            .unwrap();
+        steps(shell)
+    };
+
+    // Duplicate: the copies go after the last selected device, selected.
+    let before = run(&mut shell);
+    shell.invoke("device.duplicate", json!({})).unwrap();
+    let now = chain(&shell);
+    assert_eq!((now[..3].to_vec(), now[5]), ([a, b, c].to_vec(), d));
+    assert_eq!(selection(&shell), now[3..5]);
+    assert_eq!(titles(&shell)[3..5], titles(&shell)[1..3]);
+    assert_eq!(last_step(&shell), "Duplicate Device");
+    assert_eq!(steps(&shell), before + 1);
+    undo(&mut shell);
+    assert_eq!(chain(&shell), [a, b, c, d]);
+
+    // Copy and Paste: before the selected device, selected, one step.
+    run(&mut shell);
+    shell.invoke("device.copy", json!({})).unwrap();
+    shell
+        .invoke("device.select", json!({ "device": a }))
+        .unwrap();
+    let before = steps(&shell);
+    shell.invoke("device.paste", json!({})).unwrap();
+    let now = chain(&shell);
+    assert_eq!(now[2..], [a, b, c, d]);
+    assert_eq!(selection(&shell), now[..2]);
+    assert_eq!(titles(&shell)[..2], titles(&shell)[3..5]);
+    assert_eq!(last_step(&shell), "Copy Device");
+    assert_eq!(steps(&shell), before + 1);
+    undo(&mut shell);
+    assert_eq!(chain(&shell), [a, b, c, d]);
+
+    // Cut: both go, the device after them is selected, both are on the
+    // clipboard.
+    let before = run(&mut shell);
+    shell.invoke("device.cut", json!({})).unwrap();
+    assert_eq!(chain(&shell), [a, d]);
+    assert_eq!(selection(&shell), [d]);
+    assert_eq!(last_step(&shell), "Delete Device(s)");
+    assert_eq!(steps(&shell), before + 1);
+    shell.invoke("device.paste", json!({})).unwrap();
+    assert_eq!(titles(&shell).len(), 4);
+    assert_eq!(chain(&shell)[0], a);
+    assert_eq!(chain(&shell)[3], d);
+    undo(&mut shell);
+    undo(&mut shell);
+    assert_eq!(chain(&shell), [a, b, c, d]);
+
+    // Delete.
+    let before = run(&mut shell);
+    shell.invoke("device.remove", json!({})).unwrap();
+    assert_eq!(chain(&shell), [a, d]);
+    assert_eq!(selection(&shell), [d]);
+    assert_eq!(last_step(&shell), "Delete Device(s)");
+    assert_eq!(steps(&shell), before + 1);
+    undo(&mut shell);
+    assert_eq!(chain(&shell), [a, b, c, d]);
+
+    // Group: one rack with one chain holding them, in their place.
+    let before = run(&mut shell);
+    shell.invoke("device.group", json!({})).unwrap();
+    let frames = state(&shell).devices;
+    assert_eq!(frames.len(), 3);
+    assert_eq!((frames[0].id, frames[2].id), (a, d));
+    let rack = frames[1].rack.as_ref().expect("a rack");
+    assert_eq!(rack.chains.len(), 1);
+    assert_eq!(
+        rack.devices.iter().map(|d| d.id).collect::<Vec<_>>(),
+        [b, c]
+    );
+    assert_eq!(last_step(&shell), "Group Devices");
+    assert_eq!(steps(&shell), before + 1);
+    undo(&mut shell);
+    assert_eq!(chain(&shell), [a, b, c, d]);
+}
+
 // Spec: device-chains R16, R17, R18, R13
 #[test]
 fn presets_save_load_and_default() {

@@ -885,8 +885,9 @@ const ENTRIES: &[Entry] = &[
         keys: &[],
         description: "Colours tracks, Main and the returns among them, with swatch `colour` of the \
             palette of 5 rows of 14 (0 to 69, numbered from the top row's left, row by row: swatch \
-            14 is row 2, colour 1). Their clips keep their colours. A colour is never heard: the \
-            engine gets nothing.",
+            14 is row 2, colour 1), or a colour of one's own as `#RRGGBB`, saved as written and drawn \
+            as it is, whatever the theme. Their clips keep their colours. A colour is never heard: \
+            the engine gets nothing.",
     },
     Entry {
         id: "track.assign_colour_to_clips",
@@ -1800,7 +1801,9 @@ const ENTRIES: &[Entry] = &[
         keys: &[],
         description: "Colours clips, in the Arrangement, a Session slot or a take lane, with swatch \
             `colour` of the palette of 5 rows of 14 (0 to 69, numbered from the top row's left, row \
-            by row: swatch 14 is row 2, colour 1). A colour is never heard: the engine gets nothing.",
+            by row: swatch 14 is row 2, colour 1), or a colour of one's own as `#RRGGBB`, saved as \
+            written and drawn as it is, whatever the theme. A colour is never heard: the engine \
+            gets nothing.",
     },
     Entry {
         id: "clip.set_mute",
@@ -2737,8 +2740,8 @@ const ENTRIES: &[Entry] = &[
         contexts: &[Session],
         keys: &[],
         description: "Colours scenes with swatch `colour` of the palette of 5 rows of 14 (0 to 69, \
-            numbered from the top row's left, row by row: swatch 14 is row 2, colour 1), or clears \
-            their colour with null, as a new scene has none.",
+            numbered from the top row's left, row by row: swatch 14 is row 2, colour 1), or a colour of \
+            one's own as `#RRGGBB`, or clears their colour with null, as a new scene has none.",
     },
     Entry {
         id: "scene.set_tempo",
@@ -3586,7 +3589,7 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[DeviceView],
         keys: &[],
-        description: "Adds a chain to a rack at `index` in the rack's list of chains, where 0 is first. The chain has a new ID from the project, a `name` (left empty, a chain made with a device in it is named after the device's title and an empty one `Chain`), an optional `colour` (0 to 69), `info` text, a `mixer` (leave it out for a new chain's: `volume` 1, `pan` 0, `enabled` true, `solo` false) and its `devices`, each with a new ID, in the order for the kind of rack. A drum rack's chain also takes `receive`, `play`, `choke` and `sends`, and `is_return` makes it one of the rack's return chains (up to six, after the drum chains, audio effects only; a new one has `audio_to` null, which is the rack's own output); any other rack's chain keeps none of these. An empty chain passes its input straight to its mixer, which makes a dry path. One undo step.",
+        description: "Adds a chain to a rack at `index` in the rack's list of chains, where 0 is first. The chain has a new ID from the project, a `name` (left empty, a chain made with a device in it is named after the device's title and an empty one `Chain`), an optional `colour` (0 to 69, or `#RRGGBB`), `info` text, a `mixer` (leave it out for a new chain's: `volume` 1, `pan` 0, `enabled` true, `solo` false) and its `devices`, each with a new ID, in the order for the kind of rack. A drum rack's chain also takes `receive`, `play`, `choke` and `sends`, and `is_return` makes it one of the rack's return chains (up to six, after the drum chains, audio effects only; a new one has `audio_to` null, which is the rack's own output); any other rack's chain keeps none of these. An empty chain passes its input straight to its mixer, which makes a dry path. One undo step.",
     },
     Entry {
         id: "chain.remove",
@@ -3622,7 +3625,7 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[DeviceView],
         keys: &[],
-        description: "Colours a chain with swatch `colour` of the palette of 5 rows of 14 (0 to 69), or clears its colour with null.",
+        description: "Colours a chain with swatch `colour` of the palette of 5 rows of 14 (0 to 69) or a colour of one's own as `#RRGGBB`, or clears its colour with null.",
     },
     Entry {
         id: "chain.set_push_colour",
@@ -3784,7 +3787,7 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[DeviceView],
         keys: &[],
-        description: "Colours macro `macro_number` with swatch `colour` of the palette of 5 rows of 14 (0 to 69), or clears its colour with null. One undo step.",
+        description: "Colours macro `macro_number` with swatch `colour` of the palette of 5 rows of 14 (0 to 69) or a colour of one's own as `#RRGGBB`, or clears its colour with null. One undo step.",
     },
     Entry {
         id: "rack.set_macro_info_text",
@@ -4093,6 +4096,54 @@ const ENTRIES: &[Entry] = &[
             Time`. Undo restores it, but because it removes the person's work an agent asks \
             first. To delete the time selected as a person does, use \
             `arrangement.delete_time`.",
+    },
+    Entry {
+        id: "song.add_section",
+        action: Action::Apply("add_section"),
+        label: "Add Section",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Adds a section to the arranger track: a `section` with a new ID, a \
+            `start` in ticks, a `length` in ticks, a `name` and a `colour` (a swatch from 0 \
+            to 69). A section with no name is named \"Section\" and the next whole number. \
+            Sections never overlap, and one that would is refused. It moves nothing on the \
+            tracks. One undo step, `Add Section`. To make one as a person does, use \
+            `arranger.add_section`.",
+    },
+    Entry {
+        id: "song.remove_section",
+        action: Action::Apply("remove_section"),
+        label: "Remove Section",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Removes a section from the arranger track and nothing else: the clips, \
+            automation, tempo, time signatures and locators stay as they are. One undo step, \
+            `Remove Section`. To delete a section with its time, use `arranger.delete_section`.",
+    },
+    Entry {
+        id: "song.edit_section",
+        action: Action::Apply("edit_section"),
+        label: "Edit Section",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Changes a section's `name`, `colour` (a swatch from 0 to 69), `start` or \
+            `length`, leaving what is left out as it was. It moves nothing on the tracks, and \
+            a span that would overlap another section is refused. One undo step, `Edit \
+            Section`. To move a section with its time, use `arranger.move_section`.",
+    },
+    Entry {
+        id: "song.set_arranger_track",
+        action: Action::Apply("set_arranger_track"),
+        label: "Arranger Track",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Shows or hides the arranger track above the Arrangement's tracks \
+            (`shown`). It is hidden in a new set. Whether it shows is saved with the set and \
+            is no undo step.",
     },
     Entry {
         id: "groove.add",

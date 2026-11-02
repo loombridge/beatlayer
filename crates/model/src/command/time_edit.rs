@@ -109,6 +109,7 @@ impl Document {
             self.add_arrangement_clip(place, &right)?;
         }
         self.each_envelope(|envelope| envelope.insert_time(at, length))?;
+        self.insert_section_time(at, length)?;
 
         let mut points = tempo_breakpoints(&tempo);
         insert_tempo_time(&mut points, at, length)?;
@@ -217,6 +218,7 @@ impl Document {
         self.set_tempo_points(points);
 
         self.delete_signature_time(start, end);
+        self.delete_section_time(start, end);
         let inside: Vec<_> = self
             .settings
             .locators

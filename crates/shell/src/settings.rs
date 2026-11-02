@@ -94,6 +94,16 @@ pub struct Preferences {
     /// not saved with the set. Off in a new install, so the returns stay
     /// pinned, as in Live.
     pub return_tracks_scroll: bool,
+    /// How the MIDI Note Editor colours notes (View ▸ Note Colors; the view
+    /// options spec, R2): By Velocity, Live's, in a new install.
+    pub note_colors: bl_shell_spec::view_options::NoteColors,
+    /// Mark Empty Tracks (View menu; the view options spec, R6): off in a
+    /// new install.
+    pub mark_empty_tracks: bool,
+    /// Adjust Values with Mouse Wheel (Display & Input; the view options
+    /// spec, R10): off in a new install, so the wheel only scrolls, as in
+    /// Live.
+    pub wheel_adjusts_values: bool,
     /// The MIDI Note Editor's Preview switch (Options > MIDI Note Editor
     /// Preview; WP-6.5, the step recording spec, R1): one switch for every
     /// MIDI clip, off in a new install.

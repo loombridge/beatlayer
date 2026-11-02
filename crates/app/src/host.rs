@@ -1434,6 +1434,9 @@ impl Host {
         // pointer, so egui never sees it: it clicks nothing and selects
         // nothing.
         bl_ui::middle::take(&mut input, &surface.ctx);
+        // Spec: view-options R10 to R13. The wheel over a control is its
+        // own: no area scrolls with it.
+        let wheel = bl_ui::wheel::take(&mut input, &surface.ctx, self.shell.wheel_adjusts_values());
         input
             .viewports
             .insert(ViewportId::ROOT, surface.info.clone());
@@ -1569,6 +1572,9 @@ impl Host {
             && let Some(main) = &self.main
         {
             main.window.request_redraw();
+        }
+        for gesture in wheel {
+            gesture.run(&mut self.shell);
         }
         for invocation in invocations {
             self.invoke(&invocation);

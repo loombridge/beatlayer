@@ -62,6 +62,14 @@ search = "#a67c00"
 # The keys of a clip's scale on the piano ruler and the rows Highlight Scales
 # shades (WP-6.7b).
 scale = "#3a64b4"
+# The twelve hues of the note colours By Pitch Class and By Scale Degree, C to
+# B or the root up the scale, and the grey of a note outside the clip's scale
+# (WP-6.49).
+pitch_hues = [
+  "#c74438", "#c78b38", "#bbc738", "#73c738", "#38c744", "#38c78b", "#38bbc7",
+  "#3873c7", "#4438c7", "#8b38c7", "#c738bb", "#c73873",
+]
+out_of_scale = "#a0a7b0"
 track_palette = [
   "#d4584b", "#dd8446", "#d6af3c", "#93b642", "#47a95a", "#35a68b", "#3699c2",
   "#4676cc", "#6a5fc9", "#9156c4", "#c056a3", "#c85c77", "#88939e", "#ad8e6c",

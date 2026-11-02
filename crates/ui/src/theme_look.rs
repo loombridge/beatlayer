@@ -87,6 +87,8 @@ impl Colours {
             value_fill,
             clip_text,
             waveform,
+            out_of_scale,
+            pitch_hues: _,
             track_palette: _,
         } = self;
         vec![
@@ -137,6 +139,7 @@ impl Colours {
             ("value_fill", Chromatic, value_fill),
             ("clip_text", Fixed, clip_text),
             ("waveform", Fixed, waveform),
+            ("out_of_scale", Fixed, out_of_scale),
         ]
     }
 

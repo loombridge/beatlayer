@@ -296,6 +296,16 @@ pub fn header(
         ));
     });
     crate::info_text::describe(ui.ctx(), &title_response, shell, InfoTarget::Track(id));
+    // Spec: view-options R8, R9. The mark of an empty track, at the title's
+    // right end.
+    let mark = shell.shows_empty_mark(id).then(|| {
+        crate::widgets::describe_empty(ui.ctx(), title_response.id);
+        let row = Rect::from_min_max(
+            title.min,
+            pos2(title.right(), title.bottom().min(title.top() + 16.0)),
+        );
+        crate::widgets::paint_empty_mark(&painter, row, colors.clip_text.0)
+    });
 
     if height < 12.0 {
         return;
@@ -348,13 +358,11 @@ pub fn header(
         name_left = fold.right() + 3.0;
     }
     // Spec: comping R24. The toggle sits at the title's right end.
-    let mut name_right = title.right() - 1.0;
+    let edge = mark.unwrap_or(title.right());
+    let mut name_right = edge - 1.0;
     if let Some(shown) = take_toggle {
         let rect = Rect::from_min_size(
-            pos2(
-                title.right() - super::take_lanes::BUTTON - 3.0,
-                row_top + 1.0,
-            ),
+            pos2(edge - super::take_lanes::BUTTON - 3.0, row_top + 1.0),
             vec2(super::take_lanes::BUTTON, super::take_lanes::BUTTON),
         );
         super::take_lanes::toggle(ui, theme, id, rect, shown, events);
@@ -364,10 +372,7 @@ pub fn header(
     // hides the track's lanes of its own takes the take toggle's place.
     if let Some(Some(shown)) = automation {
         let rect = Rect::from_min_size(
-            pos2(
-                title.right() - super::automation::BUTTON - 3.0,
-                row_top + 1.0,
-            ),
+            pos2(edge - super::automation::BUTTON - 3.0, row_top + 1.0),
             vec2(super::automation::BUTTON, super::automation::BUTTON),
         );
         super::automation::lanes_toggle(ui, theme, id, rect, shown, events);

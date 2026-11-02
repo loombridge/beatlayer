@@ -1,9 +1,10 @@
 //! The View menu.
 
 use super::Action::{Choice, Command as Cmd, Omitted, Shortcut as Key, Submenu};
-use super::{Action, D24, IMP_01, IMP_25, IMP_25_CLOSE_WINDOWS, Row, SEPARATOR};
+use super::{Action, D24, IMP_01, IMP_25, IMP_25_CLOSE_WINDOWS, IMP_33, Row, SEPARATOR};
 use crate::arrangement::{SHOW_IN_OUT, SHOW_RETURN_TRACKS, SHOW_VOLUME};
 use crate::assistant::VIEW_TOGGLE_ASSISTANT;
+use crate::chord_lane::VIEW_CHORD_LANE;
 use crate::clip_properties::ARRANGE_PANELS;
 use crate::commands::{
     CLOSE_PLUG_IN_WINDOWS, VIEW_EXPAND_CLIP_VIEW, VIEW_FULL_SCREEN, VIEW_SWITCH_DETAIL_VIEW,
@@ -154,6 +155,8 @@ pub(super) const VIEW: &[Row] = &[
     ),
     SEPARATOR,
     ("M-VIEW-034", "Overview", Key(&["S-VIEW-011"])),
+    // IMP-33's switch, straight after Overview, with no key.
+    (IMP_33, "Chord Lane", Cmd(VIEW_CHORD_LANE)),
     (
         "M-VIEW-035",
         "Scene Tempo and Time Signature",

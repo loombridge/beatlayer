@@ -116,6 +116,11 @@ object_id!(
     "locator"
 );
 object_id!(
+    /// The ID of a region of the chord lane (WP-6.48).
+    ChordRegionId,
+    "chord region"
+);
+object_id!(
     /// The ID of a groove in the Groove Pool (WP-6.19).
     GrooveId,
     "groove"

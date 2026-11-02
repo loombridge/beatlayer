@@ -270,6 +270,8 @@ impl View<'_> {
             "delay": track.delay(),
             "keep_monitoring_latency": track.keep_monitoring_latency(),
             "tuning_bypass": track.tuning_bypass(),
+            // Spec: chord-lane R5, R12.
+            "follow_chord_lane": track.follow_chord_lane(),
             // Spec: tunings R24. Only a MIDI track's layout does anything.
             "tuning_layout": track.tuning_layout(),
             "clips": track.clips().len(),
@@ -721,6 +723,14 @@ fn overview(ctx: &Ctx<'_>, view: &View<'_>) -> Value {
         },
         "time_signature_at_start": settings.time_signatures.signature_at(Ticks::ZERO).to_string(),
         "scale": scale_value(settings.scale),
+        // Spec: chord-lane R2, R12.
+        "chord_lane": settings.chord_lane.iter().map(|region| json!({
+            "id": region.id,
+            "start": region.start,
+            "end": region.end,
+            "scale": scale_value(region.scale),
+            "transpose": region.transpose,
+        })).collect::<Vec<_>>(),
         "tuning": settings.tuning.as_ref().map(bl_model::Tuning::readout),
         "counts": {
             "tracks": document.track_count(),

@@ -1576,7 +1576,7 @@ impl ClipPlayer {
                         end: clip.geometry.end - clip.shape.tail as i64,
                         scale: clip.scale,
                     });
-                    scale.runs(list.track, spans, block)
+                    scale.runs(list.track, spans, std::iter::empty(), block)
                 }
                 None => ScaleRuns::of(block.set_scale()),
             },

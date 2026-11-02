@@ -270,6 +270,7 @@ impl Shell {
         self.store.set_window_views(WindowViews {
             session: self.main_view == MainView::Session,
             second_window: self.second.open,
+            chord_lane: self.arrangement.chord_lane(),
         });
     }
 
@@ -287,6 +288,7 @@ impl Shell {
         } else {
             MainView::Arrangement
         };
+        self.arrangement.set_chord_lane(views.chord_lane);
         if views.second_window && !self.second.open {
             self.open_second_window(false);
         } else if !views.second_window && self.second.open {

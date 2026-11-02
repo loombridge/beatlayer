@@ -64,6 +64,7 @@ pub mod automation;
 pub mod base64;
 pub mod bounce;
 mod changes;
+mod chord_lane;
 mod clip;
 mod clip_param;
 mod colour;
@@ -160,6 +161,7 @@ pub use mpe_settings::{MAX_NOTE_CHANNELS, MpeMode, MpeSettings, MpeZone, PluginM
 pub use mpe_view::{DEFAULT_LANE_HEIGHT, MpeLane, MpeView};
 pub use note_expression::Expression;
 pub mod freeze;
+pub use chord_lane::{ChordRegion, MAX_TRANSPOSE};
 pub use colour::{DEFAULT_TRACK_PALETTE, SWATCHES, TRACK_COLOURS, id_swatch, swatch_rgb};
 pub use external::{
     CvCalibration, CvPort, CvStep, External, ExternalPort, HardwareLatency, MAX_CV_PORTS,
@@ -175,8 +177,8 @@ pub use groove::{
     GroovePlay, GroovePool, MovedTransients, clip_seed, noise,
 };
 pub use ids::{
-    ChainId, ClipId, ContentHash, DeviceId, GrooveId, LinkGroupId, LocatorId, ParamId,
-    ParseContentHashError, SceneId, TakeLaneId, TrackId,
+    ChainId, ChordRegionId, ClipId, ContentHash, DeviceId, GrooveId, LinkGroupId, LocatorId,
+    ParamId, ParseContentHashError, SceneId, TakeLaneId, TrackId,
 };
 /// The persistent collections the document's public types hold.
 pub use imbl::{OrdMap, Vector};

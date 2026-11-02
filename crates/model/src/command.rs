@@ -15,6 +15,7 @@ use crate::automation::{
     AutomationTarget, Breakpoint, Envelope, MixerParam, PointError, check_bend, entry,
     override_device,
 };
+use crate::chord_lane::ChordRegion;
 use crate::clip::{
     AudioData, Clip, ClipData, ClipEnvelope, EnvelopeKind, MIN_MIDI_BRACE, MidiData, NewTakeLane,
     TakeLane, clip_entry, crossfades,
@@ -27,8 +28,8 @@ use crate::external::{CvCalibration, ExternalPort, HardwareLatency};
 use crate::follow::FollowPatch;
 use crate::groove::{GLOBAL_AMOUNT_MAX, Groove, GrooveBase, check_percent};
 use crate::ids::{
-    ChainId, ClipId, ContentHash, DeviceId, GrooveId, LinkGroupId, LocatorId, ParamId, SceneId,
-    TakeLaneId, TrackId,
+    ChainId, ChordRegionId, ClipId, ContentHash, DeviceId, GrooveId, LinkGroupId, LocatorId,
+    ParamId, SceneId, TakeLaneId, TrackId,
 };
 use crate::launch::{ClipLaunch, LaunchMode, LaunchQuantization};
 use crate::layers::{
@@ -263,6 +264,53 @@ pub enum Command {
     LoopToNextLocator {
         /// The locator.
         locator: LocatorId,
+    },
+    /// Adds a region to the chord lane, as drawing one in the lane does (the
+    /// chord lane spec, R3). The region must start at 1.1.1 or later, end after
+    /// it starts and overlap no other.
+    AddChordRegion {
+        /// The region, with a new ID.
+        region: ChordRegion,
+    },
+    /// Moves a chord region, or resizes it, to `start..end`.
+    MoveChordRegion {
+        /// The region.
+        region: ChordRegionId,
+        /// Where it starts: 1.1.1 or later.
+        start: Ticks,
+        /// Where it ends: after its start, and overlapping no other region.
+        end: Ticks,
+    },
+    /// Sets a chord region's scale and transposition (the chord lane spec,
+    /// R4). It leaves the values it isn't given as they were.
+    SetChordRegion {
+        /// The region.
+        region: ChordRegionId,
+        /// Whether the region names a scale: false leaves the clips' own.
+        #[serde(default)]
+        enabled: Option<bool>,
+        /// The scale's root note: 0 (C) to 11 (B).
+        #[serde(default)]
+        root: Option<u8>,
+        /// The scale's name, from the scale list.
+        #[serde(default)]
+        name: Option<String>,
+        /// How far the region moves the notes of the tracks that follow the
+        /// lane: from -24 to 24.
+        #[serde(default)]
+        transpose: Option<i32>,
+    },
+    /// Deletes a chord region.
+    DeleteChordRegion {
+        /// The region.
+        region: ChordRegionId,
+    },
+    /// Switches a MIDI track's Follow Chord Lane (the chord lane spec, R5).
+    SetFollowChordLane {
+        /// The track.
+        track: TrackId,
+        /// Whether it plays its Arrangement clips through the chord lane.
+        follow: bool,
     },
     /// Sets where the song starts: a locator, the loop brace's start, or
     /// nothing, which leaves the song starting as it otherwise does.
@@ -2980,6 +3028,12 @@ impl Command {
             Self::DeleteLocator { .. } => "Delete Locator",
             Self::MoveLocator { .. } => "Move Locator",
             Self::RenameLocator { .. } => "Rename Locator",
+            // Spec: chord-lane R3 to R5. Beatlayer's own names.
+            Self::AddChordRegion { .. } => "Add Chord Region",
+            Self::MoveChordRegion { .. } => "Move Chord Region",
+            Self::SetChordRegion { .. } => "Change Chord Region",
+            Self::DeleteChordRegion { .. } => "Delete Chord Region",
+            Self::SetFollowChordLane { .. } => "Follow Chord Lane",
             Self::SetLocatorInfoText { .. } => "Edit Info Text",
             Self::LoopToNextLocator { .. } => "Loop to Next Locator",
             Self::SetSongStart { .. } => "Set Song Start Time",
@@ -3422,6 +3476,7 @@ impl Command {
             Self::GroupDevices { rack, .. } => rack.ids(),
             Self::CreateScene { id, .. } => vec![id.0],
             Self::AddLocator { locator } => vec![locator.id.0],
+            Self::AddChordRegion { region } => vec![region.id.0],
             Self::InsertTime { clips, .. } | Self::DeleteTime { clips, .. } => {
                 clips.iter().map(|clip| clip.0).collect()
             }
@@ -3520,6 +3575,38 @@ impl Document {
             Command::InsertTime { at, length, clips } => self.insert_time(*at, *length, clips),
             Command::DeleteTime { start, end, clips } => self.delete_time(*start, *end, clips),
             Command::AddLocator { locator } => self.add_locator(locator.clone()),
+            // Spec: chord-lane R2 to R5.
+            Command::AddChordRegion { region } => self.add_chord_region(*region),
+            Command::MoveChordRegion { region, start, end } => {
+                self.move_chord_region(*region, *start, *end)
+            }
+            Command::SetChordRegion {
+                region,
+                enabled,
+                root,
+                name,
+                transpose,
+            } => self.set_chord_region(*region, *enabled, *root, name.as_deref(), *transpose),
+            Command::DeleteChordRegion { region } => {
+                let places = &mut self.settings.chord_lane;
+                let at = places
+                    .iter()
+                    .position(|other| other.id == *region)
+                    .ok_or(ModelError::NoSuchChordRegion(*region))?;
+                places.remove(at);
+                Ok(())
+            }
+            Command::SetFollowChordLane { track, follow } => {
+                check_kind(
+                    self.track_ref(*track)?,
+                    |kind| kind == TrackKind::Midi,
+                    "a MIDI track",
+                )?;
+                if self.track_ref(*track)?.follow_chord_lane != *follow {
+                    self.track_mut(*track)?.follow_chord_lane = *follow;
+                }
+                Ok(())
+            }
             Command::DeleteLocator { locator } => self.delete_locator(*locator),
             Command::MoveLocator { locator, to } => self.move_locator(*locator, *to),
             Command::RenameLocator { locator, name } => self.rename_locator(*locator, name.clone()),
@@ -8480,6 +8567,87 @@ impl Document {
             .locators
             .sort_by_key(|locator| locator.position);
         Ok(())
+    }
+
+    /// Adds a chord region (the chord lane spec, R2, R3).
+    fn add_chord_region(&mut self, region: ChordRegion) -> Result<(), ModelError> {
+        region.check()?;
+        self.check_fresh(region.id.0)?;
+        self.check_chord_room(None, region.start, region.end)?;
+        self.settings.chord_lane.push(region);
+        self.settings.chord_lane.sort_by_key(|region| region.start);
+        Ok(())
+    }
+
+    /// Moves a chord region to `start..end`.
+    fn move_chord_region(
+        &mut self,
+        id: ChordRegionId,
+        start: Ticks,
+        end: Ticks,
+    ) -> Result<(), ModelError> {
+        let mut region = *self
+            .chord_region(id)
+            .ok_or(ModelError::NoSuchChordRegion(id))?;
+        region.start = start;
+        region.end = end;
+        region.check()?;
+        self.check_chord_room(Some(id), start, end)?;
+        self.chord_region_mut(id).start = start;
+        self.chord_region_mut(id).end = end;
+        self.settings.chord_lane.sort_by_key(|region| region.start);
+        Ok(())
+    }
+
+    /// Sets a chord region's scale and transposition.
+    fn set_chord_region(
+        &mut self,
+        id: ChordRegionId,
+        enabled: Option<bool>,
+        root: Option<u8>,
+        name: Option<&str>,
+        transpose: Option<i32>,
+    ) -> Result<(), ModelError> {
+        let current = *self
+            .chord_region(id)
+            .ok_or(ModelError::NoSuchChordRegion(id))?;
+        let scale = scaled(current.scale, enabled, root, name)?;
+        let transpose = match transpose {
+            Some(by) => i8::try_from(by).map_err(|_| ModelError::InvalidValue {
+                what: "transposition",
+                value: f64::from(by),
+            })?,
+            None => current.transpose,
+        };
+        crate::chord_lane::check_transpose(transpose)?;
+        let region = self.chord_region_mut(id);
+        region.scale = scale;
+        region.transpose = transpose;
+        Ok(())
+    }
+
+    /// Refuses a stretch that overlaps a chord region other than `except`.
+    fn check_chord_room(
+        &self,
+        except: Option<ChordRegionId>,
+        start: Ticks,
+        end: Ticks,
+    ) -> Result<(), ModelError> {
+        match crate::chord_lane::overlaps(&self.settings.chord_lane, except, start, end) {
+            Some(at) => Err(ModelError::ChangeInUse {
+                what: "chord region",
+                at,
+            }),
+            None => Ok(()),
+        }
+    }
+
+    fn chord_region_mut(&mut self, id: ChordRegionId) -> &mut ChordRegion {
+        self.settings
+            .chord_lane
+            .iter_mut()
+            .find(|region| region.id == id)
+            .expect("the region was just found")
     }
 
     /// Deletes a locator. A song start time on it goes with it.

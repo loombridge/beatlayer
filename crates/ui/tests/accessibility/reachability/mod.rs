@@ -422,6 +422,8 @@ fn every_m1_command_is_reachable_from_the_keyboard() {
         [
             "browser.set_analysis_paused",
             "chain.save_preset",
+            "chord_lane.add_region",
+            "chord_lane.move_region",
             "clip.save_file",
             "device.add_layers",
             "device.add_slice",

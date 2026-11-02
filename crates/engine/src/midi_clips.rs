@@ -16,8 +16,8 @@ use std::sync::Arc;
 
 use bl_core::time::{Frames, SampleRate, TempoMap, Ticks};
 use bl_model::{
-    Clip, ClipData, ClipId, GroovePlay, GroovePool, GroupKind, MidiData, Note, Scale, SceneId,
-    Track, TrackId, clip_seed, noise,
+    ChordRegion, Clip, ClipData, ClipId, GroovePlay, GroovePool, GroupKind, MidiData, Note, Scale,
+    SceneId, Track, TrackId, clip_seed, noise,
 };
 
 use crate::midi_controllers::{PlacedController, Sounding, Stretch, play_expressions};
@@ -118,6 +118,48 @@ pub struct PlacedMidiClip {
     pub scale: Scale,
 }
 
+/// A region of the chord lane as the player of a track that follows it sees
+/// it (the chord lane spec, R6 and R8), on the song's beats.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlacedRegion {
+    /// Where it starts, which it holds.
+    pub start: Ticks,
+    /// Where it ends, which it doesn't.
+    pub end: Ticks,
+    /// The scale it names, which the devices on the track read while the song
+    /// plays through it; `None` leaves the clips' own.
+    pub scale: Option<Scale>,
+    /// How far it moves the notes that start in it: degrees of the clip's
+    /// scale, or semitones where the clip's Scale Mode is off.
+    pub transpose: i8,
+}
+
+impl PlacedRegion {
+    fn of(region: &ChordRegion) -> Self {
+        Self {
+            start: region.start,
+            end: region.end,
+            scale: region.scale.enabled.then_some(region.scale),
+            transpose: region.transpose,
+        }
+    }
+}
+
+/// The key a note on `key` that starts at song tick `at` plays on: moved by
+/// the transposition of the chord lane's region it starts in, in degrees of
+/// the clip's `scale` (semitones where its Scale Mode is off, whose scale is
+/// chromatic), or by `launch`, a Session launch's transposition, where no
+/// region holds it. `None` where the move leaves the keyboard, and the note
+/// doesn't play (the chord lane spec, R6; remote-mapping R35).
+fn moved_key(scale: Scale, key: u8, at: Ticks, lane: &[PlacedRegion], launch: i8) -> Option<u8> {
+    let region = lane.get(lane.partition_point(|region| region.end <= at));
+    match region.filter(|region| region.start <= at) {
+        Some(region) if region.transpose != 0 => scale.move_by(key, i32::from(region.transpose)),
+        Some(_) => Some(key),
+        None => key.checked_add_signed(launch).filter(|&k| k <= 127),
+    }
+}
+
 /// A probability group of a placed clip: its kind and the places of its
 /// notes in the clip's notes, which are in order of start.
 #[derive(Clone, Debug)]
@@ -181,17 +223,22 @@ pub struct MidiClipList {
     /// The track's Arrangement clips, sorted by start, and its Session slot
     /// clips, which have no position in the Arrangement.
     pub clips: Vec<PlacedMidiClip>,
+    /// The chord lane's regions in order, if the track follows the lane: it
+    /// moves the notes of the Arrangement clips only (the chord lane spec,
+    /// R5 and R9).
+    pub lane: Vec<PlacedRegion>,
 }
 
 impl MidiClipList {
     /// Builds the placed MIDI clips for `track`, with the grooves of `grooves`
-    /// they use.
+    /// they use and, where the track follows the chord lane, `lane`'s regions.
     #[must_use]
     pub fn build(
         track: &Track,
         _tempo: &TempoMap,
         _rate: SampleRate,
         grooves: &GroovePool,
+        lane: &[ChordRegion],
     ) -> Self {
         let groove = |clip: &Clip| {
             clip.groove
@@ -264,9 +311,15 @@ impl MidiClipList {
             });
         }
         clips.sort_by_key(|c| c.start);
+        let lane = if track.follow_chord_lane() {
+            lane.iter().map(PlacedRegion::of).collect()
+        } else {
+            Vec::new()
+        };
         Self {
             track: track.id(),
             clips,
+            lane,
         }
     }
 }
@@ -339,6 +392,7 @@ fn play_session_clip(
             sample_rate,
             roll,
             transpose,
+            &[],
             rng,
             next_note_id,
             scratch_notes,
@@ -399,6 +453,7 @@ fn play_session_clip(
                 sample_rate,
                 roll,
                 transpose,
+                &[],
                 rng,
                 next_note_id,
                 scratch_notes,
@@ -530,7 +585,15 @@ impl MidiClipPlayer {
                         end: frame(clip.start + clip.length),
                         scale: clip.scale,
                     });
-                    scale.runs(list.track, spans, block)
+                    let lane = list.lane.iter().filter_map(|region| {
+                        Some(Span {
+                            scene: None,
+                            start: frame(region.start),
+                            end: frame(region.end),
+                            scale: region.scale?,
+                        })
+                    });
+                    scale.runs(list.track, spans, lane, block)
                 }
                 None => ScaleRuns::of(block.set_scale()),
             },
@@ -698,6 +761,7 @@ fn process_clip_segment(
     sample_rate: SampleRate,
     roll: Roll,
     transpose: i8,
+    lane: &[PlacedRegion],
     rng: &mut Rng,
     next_note_id: &mut u32,
     scratch_notes: &mut Vec<NoteEvent>,
@@ -822,9 +886,10 @@ fn process_clip_segment(
             rng.next_in_range((base + dev).max(1), base) as u8
         };
 
-        // Spec: remote-mapping R35. A launch's transposition moves the key on
-        // its way out; a note moved outside 0 to 127 doesn't play.
-        let Some(key) = note.key.checked_add_signed(transpose).filter(|&k| k <= 127) else {
+        // Spec: remote-mapping R35, chord-lane R6. A launch's transposition
+        // or the chord lane's moves the key on its way out; a note moved
+        // outside 0 to 127 doesn't play.
+        let Some(key) = moved_key(clip.scale, note.key, note_song_start, lane, transpose) else {
             continue;
         };
         let note_song_end = (note_song_start + note.length).min(segment_song_end);
@@ -885,6 +950,7 @@ fn process_clip_segment(
             note,
             Sounding {
                 note_id,
+                key,
                 song_start: note_song_start,
                 on: note_on_frame,
                 off: note_off_frame,
@@ -1013,6 +1079,7 @@ impl Node for MidiClipPlayer {
                     note,
                     Sounding {
                         note_id: active.note_id,
+                        key: active.key,
                         song_start: active.song_start,
                         on: i64::MIN,
                         off: active.off_frame,
@@ -1224,6 +1291,7 @@ impl Node for MidiClipPlayer {
                         sample_rate,
                         arrangement,
                         0,
+                        &list.lane,
                         &mut self.rng,
                         &mut self.next_note_id,
                         &mut self.scratch_notes,
@@ -1267,6 +1335,7 @@ impl Node for MidiClipPlayer {
                             sample_rate,
                             arrangement,
                             0,
+                            &list.lane,
                             &mut self.rng,
                             &mut self.next_note_id,
                             &mut self.scratch_notes,
@@ -1325,6 +1394,7 @@ impl Node for MidiClipPlayer {
                                     sample_rate,
                                     arrangement,
                                     0,
+                                    &list.lane,
                                     &mut self.rng,
                                     &mut self.next_note_id,
                                     &mut self.scratch_notes,
@@ -1407,7 +1477,13 @@ mod tests {
             })
             .unwrap();
         let track = editor.document().track(track).unwrap();
-        MidiClipList::build(track, &TempoMap::default(), RATE, &GroovePool::default())
+        MidiClipList::build(
+            track,
+            &TempoMap::default(),
+            RATE,
+            &GroovePool::default(),
+            &[],
+        )
     }
 
     /// The note-ons the clip's whole length plays in the blocks from frame
@@ -1433,6 +1509,7 @@ mod tests {
                     entry: None,
                 },
                 0,
+                &[],
                 &mut rng,
                 &mut next_note_id,
                 &mut scratch,

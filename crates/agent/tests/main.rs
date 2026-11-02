@@ -5,6 +5,7 @@
 
 mod analog;
 mod bass_and_poli;
+mod chord_lane;
 mod clip_edge_fades;
 mod comping;
 mod control_surfaces;

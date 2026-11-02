@@ -6,10 +6,13 @@ use imbl::{OrdMap, Vector};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::chord_lane::ChordRegion;
 use crate::clip::{Clip, ClipData};
 use crate::device::Device;
 use crate::groove::GroovePool;
-use crate::ids::{ChainId, ClipId, DeviceId, GrooveId, LocatorId, SceneId, TakeLaneId, TrackId};
+use crate::ids::{
+    ChainId, ChordRegionId, ClipId, DeviceId, GrooveId, LocatorId, SceneId, TakeLaneId, TrackId,
+};
 use crate::locator::{Locator, SongStart};
 use crate::metronome::MetronomeSettings;
 use crate::pad_layout::PadLayout;
@@ -135,6 +138,11 @@ pub struct Settings {
     /// off in a new set, and not written then. Changing it is no undo step.
     #[serde(default, skip_serializing_if = "PadLayout::is_default")]
     pub pad_layout: PadLayout,
+    /// The chord lane's regions, in time order and never overlapping
+    /// (WP-6.48; the chord lane spec, R2 and R10). A set saved before the lane
+    /// has none, and a set with none doesn't write them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chord_lane: Vec<ChordRegion>,
     /// The set's tuning system (WP-6.9; the tunings spec, R1 and R11), saved
     /// whole inside the set so it opens without the file it came from. None
     /// plays twelve equal steps, and a set saved before tunings has none.
@@ -182,6 +190,7 @@ impl Default for Settings {
             grooves: GroovePool::default(),
             scale: Scale::default(),
             pad_layout: PadLayout::default(),
+            chord_lane: Vec::new(),
             tuning: None,
             ara_archives: std::sync::Arc::default(),
             remote: Vec::new(),
@@ -628,6 +637,21 @@ impl Document {
             .find(|locator| locator.id == id)
     }
 
+    /// The chord lane's regions, in time order.
+    #[must_use]
+    pub fn chord_lane(&self) -> &[ChordRegion] {
+        &self.settings.chord_lane
+    }
+
+    /// The chord lane's region with this ID.
+    #[must_use]
+    pub fn chord_region(&self, id: ChordRegionId) -> Option<&ChordRegion> {
+        self.settings
+            .chord_lane
+            .iter()
+            .find(|region| region.id == id)
+    }
+
     /// Where the song starts, in ticks: its locator's position, or the loop
     /// brace's start. `None` when the song has no song start time, or when
     /// the locator it named is gone.
@@ -924,6 +948,11 @@ impl Document {
                 .any(|locator| locator.id.0 == id)
             || self
                 .settings
+                .chord_lane
+                .iter()
+                .any(|region| region.id.0 == id)
+            || self
+                .settings
                 .grooves
                 .pool
                 .iter()
@@ -952,11 +981,19 @@ impl Document {
             .iter()
             .map(|groove| groove.id.0)
             .max();
-        [track, clip, lane, device, chain, scene, locator, groove]
-            .into_iter()
-            .flatten()
-            .max()
-            .unwrap_or(self.main.0)
+        let region = self
+            .settings
+            .chord_lane
+            .iter()
+            .map(|region| region.id.0)
+            .max();
+        [
+            track, clip, lane, device, chain, scene, locator, groove, region,
+        ]
+        .into_iter()
+        .flatten()
+        .max()
+        .unwrap_or(self.main.0)
     }
 
     /// Checks that the document's derived lookups match its tree and that the

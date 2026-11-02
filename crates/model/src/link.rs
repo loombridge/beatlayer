@@ -217,14 +217,17 @@ impl Document {
             let mut next = clip.clone();
             // An audio clip's markers are seconds in its file or ticks of
             // its contents, as its Warp switch says: a switch that changed
-            // takes the clip's own markers across the shared warp map.
+            // takes the clip's own markers across the warp map they were
+            // in: the shared one when Warp goes on, its own when it goes off.
             if let (ClipData::Audio(own), ClipData::Audio(shared)) =
                 (&mut next.data, &contents.data)
                 && own.warp != shared.warp
             {
                 let mut mapped = own.clone();
-                mapped.warp_markers = shared.warp_markers.clone();
-                mapped.tempo = shared.tempo;
+                if shared.warp {
+                    mapped.warp_markers = shared.warp_markers.clone();
+                    mapped.tempo = shared.tempo;
+                }
                 if let Ok(converted) = mapped.with_warp(shared.warp, tempo) {
                     *own = converted;
                 }

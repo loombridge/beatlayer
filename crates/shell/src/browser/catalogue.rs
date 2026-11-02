@@ -142,10 +142,10 @@ impl BrowserView {
             .collect();
         let by_key: std::collections::HashMap<String, &ScannedPlugin> =
             plugins.iter().map(|p| (p.key(), p)).collect();
-        let collections = (1..=COLLECTIONS.len() as u8)
+        let collections = (1..=COLLECTIONS.len() as u32)
             .map(|number| {
                 self.collections
-                    .members(number)
+                    .members_deep(number)
                     .into_iter()
                     .filter_map(|key| {
                         if let Some(found) = by_key.get(&key) {

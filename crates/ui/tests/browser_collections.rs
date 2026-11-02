@@ -637,7 +637,10 @@ fn a_plug_in_rows_menu_hides_it_and_content_options_shows_hidden_plug_ins() {
         .run(ids::SEARCH, json!({ "query": "gain echo" }))
         .unwrap();
     let nodes = look(&mut h);
-    right_click(&mut h, centre_of(&nodes, Role::ListItem, bl_test_clap::PLUGIN_NAME));
+    right_click(
+        &mut h,
+        centre_of(&nodes, Role::ListItem, bl_test_clap::PLUGIN_NAME),
+    );
     let nodes = look(&mut h);
     let top = |label: &str| {
         nodes
@@ -664,9 +667,184 @@ fn a_plug_in_rows_menu_hides_it_and_content_options_shows_hidden_plug_ins() {
     assert!(shown.rows[0].hidden, "listed again, dimmed");
     // Its menu offers Show Plug-In.
     let nodes = look(&mut h);
-    right_click(&mut h, centre_of(&nodes, Role::ListItem, bl_test_clap::PLUGIN_NAME));
+    right_click(
+        &mut h,
+        centre_of(&nodes, Role::ListItem, bl_test_clap::PLUGIN_NAME),
+    );
     let nodes = look(&mut h);
     h.click(button(&nodes, "Show Plug-In"));
     assert!(h.shell.plugin_settings().hidden.is_empty());
     assert!(!state(&mut h).rows[0].hidden);
+}
+
+/// Drags from one point to another, in steps, and settles.
+fn drag(h: &mut Harness, from: Pos2, to: Pos2) {
+    h.frame(vec![Event::PointerMoved(from)]);
+    h.frame(vec![Event::PointerButton {
+        pos: from,
+        button: PointerButton::Primary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    }]);
+    for step in 1..=8 {
+        let t = step as f32 / 8.0;
+        h.frame(vec![Event::PointerMoved(from + (to - from) * t)]);
+    }
+    h.frame(vec![Event::PointerButton {
+        pos: to,
+        button: PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    }]);
+    h.settle();
+}
+
+fn nested_numbers(h: &mut Harness, parent: u32) -> Vec<u32> {
+    state(h)
+        .labels
+        .iter()
+        .filter(|l| l.parent == Some(Label::Collection(parent)))
+        .filter_map(|l| match l.label {
+            Label::Collection(n) => Some(n),
+            _ => None,
+        })
+        .collect()
+}
+
+fn has(nodes: &[common::Node], role: Role, label: &str) -> bool {
+    nodes.iter().any(|n| n.role == role && n.label == label)
+}
+
+// Spec: browser-tags R45, R47; L-BRW-016. A collection's context menu has New
+// Collection, which makes one inside it with its name ready to edit; the
+// sidebar lists nested collections under a fold triangle, indented; a nested
+// collection's menu has Rename, New Collection and Delete, and Delete asks
+// first when it holds items.
+#[test]
+fn the_sidebar_nests_collections_with_fold_triangles_and_menus() {
+    let scratch = Scratch::new("nest-sidebar");
+    let (mut h, root) = harness(&scratch);
+    let nodes = look(&mut h);
+    assert!(!nodes.iter().any(|n| n.label.starts_with("Expand")));
+    // New Collection in Orange's menu.
+    right_click(&mut h, centre_of(&nodes, Role::ListItem, "Orange"));
+    let nodes = look(&mut h);
+    h.click(button(&nodes, "New Collection"));
+    assert_eq!(nested_numbers(&mut h, 2), [8]);
+    assert_eq!(
+        h.shell.browser_view().renaming_label(),
+        Some(&Label::Collection(8)),
+        "its name is ready to edit"
+    );
+    h.shell
+        .run(
+            ids::RENAME_LABEL,
+            json!({ "label": { "collection": 8 }, "name": "Kicks" }),
+        )
+        .unwrap();
+    let nodes = look(&mut h);
+    // Orange was opened by it: Kicks shows, indented past Orange.
+    let orange = centre_of(&nodes, Role::ListItem, "Orange");
+    let kicks = centre_of(&nodes, Role::ListItem, "Kicks");
+    assert!(kicks.y > orange.y);
+    let left = |label: &str| {
+        nodes
+            .iter()
+            .find(|n| n.role == Role::ListItem && n.label == label)
+            .and_then(|n| n.bounds)
+            .unwrap()
+            .x0
+    };
+    assert!(left("Kicks") >= left("Orange"), "same row start");
+    // The fold triangle closes and opens Orange's list.
+    h.click(centre_of(&nodes, Role::Button, "Collapse Orange"));
+    let nodes = look(&mut h);
+    assert!(!has(&nodes, Role::ListItem, "Kicks"));
+    h.click(centre_of(&nodes, Role::Button, "Expand Orange"));
+    let nodes = look(&mut h);
+    assert!(has(&nodes, Role::ListItem, "Kicks"));
+    // Kicks' menu: Rename, New Collection, Delete.
+    right_click(&mut h, centre_of(&nodes, Role::ListItem, "Kicks"));
+    let nodes = look(&mut h);
+    let wanted = ["Rename", "New Collection", "Delete"];
+    assert_eq!(menu_buttons(&nodes, &wanted).len(), 3);
+    // Delete with items in it asks first.
+    h.click(centre_of(&nodes, Role::ListItem, "Kicks"));
+    h.shell
+        .run(
+            ids::SET_COLLECTION,
+            json!({ "collection": 8, "items": [text(&root.join("Pad.wav"))], "member": true }),
+        )
+        .unwrap();
+    let nodes = look(&mut h);
+    right_click(&mut h, centre_of(&nodes, Role::ListItem, "Kicks"));
+    let nodes = look(&mut h);
+    h.click(button(&nodes, "Delete"));
+    assert_eq!(nested_numbers(&mut h, 2), [8], "it asked first");
+    let nodes = look(&mut h);
+    h.click(centre_of(&nodes, Role::Button, "Cancel"));
+    assert_eq!(nested_numbers(&mut h, 2), [8], "Cancel keeps it");
+    let nodes = look(&mut h);
+    right_click(&mut h, centre_of(&nodes, Role::ListItem, "Kicks"));
+    let nodes = look(&mut h);
+    h.click(button(&nodes, "Delete"));
+    let nodes = look(&mut h);
+    h.click(centre_of(&nodes, Role::Button, "Delete"));
+    assert!(nested_numbers(&mut h, 2).is_empty());
+    assert!(root.join("Pad.wav").is_file(), "no file is touched");
+}
+
+// Spec: browser-tags R46; I-DROP-024, I-DRAG-056. A collection with nested
+// ones has a submenu in an item's menu, listing them; items dragged onto a
+// nested collection's label go into it, and a nested label dragged onto a
+// collection moves into it.
+#[test]
+fn items_go_into_a_nested_collection_by_its_submenu_and_by_dropping() {
+    let scratch = Scratch::new("nest-items");
+    let (mut h, _) = harness(&scratch);
+    for (parent, name) in [(2, "Kicks"), (3, "Pads")] {
+        h.shell
+            .run(
+                ids::ADD_COLLECTION,
+                json!({ "parent": parent, "name": name }),
+            )
+            .unwrap();
+    }
+    // The item's menu: Orange is a submenu holding itself and Kicks.
+    let nodes = look(&mut h);
+    right_click(&mut h, centre_of(&nodes, Role::ListItem, "Pad.wav"));
+    let nodes = look(&mut h);
+    h.click(button(&nodes, "Orange"));
+    let nodes = look(&mut h);
+    h.click(button(&nodes, "Kicks"));
+    let row = state(&mut h)
+        .rows
+        .into_iter()
+        .find(|r| r.name == "Pad.wav")
+        .unwrap();
+    assert_eq!(row.nested, [8]);
+    assert_eq!(row.collections, [2], "it shows Orange's colour");
+    // Dragging an item onto Pads' label puts it in.
+    let nodes = look(&mut h);
+    drag(
+        &mut h,
+        centre_of(&nodes, Role::ListItem, "Snare.wav"),
+        centre_of(&nodes, Role::ListItem, "Pads"),
+    );
+    let snare = state(&mut h)
+        .rows
+        .into_iter()
+        .find(|r| r.name == "Snare.wav")
+        .unwrap();
+    assert_eq!(snare.nested, [9]);
+    assert_eq!(snare.collections, [3]);
+    // A nested label dragged onto another collection moves into it.
+    let nodes = look(&mut h);
+    drag(
+        &mut h,
+        centre_of(&nodes, Role::ListItem, "Kicks"),
+        centre_of(&nodes, Role::ListItem, "Green"),
+    );
+    assert_eq!(nested_numbers(&mut h, 4), [8]);
+    assert!(nested_numbers(&mut h, 2).is_empty());
 }

@@ -304,11 +304,56 @@ struct AskCopy {
 }
 
 /// A deletion that waits for the person's answer: saved labels use what it
-/// deletes (browser-tags R8).
+/// deletes (browser-tags R8), or a collection holds items (R47).
 #[derive(Clone, Debug, PartialEq)]
 struct AskDelete {
+    command: &'static str,
+    title: &'static str,
+    message: String,
     args: Value,
-    labels: Vec<String>,
+}
+
+/// Asks before a nested collection that holds items is deleted (spec:
+/// browser-tags R47).
+fn ask_delete_collection(ctx: &egui::Context, args: Value, name: &str, held: usize) {
+    ctx.data_mut(|data| {
+        data.insert_temp(
+            ask_delete_id(),
+            AskDelete {
+                command: ids::DELETE_COLLECTION,
+                title: "Delete Collection",
+                message: format!(
+                    "{name} and the collections inside it hold {held} items. They will leave \
+                     them; no file is deleted."
+                ),
+                args,
+            },
+        );
+    });
+}
+
+/// What a drag of items the other payloads don't cover carries: their keys
+/// (a folder), so a collection's label can take them (spec: browser-tags
+/// R46).
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ItemsDrag {
+    keys: Vec<String>,
+}
+
+/// The keys of the items being dragged from the content pane, whichever
+/// payload they travel in.
+fn dragged_item_keys(ctx: &egui::Context) -> Option<Vec<String>> {
+    if let Some(drag) = DragAndDrop::payload::<BrowserDrag>(ctx) {
+        let keys: Vec<String> = drag.paths.iter().chain(&drag.plugin).cloned().collect();
+        return Some(keys).filter(|keys| !keys.is_empty());
+    }
+    if let Some(drag) = DragAndDrop::payload::<DevicesDrag>(ctx) {
+        return Some(drag.paths.clone());
+    }
+    if let Some(drag) = DragAndDrop::payload::<SetDrag>(ctx) {
+        return drag.tracks.is_none().then(|| vec![drag.path.clone()]);
+    }
+    DragAndDrop::payload::<ItemsDrag>(ctx).map(|drag| drag.keys.clone())
 }
 
 fn ask_delete_id() -> Id {
@@ -543,7 +588,9 @@ enum SideRow {
     CollectionsHeading,
     /// The Library heading, which has Edit and Done at its right.
     LibraryHeading,
-    Label(LabelInfo),
+    /// A label, how deep a nested collection lies (0 for the others), and
+    /// whether it holds nested collections (spec: browser-tags R45).
+    Label(LabelInfo, u16, bool),
     AddFolder,
 }
 
@@ -1715,7 +1762,18 @@ impl BrowserUi {
                                 invoke(events, ids::DELETE_TAG, args);
                             } else {
                                 ui.ctx().data_mut(|data| {
-                                    data.insert_temp(ask_delete_id(), AskDelete { args, labels });
+                                    data.insert_temp(
+                                        ask_delete_id(),
+                                        AskDelete {
+                                            command: ids::DELETE_TAG,
+                                            title: "Delete Tag",
+                                            message: format!(
+                                                "The saved labels {} use it. They will leave it out.",
+                                                labels.join(", ")
+                                            ),
+                                            args,
+                                        },
+                                    );
                                 });
                             }
                             ui.close();
@@ -2112,16 +2170,13 @@ impl BrowserUi {
             return;
         };
         let mut answer = None;
-        egui::Window::new("Delete Tag")
+        egui::Window::new(ask.title)
             .id(Id::new("browser-ask-delete-window"))
             .collapsible(false)
             .resizable(false)
             .anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0))
             .show(ctx, |ui| {
-                ui.label(format!(
-                    "The saved labels {} use it. They will leave it out.",
-                    ask.labels.join(", ")
-                ));
+                ui.label(&ask.message);
                 ui.horizontal(|ui| {
                     for (label, delete) in [("Delete", true), ("Cancel", false)] {
                         if ui.button(label).clicked() {
@@ -2135,7 +2190,7 @@ impl BrowserUi {
             if delete {
                 let mut args = ask.args;
                 args["confirm"] = json!(true);
-                invoke(events, ids::DELETE_TAG, args);
+                invoke(events, ask.command, args);
             }
         }
     }
@@ -2605,6 +2660,7 @@ impl BrowserUi {
                 // Devices row.
                 DragAndDrop::set_payload(ui.ctx(), drag);
             } else {
+                let paths_all = paths.clone();
                 let (loadable, mut audio): (Vec<String>, Vec<String>) =
                     paths.into_iter().partition(|p| is_loadable(p));
                 audio.retain(|p| is_audio(p) || is_sfz(p) || is_clip(p));
@@ -2622,6 +2678,8 @@ impl BrowserUi {
                     );
                 } else if !loadable.is_empty() {
                     DragAndDrop::set_payload(ui.ctx(), DevicesDrag { paths: loadable });
+                } else if item.kind == ItemKind::Folder {
+                    DragAndDrop::set_payload(ui.ctx(), ItemsDrag { keys: paths_all });
                 }
             }
         }
@@ -2720,7 +2778,11 @@ impl BrowserUi {
                     .labels()
                     .into_iter()
                     .filter_map(|l| match l.label {
-                        Label::Collection(n) if item.collections.contains(&n) => Some(l.name),
+                        Label::Collection(n)
+                            if u8::try_from(n).is_ok_and(|n| item.collections.contains(&n)) =>
+                        {
+                            Some(l.name)
+                        }
                         _ => None,
                     })
                     .collect();

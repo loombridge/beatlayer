@@ -25,7 +25,7 @@ use super::tags::{Tag, TagGroup};
 
 /// The schema version this build writes. A file with a higher version is
 /// left alone.
-pub const SCHEMA_VERSION: i64 = 7;
+pub const SCHEMA_VERSION: i64 = 8;
 
 /// The file's schema, as SQLite statements.
 const SCHEMA: &str = "
@@ -66,6 +66,12 @@ CREATE TABLE IF NOT EXISTS item_collections (
     item_key TEXT NOT NULL,
     collection INTEGER NOT NULL,
     PRIMARY KEY (item_key, collection)
+);
+CREATE TABLE IF NOT EXISTS nested_collections (
+    id INTEGER PRIMARY KEY,
+    parent INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    position INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS saved_labels (
     id INTEGER PRIMARY KEY,
@@ -238,7 +244,19 @@ pub struct CollectionOp {
     /// The item's key.
     pub key: String,
     /// The collections it is in now, by their numbers.
-    pub collections: Vec<u8>,
+    pub collections: Vec<u32>,
+}
+
+/// A collection of the person's own inside another (spec: browser-tags
+/// R45), as the database holds it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NestedRow {
+    /// Its number, 8 or more.
+    pub id: u32,
+    /// The collection it is in.
+    pub parent: u32,
+    /// Its name.
+    pub name: String,
 }
 
 /// A change to the saved labels.
@@ -270,7 +288,9 @@ pub struct Loaded {
     /// The saved labels, in the order they were made.
     pub saved_labels: Vec<SavedLabel>,
     /// The collections each item is in, by its key.
-    pub item_collections: Vec<(String, Vec<u8>)>,
+    pub item_collections: Vec<(String, Vec<u32>)>,
+    /// The collections inside collections, in their order.
+    pub nested_collections: Vec<NestedRow>,
     /// What sound analysis made of each file it looked at.
     pub analysed: Vec<AnalysedRow>,
     /// The content keys that have a descriptor, with its version and the
@@ -299,6 +319,8 @@ enum Request {
     Labels(Vec<LabelOp>),
     /// Write the changes to the collections.
     Collections(Vec<CollectionOp>),
+    /// Replace the collections inside collections.
+    NestedCollections(Vec<NestedRow>),
     /// Write the changes to the analysis.
     Analysis(Vec<AnalysisOp>),
     /// Read every descriptor, and answer.
@@ -486,6 +508,13 @@ impl Db {
         }
     }
 
+    /// Replaces the collections inside collections.
+    pub fn save_nested_collections(&self, rows: Vec<NestedRow>) {
+        if let Some(sender) = &self.requests {
+            let _ = sender.send(Request::NestedCollections(rows));
+        }
+    }
+
     /// Writes the changes to the analysis.
     pub fn save_analysis(&self, ops: Vec<AnalysisOp>) {
         if let Some(sender) = &self.requests {
@@ -610,6 +639,7 @@ fn write_loop(connection: rusqlite::Connection, requests: Receiver<Request>) {
             Request::Tags(ops) => write_tags(&connection, &ops),
             Request::Labels(ops) => write_labels(&connection, &ops),
             Request::Collections(ops) => write_collections(&connection, &ops),
+            Request::NestedCollections(rows) => write_nested_collections(&connection, &rows),
             Request::Analysis(ops) => write_analysis(&connection, &ops),
             Request::Descriptors(reply) => {
                 let _ = reply.send(rows(
@@ -674,6 +704,17 @@ fn read_all(connection: &rusqlite::Connection) -> Loaded {
         removed_auto_tags: read_removed_auto_tags(connection),
         saved_labels: read_labels(connection),
         item_collections: read_collections(connection),
+        nested_collections: rows(
+            connection,
+            "SELECT id, parent, name FROM nested_collections ORDER BY position",
+            |row| {
+                Ok(NestedRow {
+                    id: row.get::<_, i64>(0)?.max(0) as u32,
+                    parent: row.get::<_, i64>(1)?.max(0) as u32,
+                    name: row.get(2)?,
+                })
+            },
+        ),
         analysed: rows(
             connection,
             "SELECT path, size, modified, status, key FROM analysed_files",
@@ -743,14 +784,14 @@ fn read_removed_auto_tags(connection: &rusqlite::Connection) -> Vec<(String, Vec
 }
 
 /// Reads the collections each item is in.
-fn read_collections(connection: &rusqlite::Connection) -> Vec<(String, Vec<u8>)> {
-    let mut items: Vec<(String, Vec<u8>)> = Vec::new();
+fn read_collections(connection: &rusqlite::Connection) -> Vec<(String, Vec<u32>)> {
+    let mut items: Vec<(String, Vec<u32>)> = Vec::new();
     for (key, collection) in rows(
         connection,
         "SELECT item_key, collection FROM item_collections ORDER BY item_key, collection",
         |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
     ) {
-        let Ok(collection) = u8::try_from(collection) else {
+        let Ok(collection) = u32::try_from(collection) else {
             continue;
         };
         match items.last_mut() {
@@ -977,6 +1018,22 @@ fn write_collections(connection: &rusqlite::Connection, ops: &[CollectionOp]) {
                 rusqlite::params![op.key, collection],
             );
         }
+    }
+    let _ = transaction.commit();
+}
+
+/// Replaces the collections inside collections, in one transaction.
+fn write_nested_collections(connection: &rusqlite::Connection, rows: &[NestedRow]) {
+    let Ok(transaction) = connection.unchecked_transaction() else {
+        return;
+    };
+    let _ = transaction.execute("DELETE FROM nested_collections", []);
+    for (position, row) in rows.iter().enumerate() {
+        let _ = transaction.execute(
+            "INSERT INTO nested_collections (id, parent, name, position) \
+             VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![row.id, row.parent, row.name, position as i64],
+        );
     }
     let _ = transaction.commit();
 }

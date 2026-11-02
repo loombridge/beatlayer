@@ -24,6 +24,20 @@ use crate::theme::Theme;
 #[derive(Clone, Debug)]
 struct LabelDrag(Label);
 
+/// Where a label's row lies in the sidebar: how deep, whether it holds
+/// nested collections, and the lists a drag reads its place from.
+struct Place<'a> {
+    depth: u16,
+    holds: bool,
+    /// The Library labels in the person's order.
+    order: &'a [Label],
+    /// The collections, nested ones under their parents.
+    nesting: &'a [LabelInfo],
+}
+
+/// How far a nested collection's row is indented, per level.
+const NEST_INDENT: f32 = 12.0;
+
 /// The Library heading's Edit and Done button.
 #[must_use]
 pub fn labels_edit_id() -> Id {
@@ -138,29 +152,45 @@ impl BrowserUi {
         let labels = shell.browser_view().labels();
         let editing = self.editing_labels;
         let mut rows = vec![SideRow::CollectionsHeading];
-        rows.extend(
-            labels
-                .iter()
-                .filter(|l| {
-                    l.section == Section::Collections && (l.shown || self.editing_collections)
-                })
-                .cloned()
-                .map(SideRow::Label),
-        );
+        // Spec: browser-tags R45. A nested collection shows while every
+        // collection it lies in is open.
+        let collections: Vec<&LabelInfo> = labels
+            .iter()
+            .filter(|l| l.section == Section::Collections)
+            .collect();
+        let mut expanded: Vec<(&Label, u16)> = Vec::new();
+        for info in &collections {
+            let (visible, depth) = match &info.parent {
+                None => (info.shown || self.editing_collections, 0),
+                Some(parent) => expanded
+                    .iter()
+                    .find(|(label, _)| *label == parent)
+                    .map_or((false, 0), |(_, depth)| (true, depth + 1)),
+            };
+            if visible {
+                let holds = collections
+                    .iter()
+                    .any(|child| child.parent.as_ref() == Some(&info.label));
+                rows.push(SideRow::Label((*info).clone(), depth, holds));
+                if info.open {
+                    expanded.push((&info.label, depth));
+                }
+            }
+        }
         rows.push(SideRow::LibraryHeading);
         rows.extend(
             labels
                 .iter()
                 .filter(|l| l.section == Section::Library && (l.shown || editing))
                 .cloned()
-                .map(SideRow::Label),
+                .map(|l| SideRow::Label(l, 0, false)),
         );
         rows.push(SideRow::Heading("Places"));
         rows.extend(
             labels
                 .into_iter()
                 .filter(|l| l.section == Section::Places)
-                .map(SideRow::Label),
+                .map(|l| SideRow::Label(l, 0, false)),
         );
         rows.push(SideRow::AddFolder);
         rows
@@ -195,6 +225,13 @@ impl BrowserUi {
             .into_iter()
             .filter(|l| l.section == Section::Library)
             .map(|l| l.label)
+            .collect();
+        // The collections as the sidebar lists them, for a drag to read its
+        // place among the nested ones from.
+        let nesting: Vec<LabelInfo> = view
+            .labels()
+            .into_iter()
+            .filter(|l| l.section == Section::Collections)
             .collect();
         let content = rows.len() as f32 * BROWSER_ROW;
         self.sidebar_scroll = scrolled(ui, area, self.sidebar_scroll, content);
@@ -248,8 +285,14 @@ impl BrowserUi {
                 SideRow::LibraryHeading => {
                     self.section_heading(&mut sidebar_ui, theme, rect, Section::Library, events);
                 }
-                SideRow::Label(info) => {
-                    self.label_row(&mut sidebar_ui, shell, theme, rect, info, &order, events);
+                SideRow::Label(info, depth, holds) => {
+                    let place = Place {
+                        depth: *depth,
+                        holds: *holds,
+                        order: &order,
+                        nesting: &nesting,
+                    };
+                    self.label_row(&mut sidebar_ui, shell, theme, rect, info, &place, events);
                 }
                 SideRow::AddFolder => {
                     let response = sidebar_ui.interact(rect, add_folder_id(), Sense::click());
@@ -382,9 +425,10 @@ impl BrowserUi {
         theme: &Theme,
         rect: Rect,
         info: &LabelInfo,
-        order: &[Label],
+        place: &Place<'_>,
         events: &mut Vec<UiEvent>,
     ) {
+        let order = place.order;
         let view = shell.browser_view();
         let id = label_id(&info.label);
         let library = info.section == Section::Library;
@@ -394,7 +438,7 @@ impl BrowserUi {
         } else {
             self.editing_labels
         };
-        let movable = library && info.label != Label::All;
+        let movable = (library && info.label != Label::All) || info.label.is_nested_collection();
         let response = ui.interact(
             rect,
             id,
@@ -416,7 +460,12 @@ impl BrowserUi {
         } else {
             theme.colors.text.0
         };
-        let mut left = rect.left() + 8.0;
+        let mut left = rect.left() + 8.0 + f32::from(place.depth) * NEST_INDENT;
+        // Spec: browser-tags R45. A collection holding others has a fold
+        // triangle, which opens and closes its list.
+        if place.holds {
+            self.fold_triangle(ui, theme, rect, left - 4.0, info, events);
+        }
         // Edit mode: a check box that shows or hides the label (R26, R39).
         if (library || collection) && editing {
             let check =
@@ -460,7 +509,7 @@ impl BrowserUi {
                         egui::accesskit::Toggled::False
                     });
                 });
-            left = rect.left() + 22.0;
+            left = rect.left() + 22.0 + f32::from(place.depth) * NEST_INDENT;
         }
         if let Some(name) = &info.icon {
             icon(
@@ -471,11 +520,12 @@ impl BrowserUi {
             );
             left += 14.0;
         } else if let Label::Collection(number) = info.label {
-            // Spec: browser-tags R34. A collection's colour.
+            // Spec: browser-tags R34, R46. A collection's colour; a nested
+            // one has the colour of the collection at its top.
             painter.circle_filled(
                 pos2(left + 3.5, rect.center().y),
                 3.5,
-                collection_colour(theme, number),
+                collection_colour(theme, view.collection_top(number)),
             );
             left += 12.0;
         }
@@ -530,6 +580,85 @@ impl BrowserUi {
                 }
             }
         }
+        // Spec: browser-tags R45 (I-DRAG-056). A nested collection's label
+        // dropped on a collection moves into it, or before a nested one when
+        // dropped on its upper quarter.
+        if info.section == Section::Collections
+            && let Some(drag) = DragAndDrop::payload::<LabelDrag>(ui.ctx())
+            && drag.0.is_nested_collection()
+            && let Some(pointer) = ui.input(|i| i.pointer.hover_pos())
+            && rect.contains(pointer)
+            && ui.clip_rect().contains(pointer)
+        {
+            let before =
+                info.label.is_nested_collection() && pointer.y < rect.top() + rect.height() * 0.25;
+            if before {
+                painter.line_segment(
+                    [rect.left_top(), rect.right_top()],
+                    Stroke::new(2.0, theme.colors.accent.0),
+                );
+            } else {
+                painter.rect_stroke(
+                    rect.shrink(1.0),
+                    0.0,
+                    Stroke::new(1.0, theme.colors.accent.0),
+                    StrokeKind::Inside,
+                );
+            }
+            if ui.input(|i| i.pointer.any_released()) {
+                let moved = drag.0.clone();
+                DragAndDrop::clear_payload(ui.ctx());
+                if moved != info.label {
+                    let (parent, index) = match (&info.parent, before) {
+                        (Some(parent), true) => (
+                            parent.clone(),
+                            place
+                                .nesting
+                                .iter()
+                                .filter(|l| l.parent.as_ref() == Some(parent))
+                                .position(|l| l.label == info.label),
+                        ),
+                        _ => (info.label.clone(), None),
+                    };
+                    invoke(
+                        events,
+                        ids::MOVE_COLLECTION,
+                        json!({
+                            "collection": collection_number(&moved),
+                            "parent": collection_number(&parent),
+                            "index": index,
+                        }),
+                    );
+                }
+            }
+        }
+        // Spec: browser-tags R46 (I-DROP-024). Items dropped on a nested
+        // collection's label go into it.
+        if info.label.is_nested_collection()
+            && let Some(keys) = super::dragged_item_keys(ui.ctx())
+            && let Some(pointer) = ui.input(|i| i.pointer.hover_pos())
+            && rect.contains(pointer)
+            && ui.clip_rect().contains(pointer)
+        {
+            painter.rect_stroke(
+                rect.shrink(1.0),
+                0.0,
+                Stroke::new(1.0, theme.colors.accent.0),
+                StrokeKind::Inside,
+            );
+            if ui.input(|i| i.pointer.any_released()) {
+                DragAndDrop::clear_payload(ui.ctx());
+                invoke(
+                    events,
+                    ids::SET_COLLECTION,
+                    json!({
+                        "collection": collection_number(&info.label),
+                        "items": keys,
+                        "member": true,
+                    }),
+                );
+            }
+        }
         // Spec: racks R46. A chain dropped on a place is saved there; on the
         // User Library, in its folder for the rack's presets.
         match (&info.label, &info.path) {
@@ -556,7 +685,12 @@ impl BrowserUi {
             _ => {}
         }
         // C-BROWSER-017, C-BROWSER-018: the label's context menu.
-        let menu = |ui: &mut Ui, events: &mut Vec<UiEvent>| self.label_menu(ui, info, events);
+        let holds = match info.label {
+            Label::Collection(number) => view.collection_holds(number),
+            _ => 0,
+        };
+        let menu =
+            |ui: &mut Ui, events: &mut Vec<UiEvent>| self.label_menu(ui, info, holds, events);
         if has_menu(&info.label) {
             response.context_menu(|ui| menu(ui, events));
             // S-CTX-002: the keys open the chosen place's menu while the
@@ -584,11 +718,65 @@ impl BrowserUi {
         });
     }
 
+    /// The fold triangle of a collection that holds others, centred at
+    /// `x`: it opens and closes the list of the collections nested in it.
+    fn fold_triangle(
+        &self,
+        ui: &mut Ui,
+        theme: &Theme,
+        rect: Rect,
+        x: f32,
+        info: &LabelInfo,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let c = pos2(x + 4.0, rect.center().y);
+        let id = Id::new(("browser-fold", &info.label));
+        let response = ui.interact(
+            Rect::from_center_size(c, vec2(10.0, rect.height())),
+            id,
+            Sense::click(),
+        );
+        let points = if info.open {
+            vec![
+                c + vec2(-3.0, -2.0),
+                c + vec2(3.0, -2.0),
+                c + vec2(0.0, 2.5),
+            ]
+        } else {
+            vec![
+                c + vec2(-2.0, -3.0),
+                c + vec2(-2.0, 3.0),
+                c + vec2(2.5, 0.0),
+            ]
+        };
+        ui.painter_at(rect).add(Shape::convex_polygon(
+            points,
+            theme.colors.text_dim.0,
+            Stroke::NONE,
+        ));
+        if response.clicked() {
+            invoke(
+                events,
+                ids::OPEN_FOLDER,
+                json!({ "path": format!("collection:{}", collection_number(&info.label)) }),
+            );
+        }
+        let name = format!(
+            "{} {}",
+            if info.open { "Collapse" } else { "Expand" },
+            info.name
+        );
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(Role::Button);
+            node.set_label(name);
+        });
+    }
+
     /// A label's context menu: a folder in Places can be removed from the
     /// sidebar and given an icon; a Library label or a saved label can be
     /// renamed (Cmd-R) and given an icon, and a saved label removed
     /// (C-BROWSER-017, C-BROWSER-018; spec: browser-tags R25).
-    fn label_menu(&self, ui: &mut Ui, info: &LabelInfo, events: &mut Vec<UiEvent>) {
+    fn label_menu(&self, ui: &mut Ui, info: &LabelInfo, holds: usize, events: &mut Vec<UiEvent>) {
         let mut first = true;
         let mut button = |ui: &mut Ui, text: &str| -> egui::Response {
             let response = ui.button(text);
@@ -605,12 +793,34 @@ impl BrowserUi {
             invoke(events, ids::REMOVE_FOLDER, json!({ "path": path }));
             ui.close();
         }
-        if (info.label.is_library() || info.label.is_collection()) && button(ui, "Rename").clicked()
+        let nested = info.label.is_nested_collection();
+        if (info.label.is_library() || info.label.is_collection() || nested)
+            && button(ui, "Rename").clicked()
         {
             invoke(events, ids::RENAME_LABEL, json!({ "label": info.label }));
             ui.close();
         }
-        if info.label.is_collection() {
+        if (info.label.is_collection() || nested) && button(ui, "New Collection").clicked() {
+            invoke(
+                events,
+                ids::ADD_COLLECTION,
+                json!({ "parent": collection_number(&info.label) }),
+            );
+            ui.close();
+        }
+        if nested && button(ui, "Delete").clicked() {
+            let number = collection_number(&info.label);
+            let args = json!({ "collection": number });
+            // Spec: browser-tags R47. Asks first when it holds items.
+            let held = holds;
+            if held == 0 {
+                invoke(events, ids::DELETE_COLLECTION, args);
+            } else {
+                super::ask_delete_collection(ui.ctx(), args, &info.name, held);
+            }
+            ui.close();
+        }
+        if info.label.is_collection() || nested {
             // A collection has its colour, not an icon (spec: browser-tags
             // R38).
             return;
@@ -701,6 +911,14 @@ impl BrowserUi {
             }
             self.label_text_for = None;
         }
+    }
+}
+
+/// The number of a collection's label.
+fn collection_number(label: &Label) -> u32 {
+    match label {
+        Label::Collection(number) => *number,
+        _ => 0,
     }
 }
 

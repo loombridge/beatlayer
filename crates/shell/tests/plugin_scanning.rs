@@ -558,7 +558,10 @@ fn hide_plug_in_takes_a_plug_in_out_of_every_list_and_show_hidden_brings_it_back
         .unwrap();
     assert!(rows(&mut shell).is_empty(), "the collection skips it");
     shell
-        .run(browser_ids::OPEN_PLACE, json!({ "label": browser_ids::Label::Saved(1) }))
+        .run(
+            browser_ids::OPEN_PLACE,
+            json!({ "label": browser_ids::Label::Saved(1) }),
+        )
         .unwrap();
     assert!(rows(&mut shell).is_empty(), "the saved label skips it");
 

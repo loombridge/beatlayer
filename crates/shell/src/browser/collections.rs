@@ -6,55 +6,138 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use bl_shell_spec::browser::{
-    ClearCollectionsArgs, Item, ItemKind, Label, RevealArgs, SetCollectionArgs,
+    AddCollectionArgs, ClearCollectionsArgs, DeleteCollectionArgs, Item, ItemKind, Label,
+    MoveCollectionArgs, RevealArgs, SetCollectionArgs,
 };
 
 use bl_plugin_host::scan::ScannedPlugin;
 
-use super::db::CollectionOp;
+use super::db::{CollectionOp, NestedRow};
 use super::filter::{BuiltinIds, Selection};
 use super::listing::{self, Entry};
 use super::{BrowserError, BrowserView, device_by_id, plugin_key};
 
-/// The first and last collection's numbers.
+/// The first and last of the seven collections' numbers.
 const NUMBERS: std::ops::RangeInclusive<u8> = 1..=7;
 
-/// The collections each item is in, by its key (spec: browser-tags R5).
+/// The name a collection made without one is given (spec: browser-tags
+/// R45).
+const NEW_COLLECTION: &str = "New Collection";
+
+/// The key a nested collection's folder row has in the content pane, and
+/// its fold in the sidebar.
+pub const FOLDER_PREFIX: &str = "collection:";
+
+/// The collections each item is in, by its key (spec: browser-tags R5), and
+/// the collections of the person's own inside collections (R45). The seven
+/// are numbered 1 to 7; a nested one 8 and up.
 #[derive(Clone, Debug, Default)]
 pub struct CollectionStore {
-    items: BTreeMap<String, BTreeSet<u8>>,
+    items: BTreeMap<String, BTreeSet<u32>>,
+    /// The nested collections, in the order they are listed.
+    nested: Vec<NestedRow>,
 }
 
 impl CollectionStore {
     /// Takes what the database holds.
-    pub fn load(&mut self, rows: Vec<(String, Vec<u8>)>) {
+    pub fn load(&mut self, rows: Vec<(String, Vec<u32>)>, nested: Vec<NestedRow>) {
+        self.nested = nested;
         self.items = rows
             .into_iter()
             .map(|(key, collections)| {
-                let numbers = collections.into_iter().filter(|n| NUMBERS.contains(n));
-                (key, numbers.collect::<BTreeSet<u8>>())
+                let numbers = collections.into_iter().filter(|n| self.exists(*n));
+                (key, numbers.collect::<BTreeSet<u32>>())
             })
             .filter(|(_, numbers)| !numbers.is_empty())
             .collect();
     }
 
-    /// The collections an item is in, in order.
+    /// Whether `number` names one of the seven or a nested collection.
     #[must_use]
-    pub fn of(&self, key: &str) -> Vec<u8> {
+    pub fn exists(&self, number: u32) -> bool {
+        u8::try_from(number).is_ok_and(|n| NUMBERS.contains(&n))
+            || self.nested.iter().any(|n| n.id == number)
+    }
+
+    /// The nested collections, in order.
+    #[must_use]
+    pub fn nested(&self) -> &[NestedRow] {
+        &self.nested
+    }
+
+    /// The name of a nested collection.
+    #[must_use]
+    pub fn name_of(&self, number: u32) -> Option<&str> {
+        self.nested
+            .iter()
+            .find(|n| n.id == number)
+            .map(|n| n.name.as_str())
+    }
+
+    /// The collections directly inside `parent`, in order.
+    #[must_use]
+    pub fn children(&self, parent: u32) -> Vec<u32> {
+        self.nested
+            .iter()
+            .filter(|n| n.parent == parent)
+            .map(|n| n.id)
+            .collect()
+    }
+
+    /// The collections inside `number`, at any depth.
+    #[must_use]
+    pub fn descendants(&self, number: u32) -> Vec<u32> {
+        let mut found = Vec::new();
+        let mut queue = self.children(number);
+        while let Some(next) = queue.pop() {
+            found.push(next);
+            queue.extend(self.children(next));
+        }
+        found
+    }
+
+    /// The collection at the top of `number`'s chain: itself for one of the
+    /// seven, which gives a nested collection its colour (R46).
+    #[must_use]
+    pub fn top_of(&self, number: u32) -> u8 {
+        let mut at = number;
+        while let Some(parent) = self.nested.iter().find(|n| n.id == at).map(|n| n.parent) {
+            at = parent;
+        }
+        u8::try_from(at).unwrap_or(0)
+    }
+
+    /// The collections an item is in, in order, nested ones included.
+    #[must_use]
+    pub fn of(&self, key: &str) -> Vec<u32> {
         self.items
             .get(key)
             .map_or_else(Vec::new, |numbers| numbers.iter().copied().collect())
     }
 
+    /// The seven collections' colours a row shows for an item: the ones it
+    /// is in, and the top collection of each nested one (R46), in order.
+    #[must_use]
+    pub fn colours_of(&self, key: &str) -> Vec<u8> {
+        let tops: BTreeSet<u8> = self.of(key).into_iter().map(|n| self.top_of(n)).collect();
+        tops.into_iter().collect()
+    }
+
+    /// The nested collections an item is directly in.
+    #[must_use]
+    pub fn nested_of(&self, key: &str) -> Vec<u32> {
+        self.of(key).into_iter().filter(|n| *n > 7).collect()
+    }
+
     /// Whether an item is in a collection.
     #[must_use]
-    pub fn contains(&self, key: &str, number: u8) -> bool {
+    pub fn contains(&self, key: &str, number: u32) -> bool {
         self.items.get(key).is_some_and(|n| n.contains(&number))
     }
 
     /// The keys of the items in a collection, in order.
     #[must_use]
-    pub fn members(&self, number: u8) -> Vec<String> {
+    pub fn members(&self, number: u32) -> Vec<String> {
         self.items
             .iter()
             .filter(|(_, numbers)| numbers.contains(&number))
@@ -62,9 +145,22 @@ impl CollectionStore {
             .collect()
     }
 
+    /// The keys of the items in a collection or in any collection inside it
+    /// (R47), in order.
+    #[must_use]
+    pub fn members_deep(&self, number: u32) -> Vec<String> {
+        let mut within = self.descendants(number);
+        within.push(number);
+        self.items
+            .iter()
+            .filter(|(_, numbers)| within.iter().any(|n| numbers.contains(n)))
+            .map(|(key, _)| key.clone())
+            .collect()
+    }
+
     /// Puts an item in exactly these collections, and says what to write to
     /// the database when that changes anything.
-    pub fn set(&mut self, key: &str, numbers: BTreeSet<u8>) -> Option<CollectionOp> {
+    pub fn set(&mut self, key: &str, numbers: BTreeSet<u32>) -> Option<CollectionOp> {
         let before = self.items.get(key).cloned().unwrap_or_default();
         if before == numbers {
             return None;
@@ -80,6 +176,55 @@ impl CollectionStore {
             collections,
         })
     }
+
+    /// Makes a collection inside `parent`, named `name`, or "New
+    /// Collection" numbered when that is taken there; its number.
+    fn add(&mut self, parent: u32, name: Option<String>) -> u32 {
+        let id = self.nested.iter().map(|n| n.id).max().unwrap_or(7).max(7) + 1;
+        let taken = |name: &str| {
+            self.nested
+                .iter()
+                .any(|n| n.parent == parent && n.name == name)
+        };
+        let name = name.unwrap_or_else(|| {
+            let mut count = 1;
+            let mut name = NEW_COLLECTION.to_owned();
+            while taken(&name) {
+                count += 1;
+                name = format!("{NEW_COLLECTION} {count}");
+            }
+            name
+        });
+        self.nested.push(NestedRow { id, parent, name });
+        id
+    }
+
+    /// Removes nested collections.
+    fn remove(&mut self, gone: &[u32]) {
+        self.nested.retain(|n| !gone.contains(&n.id));
+    }
+
+    /// Moves a nested collection into `parent`, before the `index`th
+    /// collection there (the end if `None`).
+    fn move_to(&mut self, id: u32, parent: u32, index: Option<usize>) {
+        let Some(at) = self.nested.iter().position(|n| n.id == id) else {
+            return;
+        };
+        let mut moved = self.nested.remove(at);
+        moved.parent = parent;
+        let siblings: Vec<usize> = self
+            .nested
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| n.parent == parent)
+            .map(|(i, _)| i)
+            .collect();
+        let place = match index.and_then(|i| siblings.get(i)) {
+            Some(&before) => before,
+            None => siblings.last().map_or(self.nested.len(), |last| last + 1),
+        };
+        self.nested.insert(place, moved);
+    }
 }
 
 impl BrowserView {
@@ -94,6 +239,11 @@ impl BrowserView {
             return Err(BrowserError::Unavailable(
                 "no items are selected".to_owned(),
             ));
+        }
+        if let Some(key) = keys.iter().find(|key| key.starts_with(FOLDER_PREFIX)) {
+            return Err(BrowserError::Unavailable(format!(
+                "{key} is a collection, which a collection can't hold"
+            )));
         }
         if let Some(key) = keys.iter().find(|key| self.is_set_row(key)) {
             return Err(BrowserError::Unavailable(format!(
@@ -129,11 +279,7 @@ impl BrowserView {
             items,
             member,
         } = args;
-        if !NUMBERS.contains(&collection) {
-            return Err(BrowserError::InvalidArgs(format!(
-                "{collection} isn't a collection: they are 1 (Favorites) to 7 (Gray)"
-            )));
-        }
+        self.check_collection(collection)?;
         let keys = self.collection_targets(items)?;
         let put = member.unwrap_or_else(|| {
             !keys
@@ -143,7 +289,7 @@ impl BrowserView {
         let ops = keys
             .iter()
             .filter_map(|key| {
-                let mut numbers: BTreeSet<u8> = self.collections.of(key).into_iter().collect();
+                let mut numbers: BTreeSet<u32> = self.collections.of(key).into_iter().collect();
                 if put {
                     numbers.insert(collection);
                 } else {
@@ -154,13 +300,162 @@ impl BrowserView {
             .collect();
         self.save_collections(ops);
         self.hash_tagged_files(&keys);
-        let label = Label::Collection(collection);
+        let label = Label::Collection(u32::from(self.collections.top_of(collection)));
         let comes_back = put && !self.label_prefs.shown(&label);
         if comes_back {
             self.label_prefs.set_shown(&label, true);
         }
         self.rebuild();
         Ok(comes_back)
+    }
+
+    /// Whether `number` names a collection the browser has.
+    pub(super) fn check_collection(&self, number: u32) -> Result<(), BrowserError> {
+        if self.collections.exists(number) {
+            return Ok(());
+        }
+        Err(BrowserError::InvalidArgs(format!(
+            "{number} isn't a collection: they are 1 (Favorites) to 7 (Gray), and the \
+             numbers `browser.state` lists under them"
+        )))
+    }
+
+    /// Writes the nested collections to the database.
+    fn save_nested(&mut self) {
+        self.generation += 1;
+        if let Some(db) = &self.db {
+            db.save_nested_collections(self.collections.nested().to_vec());
+        }
+    }
+
+    /// Makes a collection inside another (spec: browser-tags R45), and
+    /// opens its parent so it shows.
+    pub(super) fn add_collection(&mut self, args: AddCollectionArgs) -> Result<(), BrowserError> {
+        let AddCollectionArgs { parent, name } = args;
+        self.check_collection(parent)?;
+        let name = name.map(|name| name.trim().to_owned());
+        if name.as_deref() == Some("") {
+            return Err(BrowserError::InvalidArgs(
+                "a collection needs a name".to_owned(),
+            ));
+        }
+        let editing = name.is_none();
+        let id = self.collections.add(parent, name);
+        self.save_nested();
+        self.open
+            .insert(PathBuf::from(format!("{FOLDER_PREFIX}{parent}")));
+        if editing {
+            self.renaming_label = Some(Label::Collection(id));
+        }
+        self.rebuild();
+        Ok(())
+    }
+
+    /// Renames a nested collection (spec: browser-tags R47).
+    pub(super) fn rename_nested(&mut self, number: u32, name: String) -> Result<(), BrowserError> {
+        if name.is_empty() {
+            return Err(BrowserError::InvalidArgs(
+                "a collection needs a name".to_owned(),
+            ));
+        }
+        if let Some(row) = self.collections.nested.iter_mut().find(|n| n.id == number) {
+            row.name = name;
+        }
+        self.save_nested();
+        Ok(())
+    }
+
+    /// Moves a nested collection (spec: browser-tags R45).
+    pub(super) fn move_collection(&mut self, args: MoveCollectionArgs) -> Result<(), BrowserError> {
+        let MoveCollectionArgs {
+            collection,
+            parent,
+            index,
+        } = args;
+        if collection <= 7 || !self.collections.exists(collection) {
+            return Err(BrowserError::InvalidArgs(format!(
+                "{collection} isn't a collection of your own: only those move"
+            )));
+        }
+        self.check_collection(parent)?;
+        if parent == collection || self.collections.descendants(collection).contains(&parent) {
+            return Err(BrowserError::InvalidArgs(
+                "a collection can't go inside itself or one of its own".to_owned(),
+            ));
+        }
+        self.collections.move_to(collection, parent, index);
+        self.save_nested();
+        self.open
+            .insert(PathBuf::from(format!("{FOLDER_PREFIX}{parent}")));
+        self.rebuild();
+        Ok(())
+    }
+
+    /// How many items a nested collection and the ones inside it hold, as
+    /// Delete in its context menu asks about (spec: browser-tags R47).
+    #[must_use]
+    pub fn collection_holds(&self, number: u32) -> usize {
+        self.collections.members_deep(number).len()
+    }
+
+    /// Deletes a nested collection and the ones inside it (spec:
+    /// browser-tags R47); no file is touched.
+    pub(super) fn delete_collection(
+        &mut self,
+        args: DeleteCollectionArgs,
+    ) -> Result<(), BrowserError> {
+        let DeleteCollectionArgs {
+            collection,
+            confirm,
+        } = args;
+        if collection <= 7 || !self.collections.exists(collection) {
+            return Err(BrowserError::InvalidArgs(format!(
+                "{collection} isn't a collection of your own: the seven can't be deleted"
+            )));
+        }
+        let held = self.collection_holds(collection);
+        if held > 0 && !confirm {
+            return Err(BrowserError::Unavailable(format!(
+                "{} and the collections inside it hold {held} items, which leave them: run it \
+                 again with `confirm` to delete it",
+                self.label_name(&Label::Collection(collection))
+            )));
+        }
+        let mut gone = self.collections.descendants(collection);
+        gone.push(collection);
+        let ops = self
+            .collections
+            .members_deep(collection)
+            .into_iter()
+            .filter_map(|key| {
+                let mut numbers: BTreeSet<u32> = self.collections.of(&key).into_iter().collect();
+                numbers.retain(|n| !gone.contains(n));
+                self.collections.set(&key, numbers)
+            })
+            .collect();
+        let parent = self
+            .collections
+            .nested()
+            .iter()
+            .find(|n| n.id == collection)
+            .map_or(0, |n| n.parent);
+        self.collections.remove(&gone);
+        self.save_collections(ops);
+        self.save_nested();
+        for number in &gone {
+            self.open
+                .remove(&PathBuf::from(format!("{FOLDER_PREFIX}{number}")));
+        }
+        if let Label::Collection(chosen) = self.label
+            && gone.contains(&chosen)
+        {
+            self.label = Label::Collection(parent);
+        }
+        if self.renaming_label == Some(Label::Collection(collection)) {
+            self.renaming_label = None;
+        }
+        self.rebuild();
+        Ok(())
     }
 
     /// Takes items out of every collection (spec: browser-tags R35).
@@ -199,13 +494,15 @@ impl BrowserView {
         Ok(paths)
     }
 
-    /// A collection's rows (spec: browser-tags R36): the items in it that
-    /// can be found, folders first, each group by name or the chosen sort,
-    /// folders and sets open as they do under any label. A search lists the
-    /// matching items alone, as it does elsewhere.
+    /// A collection's rows (spec: browser-tags R36, R47): the collections
+    /// nested in it first, as folders that open in place, then the items in
+    /// it that can be found, folders first, each group by name or the chosen
+    /// sort, folders and sets open as they do under any label. A search
+    /// lists the matching items alone, as it does elsewhere, and covers the
+    /// nested collections too.
     pub(super) fn collection_rows(
         &mut self,
-        number: u8,
+        number: u32,
         tags: &[i64],
         selection: &Selection,
         builtin: &BuiltinIds,
@@ -213,64 +510,12 @@ impl BrowserView {
         let query = self.search.trim().to_lowercase();
         let words: Vec<&str> = query.split_whitespace().collect();
         let filtering = !words.is_empty() || !tags.is_empty() || !selection.is_empty();
-        let mut entries: Vec<Entry> = Vec::new();
-        let mut plugins: Vec<Item> = Vec::new();
-        let by_key: HashMap<String, &ScannedPlugin> =
-            self.plugins.iter().map(|p| (p.key(), p)).collect();
-        for key in self.collections.members(number) {
-            if let Some(plugin) = by_key.get(&key) {
-                plugins.push(Item {
-                    path: plugin_key(plugin),
-                    name: plugin.name.clone(),
-                    kind: ItemKind::Plugin,
-                    depth: 0,
-                    open: false,
-                    folder: plugin.vendor.clone(),
-                    format: Some(plugin.format),
-                    clip_kind: None,
-                    details: None,
-                    collections: Vec::new(),
-                    hidden: self.hidden_plugins.contains(&plugin.key()),
-                });
-            } else if let Some(device) = device_by_id(&key) {
-                plugins.push(Item {
-                    path: device.id,
-                    name: device.name,
-                    kind: ItemKind::Device,
-                    depth: 0,
-                    open: false,
-                    folder: None,
-                    format: None,
-                    clip_kind: None,
-                    details: None,
-                    collections: Vec::new(),
-                    hidden: false,
-                });
-            } else if let Some(entry) = Self::collected_entry(&key) {
-                entries.push(entry);
-            }
-        }
-        entries.sort_by(listing::browser_order);
-        self.sort_entries(&mut entries);
-        let mut items: Vec<Item> = Vec::new();
-        if filtering {
-            items.extend(entries.into_iter().map(|entry| Item {
-                path: entry.path.to_string_lossy().into_owned(),
-                name: entry.name,
-                kind: entry.kind,
-                depth: 0,
-                open: false,
-                folder: None,
-                format: None,
-                clip_kind: entry.clip,
-                details: None,
-                collections: Vec::new(),
-                hidden: false,
-            }));
+        let mut items: Vec<Item> = if filtering {
+            let keys = self.collections.members_deep(number);
+            self.collected_rows(keys, 0, true)
         } else {
-            self.push_entries(entries, 0, &mut items);
-        }
-        items.extend(plugins);
+            self.collection_level(number, 0)
+        };
         if filtering {
             items.retain(|item| {
                 let name = item.name.to_lowercase();
@@ -291,6 +536,103 @@ impl BrowserView {
                 format!("Nothing matches \u{201c}{}\u{201d}.", self.search.trim())
             });
         }
+        items
+    }
+
+    /// One level of a collection's rows: its nested collections as folders,
+    /// each followed by its own level while open, then its items.
+    fn collection_level(&mut self, number: u32, depth: u16) -> Vec<Item> {
+        let mut items = Vec::new();
+        for child in self.collections.children(number) {
+            let key = format!("{FOLDER_PREFIX}{child}");
+            let open = self.open.contains(Path::new(&key));
+            items.push(Item {
+                path: key,
+                name: self.label_name(&Label::Collection(child)),
+                kind: ItemKind::Folder,
+                depth,
+                open,
+                folder: None,
+                format: None,
+                clip_kind: None,
+                details: None,
+                collections: vec![self.collections.top_of(child)],
+                hidden: false,
+                nested: Vec::new(),
+            });
+            if open {
+                items.extend(self.collection_level(child, depth.saturating_add(1)));
+            }
+        }
+        let keys = self.collections.members(number);
+        items.extend(self.collected_rows(keys, depth, false));
+        items
+    }
+
+    /// The rows of the items `keys` name: files and folders (opening in place
+    /// unless `flat`), then plug-ins and devices.
+    fn collected_rows(&mut self, keys: Vec<String>, depth: u16, flat: bool) -> Vec<Item> {
+        let mut entries: Vec<Entry> = Vec::new();
+        let mut plugins: Vec<Item> = Vec::new();
+        let by_key: HashMap<String, &ScannedPlugin> =
+            self.plugins.iter().map(|p| (p.key(), p)).collect();
+        for key in keys {
+            if let Some(plugin) = by_key.get(&key) {
+                plugins.push(Item {
+                    path: plugin_key(plugin),
+                    name: plugin.name.clone(),
+                    kind: ItemKind::Plugin,
+                    depth,
+                    open: false,
+                    folder: plugin.vendor.clone(),
+                    format: Some(plugin.format),
+                    clip_kind: None,
+                    details: None,
+                    collections: Vec::new(),
+                    hidden: self.hidden_plugins.contains(&plugin.key()),
+                    nested: Vec::new(),
+                });
+            } else if let Some(device) = device_by_id(&key) {
+                plugins.push(Item {
+                    path: device.id,
+                    name: device.name,
+                    kind: ItemKind::Device,
+                    depth,
+                    open: false,
+                    folder: None,
+                    format: None,
+                    clip_kind: None,
+                    details: None,
+                    collections: Vec::new(),
+                    hidden: false,
+                    nested: Vec::new(),
+                });
+            } else if let Some(entry) = Self::collected_entry(&key) {
+                entries.push(entry);
+            }
+        }
+        entries.sort_by(listing::browser_order);
+        self.sort_entries(&mut entries);
+        let mut items: Vec<Item> = Vec::new();
+        if flat {
+            items.extend(entries.into_iter().map(|entry| Item {
+                path: entry.path.to_string_lossy().into_owned(),
+                name: entry.name,
+                kind: entry.kind,
+                depth,
+                open: false,
+                folder: None,
+                format: None,
+                clip_kind: entry.clip,
+                details: None,
+                collections: Vec::new(),
+                hidden: false,
+                nested: Vec::new(),
+            }));
+        } else {
+            self.push_entries(entries, depth, &mut items);
+        }
+        items.extend(plugins);
         items
     }
 

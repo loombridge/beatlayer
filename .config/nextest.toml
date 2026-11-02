@@ -54,6 +54,19 @@ filter = """
 threads-required = 4
 priority = 90
 
+# These two time sixteen voices against real time, and fail below 4x at
+# BL_TEST_DEPTH=full. A wall-clock result again, so beside other tests they
+# would time their load (3.2x in the nightly macOS check of 2 November 2026).
+# Each takes four test slots, the whole of a CI runner, so it runs with the
+# runner to itself there.
+[[profile.default.overrides]]
+filter = """
+    (package(bl-devices) & test(=meld::sixteen_voices_of_swarm_saw_on_both_engines_render_inside_the_device_budget))
+    | (package(bl-devices) & test(=wavetable::sixteen_voices_with_eight_unison_copies_render_inside_the_device_budget))
+"""
+threads-required = 4
+priority = 90
+
 # The slowest tests, at either BL_TEST_DEPTH, start next, so a run doesn't
 # end waiting for one that started late.
 [[profile.default.overrides]]

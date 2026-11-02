@@ -1,6 +1,6 @@
 # CLAP hosting
 
-- **Status:** partial (R1 to R24 have passing tests; R25 and R26 are Phase 10's)
+- **Status:** partial (R1 to R24, R27 and R28 have passing tests; R25 and R26 are Phase 10's)
 - **Work packages:** WP-2.6 (this spec). The plug-in scanner, the browser's plug-ins, and plug-in sources are WP-2.9's; plug-in editor windows per platform (embedding, resizing, scale), the plug-in device panel, and plug-in window handling are WP-2.10's (Settings > Plug-Ins is WP-2.5b's); delay compensation is WP-2.11's; offline renders (export, agents' previews) running plug-ins are WP-2.6b's; VST3 and Audio Units are WP-2.7 and 2.8; notes reach devices from MIDI clips and inputs with WP-2.1 and 2.2. The host side of the plug-in kit's agent-commands extension (R18, R19) belongs to Reagent's own plan; the gain-adjustment report (R24) is WP-5.29's (IMP-25). WP-6.17b adds per-note expression and MPE (R21 to R23, with [MPE](mpe.md) R14 to R21). WP-10.2 runs CLAP plug-ins in a `beatlayer-host` process (R25, with [the plug-in sandbox](plugin-sandbox.md)); WP-10.8 finds a set's plug-ins by identifier, the saved file only a hint (R9, R26, with [plug-in scanning](plugin-scanning.md) R22 to R25)
 - **Parity-matrix row:** Plug-in formats: (Beatlayer only) CLAP
 - **Checked against:** Live 12.4.6 on macOS, observed on 12 October 2026 with Apple's AUDelay (a plug-in's own window, its title, its undo step, and the wrench button); the CLAP specification (1.2); [the architecture](../02-architecture.md), "Plug-in hosting" and "Real-time rules"

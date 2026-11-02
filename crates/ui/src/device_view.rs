@@ -1040,7 +1040,7 @@ impl DeviceViewUi {
             && (response.clicked()
                 || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))))
         {
-            // Spec: clap-hosting R13, R35. Not an undo step. Cmd-click
+            // Spec: clap-hosting R13, R27. Not an undo step. Cmd-click
             // (Ctrl-click) keeps the other plug-in windows open.
             let keep_others = ui.input(|i| i.modifiers.command);
             invoke(
@@ -1087,7 +1087,10 @@ impl DeviceViewUi {
                 node.set_disabled();
             }
             node.set_description(
-                "Shows or hides the plug-in's own panel in a floating window".to_owned(),
+                "Shows or hides the plug-in's own panel in a floating window. Cmd-Option-P \
+                 (Ctrl-Alt-P) shows or hides every plug-in window; Cmd-click (Ctrl-click) \
+                 opens this one and keeps the others open"
+                    .to_owned(),
             );
         });
     }

@@ -108,7 +108,7 @@ Result: [`ChangeSet`](README.md#changeset).
 
 **Change Scene Color**. Permission: `edit`. Contexts: `session`.
 
-Colours scenes with swatch `colour` of the palette of 5 rows of 14 (0 to 69, numbered from the top row's left, row by row: swatch 14 is row 2, colour 1), or clears their colour with null, as a new scene has none.
+Colours scenes with swatch `colour` of the palette of 5 rows of 14 (0 to 69, numbered from the top row's left, row by row: swatch 14 is row 2, colour 1), or a colour of one's own as `#RRGGBB`, or clears their colour with null, as a new scene has none.
 
 Default keys: none.
 
@@ -117,7 +117,7 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `scenes` | array of [`SceneId`](README.md#sceneid) | yes | The scenes, each listed once. |
-| `colour` | integer or null | no | The swatch, or `null` for none. |
+| `colour` | [`Colour`](README.md#colour) or null | no | The swatch, or `null` for none. |
 
 Result: [`ChangeSet`](README.md#changeset).
 

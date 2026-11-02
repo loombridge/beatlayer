@@ -919,13 +919,13 @@ fn land_piece(
         )?;
         made.tracks.push(track);
         // Spec: stem-separation R26. Each part's own colour.
-        set_colour(editor, track, kind.swatch())?;
+        set_colour(editor, track, kind.swatch().into())?;
         let clip = new_clip(editor, env, plan, track, name, *hash, path)?;
         made.clips.push(clip);
         editor
             .apply(Command::SetClipColour {
                 clips: vec![clip],
-                colour: kind.swatch(),
+                colour: kind.swatch().into(),
             })
             .map_err(|e| e.to_string())?;
     }
@@ -997,7 +997,7 @@ fn new_track(
         .ok_or_else(|| "the track wasn't copied".to_owned())
 }
 
-fn set_colour(editor: &mut Editor, track: TrackId, colour: u8) -> Result<(), String> {
+fn set_colour(editor: &mut Editor, track: TrackId, colour: bl_model::Colour) -> Result<(), String> {
     editor
         .apply(Command::SetTrackColour {
             tracks: vec![track],

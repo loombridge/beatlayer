@@ -293,14 +293,15 @@ impl SessionMenus {
                     .first()
                     .and_then(|clip| doc.clip(*clip))
                     .and_then(|clip| clip.colour);
-                if let Some(colour) = crate::palette::show(ui, theme, "clip-title-colour", current)
-                {
-                    events.push(UiEvent::Invoke(Invocation::new(
-                        "clip.set_colour",
-                        json!({ "clips": clips, "colour": colour }),
-                    )));
-                    ui.close();
-                }
+                crate::palette::show(
+                    ui,
+                    theme,
+                    shell,
+                    "clip-title-colour",
+                    current,
+                    crate::palette::Target::new("clip.set_colour", json!({ "clips": clips })),
+                    events,
+                );
                 continue;
             }
             let mut state = item_state_in(item, shell, &keymap, self.platform, &contexts);
@@ -360,15 +361,18 @@ impl SessionMenus {
                 let current = clicked_clip
                     .and_then(|clip| doc.clip(clip))
                     .and_then(|clip| clip.colour);
-                if let Some(colour) =
-                    crate::palette::show(ui, theme, "session-clip-colour", current)
-                {
-                    events.push(UiEvent::Invoke(Invocation::new(
+                crate::palette::show(
+                    ui,
+                    theme,
+                    shell,
+                    "session-clip-colour",
+                    current,
+                    crate::palette::Target::new(
                         "clip.set_colour",
-                        json!({ "clips": chosen.clips, "colour": colour }),
-                    )));
-                    ui.close();
-                }
+                        json!({ "clips": chosen.clips }),
+                    ),
+                    events,
+                );
                 continue;
             }
             if row == "C-SCENE-014" {
@@ -551,13 +555,15 @@ impl SessionMenus {
         let response = draw_item(ui, state, self.platform, events);
         crate::menus::take_focus_first(ui, &response);
         let current = on.scene.and_then(colour_of);
-        if let Some(colour) = crate::palette::show(ui, theme, "scene-colour", current) {
-            events.push(UiEvent::Invoke(Invocation::new(
-                "scene.set_colour",
-                json!({ "scenes": chosen.scenes, "colour": colour }),
-            )));
-            ui.close();
-        }
+        crate::palette::show(
+            ui,
+            theme,
+            shell,
+            "scene-colour",
+            current,
+            crate::palette::Target::new("scene.set_colour", json!({ "scenes": chosen.scenes })),
+            events,
+        );
     }
 }
 

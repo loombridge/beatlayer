@@ -232,7 +232,10 @@ fn every_command_runs_by_id() {
         "track.set_colour",
         json!({ "tracks": [drums], "colour": 16 }),
     );
-    assert_eq!(agent.editor.document().track(drums).unwrap().colour(), 16);
+    assert_eq!(
+        agent.editor.document().track(drums).unwrap().colour(),
+        bl_model::Colour::Swatch(16)
+    );
     agent.run(
         "track.set_frozen",
         json!({ "frozen": [[drums, { "clips": [], "tails": [], "output": null }]] }),
@@ -685,7 +688,10 @@ fn every_command_runs_by_id() {
         Some(own)
     );
     agent.run("clip.set_colour", json!({ "clips": [riff], "colour": 40 }));
-    assert_eq!(agent.editor.document().clip(riff).unwrap().colour, Some(40));
+    assert_eq!(
+        agent.editor.document().clip(riff).unwrap().colour,
+        Some(bl_model::Colour::Swatch(40))
+    );
     // Spec: linked-clips R14. A twin of the riff links with it and leaves
     // again.
     let twin: ClipId = agent.new_id();
@@ -1282,7 +1288,7 @@ fn every_command_runs_by_id() {
     );
     assert_eq!(
         agent.editor.document().scene(first).unwrap().colour,
-        Some(55)
+        Some(bl_model::Colour::Swatch(55))
     );
     agent.run("scene.set_tempo", json!({ "scene": first, "tempo": 96.5 }));
     agent.run(
@@ -2036,7 +2042,7 @@ fn every_command_runs_by_id() {
     let direct = agent.editor.document().chain(first).unwrap();
     assert_eq!(
         (direct.name.as_str(), direct.colour, direct.info.as_str()),
-        ("Direct", Some(12), "no verb")
+        ("Direct", Some(bl_model::Colour::Swatch(12)), "no verb")
     );
     assert_eq!((direct.mixer.volume, direct.mixer.pan), (0.5, -0.25));
     assert!(!direct.mixer.enabled);
@@ -4312,7 +4318,7 @@ fn schemas_match_what_commands_serialise() {
             "chain.set_colour",
             Command::SetChainColour {
                 chain: ChainId(fresh_id),
-                colour: Some(3),
+                colour: Some(bl_model::Colour::Swatch(3)),
             },
         ),
         (
@@ -4326,7 +4332,7 @@ fn schemas_match_what_commands_serialise() {
             "track.set_colour",
             Command::SetTrackColour {
                 tracks: vec![track],
-                colour: 3,
+                colour: bl_model::Colour::Swatch(3),
             },
         ),
         (
@@ -4345,7 +4351,7 @@ fn schemas_match_what_commands_serialise() {
             "clip.set_colour",
             Command::SetClipColour {
                 clips: vec![clip],
-                colour: 3,
+                colour: bl_model::Colour::Swatch(3),
             },
         ),
         (
@@ -4359,7 +4365,7 @@ fn schemas_match_what_commands_serialise() {
             "scene.set_colour",
             Command::SetSceneColour {
                 scenes: vec![scene],
-                colour: Some(3),
+                colour: Some(bl_model::Colour::Swatch(3)),
             },
         ),
         (
@@ -4630,7 +4636,7 @@ fn schemas_match_what_commands_serialise() {
             Command::SetMacroColour {
                 rack,
                 macro_number: 1,
-                colour: Some(2),
+                colour: Some(bl_model::Colour::Swatch(2)),
             },
         ),
         (

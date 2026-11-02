@@ -271,7 +271,7 @@ impl Shown<'_> {
         self.clip
             .colour
             .or(track)
-            .map_or(GREY, |index| swatch_rgb(colours, index))
+            .map_or(GREY, |colour| colour.rgb(colours))
     }
 }
 
@@ -1347,7 +1347,7 @@ impl Content for ClipMode {
                 let colour = model
                     .document
                     .track(track)
-                    .map_or(GREY, |t| swatch_rgb(paint.colours, t.colour()));
+                    .map_or(GREY, |t| t.colour().rgb(paint.colours));
                 state.shows = if audio { "empty_audio" } else { "empty_midi" };
                 paint.screen.upper[0] = if audio {
                     Label::new("Load Sample", WHITE, false)

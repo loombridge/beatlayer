@@ -207,6 +207,13 @@ pub const SETTINGS_SET_DEFAULT_TRACK_COLOUR: &str = "settings.set_default_track_
 pub const SETTINGS_SET_REDUCED_AUTOMATIC_COLOURS: &str = "settings.set_reduced_automatic_colours";
 /// `settings.set_clip_colour`: choose Clip Color.
 pub const SETTINGS_SET_CLIP_COLOUR: &str = "settings.set_clip_colour";
+/// `settings.set_new_tracks_take_group_colour`: switch New Tracks Take Group
+/// Color (the themes spec, R30).
+pub const SETTINGS_SET_NEW_TRACKS_TAKE_GROUP_COLOUR: &str =
+    "settings.set_new_tracks_take_group_colour";
+/// `settings.use_custom_colour`: put a colour in the row of custom colours,
+/// or mark it as used (the themes spec, R28).
+pub const SETTINGS_USE_CUSTOM_COLOUR: &str = "settings.use_custom_colour";
 /// `settings.set_create_fades_on_clip_edges`: switch Create Fades on Clip
 /// Edges.
 pub const SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES: &str = "settings.set_create_fades_on_clip_edges";
@@ -264,6 +271,12 @@ pub const SETTINGS_SET_TAKEOVER_MODE: &str = "settings.set_takeover_mode";
 /// `settings.set_auto_hide_plug_in_windows`: switch Auto-Hide Plug-In
 /// Windows (WP-2.5b).
 pub const SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS: &str = "settings.set_auto_hide_plug_in_windows";
+/// `settings.set_multiple_plug_in_windows`: switch Multiple Plug-In Windows
+/// (WP-6.75).
+pub const SETTINGS_SET_MULTIPLE_PLUG_IN_WINDOWS: &str = "settings.set_multiple_plug_in_windows";
+/// `settings.set_auto_open_plug_in_windows`: switch Auto-Open Plug-In
+/// Windows (WP-6.75).
+pub const SETTINGS_SET_AUTO_OPEN_PLUG_IN_WINDOWS: &str = "settings.set_auto_open_plug_in_windows";
 /// `settings.set_collect_files_on_export`: choose Collect Files on Export
 /// (WP-6.34).
 pub const SETTINGS_SET_COLLECT_FILES_ON_EXPORT: &str = "settings.set_collect_files_on_export";
@@ -370,6 +383,8 @@ pub const IDS: &[&str] = &[
     SETTINGS_SET_DEFAULT_TRACK_COLOUR,
     SETTINGS_SET_REDUCED_AUTOMATIC_COLOURS,
     SETTINGS_SET_CLIP_COLOUR,
+    SETTINGS_SET_NEW_TRACKS_TAKE_GROUP_COLOUR,
+    SETTINGS_USE_CUSTOM_COLOUR,
     SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
     SETTINGS_SET_RETUNE_ON_TUNING_LOAD,
     SETTINGS_SET_SNAP_AUTOMATION_TO_GRID,
@@ -388,7 +403,9 @@ pub const IDS: &[&str] = &[
     SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN,
     SETTINGS_SET_AUTOMATION_RECORD_MODE,
     SETTINGS_SET_TAKEOVER_MODE,
+    SETTINGS_SET_MULTIPLE_PLUG_IN_WINDOWS,
     SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
+    SETTINGS_SET_AUTO_OPEN_PLUG_IN_WINDOWS,
     SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS,
     SETTINGS_SET_PERMANENT_SCRUB_AREAS,
     SETTINGS_SET_COLLECT_FILES_ON_EXPORT,
@@ -559,6 +576,15 @@ pub struct SwatchArgs {
     /// A swatch of the palette of 5 rows of 14, from 0 to 69.
     #[schemars(range(min = 0, max = 69))]
     pub colour: u8,
+}
+
+/// Arguments of `settings.use_custom_colour`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CustomColourArgs {
+    /// The colour, `#RRGGBB`.
+    #[schemars(regex(pattern = "^#[0-9A-Fa-f]{6}$"))]
+    pub colour: String,
 }
 
 /// Arguments of `settings.set_clip_colour`.
@@ -2211,6 +2237,35 @@ fn specs() -> Vec<CommandSpec> {
             .context(Settings)
             .args::<ClipColourArgs>()
             .result::<()>(),
+        CommandSpec::new(
+            SETTINGS_SET_NEW_TRACKS_TAKE_GROUP_COLOUR,
+            "New Tracks Take Group Color",
+        )
+        .description(
+            "Switches New Tracks Take Group Color, off in a new install. On, a track made \
+             inside a group (inserted among the group's tracks, or made by dropping a file, a \
+             device or clips among them) takes the group's colour instead of an automatic or \
+             default one; a track moved into a group, and the tracks Group Tracks puts into a \
+             new group, keep their colours. Kept for the next start; changes nothing in the \
+             set.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<SwitchArgs>()
+        .result::<()>(),
+        CommandSpec::new(SETTINGS_USE_CUSTOM_COLOUR, "Use Custom Color")
+            .description(
+                "Records a colour of one's own, `#RRGGBB`, in the row of 14 custom colours \
+                 under every palette: a colour the row holds is marked as used last, any other \
+                 goes into the first empty place, or into the place of the colour used longest \
+                 ago when the row is full. The row is kept for the next start and is the same \
+                 in every set; it changes nothing in the set, and colouring something is \
+                 `track.set_colour` and the other colour commands, which take `#RRGGBB` too.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<CustomColourArgs>()
+            .result::<()>(),
         CommandSpec::new(SETTINGS_SET_COLOR_HUE, "Color Hue")
             .description(
                 "Turns the hue of the interface's chromatic colours by this many degrees, from \
@@ -2555,6 +2610,39 @@ fn specs() -> Vec<CommandSpec> {
         .args::<SwitchArgs>()
         .result::<SwitchResult>(),
         // Plug-Ins, Plug-In Windows (L-SET-017; WP-2.5b).
+        CommandSpec::new(
+            SETTINGS_SET_MULTIPLE_PLUG_IN_WINDOWS,
+            "Multiple Plug-In Windows",
+        )
+        .description(
+            "Switches Multiple Plug-In Windows, on the Settings window's Plug-Ins page; it's on \
+             in a new install, as Live's is. While it's on, any number of plug-in editor \
+             windows stay open together. While it's off, opening a plug-in's window with \
+             `plugin.show_window` closes the other plug-in windows, unless the call passes \
+             `keep_others`, as a Cmd-click (Ctrl-click) on the window button does. Switching \
+             it off closes nothing that's already open. The setting is kept for the next \
+             start, and isn't part of the set or an undo step. The result's `on` is the \
+             setting afterwards.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<SwitchArgs>()
+        .result::<SwitchResult>(),
+        CommandSpec::new(
+            SETTINGS_SET_AUTO_OPEN_PLUG_IN_WINDOWS,
+            "Auto-Open Plug-In Windows",
+        )
+        .description(
+            "Switches Auto-Open Plug-In Windows, on the Settings window's Plug-Ins page; it's on \
+             in a new install, as Live's is. While it's on, inserting a plug-in device opens \
+             its editor window at once, as `plugin.show_window` does. The setting is kept for \
+             the next start, and isn't part of the set or an undo step. The result's `on` is \
+             the setting afterwards.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<SwitchArgs>()
+        .result::<SwitchResult>(),
         CommandSpec::new(
             SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
             "Auto-Hide Plug-In Windows",

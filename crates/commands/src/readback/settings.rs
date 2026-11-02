@@ -27,6 +27,8 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("keymap.reset", read("keymap.state", "shortcuts")),
     ("keymap.unbind", read("keymap.state", "shortcuts")),
     ("settings.set_auto_hide_plug_in_windows", read("settings.state", "auto_hide_plug_in_windows")),
+    ("settings.set_multiple_plug_in_windows", read("settings.state", "multiple_plug_in_windows")),
+    ("settings.set_auto_open_plug_in_windows", read("settings.state", "auto_open_plug_in_windows")),
     ("settings.set_continuous_save", read("settings.state", "file_folder.save_continuously")),
     ("settings.set_auto_warp_long_samples", read("settings.state", "warp.auto_warp_long_samples")),
     ("settings.set_default_warp_mode", read("settings.state", "warp.default_warp_mode")),
@@ -60,6 +62,8 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("settings.set_default_track_colour", read("settings.state", "theme_colors.default_track_colour")),
     ("settings.set_reduced_automatic_colours", read("settings.state", "theme_colors.reduced_automatic_colours")),
     ("settings.set_clip_colour", read("settings.state", "theme_colors.clip_colour")),
+    ("settings.set_new_tracks_take_group_colour", read("settings.state", "theme_colors.new_tracks_take_group_colour")),
+    ("settings.use_custom_colour", read("settings.state", "theme_colors.custom_colours")),
     ("settings.set_warp_recorded_audio", read("settings.state", "warp_recorded_audio")),
     (
         "settings.set_start_transport_with_tap_tempo",

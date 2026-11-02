@@ -29,6 +29,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::automation::{AutomationTarget, Breakpoint, Envelope};
+use crate::colour::Colour;
 use crate::error::ModelError;
 use crate::ids::{ClipId, ContentHash, GrooveId, LinkId, TakeLaneId};
 use crate::launch::ClipLaunch;
@@ -87,12 +88,13 @@ pub struct Clip {
     /// nothing in the clip itself until it is committed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub groove: Option<GrooveId>,
-    /// The clip's colour, a swatch from 0 to 69 (the themes spec, R14). A
+    /// The clip's colour, a swatch from 0 to 69 or a `#RRGGBB` colour (the
+    /// themes spec, R14, R29). A
     /// clip handed to a command without one takes its track's colour as it
     /// goes in, and a set saved before colours gives each clip its track's
     /// on loading, so a clip in a document always has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub colour: Option<u8>,
+    pub colour: Option<Colour>,
     /// The user's own info text (Edit Info Text), which the Info View shows while the pointer is over the clip; empty for none, and left out of the saved set then (the Info View spec, R9).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub info_text: String,
@@ -228,7 +230,7 @@ impl Clip {
     /// The clip with `colour` as its colour: `None` lets it take its
     /// track's colour as it goes into the document (the themes spec, R20).
     #[must_use]
-    pub fn with_colour(self, colour: Option<u8>) -> Self {
+    pub fn with_colour(self, colour: Option<Colour>) -> Self {
         Self { colour, ..self }
     }
 

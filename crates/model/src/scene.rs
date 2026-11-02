@@ -11,6 +11,7 @@ use bl_core::time::{Bpm, TimeSignature};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::colour::Colour;
 use crate::error::ModelError;
 use crate::follow::FollowActions;
 use crate::ids::SceneId;
@@ -40,10 +41,10 @@ pub struct Scene {
     /// (WP-3.10): on a scene, Linked is the Longest button.
     #[serde(default, skip_serializing_if = "FollowActions::is_default")]
     pub follow: FollowActions,
-    /// The scene's colour, a swatch from 0 to 69, or none (the themes spec,
+    /// The scene's colour, a swatch from 0 to 69, a `#RRGGBB` colour, or none (the themes spec,
     /// R14): a new scene has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub colour: Option<u8>,
+    pub colour: Option<Colour>,
     /// The user's own info text (Edit Info Text), which the Info View shows while the pointer is over the scene; empty for none, and left out of the saved set then (the Info View spec, R9).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub info_text: String,

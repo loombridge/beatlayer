@@ -32,8 +32,8 @@ pub struct Look {
     pub what: &'static str,
     /// The clip in the slot.
     pub clip: Option<ClipId>,
-    /// The swatch of the clip's colour, or of the scene's.
-    pub colour: Option<u8>,
+    /// The clip's colour, or the scene's.
+    pub colour: Option<bl_model::Colour>,
 }
 
 impl Look {
@@ -142,7 +142,7 @@ impl Session {
                 ctx.open_picker(Target::Command {
                     command: "clip.set_colour".to_owned(),
                     args: json!({ "clips": [clip.id] }),
-                    current: own,
+                    current: own.and_then(bl_model::Colour::swatch),
                 });
             }
         } else if modifiers.has(cc::SELECT) {
@@ -303,8 +303,8 @@ impl Session {
                         let swatch = clip
                             .and_then(|c| c.colour)
                             .or_else(|| doc.track(track).map(bl_model::Track::colour))
-                            .unwrap_or(0);
-                        let rgb = bl_model::swatch_rgb(paint.colours, swatch);
+                            .unwrap_or_default();
+                        let rgb = swatch.rgb(paint.colours);
                         let full = paint.lights.colour(rgb);
                         let (what, shown) = match status {
                             Some(SlotState::Playing) => {
@@ -346,9 +346,7 @@ impl Session {
                         colour: own,
                     };
                     led = Led::steady(match own {
-                        Some(swatch) => paint
-                            .lights
-                            .colour(bl_model::swatch_rgb(paint.colours, swatch)),
+                        Some(swatch) => paint.lights.colour(swatch.rgb(paint.colours)),
                         None => fixed::WHITE,
                     });
                 }

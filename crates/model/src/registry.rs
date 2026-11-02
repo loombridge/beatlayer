@@ -885,8 +885,9 @@ const ENTRIES: &[Entry] = &[
         keys: &[],
         description: "Colours tracks, Main and the returns among them, with swatch `colour` of the \
             palette of 5 rows of 14 (0 to 69, numbered from the top row's left, row by row: swatch \
-            14 is row 2, colour 1). Their clips keep their colours. A colour is never heard: the \
-            engine gets nothing.",
+            14 is row 2, colour 1), or a colour of one's own as `#RRGGBB`, saved as written and drawn \
+            as it is, whatever the theme. Their clips keep their colours. A colour is never heard: \
+            the engine gets nothing.",
     },
     Entry {
         id: "track.assign_colour_to_clips",
@@ -1800,7 +1801,9 @@ const ENTRIES: &[Entry] = &[
         keys: &[],
         description: "Colours clips, in the Arrangement, a Session slot or a take lane, with swatch \
             `colour` of the palette of 5 rows of 14 (0 to 69, numbered from the top row's left, row \
-            by row: swatch 14 is row 2, colour 1). A colour is never heard: the engine gets nothing.",
+            by row: swatch 14 is row 2, colour 1), or a colour of one's own as `#RRGGBB`, saved as \
+            written and drawn as it is, whatever the theme. A colour is never heard: the engine \
+            gets nothing.",
     },
     Entry {
         id: "clip.link",
@@ -2764,8 +2767,8 @@ const ENTRIES: &[Entry] = &[
         contexts: &[Session],
         keys: &[],
         description: "Colours scenes with swatch `colour` of the palette of 5 rows of 14 (0 to 69, \
-            numbered from the top row's left, row by row: swatch 14 is row 2, colour 1), or clears \
-            their colour with null, as a new scene has none.",
+            numbered from the top row's left, row by row: swatch 14 is row 2, colour 1), or a colour of \
+            one's own as `#RRGGBB`, or clears their colour with null, as a new scene has none.",
     },
     Entry {
         id: "scene.set_tempo",
@@ -3613,7 +3616,7 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[DeviceView],
         keys: &[],
-        description: "Adds a chain to a rack at `index` in the rack's list of chains, where 0 is first. The chain has a new ID from the project, a `name` (left empty, a chain made with a device in it is named after the device's title and an empty one `Chain`), an optional `colour` (0 to 69), `info` text, a `mixer` (leave it out for a new chain's: `volume` 1, `pan` 0, `enabled` true, `solo` false) and its `devices`, each with a new ID, in the order for the kind of rack. A drum rack's chain also takes `receive`, `play`, `choke` and `sends`, and `is_return` makes it one of the rack's return chains (up to six, after the drum chains, audio effects only; a new one has `audio_to` null, which is the rack's own output); any other rack's chain keeps none of these. An empty chain passes its input straight to its mixer, which makes a dry path. One undo step.",
+        description: "Adds a chain to a rack at `index` in the rack's list of chains, where 0 is first. The chain has a new ID from the project, a `name` (left empty, a chain made with a device in it is named after the device's title and an empty one `Chain`), an optional `colour` (0 to 69, or `#RRGGBB`), `info` text, a `mixer` (leave it out for a new chain's: `volume` 1, `pan` 0, `enabled` true, `solo` false) and its `devices`, each with a new ID, in the order for the kind of rack. A drum rack's chain also takes `receive`, `play`, `choke` and `sends`, and `is_return` makes it one of the rack's return chains (up to six, after the drum chains, audio effects only; a new one has `audio_to` null, which is the rack's own output); any other rack's chain keeps none of these. An empty chain passes its input straight to its mixer, which makes a dry path. One undo step.",
     },
     Entry {
         id: "chain.remove",
@@ -3649,7 +3652,7 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[DeviceView],
         keys: &[],
-        description: "Colours a chain with swatch `colour` of the palette of 5 rows of 14 (0 to 69), or clears its colour with null.",
+        description: "Colours a chain with swatch `colour` of the palette of 5 rows of 14 (0 to 69) or a colour of one's own as `#RRGGBB`, or clears its colour with null.",
     },
     Entry {
         id: "chain.set_push_colour",
@@ -3811,7 +3814,7 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[DeviceView],
         keys: &[],
-        description: "Colours macro `macro_number` with swatch `colour` of the palette of 5 rows of 14 (0 to 69), or clears its colour with null. One undo step.",
+        description: "Colours macro `macro_number` with swatch `colour` of the palette of 5 rows of 14 (0 to 69) or a colour of one's own as `#RRGGBB`, or clears its colour with null. One undo step.",
     },
     Entry {
         id: "rack.set_macro_info_text",

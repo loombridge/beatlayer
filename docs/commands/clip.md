@@ -999,7 +999,7 @@ Result: [`ChangeSet`](README.md#changeset).
 
 **Change Clip Color**. Permission: `edit`. Contexts: `arrangement`.
 
-Colours clips, in the Arrangement, a Session slot or a take lane, with swatch `colour` of the palette of 5 rows of 14 (0 to 69, numbered from the top row's left, row by row: swatch 14 is row 2, colour 1). A colour is never heard: the engine gets nothing.
+Colours clips, in the Arrangement, a Session slot or a take lane, with swatch `colour` of the palette of 5 rows of 14 (0 to 69, numbered from the top row's left, row by row: swatch 14 is row 2, colour 1), or a colour of one's own as `#RRGGBB`, saved as written and drawn as it is, whatever the theme. A colour is never heard: the engine gets nothing.
 
 Default keys: none.
 
@@ -1008,7 +1008,7 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `clips` | array of [`ClipId`](README.md#clipid) | yes | The clips, each listed once. |
-| `colour` | integer from 0 to 255 | yes | The swatch. |
+| `colour` | [`Colour`](README.md#colour) | yes | The swatch, or a `#RRGGBB` colour. |
 
 Result: [`ChangeSet`](README.md#changeset).
 

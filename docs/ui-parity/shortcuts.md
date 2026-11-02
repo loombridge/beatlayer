@@ -616,7 +616,7 @@ The Settings window has focus.
 | S-DEV-006 | same command as S-VAL-004 | Double-clicking the control also resets it. |
 | S-DEV-007 | same command as S-BRW-004 |  |
 | S-DEV-008 | same command as S-VIEW-006 |  |
-| S-DEV-010 | note | Moved to M6 by WP-6.70: Plug-in windows do not yet close the others when one opens, which is what the key undoes, and the Multiple Plug-In Windows setting is not built. WP-6.75 builds it. |
+| S-DEV-010 | note | Moved to M6 by WP-6.70, built by WP-6.75: with Multiple Plug-In Windows off, opening a plug-in's window closes the others, and this click keeps them (clap-hosting R27). |
 | S-EDIT-004 | note | Duplicating a track puts the copy straight after it and selects it; one undo step, Duplicate Track(s) (pressed in 12.4.6 (macOS), 12 October 2026). |
 | S-EDIT-007 | note | Windows uses Ctrl+Y, not Ctrl+Shift+Z. |
 | S-VAL-001 | note | On the volume field Up and Down step 1 dB; from 5.5 dB, Up gives 6.0 dB and stops at the top. |

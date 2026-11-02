@@ -322,28 +322,89 @@ pub struct ThemeLook {
     pub reduced_automatic_colours: bool,
     /// Clip Color.
     pub clip_colour: ClipColour,
+    /// New Tracks Take Group Color (themes R30).
+    pub new_tracks_take_group_colour: bool,
+    /// The row of custom colours under every palette (themes R28).
+    pub custom_colours: CustomColours,
+}
+
+/// How many places the row of custom colours has (themes R28).
+pub const CUSTOM_COLOURS: usize = 14;
+
+/// The row of custom colours under every palette (themes R28): 14 places,
+/// each empty or a colour of the person's own, and the order the places
+/// were last used in, which says what a full row gives up.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct CustomColours {
+    /// The places, from the first: a `#RRGGBB` colour or null.
+    pub places: Vec<Option<bl_model::Colour>>,
+    /// The places that hold a colour, from the one used longest ago to the
+    /// one used last.
+    pub used: Vec<u8>,
+}
+
+impl Default for CustomColours {
+    fn default() -> Self {
+        Self {
+            places: vec![None; CUSTOM_COLOURS],
+            used: Vec::new(),
+        }
+    }
+}
+
+impl CustomColours {
+    /// The colour in place `place`, if it has one: only a colour of the
+    /// person's own is kept.
+    #[must_use]
+    pub fn get(&self, place: usize) -> Option<[u8; 3]> {
+        match self.places.get(place) {
+            Some(Some(bl_model::Colour::Custom(rgb))) => Some(*rgb),
+            _ => None,
+        }
+    }
+
+    /// Records that `rgb` was used: a colour the row holds is marked as
+    /// used last; any other goes into the first empty place, or the place
+    /// of the colour used longest ago when the row is full (themes R28).
+    pub fn use_colour(&mut self, rgb: [u8; 3]) {
+        self.places.resize(CUSTOM_COLOURS, None);
+        let place = (0..CUSTOM_COLOURS)
+            .find(|&place| self.get(place) == Some(rgb))
+            .or_else(|| (0..CUSTOM_COLOURS).find(|&place| self.get(place).is_none()))
+            .or_else(|| {
+                self.used
+                    .iter()
+                    .map(|&place| usize::from(place))
+                    .find(|&place| place < CUSTOM_COLOURS)
+            })
+            .unwrap_or(0);
+        self.places[place] = Some(bl_model::Colour::Custom(rgb));
+        self.used.retain(|&held| usize::from(held) != place);
+        self.used.push(place as u8);
+    }
 }
 
 impl ThemeLook {
     /// The swatch a new track with this ID takes (themes R23).
     #[must_use]
-    pub fn new_track_colour(&self, id: bl_model::TrackId) -> u8 {
+    pub fn new_track_colour(&self, id: bl_model::TrackId) -> bl_model::Colour {
         if !self.auto_assign_track_colours {
-            return self.default_track_colour;
+            return self.default_track_colour.into();
         }
         let raw = id.0.get();
         if self.reduced_automatic_colours {
             // The top row's even-numbered swatches, 0 to 12.
-            (raw % 7) as u8 * 2
+            ((raw % 7) as u8 * 2).into()
         } else {
-            (raw % u64::from(bl_model::TRACK_COLOURS)) as u8
+            ((raw % u64::from(bl_model::TRACK_COLOURS)) as u8).into()
         }
     }
 
     /// The swatch a new clip with this ID is given, or none to let it take
     /// its track's colour (themes R23).
     #[must_use]
-    pub fn new_clip_colour(&self, id: bl_model::ClipId) -> Option<u8> {
+    pub fn new_clip_colour(&self, id: bl_model::ClipId) -> Option<bl_model::Colour> {
         match self.clip_colour {
             ClipColour::TrackColor => None,
             // SplitMix64's finalizer: a fixed hash, so a clip's swatch never changes.
@@ -351,7 +412,7 @@ impl ThemeLook {
                 let mut h = id.0.get().wrapping_add(0x9E37_79B9_7F4A_7C15);
                 h = (h ^ (h >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
                 h = (h ^ (h >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-                Some(((h ^ (h >> 31)) % u64::from(bl_model::SWATCHES)) as u8)
+                Some((((h ^ (h >> 31)) % u64::from(bl_model::SWATCHES)) as u8).into())
             }
         }
     }
@@ -371,6 +432,8 @@ impl Default for ThemeLook {
             default_track_colour: DEFAULT_TRACK_COLOUR,
             reduced_automatic_colours: false,
             clip_colour: ClipColour::default(),
+            new_tracks_take_group_colour: false,
+            custom_colours: CustomColours::default(),
         }
     }
 }
@@ -721,9 +784,15 @@ pub struct SettingsState {
     pub file_folder: FileFolderSettings,
     /// Library: Collect Files on Export and the User Library's folder.
     pub library: LibrarySettings,
+    /// Plug-Ins: Multiple Plug-In Windows, as
+    /// `settings.set_multiple_plug_in_windows` sets it.
+    pub multiple_plug_in_windows: bool,
     /// Plug-Ins: Auto-Hide Plug-In Windows, as
     /// `settings.set_auto_hide_plug_in_windows` sets it.
     pub auto_hide_plug_in_windows: bool,
+    /// Plug-Ins: Auto-Open Plug-In Windows, as
+    /// `settings.set_auto_open_plug_in_windows` sets it.
+    pub auto_open_plug_in_windows: bool,
     /// Plug-Ins: how the Browser shows plug-ins, as `plugin.settings` sets
     /// it.
     pub plug_ins: PluginSettings,

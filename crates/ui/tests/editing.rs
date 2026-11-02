@@ -864,6 +864,57 @@ fn context_menus_reach_the_edits_and_the_grid() {
     assert!(!s.state().grid.fixed);
 }
 
+// Spec: themes R16, R28, R29. Custom Color… in a clip's menu opens the
+// picker; its hex field takes a typed colour, and OK colours the selected
+// clips with it, drawn as saved whatever the theme's palette is.
+#[test]
+fn custom_color_colours_a_clip_through_the_picker() {
+    let mut s = set();
+    let a = s.a;
+    let output = s.right_click(pos2(x(3.0), AUDIO_3.1));
+    let nodes = Harness::nodes(&output);
+    let b = Harness::node(&nodes, "Custom Color…").bounds.unwrap();
+    s.click(
+        pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32),
+        Modifiers::NONE,
+    );
+    assert!(bl_ui::palette::picker_is_open(&s.h.ctx));
+    let nodes = Harness::nodes(&s.h.settle());
+    let b = Harness::node(&nodes, "Hex color").bounds.unwrap();
+    s.click(
+        pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32),
+        Modifiers::NONE,
+    );
+    s.h.key(Key::A, command());
+    s.h.frame(vec![Event::Text("#c0ffee".to_owned())]);
+    s.h.settle();
+    // Enter in the field confirms, as OK does.
+    s.h.key(Key::Enter, Modifiers::NONE);
+    s.h.settle();
+    assert!(!bl_ui::palette::picker_is_open(&s.h.ctx));
+    assert_eq!(
+        s.h.shell.editor().document().clip(a).unwrap().colour,
+        Some(bl_model::Colour::Custom([0xC0, 0xFF, 0xEE]))
+    );
+    assert_eq!(s.undo_label().as_deref(), Some("Change Clip Color"));
+    assert_eq!(
+        s.h.shell.look().custom_colours.places.first(),
+        Some(&Some(bl_model::Colour::Custom([0xC0, 0xFF, 0xEE])))
+    );
+    // Drawn as saved: the lanes carry the colour itself.
+    s.h.settle();
+    let wanted = egui::Color32::from_rgb(0xC0, 0xFF, 0xEE).to_array();
+    let shared = s.h.main.arrangement().shared();
+    let frame = lock(&shared);
+    assert!(
+        frame.slots[Slot::Lanes as usize]
+            .rects
+            .iter()
+            .any(|r| r.color == wanted),
+        "the clip is drawn in its custom colour"
+    );
+}
+
 // Spec: themes R16, R18, R22. A clip's menu ends with the colour palette:
 // the clip's own swatch is selected, choosing one colours the selected clips
 // in one step, and the clip is drawn in the colour it has.
@@ -878,12 +929,14 @@ fn the_clip_menu_ends_with_the_palette_and_a_clip_is_drawn_in_its_colour() {
             .clip(a)
             .unwrap()
             .colour
+            .unwrap()
+            .swatch()
             .unwrap();
     let output = s.right_click(pos2(x(3.0), AUDIO_3.1));
     let nodes = Harness::nodes(&output);
     let swatches: Vec<_> = nodes
         .iter()
-        .filter(|n| n.label.starts_with("Row "))
+        .filter(|n| n.label.starts_with("Row ") && !n.label.starts_with("Row 6"))
         .collect();
     assert_eq!(swatches.len(), 70);
     let ticked: Vec<_> = swatches
@@ -906,7 +959,7 @@ fn the_clip_menu_ends_with_the_palette_and_a_clip_is_drawn_in_its_colour() {
     );
     assert_eq!(
         s.h.shell.editor().document().clip(a).unwrap().colour,
-        Some(3 * 14 + 5)
+        Some(bl_model::Colour::Swatch(3 * 14 + 5))
     );
     assert_eq!(s.undo_label().as_deref(), Some("Change Clip Color"));
     // The other clip keeps its colour, and the lanes draw the new one.

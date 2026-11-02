@@ -6,6 +6,7 @@
 mod analog;
 mod bass_and_poli;
 mod clip_edge_fades;
+mod collision;
 mod comping;
 mod control_surfaces;
 mod electric;

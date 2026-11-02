@@ -82,6 +82,7 @@ pub mod lfo;
 pub mod lift;
 pub mod limiter;
 pub mod looper;
+pub mod collision;
 pub mod meld;
 mod meld_osc;
 pub mod midi_cc;
@@ -354,6 +355,7 @@ pub fn register(registry: &mut Registry) {
     polysynth::register(registry);
     electric::register(registry);
     meld::register(registry);
+    collision::register(registry);
     operator::register(registry);
     analog::register(registry);
     limiter::register(registry);

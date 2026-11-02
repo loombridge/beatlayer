@@ -23,6 +23,7 @@ mod channel_eq;
 mod channel_messages;
 mod chorus_ensemble;
 mod clip_envelopes;
+mod collision;
 mod color_limiter;
 mod common;
 mod compressor;

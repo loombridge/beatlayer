@@ -686,6 +686,15 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                 "`device.clear_route`, which puts the slot's amount back to 0 %",
             )),
         ),
+        // Collision's Copy buttons have no control kind in the device layout
+        // yet.
+        (
+            "collision.copy_resonator",
+            Exception(Gap(
+                "Collision's Copy buttons, which the device layout has no control kind for \
+                 (collision R10)",
+            )),
+        ),
         (
             "device.set_route",
             Exception(LaterView(

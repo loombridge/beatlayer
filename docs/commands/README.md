@@ -40,6 +40,7 @@ The commands, by the part of their ID before its first dot:
 - [`chain`](chain.md)
 - [`clip`](clip.md)
 - [`clip_view`](clip_view.md)
+- [`collision`](collision.md)
 - [`control_surface`](control_surface.md)
 - [`cv`](cv.md)
 - [`device`](device.md)
@@ -30948,6 +30949,52 @@ What `set.close_dawproject_report` returns.
   },
   "required": [
     "open"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ResonatorCopied`
+
+What `collision.copy_resonator` returns: the Collision and the resonators it copied between.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `from` | integer from 0 to 255 | yes | The resonator copied from, 1 or 2. |
+| `to` | integer from 0 to 255 | yes | The resonator copied to, 1 or 2. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `collision.copy_resonator` returns: the Collision and the resonators it copied between.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "from": {
+      "description": "The resonator copied from, 1 or 2.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "to": {
+      "description": "The resonator copied to, 1 or 2.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "from",
+    "to"
   ],
   "type": "object"
 }

@@ -1901,7 +1901,7 @@ impl DeviceView {
                     })
             }
             ids::LOAD_PRESET => has_target() && args.get("path").is_some(),
-            ids::SET_ROUTE | ids::CLEAR_ROUTE => has_target(),
+            ids::SET_ROUTE | ids::CLEAR_ROUTE | ids::COPY_RESONATOR => has_target(),
             ids::PARAMETERS
             | ids::DISPLAY
             | ids::PREVIEW_HIT
@@ -2688,6 +2688,12 @@ impl DeviceView {
                 outcome.value = to_value(&changed);
                 return Ok(outcome);
             }
+            ids::COPY_RESONATOR => {
+                let copied = self.copy_resonator(args, editor)?;
+                outcome.document_changed = true;
+                outcome.value = to_value(&copied);
+                return Ok(outcome);
+            }
             ids::ARTICULATION_LIST => {
                 let ArticulationListArgs { device } = parse(args)?;
                 let device = self.target(editor.document(), device)?;
@@ -2884,6 +2890,61 @@ impl DeviceView {
             })
             .map_err(|e| DeviceError::Failed(e.to_string()))?;
         Ok(ids::RouteChanged { device, slot })
+    }
+
+    /// Copies every parameter of one of Collision's resonators to the other
+    /// (`collision.copy_resonator`; collision R10), in one undo step.
+    fn copy_resonator(
+        &self,
+        args: Value,
+        editor: &mut Editor,
+    ) -> Result<ids::ResonatorCopied, DeviceError> {
+        use bl_devices::collision::{COLLISION, RES_COUNT, res};
+        let args: ids::CopyResonatorArgs = parse(args)?;
+        let device = self.target(editor.document(), args.device)?;
+        let current = editor.document().device(device).expect("the target exists");
+        if !matches!(&current.kind, DeviceKind::Native { device_type } if device_type == COLLISION)
+        {
+            return Err(DeviceError::Unavailable(format!(
+                "{device} isn't a Collision"
+            )));
+        }
+        let (from, to) = match args.from {
+            1 => (0, 1),
+            2 => (1, 0),
+            other => {
+                return Err(DeviceError::InvalidArgs(format!(
+                    "`from` is 1 or 2, not {other}"
+                )));
+            }
+        };
+        let device_type = self
+            .device_type(&current.kind)
+            .expect("Collision is registered");
+        let description = &device_type.description;
+        let moves: Vec<(ParamId, f64)> = (0..RES_COUNT)
+            .map(|offset| {
+                let (source, target) = (res(from, offset), res(to, offset));
+                (target, description.value(&current.params, source).unwrap_or(0.0))
+            })
+            .collect();
+        editor
+            .transact("Copy Resonator", |editor| {
+                for (param, value) in moves {
+                    editor.apply(Command::SetDeviceParam {
+                        device,
+                        param,
+                        value,
+                    })?;
+                }
+                Ok::<(), bl_model::EditError>(())
+            })
+            .map_err(|e| DeviceError::Failed(e.to_string()))?;
+        Ok(ids::ResonatorCopied {
+            device,
+            from: args.from,
+            to: if args.from == 1 { 2 } else { 1 },
+        })
     }
 
     /// `device.clear_route`: empties the slot and puts its amount back to 0 %.

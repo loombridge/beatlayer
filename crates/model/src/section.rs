@@ -8,7 +8,7 @@ use bl_core::time::Ticks;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::colour::{TRACK_COLOURS, check_swatch};
+use crate::colour::{Colour, TRACK_COLOURS};
 use crate::document::Document;
 use crate::error::ModelError;
 use crate::ids::SectionId;
@@ -64,7 +64,7 @@ pub(crate) fn check_sections(sections: &[SongSection]) -> Result<(), ModelError>
     sorted.sort_by_key(|section| section.start);
     for section in sorted {
         check_span(section.start, section.length)?;
-        check_swatch("section colour", section.colour)?;
+        Colour::Swatch(section.colour).check("section colour")?;
         if section.start < ends {
             return Err(ModelError::ChangeInUse {
                 what: "section",
@@ -121,7 +121,7 @@ impl Document {
     /// Adds a section, naming it where it has no name (R5).
     pub(crate) fn add_section(&mut self, mut section: SongSection) -> Result<(), ModelError> {
         check_span(section.start, section.length)?;
-        check_swatch("section colour", section.colour)?;
+        Colour::Swatch(section.colour).check("section colour")?;
         self.check_fresh(section.id.0)?;
         if let Some(at) = self.section_overlap(section.start, section.length, None) {
             return Err(ModelError::ChangeInUse {
@@ -162,7 +162,7 @@ impl Document {
         let (start, length) = (start.unwrap_or(now.start), length.unwrap_or(now.length));
         check_span(start, length)?;
         if let Some(colour) = colour {
-            check_swatch("section colour", colour)?;
+            Colour::Swatch(colour).check("section colour")?;
         }
         if let Some(at) = self.section_overlap(start, length, Some(id)) {
             return Err(ModelError::ChangeInUse {

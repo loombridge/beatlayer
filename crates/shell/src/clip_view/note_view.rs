@@ -287,6 +287,7 @@ pub fn pauses_follow(id: &str) -> bool {
                 | ids::SELECT_LOOP_BARS
                 | ids::FOCUS_MODE
                 | ids::NOTE_VIEW
+                | ids::UTILITIES
         ))
         || matches!(id, SET_MIDI_REGION | SET_MIDI_LOOP)
 }

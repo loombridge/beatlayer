@@ -381,14 +381,50 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                  keys sounds as a preview too (`clip_view.select_notes`)",
             )),
         ),
-        // The stretch markers are dragged (I-DRAG-040); Live has no key
-        // for stretching notes, so a keyboard path needs the maintainer's
-        // choice of keys.
+        // The stretch markers are dragged (I-DRAG-040), and Live has no key
+        // for them; the Pitch and Time Utilities' ×2 button stretches the
+        // notes from the keyboard (WP-6.16).
         (
             "note.stretch",
-            Exception(LaterView(
-                "keys for the note stretch markers (Live has none; the choice is the maintainer's)",
-            )),
+            main(utilities_shown, detail_area, "Double", Key::Enter),
+        ),
+        // The Pitch and Time Utilities panel (WP-6.16): its controls are in
+        // the Tab order, and a number field is stepped with Up and Down.
+        (
+            "note.transpose",
+            main(utilities_shown, detail_area, "Transpose", Key::ArrowUp),
+        ),
+        (
+            "note.fit_to_scale",
+            main(utilities_shown, detail_area, "Fit to Scale", Key::Enter),
+        ),
+        (
+            "note.invert",
+            main(utilities_shown, detail_area, "Invert", Key::Enter),
+        ),
+        (
+            "note.add_interval",
+            main(utilities_shown, detail_area, "Add Interval", Key::Enter),
+        ),
+        (
+            "note.set_length",
+            main(utilities_shown, detail_area, "Set Length", Key::Enter),
+        ),
+        (
+            "note.humanize",
+            main(utilities_shown, detail_area, "Humanize", Key::Enter),
+        ),
+        (
+            "note.reverse",
+            main(utilities_shown, detail_area, "Reverse", Key::Enter),
+        ),
+        (
+            "note.legato",
+            main(utilities_shown, detail_area, "Legato", Key::Enter),
+        ),
+        (
+            "clip_view.utilities",
+            main(utilities_shown, detail_area, "Duration", Key::ArrowDown),
         ),
         // The expression lanes and the footer (WP-6.1): the pointer drags
         // the markers and uses the footer's controls and the Lane

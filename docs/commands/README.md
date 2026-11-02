@@ -24750,6 +24750,37 @@ The Pitch filter: pitch classes C to B.
 
 </details>
 
+### `PitchUnit`
+
+What a step of a pitch utility is (Spec: pitch-and-time-utilities R2).
+
+One of:
+
+- `"steps"`: A step of the clip's scale in Scale Mode, a semitone otherwise, and a Drum Rack's key on a Drum Rack track.
+- `"semitones"`: A semitone.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a step of a pitch utility is (Spec: pitch-and-time-utilities R2).",
+  "oneOf": [
+    {
+      "const": "steps",
+      "description": "A step of the clip's scale in Scale Mode, a semitone otherwise, and a Drum Rack's key on a Drum Rack track.",
+      "type": "string"
+    },
+    {
+      "const": "semitones",
+      "description": "A semitone.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `PlacedClip`
 
 A clip a browser command placed.
@@ -40636,6 +40667,127 @@ What `settings.set_user_library` returns: the User Library in use afterwards.
   },
   "required": [
     "path"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `UtilitiesState`
+
+The Pitch and Time Utilities panel's values and what it shows.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `interval` | integer | yes | Interval Size. |
+| `interval_range` | pair of integer and integer | yes | The least and the most Interval Size can be set to with the notes it would copy now: those that keep every copy on the keyboard. |
+| `stretch` | number | yes | The Stretch knob's position. |
+| `stretch_factor` | number | yes | The factor that position is, from 0.1 to 10. |
+| `duration` | string | yes | Duration. |
+| `humanize_amount` | integer from 0 to 255 | yes | Humanize Amount, in percent. |
+| `scale` | string or null | yes | The root and name of the clip's scale; `null` while Scale Mode is off. |
+| `fit_to_scale` | boolean | yes | Whether Fit to Scale is available: Scale Mode is on. |
+| `time_range` | boolean | yes | Whether Duration's Time Range is available: there is a time selection. |
+| `lowest` | integer or null | yes | The lowest key of the notes the utilities act on now. |
+| `highest` | integer or null | yes | The highest key of the notes the utilities act on now. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Pitch and Time Utilities panel's values and what it shows.",
+  "properties": {
+    "duration": {
+      "description": "Duration.",
+      "type": "string"
+    },
+    "fit_to_scale": {
+      "description": "Whether Fit to Scale is available: Scale Mode is on.",
+      "type": "boolean"
+    },
+    "highest": {
+      "description": "The highest key of the notes the utilities act on now.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "humanize_amount": {
+      "description": "Humanize Amount, in percent.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "interval": {
+      "description": "Interval Size.",
+      "format": "int32",
+      "type": "integer"
+    },
+    "interval_range": {
+      "description": "The least and the most Interval Size can be set to with the notes it would copy now: those that keep every copy on the keyboard.",
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "format": "int32",
+          "type": "integer"
+        },
+        {
+          "format": "int32",
+          "type": "integer"
+        }
+      ],
+      "type": "array"
+    },
+    "lowest": {
+      "description": "The lowest key of the notes the utilities act on now.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "scale": {
+      "description": "The root and name of the clip's scale; `null` while Scale Mode is off.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "stretch": {
+      "description": "The Stretch knob's position.",
+      "format": "double",
+      "type": "number"
+    },
+    "stretch_factor": {
+      "description": "The factor that position is, from 0.1 to 10.",
+      "format": "double",
+      "type": "number"
+    },
+    "time_range": {
+      "description": "Whether Duration's Time Range is available: there is a time selection.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "interval",
+    "interval_range",
+    "stretch",
+    "stretch_factor",
+    "duration",
+    "humanize_amount",
+    "scale",
+    "fit_to_scale",
+    "time_range",
+    "lowest",
+    "highest"
   ],
   "type": "object"
 }

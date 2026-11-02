@@ -136,6 +136,95 @@ fn clicking_the_wrench_opens_and_closes_the_plugins_window() {
     assert_eq!(button_value(&mut h), "off");
 }
 
+/// A click at a point with Cmd held (Ctrl elsewhere).
+fn cmd_click(h: &mut Harness, at: Pos2) {
+    let cmd = if cfg!(target_os = "macos") {
+        Modifiers::MAC_CMD | Modifiers::COMMAND
+    } else {
+        Modifiers::CTRL | Modifiers::COMMAND
+    };
+    let held = Event::ModifiersChanged(cmd);
+    h.frame(vec![held.clone(), Event::PointerMoved(at)]);
+    for pressed in [true, false] {
+        h.frame(vec![
+            held.clone(),
+            Event::PointerButton {
+                pos: at,
+                button: PointerButton::Primary,
+                pressed,
+                modifiers: cmd,
+            },
+        ]);
+    }
+    h.frame(vec![Event::ModifiersChanged(Modifiers::NONE)]);
+    h.settle();
+}
+
+/// The window button of `device`'s frame.
+fn wrench_of(h: &mut Harness, device: DeviceId) -> Pos2 {
+    let frame = frame_of(h, device);
+    let expandable = h
+        .shell
+        .device_view_state()
+        .devices
+        .iter()
+        .find(|d| d.id == device)
+        .unwrap()
+        .expandable;
+    plugin_window_rect(frame, expandable).center()
+}
+
+// Spec: clap-hosting R27; S-DEV-010, I-CLICK-025. With Multiple Plug-In
+// Windows off, a click on a window button closes the other plug-in windows,
+// and a Cmd-click (Ctrl-click) keeps them.
+#[test]
+fn cmd_clicking_a_window_button_keeps_the_other_plug_in_windows() {
+    let (mut h, a) = harness();
+    let track = h.shell.editor().document().device_track(a).unwrap();
+    let b: PluginLoaded = serde_json::from_value(
+        h.shell
+            .run(
+                ids::LOAD,
+                json!({ "path": bl_test_clap::bundle(), "track": track }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let b = b.device;
+    let until = Instant::now() + Duration::from_secs(10);
+    while !h.shell.plugin_info(b).is_some_and(|i| i.has_window) {
+        assert!(
+            Instant::now() < until,
+            "the plug-in never offered its editor"
+        );
+        h.shell.poll();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    h.shell
+        .run(
+            "settings.set_multiple_plug_in_windows",
+            json!({ "on": false }),
+        )
+        .unwrap();
+    h.settle();
+
+    let at = wrench_of(&mut h, a);
+    h.click(at);
+    let at = wrench_of(&mut h, b);
+    h.click(at);
+    assert!(
+        !info(&mut h, a).window_open && info(&mut h, b).window_open,
+        "a click closes the other window"
+    );
+
+    let at = wrench_of(&mut h, a);
+    cmd_click(&mut h, at);
+    assert!(
+        info(&mut h, a).window_open && info(&mut h, b).window_open,
+        "a Cmd-click keeps it"
+    );
+}
+
 // Spec: clap-hosting R5; D19, IMP-03.
 #[test]
 fn the_panel_shows_the_plugins_parameters_as_knobs() {

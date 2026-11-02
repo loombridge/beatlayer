@@ -141,7 +141,9 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         // spec, R28).
         commands::SETTINGS_SET_TAKEOVER_MODE,
         // The Plug-Ins page's switch (the device chains spec, R31).
+        commands::SETTINGS_SET_MULTIPLE_PLUG_IN_WINDOWS,
         commands::SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
+        commands::SETTINGS_SET_AUTO_OPEN_PLUG_IN_WINDOWS,
         // The Display & Input page's Zoom (interface-zoom R4).
         commands::VIEW_SET_ZOOM,
         // The Display & Input page's Outline View in Focus (the

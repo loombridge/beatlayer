@@ -271,6 +271,12 @@ pub const SETTINGS_SET_TAKEOVER_MODE: &str = "settings.set_takeover_mode";
 /// `settings.set_auto_hide_plug_in_windows`: switch Auto-Hide Plug-In
 /// Windows (WP-2.5b).
 pub const SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS: &str = "settings.set_auto_hide_plug_in_windows";
+/// `settings.set_multiple_plug_in_windows`: switch Multiple Plug-In Windows
+/// (WP-6.75).
+pub const SETTINGS_SET_MULTIPLE_PLUG_IN_WINDOWS: &str = "settings.set_multiple_plug_in_windows";
+/// `settings.set_auto_open_plug_in_windows`: switch Auto-Open Plug-In
+/// Windows (WP-6.75).
+pub const SETTINGS_SET_AUTO_OPEN_PLUG_IN_WINDOWS: &str = "settings.set_auto_open_plug_in_windows";
 /// `settings.set_collect_files_on_export`: choose Collect Files on Export
 /// (WP-6.34).
 pub const SETTINGS_SET_COLLECT_FILES_ON_EXPORT: &str = "settings.set_collect_files_on_export";
@@ -397,7 +403,9 @@ pub const IDS: &[&str] = &[
     SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN,
     SETTINGS_SET_AUTOMATION_RECORD_MODE,
     SETTINGS_SET_TAKEOVER_MODE,
+    SETTINGS_SET_MULTIPLE_PLUG_IN_WINDOWS,
     SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
+    SETTINGS_SET_AUTO_OPEN_PLUG_IN_WINDOWS,
     SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS,
     SETTINGS_SET_PERMANENT_SCRUB_AREAS,
     SETTINGS_SET_COLLECT_FILES_ON_EXPORT,
@@ -2602,6 +2610,39 @@ fn specs() -> Vec<CommandSpec> {
         .args::<SwitchArgs>()
         .result::<SwitchResult>(),
         // Plug-Ins, Plug-In Windows (L-SET-017; WP-2.5b).
+        CommandSpec::new(
+            SETTINGS_SET_MULTIPLE_PLUG_IN_WINDOWS,
+            "Multiple Plug-In Windows",
+        )
+        .description(
+            "Switches Multiple Plug-In Windows, on the Settings window's Plug-Ins page; it's on \
+             in a new install, as Live's is. While it's on, any number of plug-in editor \
+             windows stay open together. While it's off, opening a plug-in's window with \
+             `plugin.show_window` closes the other plug-in windows, unless the call passes \
+             `keep_others`, as a Cmd-click (Ctrl-click) on the window button does. Switching \
+             it off closes nothing that's already open. The setting is kept for the next \
+             start, and isn't part of the set or an undo step. The result's `on` is the \
+             setting afterwards.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<SwitchArgs>()
+        .result::<SwitchResult>(),
+        CommandSpec::new(
+            SETTINGS_SET_AUTO_OPEN_PLUG_IN_WINDOWS,
+            "Auto-Open Plug-In Windows",
+        )
+        .description(
+            "Switches Auto-Open Plug-In Windows, on the Settings window's Plug-Ins page; it's on \
+             in a new install, as Live's is. While it's on, inserting a plug-in device opens \
+             its editor window at once, as `plugin.show_window` does. The setting is kept for \
+             the next start, and isn't part of the set or an undo step. The result's `on` is \
+             the setting afterwards.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<SwitchArgs>()
+        .result::<SwitchResult>(),
         CommandSpec::new(
             SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
             "Auto-Hide Plug-In Windows",

@@ -172,6 +172,10 @@ pub struct EngineState {
     pub insert_marker: Ticks,
     /// The Arrangement loop the engine plays, if it's on.
     pub loop_region: Option<LoopRegion>,
+    /// Whether a Play Selection that stops at the selection's end is
+    /// playing, so the Arrangement loop doesn't apply and the Loop switch
+    /// shows off (the transport spec, R35).
+    pub loop_suspended: bool,
     /// Whether the transport is recording (WP-2.13).
     pub recording: bool,
     /// Whether a take is running: the transport records and has begun to
@@ -282,6 +286,7 @@ impl EngineState {
             position_ticks: Ticks::ZERO,
             insert_marker: Ticks::ZERO,
             loop_region: None,
+            loop_suspended: false,
             recording: false,
             take_running: false,
             counting_in: false,
@@ -386,6 +391,7 @@ impl Clone for EngineState {
             position_ticks: self.position_ticks,
             insert_marker: self.insert_marker,
             loop_region: self.loop_region,
+            loop_suspended: self.loop_suspended,
             recording: self.recording,
             take_running: self.take_running,
             counting_in: self.counting_in,

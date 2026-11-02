@@ -119,8 +119,27 @@ pub const CHOP: &str = "note.chop";
 pub const JOIN: &str = "note.join";
 /// `note.fit_to_time`: give notes a time range's start and end.
 pub const FIT_TO_TIME: &str = "note.fit_to_time";
-/// `note.stretch`: scale notes from one range of time to another.
+/// `note.stretch`: scale notes from one range of time to another, or by a
+/// factor.
 pub const STRETCH: &str = "note.stretch";
+/// `note.transpose`: move notes by steps of the clip's scale or semitones.
+pub const TRANSPOSE: &str = "note.transpose";
+/// `note.fit_to_scale`: move notes to the nearest key of the clip's scale.
+pub const FIT_TO_SCALE: &str = "note.fit_to_scale";
+/// `note.invert`: turn notes upside down between their lowest and highest.
+pub const INVERT: &str = "note.invert";
+/// `note.add_interval`: add a copy of notes moved by an interval.
+pub const ADD_INTERVAL: &str = "note.add_interval";
+/// `note.set_length`: give notes one length.
+pub const SET_LENGTH: &str = "note.set_length";
+/// `note.humanize`: move notes' starts at random.
+pub const HUMANIZE: &str = "note.humanize";
+/// `note.reverse`: mirror notes in time.
+pub const REVERSE: &str = "note.reverse";
+/// `note.legato`: make each note reach the next note's start.
+pub const LEGATO: &str = "note.legato";
+/// `clip_view.utilities`: the Pitch and Time Utilities panel's values.
+pub const UTILITIES: &str = "clip_view.utilities";
 /// `note.split_clip`: split the Arrangement clip the editor shows at the
 /// time selection.
 pub const SPLIT_CLIP: &str = "note.split_clip";
@@ -182,6 +201,15 @@ pub const IDS: &[&str] = &[
     JOIN,
     FIT_TO_TIME,
     STRETCH,
+    TRANSPOSE,
+    FIT_TO_SCALE,
+    INVERT,
+    ADD_INTERVAL,
+    SET_LENGTH,
+    HUMANIZE,
+    REVERSE,
+    LEGATO,
+    UTILITIES,
     SPLIT_CLIP,
     NOTE_VIEW,
     SET_MARKER,
@@ -1056,7 +1084,7 @@ pub struct StretchPoint {
 }
 
 /// Arguments of `note.stretch`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StretchNotesArgs {
     /// The MIDI clip. Left out, the one the Clip View shows (the
@@ -1065,19 +1093,237 @@ pub struct StretchNotesArgs {
     pub clip: Option<ClipId>,
     /// The notes, by their place in the clip's notes in order. Left out,
     /// the selected notes, or with none selected the notes that start
-    /// inside `from`.
+    /// inside `from`, or with `factor`, the notes in the time selection, or
+    /// with none every note.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<Vec<u32>>,
     /// The range being stretched. Left out, the time selection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<TickRange>,
     /// The range it becomes: its start is where `from`'s start goes, and
-    /// its end where `from`'s end goes.
-    pub to: TickRange,
+    /// its end where `from`'s end goes. Give `to` or `factor`, not both.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<TickRange>,
     /// A point inside `from` that goes somewhere else: what lies on either
-    /// side of it is scaled to meet it there.
+    /// side of it is scaled to meet it there. With `factor`, the point the
+    /// notes stretch around instead of the time selection's start: its
+    /// `from` and `to` must be the same tick.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub point: Option<StretchPoint>,
+    /// The factor, from 0.1 to 10, that every note's distance from the
+    /// time selection's start (or `point`) and its length are multiplied
+    /// by; the time selection stretches with them. Give `factor` or `to`,
+    /// not both.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub factor: Option<f64>,
+    /// With `factor`, when the notes stretched are every note in the clip,
+    /// also stretch the clip's Start and End markers and loop brace by the
+    /// factor around the contents' start, as ×2 and ÷2 do with nothing
+    /// selected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub markers: Option<bool>,
+}
+
+/// What a step of a pitch utility is (Spec: pitch-and-time-utilities R2).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PitchUnit {
+    /// A step of the clip's scale in Scale Mode, a semitone otherwise, and a
+    /// Drum Rack's key on a Drum Rack track.
+    #[default]
+    Steps,
+    /// A semitone.
+    Semitones,
+}
+
+/// Arguments of `note.transpose`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TransposeArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The notes, by their place in the clip's notes in order. Left out,
+    /// the selected notes, or with none selected the notes that start in the
+    /// time selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
+    /// How many steps to move them, up when positive.
+    pub by: i32,
+    /// What a step is: `steps` (the default) or `semitones`.
+    #[serde(default, rename = "in", skip_serializing_if = "Option::is_none")]
+    pub unit: Option<PitchUnit>,
+}
+
+/// Arguments of the utilities that take only their notes: `note.fit_to_scale`,
+/// `note.invert`, `note.reverse` and `note.legato`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UtilityNotesArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The notes, by their place in the clip's notes in order. Left out,
+    /// the selected notes, or with none selected the notes that start in the
+    /// time selection, or with neither every note in the clip.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
+}
+
+/// Arguments of `note.add_interval`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AddIntervalArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The notes, as for `note.fit_to_scale`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
+    /// The interval, from -36 to 36. Left out, the panel's Interval Size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub by: Option<i32>,
+    /// What a step is: `steps` (the default) or `semitones`.
+    #[serde(default, rename = "in", skip_serializing_if = "Option::is_none")]
+    pub unit: Option<PitchUnit>,
+}
+
+/// Arguments of `note.set_length`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetLengthArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The notes, as for `note.fit_to_scale`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
+    /// The length every note takes, in ticks. Give `length` or
+    /// `to_time_range`, not both.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub length: Option<Ticks>,
+    /// End every note at the time selection's end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to_time_range: Option<bool>,
+}
+
+/// Arguments of `note.humanize`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HumanizeArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The notes, as for `note.fit_to_scale`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
+    /// The amount, from 0 to 100 percent. Left out, the panel's Humanize
+    /// Amount.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(max = 100))]
+    pub amount: Option<u8>,
+    /// The seed the random amounts come from; the same seed gives the same
+    /// notes. Left out, a new one each time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<u32>,
+}
+
+/// The lengths the panel's Duration chooser offers, in order: the time
+/// selection, the grid, then a whole note divided by n.
+pub const DURATIONS: [&str; 16] = [
+    "time_range",
+    "grid",
+    "1",
+    "1/2",
+    "1/3",
+    "1/4",
+    "1/6",
+    "1/8",
+    "1/12",
+    "1/16",
+    "1/24",
+    "1/32",
+    "1/48",
+    "1/64",
+    "1/96",
+    "1/128",
+];
+
+/// How long the Duration `name` is, given the grid step: `None` for
+/// `time_range`, which has no length of its own, and for a name that isn't
+/// in [`DURATIONS`].
+#[must_use]
+pub fn duration_length(name: &str, grid: Ticks) -> Option<Ticks> {
+    if name == "grid" {
+        return Some(grid);
+    }
+    let divider: i64 = match name {
+        "time_range" => return None,
+        "1" => 1,
+        other => other.strip_prefix("1/")?.parse().ok()?,
+    };
+    DURATIONS
+        .contains(&name)
+        .then(|| Ticks(Ticks::WHOLE.get() / divider))
+}
+
+/// The factor a position from 0 to 1 along the Stretch knob's travel is: 10
+/// to the power of 2p - 1, so 0.5 is ×1 (Spec: pitch-and-time-utilities R8).
+#[must_use]
+pub fn stretch_factor(position: f64) -> f64 {
+    10f64.powf(2.0 * position - 1.0)
+}
+
+/// Arguments of `clip_view.utilities`: the panel's values to set; each left
+/// out stays.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UtilitiesArgs {
+    /// Interval Size, from -36 to 36.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interval: Option<i32>,
+    /// The Stretch knob's position, from 0 to 1 along its travel; 0.5 is
+    /// ×1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stretch: Option<f64>,
+    /// Duration: one of `time_range`, `grid`, `1`, `1/2`, `1/3`, `1/4`,
+    /// `1/6`, `1/8`, `1/12`, `1/16`, `1/24`, `1/32`, `1/48`, `1/64`, `1/96`
+    /// and `1/128`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration: Option<String>,
+    /// Humanize Amount, from 0 to 100 percent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(max = 100))]
+    pub humanize_amount: Option<u8>,
+}
+
+/// The Pitch and Time Utilities panel's values and what it shows.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct UtilitiesState {
+    /// Interval Size.
+    pub interval: i32,
+    /// The least and the most Interval Size can be set to with the notes it
+    /// would copy now: those that keep every copy on the keyboard.
+    pub interval_range: (i32, i32),
+    /// The Stretch knob's position.
+    pub stretch: f64,
+    /// The factor that position is, from 0.1 to 10.
+    pub stretch_factor: f64,
+    /// Duration.
+    pub duration: String,
+    /// Humanize Amount, in percent.
+    pub humanize_amount: u8,
+    /// The root and name of the clip's scale; `null` while Scale Mode is
+    /// off.
+    pub scale: Option<String>,
+    /// Whether Fit to Scale is available: Scale Mode is on.
+    pub fit_to_scale: bool,
+    /// Whether Duration's Time Range is available: there is a time selection.
+    pub time_range: bool,
+    /// The lowest key of the notes the utilities act on now.
+    pub lowest: Option<u8>,
+    /// The highest key of the notes the utilities act on now.
+    pub highest: Option<u8>,
 }
 
 /// Arguments of `note.add`.
@@ -2282,12 +2528,149 @@ fn specs() -> Vec<CommandSpec> {
                  `from` move by the same mapping, replacing any breakpoint they land on; \
                  unlinked envelopes stay. Refused, changing nothing, if a note would be \
                  shorter than a tick or start before the clip's contents. The time selection \
-                 becomes `to`. The edit is one undo step, `Stretch Notes`.",
+                 becomes `to`. The edit is one undo step, `Stretch Notes`. Instead of `to`, \
+                 `factor` (0.1 to 10) multiplies each note's distance from the time \
+                 selection's start (or, with none, the clip's contents' start; or `point`, \
+                 with its `from` and `to` the same tick) and its length by it, as the Pitch \
+                 and Time Utilities panel's Stretch knob does: the notes are `notes`, or the \
+                 selected notes, or the notes in the time selection, or with none every note, \
+                 the time selection stretches with them, and the clip's loop and markers stay \
+                 unless `markers` is true with every note stretched, as \u{d7}2 and \u{f7}2 \
+                 do. Give `to` or `factor`, not both. The step is `Stretch`, `Stretch Time by \
+                 Double` for a factor of 2 and `Shrink Time by Half` for ½.",
             )
             .permission(Permission::Edit)
             .contexts([NoteEditor, NoteSelectionContext])
             .args::<StretchNotesArgs>()
             .result::<NoteEditResult>(),
+        CommandSpec::new(TRANSPOSE, "Transpose")
+            .description(
+                "Moves notes up or down by `by` steps: the notes `notes`, or the selected \
+                 notes, or with none selected the notes that start in the time selection. A \
+                 step is a step of the clip's scale in Scale Mode, a semitone otherwise, and a \
+                 Drum Rack's key on a Drum Rack track; `in` set to `semitones` makes it a \
+                 semitone. A note off the scale keeps its distance above the scale note below \
+                 it. Refused, changing nothing, with no notes, or if a note would leave keys 0 \
+                 to 127. One undo step, `Transpose`. The Transpose field in the Pitch and Time \
+                 Utilities panel runs it as it is dragged or typed into.",
+            )
+            .permission(Permission::Edit)
+            .contexts([NoteEditor, NoteSelectionContext])
+            .args::<TransposeArgs>()
+            .result::<NoteEditResult>(),
+        CommandSpec::new(FIT_TO_SCALE, "Fit to Scale")
+            .description(
+                "Moves each of the notes `notes`, or the selected notes, or with none \
+                 selected the notes that start in the time selection, or with neither every \
+                 note in the clip, that is off the clip's scale to the nearest key of the \
+                 scale, the lower of two equally near. Notes on the scale stay. Refused \
+                 while the clip's Scale Mode is off. One undo step, `Fit to Scale`, none if no \
+                 note moves.",
+            )
+            .permission(Permission::Edit)
+            .contexts([NoteEditor, NoteSelectionContext])
+            .args::<UtilityNotesArgs>()
+            .result::<NoteEditResult>(),
+        CommandSpec::new(INVERT, "Invert")
+            .description(
+                "Turns notes upside down: with L the lowest key of the notes (`notes`, or the \
+                 selected notes, or with none selected the notes that start in the time \
+                 selection, or with neither every note in the clip) and H the highest, a note \
+                 at key k moves to L + H - k. In Scale Mode, when L and H are on the scale, a \
+                 note on the scale goes to the scale note as many steps below H as it was above \
+                 L, and a note off the scale still moves to L + H - k. One undo step, \
+                 `Invert`, none if no note moves.",
+            )
+            .permission(Permission::Edit)
+            .contexts([NoteEditor, NoteSelectionContext])
+            .args::<UtilityNotesArgs>()
+            .result::<NoteEditResult>(),
+        CommandSpec::new(ADD_INTERVAL, "Add Interval")
+            .description(
+                "Adds a copy of each of the notes (`notes`, or the selected notes, or with \
+                 none selected the notes that start in the time selection, or with neither \
+                 every note in the clip) moved by `by` steps (the panel's Interval Size when \
+                 left out), from -36 to 36, a step being as `note.transpose` has it. The \
+                 copies keep their notes' starts, lengths and values, and are selected. A copy \
+                 that would leave keys 0 to 127 is left out, and so, on a Drum Rack track, is \
+                 one that would land on a key no chain receives, and an interval of 0 adds \
+                 nothing. One undo step, `Interval`, none if nothing is added.",
+            )
+            .permission(Permission::Edit)
+            .contexts([NoteEditor, NoteSelectionContext])
+            .args::<AddIntervalArgs>()
+            .result::<NoteEditResult>(),
+        CommandSpec::new(SET_LENGTH, "Set Length")
+            .description(
+                "Gives every one of the notes (`notes`, or the selected notes, or with none \
+                 selected the notes that start in the time selection, or with neither every \
+                 note in the clip) one length: `length` ticks, or with `to_time_range` an end \
+                 at the time selection's end, for the notes that start before it. Give one of \
+                 the two. Refused with `to_time_range` and no time selection. One undo step, \
+                 `Set Length`, none if no length changes.",
+            )
+            .permission(Permission::Edit)
+            .contexts([NoteEditor, NoteSelectionContext])
+            .args::<SetLengthArgs>()
+            .result::<NoteEditResult>(),
+        CommandSpec::new(HUMANIZE, "Humanize")
+            .description(
+                "Moves each of the notes (`notes`, or the selected notes, or with none \
+                 selected the notes that start in the time selection, or with neither every \
+                 note in the clip) earlier or later by a random amount up to `amount` percent \
+                 of a quarter of the grid step, keeping its length; a note never starts before \
+                 the clip's contents. `seed` gives the random amounts: the same seed on the \
+                 same notes gives the same result, and with none a new seed is drawn. One \
+                 undo step, `Humanize`, none if no note moves.",
+            )
+            .permission(Permission::Edit)
+            .contexts([NoteEditor, NoteSelectionContext])
+            .args::<HumanizeArgs>()
+            .result::<NoteEditResult>(),
+        CommandSpec::new(REVERSE, "Reverse")
+            .description(
+                "Mirrors notes (`notes`, or the selected notes, or with none selected the \
+                 notes that start in the time selection, or with neither every note in the \
+                 clip) in time around the middle of a span: the time selection; with none, the \
+                 clip's loop brace while Loop is on, and its Start marker to its End marker \
+                 while it is off. A note that starts at s and lasts d in a span from a to b \
+                 starts at a + b - (s + d) and keeps its length. Refused, changing nothing, if \
+                 a note would start before the clip's contents. One undo step, `Reverse`.",
+            )
+            .permission(Permission::Edit)
+            .contexts([NoteEditor, NoteSelectionContext])
+            .args::<UtilityNotesArgs>()
+            .result::<NoteEditResult>(),
+        CommandSpec::new(LEGATO, "Legato")
+            .description(
+                "Makes each note (`notes`, or the selected notes, or with none selected the \
+                 notes that start in the time selection, or with neither every note in the \
+                 clip) end at the next later start among them; the notes with the latest start \
+                 end at the clip's loop brace's end while Loop is on, or its End marker (the \
+                 clip's end without one) while it is off, and keep their length when they \
+                 start at or after it. One undo step, `Legato`, none if no length changes.",
+            )
+            .permission(Permission::Edit)
+            .contexts([NoteEditor, NoteSelectionContext])
+            .args::<UtilityNotesArgs>()
+            .result::<NoteEditResult>(),
+        CommandSpec::new(UTILITIES, "Pitch and Time Utilities")
+            .description(
+                "Reads the Pitch and Time Utilities panel's values and what it shows, and sets \
+                 the ones given: `interval` (Interval Size, -36 to 36), `stretch` (the Stretch \
+                 knob's position, 0 to 1, 0.5 being ×1), `duration` (`time_range`, `grid`, \
+                 `1`, `1/2`, `1/3`, `1/4`, `1/6`, `1/8`, `1/12`, `1/16`, `1/24`, `1/32`, \
+                 `1/48`, `1/64`, `1/96` or `1/128`) and `humanize_amount` (0 to 100 percent). \
+                 Changes only the view, so it is no undo step and is not saved with the set. \
+                 `interval_range` is what Interval Size can be set to with the notes it would \
+                 copy now, `fit_to_scale` and `time_range` say whether Fit to Scale and \
+                 Duration's Time Range are available, and `lowest` and `highest` are the keys \
+                 Transpose shows.",
+            )
+            .permission(Permission::Read)
+            .contexts([NoteEditor, NoteSelectionContext])
+            .args::<UtilitiesArgs>()
+            .result::<UtilitiesState>(),
         CommandSpec::new(SPLIT_CLIP, "Split Clip")
             .description(
                 "Splits the Arrangement clip the Clip View shows at the start and end of the \

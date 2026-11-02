@@ -430,8 +430,8 @@ pub struct PushSessionLook {
     pub shows: String,
     /// The clip in the pad's slot.
     pub clip: Option<bl_model::ClipId>,
-    /// The swatch of the clip's colour, or of the scene's.
-    pub colour: Option<u8>,
+    /// The clip's colour, or the scene's: a swatch or `#RRGGBB`.
+    pub colour: Option<bl_model::Colour>,
 }
 
 /// What Session Mode shows (push-2-tracks R73).

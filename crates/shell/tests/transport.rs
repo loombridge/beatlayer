@@ -67,6 +67,7 @@ const TRANSPORT: &[(&str, &str)] = &[
     ("transport.play_stop", "{}"),
     ("transport.continue", "{}"),
     ("transport.play_from_insert_marker", "{}"),
+    ("transport.play_selection", "{\"start\": 0}"),
     ("transport.locate", "{\"position\": 2822400}"),
     ("transport.scrub", "{\"position\": 2822400}"),
     ("transport.return_to_start", "{}"),

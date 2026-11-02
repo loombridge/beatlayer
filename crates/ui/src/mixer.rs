@@ -647,7 +647,7 @@ impl MixerUi {
                     pos2(column.rect.right() - 0.5, layout.colour.1),
                 ),
                 0.0,
-                theme.swatch(colour),
+                theme.colour(colour),
             );
         }
         if let Some(span) = layout.strip {

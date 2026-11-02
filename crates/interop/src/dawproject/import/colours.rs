@@ -2,7 +2,7 @@
 //! of the palette as the theme in use draws it, by the distance between the
 //! two in the CIELAB colour space.
 
-use bl_model::{SWATCHES, swatch_rgb};
+use bl_model::{Colour, SWATCHES, swatch_rgb};
 
 use super::*;
 
@@ -58,13 +58,16 @@ pub fn nearest_swatch(track_colours: &[[u8; 3]], rgb: [u8; 3]) -> u8 {
 impl Importer<'_, '_> {
     /// The swatch a `color` names, or `None` with a report for one that
     /// isn't `#rrggbb` (R23).
-    pub(super) fn swatch_of(&mut self, color: &str, place: &str) -> Option<u8> {
+    pub(super) fn swatch_of(&mut self, color: &str, place: &str) -> Option<Colour> {
         let Some(rgb) = parse(color) else {
             self.report
                 .add("a colour that isn't #rrggbb", place, "left out");
             return None;
         };
-        Some(nearest_swatch(self.context.track_colours, rgb))
+        Some(Colour::Swatch(nearest_swatch(
+            self.context.track_colours,
+            rgb,
+        )))
     }
 
     /// A new track's colour: the file's, or the one a new track takes (R23).

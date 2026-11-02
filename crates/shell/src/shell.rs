@@ -49,6 +49,7 @@ use bl_plugin_host::lv2::Lv2Host;
 use bl_plugin_host::scan::Scanner;
 use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::arrangement as view_ids;
+use bl_shell_spec::arranger as arranger_ids;
 use bl_shell_spec::audio_editing as audio_ids;
 use bl_shell_spec::automation as automation_ids;
 use bl_shell_spec::autosampler as autosampler_ids;
@@ -431,6 +432,10 @@ pub enum Effect {
     /// person types the new name; Return runs `locator.rename` with it
     /// (WP-6.24; the time editing spec, R8).
     RenameLocator(bl_model::LocatorId),
+    /// Start renaming a section in the arranger track, where the person
+    /// types the new name; Return runs `arranger.rename_section` with it
+    /// (WP-6.45; the arranger track spec, R7).
+    RenameSection(bl_model::SectionId),
     /// Start typing a new signature for the time-signature marker at this
     /// position, in the lane under the beat-time ruler; Return runs
     /// `arrangement.edit_time_signature` with it (WP-6.61; the time editing
@@ -847,6 +852,9 @@ pub struct Shell {
     /// The engine's insert marker when the shell last looked, so a move of
     /// it reaches the Arrangement View once (WP-1.18).
     seen_insert_marker: Option<Ticks>,
+    /// Whether the engine plays a Play Selection to the selection's end, so
+    /// the Loop switch shows off (the transport spec, R35).
+    loop_suspended: bool,
     /// Whether a person's gesture (a drag on a value) holds a transaction
     /// open, so its document commands are one undo step.
     gesture: bool,
@@ -901,6 +909,12 @@ pub struct Shell {
     /// floating devices' windows and the plug-ins' editor windows;
     /// WP-2.5b): view state, never part of the set.
     plug_in_windows: bool,
+    /// The states a preset gave plug-ins the engine hasn't started yet, which
+    /// they take when they run (the plug-in scanning spec, R16).
+    pending_states: BTreeMap<bl_model::DeviceId, Vec<u8>>,
+    /// Plug-ins inserted from the Browser whose windows Auto-Open Plug-In
+    /// Windows opens once they've started (WP-6.75).
+    auto_open: Vec<bl_model::DeviceId>,
     /// The native device types the engine offers, which the plug-ins'
     /// join in the Device View (WP-2.6).
     native_types: Vec<bl_engine::DeviceType>,
@@ -1084,12 +1098,19 @@ fn clip_marker_command(id: &str) -> bool {
 /// Whether `id` is one of the Arrangement's own clip drags, which the
 /// document runs per frame as gestures: stretching a warped clip's edge (the
 /// warping spec, R47), sliding a clip's contents (R54) and dragging a fade's
-/// handles (the audio clips spec, R27), each one undo step however far the drag
+/// handles (the audio clips spec, R27), and drawing or moving a chord lane
+/// region (the chord lane spec, R3), each one undo step however far the drag
 /// goes.
 fn arrangement_clip_command(id: &str) -> bool {
     matches!(
         id,
-        "clip.stretch" | "clip.slide_contents" | "clip.set_fades" | "arrangement.set_crossfade"
+        "clip.stretch"
+            | "clip.slide_contents"
+            | "clip.set_fades"
+            | "arrangement.set_crossfade"
+            // Spec: chord-lane R3. Drawing, moving and resizing a region.
+            | "chord_lane.add_region"
+            | "chord_lane.move_region"
     )
 }
 
@@ -1113,6 +1134,8 @@ fn marker_label(id: &str) -> &'static str {
         "clip.stretch" => "Stretch clip",
         "clip.slide_contents" => "Slide clip contents",
         "clip.set_fades" | "arrangement.set_crossfade" => "Change Fade",
+        "chord_lane.add_region" => "Add Chord Region",
+        "chord_lane.move_region" => "Move Chord Region",
         model::SET_MIDI_REGION | "clip.set_region" => "Change clip region",
         model::SET_MIDI_LOOP | "clip.set_loop" => "Change clip loop",
         "clip.insert_warp_marker" | "clip.move_warp_markers" => "Move warp markers",
@@ -1436,6 +1459,7 @@ impl Shell {
             envelope_control_focused: false,
             au,
             seen_insert_marker: None,
+            loop_suspended: false,
             gesture: false,
             mixer: MixerView::new(),
             session: SessionView::new(),
@@ -1467,6 +1491,8 @@ impl Shell {
             session_watch: crate::session_capture::Watch::default(),
             automation_recording: false,
             plug_in_windows: true,
+            pending_states: BTreeMap::new(),
+            auto_open: Vec::new(),
             devices: {
                 // Beatlayer's native devices (WP-2.5; none ship yet).
                 let mut devices = DeviceView::new();
@@ -1855,6 +1881,9 @@ impl Shell {
         if edit_ids::handles(id) {
             return self.run_edit(id, args);
         }
+        if bl_shell_spec::linked_clips::handles(id) {
+            return self.run_linked_clips(id, args);
+        }
         if automation_ids::handles(id) {
             // Spec: clip-envelopes R13. Edit ▸ Simplify Envelope acts on the
             // Envelope Editor's time selection while the editor has the
@@ -1876,6 +1905,12 @@ impl Shell {
         }
         if locator_ids::handles(id) {
             return self.run_locator(id, args);
+        }
+        if arranger_ids::handles(id) {
+            return self.run_arranger(id, args);
+        }
+        if bl_shell_spec::chord_lane::handles(id) {
+            return self.run_chord_lane(id, args);
         }
         if note_ids::is_preview_or_mode(id) || id == note_ids::STEP_RECORD {
             // Spec: step-recording. The Preview switch, previews, step
@@ -2046,10 +2081,12 @@ impl Shell {
         if id == browser_ids::LOAD_SELECTED
             && let Some(plugin) = self.browser_view.selected_plugin().cloned()
         {
-            // Spec: plugin-scanning R11. A plug-in chosen in the browser
-            // loads as `plugin.load` loads it.
+            // Spec: plugin-scanning R11, R17. A plug-in chosen in the
+            // browser loads as `plugin.load` loads it, and a preset of one
+            // loads it with that preset.
             Self::args::<NoArgs>(id, args)?;
-            let loaded = self.load_browser_plugin(id, &plugin)?;
+            let preset = self.browser_view.selected_plugin_preset();
+            let loaded = self.load_browser_plugin(id, &plugin, preset)?;
             self.touch();
             return Ok(loaded);
         }

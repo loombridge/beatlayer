@@ -496,8 +496,14 @@ impl GridUi {
         let clip_id = clip.map(|clip| clip.id);
         let response = ui.interact(cell, slot_id(track, scene), Sense::click_and_drag());
         let track_name = t.name().to_owned();
-        let label = if clip.is_some() {
-            format!("{track_name}: {scene_name}")
+        let label = if let Some(held) = clip {
+            let named = format!("{track_name}: {scene_name}");
+            if held.link.is_some() {
+                // Spec: linked-clips R11.
+                crate::link_mark::described(&named, doc.linked_clip_ids(held.id).len())
+            } else {
+                named
+            }
         } else {
             format!("{track_name}: {scene_name} (empty)")
         };
@@ -550,7 +556,7 @@ impl GridUi {
         let painter = ui.painter_at(cell.expand(1.0));
         let fill = match clip {
             Some(held) => theme
-                .swatch(held.colour.unwrap_or_default())
+                .colour(held.colour.unwrap_or_default())
                 .gamma_multiply(0.75),
             None => theme.colors.lane.0,
         };
@@ -621,6 +627,28 @@ impl GridUi {
                 "session.stop_track",
                 json!({ "track": track }),
             );
+        }
+        // Spec: linked-clips R10. A linked clip's slot shows the link mark at
+        // its right; clicking it selects the slots of the clips in its link.
+        if let Some(held) = clip.filter(|held| held.link.is_some()) {
+            let linked = doc.linked_clip_ids(held.id);
+            let area = Rect::from_min_max(
+                pos2(
+                    cell.right() - crate::link_mark::WIDTH - 1.0,
+                    cell.top() + 1.0,
+                ),
+                pos2(cell.right() - 1.0, cell.top() + 15.0),
+            );
+            if crate::link_mark::show(
+                ui,
+                Id::new(("link-mark", held.id)),
+                area,
+                theme.colors.clip_text.0,
+                linked.len(),
+                events,
+            ) {
+                crate::link_mark::select_link(doc, held.id, events);
+            }
         }
         // Spec: map-modes R3, R11. The map modes tint every slot.
         crate::mapping::remote_overlay(
@@ -1118,7 +1146,7 @@ impl GridUi {
             .document()
             .scene(scene)
             .and_then(|held| held.colour)
-            .map_or(theme.colors.lane.0, |swatch| theme.swatch(swatch));
+            .map_or(theme.colors.lane.0, |swatch| theme.colour(swatch));
         painter.rect_filled(row.name.shrink(1.0), 0.0, fill);
         // Spec: session-view R21. View > Scene Tempo and Time Signature
         // puts the scene's fields where the name was (L-SES-007); they're

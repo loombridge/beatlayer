@@ -86,7 +86,7 @@ fn pad(rig: &Rig, row: u8, column: u8) -> [u8; 3] {
 
 fn track_colour(rig: &Rig) -> [u8; 3] {
     let colour = rig.editor.document().track(rig.tracks[0]).unwrap().colour();
-    bl_model::swatch_rgb(&bl_model::DEFAULT_TRACK_PALETTE, colour)
+    colour.rgb(&bl_model::DEFAULT_TRACK_PALETTE)
 }
 
 const WHITE: [u8; 3] = [204, 204, 204];

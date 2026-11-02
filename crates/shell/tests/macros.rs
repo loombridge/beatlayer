@@ -285,7 +285,7 @@ fn rename_colour_and_info_text_are_one_undo_step_each_and_save() {
     let rack = set.shell.editor().document().device(set.rack).unwrap();
     let setting = rack.macros.setting(1);
     assert_eq!(setting.name, "Brightness");
-    assert_eq!(setting.colour, Some(3));
+    assert_eq!(setting.colour, Some(bl_model::Colour::Swatch(3)));
     assert_eq!(setting.info, "Opens it up");
 }
 

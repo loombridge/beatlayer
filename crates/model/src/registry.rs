@@ -885,8 +885,9 @@ const ENTRIES: &[Entry] = &[
         keys: &[],
         description: "Colours tracks, Main and the returns among them, with swatch `colour` of the \
             palette of 5 rows of 14 (0 to 69, numbered from the top row's left, row by row: swatch \
-            14 is row 2, colour 1). Their clips keep their colours. A colour is never heard: the \
-            engine gets nothing.",
+            14 is row 2, colour 1), or a colour of one's own as `#RRGGBB`, saved as written and drawn \
+            as it is, whatever the theme. Their clips keep their colours. A colour is never heard: \
+            the engine gets nothing.",
     },
     Entry {
         id: "track.assign_colour_to_clips",
@@ -1800,7 +1801,36 @@ const ENTRIES: &[Entry] = &[
         keys: &[],
         description: "Colours clips, in the Arrangement, a Session slot or a take lane, with swatch \
             `colour` of the palette of 5 rows of 14 (0 to 69, numbered from the top row's left, row \
-            by row: swatch 14 is row 2, colour 1). A colour is never heard: the engine gets nothing.",
+            by row: swatch 14 is row 2, colour 1), or a colour of one's own as `#RRGGBB`, saved as \
+            written and drawn as it is, whatever the theme. A colour is never heard: the engine \
+            gets nothing.",
+    },
+    Entry {
+        id: "clip.link",
+        action: Action::Apply("link_clips"),
+        label: "Link Clips",
+        permission: Permission::Edit,
+        contexts: &[Arrangement, Session],
+        keys: &[],
+        description: "Links clips that already hold the same contents, so that from then on an \
+            edit to one clip's notes, controller envelopes, audio file, warping or gain reaches \
+            every clip of the link in the same undo step (each clip keeps its own place, length, \
+            markers, loop and name). The clips are all MIDI or all audio, each listed once, at \
+            least two; clips whose contents differ are refused, and so are clips that belong to \
+            different links. `clip.duplicate_linked` makes linked copies; this links clips that \
+            are copies already. Undo with `clip.unlink`.",
+    },
+    Entry {
+        id: "clip.unlink",
+        action: Action::Apply("unlink_clips"),
+        label: "Unlink Clip",
+        permission: Permission::Edit,
+        contexts: &[Arrangement, Session],
+        keys: &[],
+        description: "Takes clips out of their links, each keeping the contents it has; later \
+            edits to its contents change only that clip. A link left with one clip ends, and \
+            that clip is independent. A clip that is in no link is left as it is. The query \
+            tool's `clip.link` shows a clip's link.",
     },
     Entry {
         id: "clip.set_mute",
@@ -2737,8 +2767,8 @@ const ENTRIES: &[Entry] = &[
         contexts: &[Session],
         keys: &[],
         description: "Colours scenes with swatch `colour` of the palette of 5 rows of 14 (0 to 69, \
-            numbered from the top row's left, row by row: swatch 14 is row 2, colour 1), or clears \
-            their colour with null, as a new scene has none.",
+            numbered from the top row's left, row by row: swatch 14 is row 2, colour 1), or a colour of \
+            one's own as `#RRGGBB`, or clears their colour with null, as a new scene has none.",
     },
     Entry {
         id: "scene.set_tempo",
@@ -3586,7 +3616,7 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[DeviceView],
         keys: &[],
-        description: "Adds a chain to a rack at `index` in the rack's list of chains, where 0 is first. The chain has a new ID from the project, a `name` (left empty, a chain made with a device in it is named after the device's title and an empty one `Chain`), an optional `colour` (0 to 69), `info` text, a `mixer` (leave it out for a new chain's: `volume` 1, `pan` 0, `enabled` true, `solo` false) and its `devices`, each with a new ID, in the order for the kind of rack. A drum rack's chain also takes `receive`, `play`, `choke` and `sends`, and `is_return` makes it one of the rack's return chains (up to six, after the drum chains, audio effects only; a new one has `audio_to` null, which is the rack's own output); any other rack's chain keeps none of these. An empty chain passes its input straight to its mixer, which makes a dry path. One undo step.",
+        description: "Adds a chain to a rack at `index` in the rack's list of chains, where 0 is first. The chain has a new ID from the project, a `name` (left empty, a chain made with a device in it is named after the device's title and an empty one `Chain`), an optional `colour` (0 to 69, or `#RRGGBB`), `info` text, a `mixer` (leave it out for a new chain's: `volume` 1, `pan` 0, `enabled` true, `solo` false) and its `devices`, each with a new ID, in the order for the kind of rack. A drum rack's chain also takes `receive`, `play`, `choke` and `sends`, and `is_return` makes it one of the rack's return chains (up to six, after the drum chains, audio effects only; a new one has `audio_to` null, which is the rack's own output); any other rack's chain keeps none of these. An empty chain passes its input straight to its mixer, which makes a dry path. One undo step.",
     },
     Entry {
         id: "chain.remove",
@@ -3622,7 +3652,7 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[DeviceView],
         keys: &[],
-        description: "Colours a chain with swatch `colour` of the palette of 5 rows of 14 (0 to 69), or clears its colour with null.",
+        description: "Colours a chain with swatch `colour` of the palette of 5 rows of 14 (0 to 69) or a colour of one's own as `#RRGGBB`, or clears its colour with null.",
     },
     Entry {
         id: "chain.set_push_colour",
@@ -3784,7 +3814,7 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[DeviceView],
         keys: &[],
-        description: "Colours macro `macro_number` with swatch `colour` of the palette of 5 rows of 14 (0 to 69), or clears its colour with null. One undo step.",
+        description: "Colours macro `macro_number` with swatch `colour` of the palette of 5 rows of 14 (0 to 69) or a colour of one's own as `#RRGGBB`, or clears its colour with null. One undo step.",
     },
     Entry {
         id: "rack.set_macro_info_text",
@@ -3925,6 +3955,77 @@ const ENTRIES: &[Entry] = &[
             that one as it is. One undo step, `Add Locator`.",
     },
     Entry {
+        id: "chord_lane.add_region",
+        action: Action::Apply("add_chord_region"),
+        label: "Add Chord Region",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Adds a region to the chord lane, as drawing in the lane does: `region` \
+            has a new `id`, a `start` and an `end` in ticks on the song's beats (1.1.1 or \
+            later, the end after the start), optionally a `scale` (`enabled`, `root` 0 is C, \
+            `name` from `song.scales`) and a `transpose` from -24 to 24 (0 by default). Regions \
+            never overlap: one that would is refused and nothing changes. A MIDI track that \
+            follows the lane (`track.set_follow_chord_lane`) plays its Arrangement clips' notes \
+            moved by the transposition of the region they start in: by that many degrees of the \
+            clip's scale where the clip's Scale Mode is on, by that many semitones where it is \
+            off. Where the region names a scale, the track's scale-aware devices take it as \
+            their current scale. Nothing in the clips changes. One undo step, `Add Chord \
+            Region`. `song` reads the regions in its `chord_lane` field.",
+    },
+    Entry {
+        id: "chord_lane.move_region",
+        action: Action::Apply("move_chord_region"),
+        label: "Move Chord Region",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Moves a chord region, or resizes it, to the new `start` and `end` in \
+            ticks, as dragging it or one of its edges does. A move that would overlap another \
+            region, start before 1.1.1 or end the region at or before its start is refused and \
+            nothing changes. One undo step, `Move Chord Region`.",
+    },
+    Entry {
+        id: "chord_lane.set_region",
+        action: Action::Apply("set_chord_region"),
+        label: "Set Chord Region",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Sets a chord region's scale and transposition, as its context menu does: \
+            `enabled` (whether it names a scale; false leaves the clips' own), `root` (0 is C \
+            and 11 is B), `name` (one of the names `song.scales` reads) and `transpose` (from \
+            -24 to 24, in degrees of each clip's scale where the clip's Scale Mode is on and in \
+            semitones where it is off). It leaves the values it isn't given as they were. One \
+            undo step, `Change Chord Region`.",
+    },
+    Entry {
+        id: "chord_lane.delete_region",
+        action: Action::Apply("delete_chord_region"),
+        label: "Delete Chord Region",
+        permission: Permission::Destructive,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Deletes a chord region, as selecting it and pressing Delete does. The \
+            tracks that follow the lane play the notes as written where it was. One undo step, \
+            `Delete Chord Region`. Because it removes the person's work, an agent asks first.",
+    },
+    Entry {
+        id: "track.set_follow_chord_lane",
+        action: Action::Apply("set_follow_chord_lane"),
+        label: "Follow Chord Lane",
+        permission: Permission::Edit,
+        contexts: &[TrackHeaders, Arrangement],
+        keys: &[],
+        description: "Switches a MIDI track's Follow Chord Lane, as its context menu's item \
+            does. On, the track's Arrangement clips play moved by the chord lane's region they \
+            start in and its scale-aware devices take that region's scale; off (a new track's), \
+            the track plays the notes as written. Session clips, audio clips and monitored \
+            input are never moved. Only MIDI tracks have it. The switch is saved with the set \
+            only where it's on, and each change is one undo step, named \"Follow Chord \
+            Lane\". `track` reads it back in `follow_chord_lane`.",
+    },
+    Entry {
         id: "song.delete_locator",
         action: Action::Apply("delete_locator"),
         label: "Delete Locator",
@@ -4022,6 +4123,54 @@ const ENTRIES: &[Entry] = &[
             Time`. Undo restores it, but because it removes the person's work an agent asks \
             first. To delete the time selected as a person does, use \
             `arrangement.delete_time`.",
+    },
+    Entry {
+        id: "song.add_section",
+        action: Action::Apply("add_section"),
+        label: "Add Section",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Adds a section to the arranger track: a `section` with a new ID, a \
+            `start` in ticks, a `length` in ticks, a `name` and a `colour` (a swatch from 0 \
+            to 69). A section with no name is named \"Section\" and the next whole number. \
+            Sections never overlap, and one that would is refused. It moves nothing on the \
+            tracks. One undo step, `Add Section`. To make one as a person does, use \
+            `arranger.add_section`.",
+    },
+    Entry {
+        id: "song.remove_section",
+        action: Action::Apply("remove_section"),
+        label: "Remove Section",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Removes a section from the arranger track and nothing else: the clips, \
+            automation, tempo, time signatures and locators stay as they are. One undo step, \
+            `Remove Section`. To delete a section with its time, use `arranger.delete_section`.",
+    },
+    Entry {
+        id: "song.edit_section",
+        action: Action::Apply("edit_section"),
+        label: "Edit Section",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Changes a section's `name`, `colour` (a swatch from 0 to 69), `start` or \
+            `length`, leaving what is left out as it was. It moves nothing on the tracks, and \
+            a span that would overlap another section is refused. One undo step, `Edit \
+            Section`. To move a section with its time, use `arranger.move_section`.",
+    },
+    Entry {
+        id: "song.set_arranger_track",
+        action: Action::Apply("set_arranger_track"),
+        label: "Arranger Track",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Shows or hides the arranger track above the Arrangement's tracks \
+            (`shown`). It is hidden in a new set. Whether it shows is saved with the set and \
+            is no undo step.",
     },
     Entry {
         id: "groove.add",

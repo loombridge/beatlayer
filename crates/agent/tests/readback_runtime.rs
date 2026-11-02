@@ -200,6 +200,8 @@ fn each_settings_command_reads_back_from_settings_state() {
             "default_track_colour": 12,
             "reduced_automatic_colours": false,
             "clip_colour": "track-color",
+            "new_tracks_take_group_colour": false,
+            "custom_colours": { "places": vec![Value::Null; 14], "used": [] },
             "appearance": "dark",
             "drawn_appearance": "dark",
             "themes": ["Beatlayer"],
@@ -209,7 +211,9 @@ fn each_settings_command_reads_back_from_settings_state() {
     // Spec: automation R31. On in a new install.
     assert_eq!(before["snap_automation_to_grid"], true);
     assert_eq!(before["warp_recorded_audio"], true);
+    assert_eq!(before["multiple_plug_in_windows"], true);
     assert_eq!(before["auto_hide_plug_in_windows"], true);
+    assert_eq!(before["auto_open_plug_in_windows"], true);
     // Spec: warping R29. What a new install has.
     assert_eq!(
         before["warp"],
@@ -315,6 +319,17 @@ fn each_settings_command_reads_back_from_settings_state() {
         "settings.set_clip_colour",
         json!({ "clip_colour": "random" }),
     );
+    // Spec: themes R28, R30.
+    run(
+        &mut client,
+        "settings.set_new_tracks_take_group_colour",
+        json!({ "on": true }),
+    );
+    run(
+        &mut client,
+        "settings.use_custom_colour",
+        json!({ "colour": "#336699" }),
+    );
     run(
         &mut client,
         "settings.set_create_fades_on_clip_edges",
@@ -367,7 +382,17 @@ fn each_settings_command_reads_back_from_settings_state() {
     );
     run(
         &mut client,
+        "settings.set_multiple_plug_in_windows",
+        json!({ "on": false }),
+    );
+    run(
+        &mut client,
         "settings.set_auto_hide_plug_in_windows",
+        json!({ "on": false }),
+    );
+    run(
+        &mut client,
+        "settings.set_auto_open_plug_in_windows",
         json!({ "on": false }),
     );
     run(
@@ -441,6 +466,8 @@ fn each_settings_command_reads_back_from_settings_state() {
             "default_track_colour": 33,
             "reduced_automatic_colours": true,
             "clip_colour": "random",
+            "new_tracks_take_group_colour": true,
+            "custom_colours": { "places": ["#336699", null, null, null, null, null, null, null, null, null, null, null, null, null], "used": [0] },
             "appearance": "follow-system",
             "drawn_appearance": "dark",
             "themes": ["Beatlayer"],
@@ -449,7 +476,9 @@ fn each_settings_command_reads_back_from_settings_state() {
     assert_eq!(state["create_fades_on_clip_edges"], false);
     assert_eq!(state["snap_automation_to_grid"], false);
     assert_eq!(state["warp_recorded_audio"], false);
+    assert_eq!(state["multiple_plug_in_windows"], false);
     assert_eq!(state["auto_hide_plug_in_windows"], false);
+    assert_eq!(state["auto_open_plug_in_windows"], false);
     assert_eq!(
         state["warp"],
         json!({

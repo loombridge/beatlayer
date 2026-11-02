@@ -377,7 +377,7 @@ Result: [`Converted`](README.md#converted).
 
 **Copy Device**. Permission: `read`. Contexts: `device-view`.
 
-Copies a device to the clipboard, with its settings, for `device.paste`. Changes nothing in the set.
+Copies a device to the clipboard, with its settings, for `device.paste`; with `device` left out, every selected device. Changes nothing in the set.
 
 Default keys:
 
@@ -414,7 +414,7 @@ Result: [`SampleProcessed`](README.md#sampleprocessed).
 
 **Cut Device**. Permission: `destructive`. Contexts: `device-view`.
 
-Copies a device to the clipboard, with its settings, and deletes it from its chain: one undo step, named Delete Device(s). Because it removes the person's work an agent asks first. `device.paste` puts it back, anywhere.
+Copies a device to the clipboard, with its settings, and deletes it from its chain: one undo step, named Delete Device(s). With `device` left out it cuts every selected device, and selects the device after them. Because it removes the person's work an agent asks first. `device.paste` puts it back, anywhere.
 
 Default keys:
 
@@ -503,7 +503,7 @@ Result: [`ChangeSet`](README.md#changeset).
 
 **Duplicate Device**. Permission: `edit`. Contexts: `device-view`.
 
-Puts a copy of a device, with its settings, straight after it, and selects the copy: one undo step, named Duplicate Device. A chain holds one instrument, so an instrument can't be duplicated; a rack is copied whole, with new IDs for its chains and devices.
+Puts a copy of a device, with its settings, straight after it, and selects the copy: one undo step, named Duplicate Device. With `device` left out it copies every selected device, in order, after the last of them; the result names the first copy. A chain holds one instrument, so an instrument can't be duplicated; a rack is copied whole, with new IDs for its chains and devices.
 
 Default keys:
 
@@ -615,7 +615,7 @@ Result: [`DeviceViewState`](README.md#deviceviewstate).
 
 **Group**. Permission: `edit`. Contexts: `device-view`, `rack-chains`.
 
-Wraps the selected devices (or `devices`, all in one chain) in a new rack, as Group does: the rack takes the first device's place and holds one chain, named after the first device, that holds the devices in their order, each keeping its settings and running state; the rack is selected. The rack is the kind that can hold them: an audio effect rack for audio effects alone, a MIDI effect rack for MIDI effects alone, and an instrument rack for any other mix. A selection that grouping would put out of the chain's order is refused. With `chains` (several chains of one rack) they become the chains of a new rack of the same kind, inside a new chain in the first one's place. One undo step (Group).
+Wraps the selected devices (or `devices`, all in one chain) in a new rack, as Group does: the rack takes the first device's place and holds one chain, named after the first device, that holds the devices in their order, each keeping its settings and running state; the rack is selected. The rack is the kind that can hold them: an audio effect rack for audio effects alone, a MIDI effect rack for MIDI effects alone, and an instrument rack for any other mix. A selection that grouping would put out of the chain's order is refused. With `chains` (several chains of one rack) they become the chains of a new rack of the same kind, inside a new chain in the first one's place. With neither it groups every selected device. One undo step (Group Devices).
 
 Default keys:
 
@@ -926,7 +926,7 @@ Result: [`DeviceParameters`](#deviceparameters).
 
 **Paste Device**. Permission: `edit`. Contexts: `device-view`.
 
-Pastes the clipboard's device, as a new device with its settings, before the selected device (or `before`), or at the end of the chain with none selected, on the selected track (or `track`), and selects it: one undo step, named Copy Device. The chain keeps Live's order, so an audio effect can't go before an instrument, and instruments and MIDI effects only go on MIDI tracks. With `chain` it pastes into that rack chain, or before a device that is in one.
+Pastes the clipboard's devices, as new devices with their settings, before the first selected device (or `before`), or at the end of the chain with none selected, on the selected track (or `track`), and selects them: one undo step, named Copy Device. The result names the first. The chain keeps Live's order, so an audio effect can't go before an instrument, and instruments and MIDI effects only go on MIDI tracks. With `chain` it pastes into that rack chain, or before a device that is in one.
 
 Default keys:
 
@@ -1131,7 +1131,7 @@ Result: [`ChangeSet`](README.md#changeset).
 
 **Select Device**. Permission: `read`. Contexts: `device-view`.
 
-Selects a device, as clicking its title bar does, or none with `null`. The Device View's keys (Delete, Cmd-C, Cmd-D, Cmd-R) act on it. A device that floats in its own window also brings that window to the front. Selecting changes nothing in the set.
+Selects a device, as clicking its title bar does, or none with `null`; with `devices` it selects that run of neighbouring devices of one chain, and with `range` it grows the selection to `device`, as Shift-click does. The Device View's keys (Delete, Cmd-C, Cmd-D, Cmd-G, Cmd-X) act on every selected device, which `device_view.state` lists in `selection`. A device that floats in its own window also brings that window to the front. Selecting changes nothing in the set.
 
 Default keys: none.
 
@@ -1139,7 +1139,9 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `device` | [`DeviceId`](README.md#deviceid) or null | no | The device, or `null` to select none. |
+| `device` | [`DeviceId`](README.md#deviceid) or null | no | The device, or `null` to select none; left out with `devices`. |
+| `devices` | array or null | no | Neighbouring devices of one chain to select together, as a range; instead of `device`. |
+| `range` | boolean | no | Select the range from the device selected last on its own to `device`, never fewer devices than before, as Shift-click does. |
 
 Result: [`DeviceViewState`](README.md#deviceviewstate).
 

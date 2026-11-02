@@ -15,8 +15,10 @@
 //! keyboard is in [`editing`] (WP-1.8b), whose behaviour is in the
 //! arrangement editing spec.
 
+pub mod arranger;
 pub mod automation;
 pub mod benchmark;
+mod chord_lane;
 pub mod context_menu;
 pub mod editing;
 pub mod fades;
@@ -284,6 +286,10 @@ pub struct ArrangementUi {
     locator_drag: Option<bl_model::LocatorId>,
     /// The time-signature lane's gestures (WP-6.61).
     signature_lane: signatures::SignatureLane,
+    /// The arranger track's gestures (WP-6.45).
+    arranger_lane: arranger::ArrangerLane,
+    /// The chord lane's gestures (WP-6.48).
+    chord_lane: chord_lane::ChordLane,
     /// The point a held press in the scrub area or the beat-time ruler is
     /// looping, until the button is released (WP-6.59; time-editing R25).
     scrub_hold: Option<Ticks>,
@@ -459,6 +465,8 @@ impl ArrangementUi {
             snap_line: None,
             locator_drag: None,
             signature_lane: signatures::SignatureLane::default(),
+            arranger_lane: arranger::ArrangerLane::default(),
+            chord_lane: chord_lane::ChordLane::default(),
             scrub_hold: None,
             locators_drawn: Vec::new(),
             mixer: None,
@@ -580,6 +588,11 @@ impl ArrangementUi {
         self.stats
     }
 
+    /// The clips the last frame drew, each with its rectangle on screen.
+    pub fn shown_clips(&self) -> impl Iterator<Item = (bl_model::ClipId, Rect)> + '_ {
+        self.shown.iter().map(|shown| (shown.clip, shown.rect))
+    }
+
     /// The block the GPU callback reads, for hosts and benchmarks that
     /// render offscreen.
     #[must_use]
@@ -623,6 +636,18 @@ impl ArrangementUi {
         // Spec: time-editing R29. The lane shows while the set has changes.
         let layout = if doc.settings().time_signatures.has_changes() {
             layout.with_signature_lane()
+        } else {
+            layout
+        };
+        // Spec: arranger-track R2. The lane shows while the set says so.
+        let layout = if doc.settings().arranger_track {
+            layout.with_arranger_lane()
+        } else {
+            layout
+        };
+        // Spec: chord-lane R1. The lane shows while View > Chord Lane is on.
+        let layout = if view.chord_lane() {
+            layout.with_chord_lane()
         } else {
             layout
         };
@@ -728,6 +753,7 @@ impl ArrangementUi {
             ));
         self.draw_labels(ui, doc, theme, lanes);
         let lanes_response = self.lanes_input(ui, shell, view, doc, &layout, horizontal, events);
+        self.link_marks(ui, theme, doc, lanes, events);
         // WP-1.8b: right-clicking a clip or the lanes opens their menu.
         if lanes_response.secondary_clicked()
             && let Some(pos) = lanes_response.interact_pointer_pos()
@@ -866,6 +892,26 @@ impl ArrangementUi {
             doc.settings().song_start,
             theme,
         );
+        if let (Some(lane), Some(header)) = (layout.chord_lane, layout.chord_header) {
+            rulers::chord_lane(
+                &ui.painter_at(lane),
+                lane,
+                horizontal,
+                doc.chord_lane(),
+                view.selected_chord_region(),
+                theme,
+            );
+            // The header column's cell, which names the lane.
+            ui.painter_at(header)
+                .rect_filled(header, 0.0, theme.colors.bar.0);
+            ui.painter_at(header).text(
+                pos2(header.left() + 6.0, header.center().y),
+                egui::Align2::LEFT_CENTER,
+                "Chord Lane",
+                theme.small_font(),
+                theme.colors.text_dim.0,
+            );
+        }
         rulers::time_ruler(
             &ui.painter_at(layout.time_ruler),
             layout.time_ruler,
@@ -884,6 +930,36 @@ impl ArrangementUi {
                 &mut self.snap_line,
                 events,
             );
+        }
+        // Spec: arranger-track R2 to R7. The arranger track, over the track
+        // lanes' top, and its header.
+        if let (Some(lane), Some(header)) = (layout.arranger, layout.arranger_header) {
+            rulers::arranger_header(&ui.painter_at(header), header, theme);
+            rulers::arranger_lane(
+                &ui.painter_at(lane),
+                lane,
+                doc.sections(),
+                view.selected_sections(),
+                horizontal,
+                theme,
+            );
+            self.arranger_lane.show(
+                ui,
+                shell,
+                theme,
+                lane,
+                &mut self.menus,
+                &mut self.snap_line,
+                events,
+            );
+        } else {
+            self.arranger_lane.tab.clear();
+            self.arranger_lane.tab_lane = None;
+        }
+
+        if let Some(lane) = layout.chord_lane {
+            self.chord_lane
+                .show(ui, shell, lane, &mut self.snap_line, events);
         }
 
         // The playhead, over the rulers and the lanes.
@@ -944,13 +1020,48 @@ impl ArrangementUi {
             if clip.name.is_empty() {
                 continue;
             }
-            painter.with_clip_rect(label.rect.intersect(lanes)).text(
+            // Spec: linked-clips R10. A linked clip's name stops short of its
+            // link mark.
+            let room = if clip.link.is_some() {
+                crate::link_mark::rect(label.rect).map_or(label.rect, |mark| {
+                    Rect::from_min_max(label.rect.min, pos2(mark.left(), label.rect.bottom()))
+                })
+            } else {
+                label.rect
+            };
+            painter.with_clip_rect(room.intersect(lanes)).text(
                 pos2(label.rect.left() + 3.0, label.rect.center().y),
                 Align2::LEFT_CENTER,
                 &clip.name,
                 theme.small_font(),
                 theme.colors.clip_text.0,
             );
+        }
+    }
+
+    /// Spec: linked-clips R10. The link mark at the right end of each linked
+    /// clip's title bar, over the lanes' own input so that clicking it selects
+    /// the link's clips and nothing else.
+    fn link_marks(
+        &self,
+        ui: &Ui,
+        theme: &Theme,
+        doc: &Document,
+        lanes: Rect,
+        events: &mut Vec<UiEvent>,
+    ) {
+        for label in &self.labels {
+            let Some(clip) = doc.clip(label.clip).filter(|clip| clip.link.is_some()) else {
+                continue;
+            };
+            let Some(area) = crate::link_mark::rect(label.rect.intersect(lanes)) else {
+                continue;
+            };
+            let id = egui::Id::new(("link-mark", clip.id));
+            let others = doc.linked_clip_ids(clip.id).len();
+            if crate::link_mark::show(ui, id, area, theme.colors.clip_text.0, others, events) {
+                crate::link_mark::select_link(doc, clip.id, events);
+            }
         }
     }
 
@@ -2541,6 +2652,15 @@ impl ArrangementUi {
             // Spec: accessibility R10. The switch is in the Tab order,
             // after Automation Mode.
             crate::focus::register(ui.ctx(), id, bl_shell::Area::MainView, None);
+            // Spec: arranger-track R14. The sections follow it, in time order.
+            for section in self
+                .arranger_lane
+                .tab
+                .iter()
+                .chain(&self.arranger_lane.tab_lane)
+            {
+                crate::focus::register(ui.ctx(), *section, bl_shell::Area::MainView, None);
+            }
             response.widget_info(|| {
                 WidgetInfo::selected(WidgetType::Checkbox, true, on, "Lock Envelopes")
             });
@@ -2704,7 +2824,11 @@ impl ArrangementUi {
                 } else {
                     &clip.name
                 };
-                node.set_label(name.to_owned());
+                node.set_label(if clip.link.is_some() {
+                    crate::link_mark::described(name, doc.linked_clip_ids(clip.id).len())
+                } else {
+                    name.to_owned()
+                });
                 if let Some((_, text)) = shell.info_text_shown(InfoTarget::Clip(clip.id)) {
                     node.set_description(text);
                 }
@@ -3089,6 +3213,19 @@ impl ArrangementUi {
                 );
             }
         }
+        // Spec: chord-lane R3. The Delete key deletes the selected region,
+        // unless clips or time chosen since are what Edit > Delete deletes.
+        if let Some(region) = view.selected_chord_region()
+            && view.selected_clips().is_empty()
+            && view.time_selection().is_none()
+            && ui.input(|i| i.key_pressed(Key::Delete))
+        {
+            invoke(
+                events,
+                bl_shell::chord_lane_commands::DELETE_REGION,
+                json!({ "region": region }),
+            );
+        }
         // Spec: time-editing R8. Cmd-R renames the selected locators.
         if !view.selected_locators().is_empty()
             && ui.input(|i| {
@@ -3124,6 +3261,37 @@ impl ArrangementUi {
             })
         {
             invoke(events, locator_ids::DELETE, json!({}));
+        }
+        // Spec: arranger-track R7, R10, R11. With a section selected, Cmd-R
+        // renames it, Cmd-D duplicates it and Delete deletes it, unless its
+        // name is being typed.
+        // Not while a text field has the keyboard: Delete there edits text.
+        if !view.selected_sections().is_empty()
+            && !arranger::is_renaming(ui.ctx())
+            && !ui.ctx().egui_wants_keyboard_input()
+        {
+            let pressed = |wanted: Key, command: bool| {
+                ui.input(|i| {
+                    i.events.iter().any(|event| {
+                        matches!(
+                            event,
+                            egui::Event::Key { key, pressed: true, modifiers, .. }
+                                if *key == wanted
+                                    && modifiers.command == command
+                                    && !modifiers.shift
+                                    && !modifiers.alt
+                        )
+                    })
+                })
+            };
+            use bl_shell::arranger_commands as section_ids;
+            if pressed(Key::R, true) {
+                invoke(events, section_ids::RENAME_SECTION, json!({}));
+            } else if pressed(Key::D, true) {
+                invoke(events, section_ids::DUPLICATE_SECTION, json!({}));
+            } else if pressed(Key::Delete, false) {
+                invoke(events, section_ids::DELETE_SECTION, json!({}));
+            }
         }
         // WP-1.8b: nudging, clip edges, extending the selection, and
         // resizing from the keyboard.

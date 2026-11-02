@@ -381,6 +381,9 @@ pub struct Processor {
     /// Where the song starts, when it has a song start time (the transport
     /// spec, R21).
     song_start: Option<Ticks>,
+    /// Where a run of Play Selection stops, while one plays: the Arrangement
+    /// loop doesn't apply until then (the transport spec, R35).
+    until: Option<Ticks>,
     /// The Global Amount of groove, 1 at 100 %.
     groove_amount: f32,
     /// The set's current scale (the scales spec, R9).
@@ -515,6 +518,7 @@ impl Processor {
             held_scrub: None,
             held_frames: None,
             song_start: None,
+            until: None,
             groove_amount: 1.0,
             scale: Scale::default(),
             scales_hidden: false,
@@ -763,6 +767,7 @@ impl Processor {
             self.capture(done, length, part.transport);
             self.log_captured(done, length, part.transport);
             self.render(done, length, part);
+            self.stop_at_end();
             done += length;
         }
         self.send_link_audio(frames);
@@ -1233,7 +1238,9 @@ impl Processor {
     /// for the follower's frame when the follower decides starts (R25).
     fn starts_song(&self, command: TransportCommand) -> bool {
         match command {
-            TransportCommand::Play | TransportCommand::PlayFromInsertMarker => true,
+            TransportCommand::Play
+            | TransportCommand::PlayFromInsertMarker
+            | TransportCommand::PlaySelection { .. } => true,
             TransportCommand::Continue
             | TransportCommand::PlayStop
             | TransportCommand::Scrub { .. } => !self.playing,
@@ -1315,6 +1322,8 @@ impl Processor {
             TransportCommand::Play => self.play(),
             // Spec: transport R10, R21
             TransportCommand::PlayFromInsertMarker => self.play_from_marker(),
+            // Spec: transport R35, R36
+            TransportCommand::PlaySelection { start, end } => self.play_selection(start, end),
             // Spec: transport R3, R4
             TransportCommand::Stop => {
                 // Spec: transport R25. A stop of the follower's own cancels
@@ -1324,6 +1333,7 @@ impl Processor {
                 // Spec: transport R22. A jump waiting for a line is
                 // abandoned when the transport stops.
                 self.pending_locate = None;
+                self.end_run();
                 self.metronome.stop();
                 // Spec: routing R11; WP-2.13. Stop ends the take, as Live's
                 // Stop ends a recording.
@@ -1348,6 +1358,7 @@ impl Processor {
                     self.held.clear();
                     self.release = None;
                     self.playing = false;
+                    self.end_run();
                     self.release_midi();
                     self.metronome.stop();
                     self.end_recordings();
@@ -1516,10 +1527,50 @@ impl Processor {
         self.start_playing_at(start);
     }
 
+    /// Starts playback from `start` and leaves the insert marker where it
+    /// is (the transport spec, R35, R36). With an `end` after `start`, the
+    /// song stops there and the Arrangement loop doesn't apply until it
+    /// does. Without one it plays on as Play does, from the song start time
+    /// instead if the set has one (R21).
+    fn play_selection(&mut self, start: Ticks, end: Option<Ticks>) {
+        let start = clamp_position(match end {
+            Some(_) => start,
+            None => self.song_start.unwrap_or(start),
+        });
+        self.start_playing_at(start);
+        self.until = end.filter(|end| *end > start);
+        self.update_loop_frames();
+    }
+
+    /// Ends a run of Play Selection: the Arrangement loop applies again
+    /// (the transport spec, R35).
+    fn end_run(&mut self) {
+        if self.until.take().is_some() {
+            self.update_loop_frames();
+        }
+    }
+
+    /// Stops the song on the end of a run of Play Selection, once the
+    /// playhead reaches it (the transport spec, R35). The block's parts
+    /// end on that frame, so the song stops there at any block size.
+    fn stop_at_end(&mut self) {
+        let Some(end) = self.until.map(|ticks| self.frames_at(ticks)) else {
+            return;
+        };
+        if !self.playing {
+            // Something else stopped the song, such as a real-time render's
+            // end, so the loop applies again.
+            self.end_run();
+        } else if self.position >= end {
+            self.transport(TransportCommand::Stop);
+        }
+    }
+
     fn start_playing_at(&mut self, start: Ticks) {
         // Spec: transport R22. A jump waiting for a line is abandoned when
         // the song starts again somewhere else.
         self.pending_locate = None;
+        self.end_run();
         let (tempo, sigs) = match &self.program {
             Some(p) => (&p.get().tempo, &p.get().time_signatures),
             None => (&self.fallback_tempo, &self.fallback_time_signatures),
@@ -1650,7 +1701,9 @@ impl Processor {
             })
         };
         let (loop_frames, held_frames) = (
-            self.loop_region.and_then(frames),
+            self.loop_region
+                .filter(|_| self.until.is_none())
+                .and_then(frames),
             self.held_scrub.and_then(frames),
         );
         self.loop_frames = loop_frames;
@@ -2264,6 +2317,7 @@ impl Processor {
         // with (link R10).
         let looped = self
             .loop_region
+            .filter(|_| self.until.is_none())
             .map(|region| (region.start.get() as f64, region.end.get() as f64));
         let tempo = self
             .program
@@ -2555,6 +2609,10 @@ impl Processor {
         // Spec: transport R13
         if let Some(region) = self.active_loop() {
             each(region.end);
+        }
+        // Spec: transport R35. The song stops on the end of a Play Selection.
+        if let Some(end) = self.until {
+            each(self.frames_at(end));
         }
         // Spec: transport R22. A jump waiting for the next line of the
         // global launch quantisation lands on that line's frame.
@@ -3089,7 +3147,8 @@ impl Processor {
         state.position = self.position;
         state.position_ticks = position_ticks;
         state.insert_marker = self.insert_marker;
-        state.loop_region = self.loop_region;
+        state.loop_region = self.loop_region.filter(|_| self.until.is_none());
+        state.loop_suspended = self.until.is_some();
         state.recording = self.recording;
         state.take_running = self.take.is_some();
         state.take_so_far = self.take.map(|take| TakeBounds {

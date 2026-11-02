@@ -10,15 +10,15 @@ use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::registry::{self, RunError};
 use bl_model::{
     ArrangementLoop, AudioData, AutomationTarget, BeatsUpdate, Breakpoint, Chain, ChainId, Change,
-    ChangeSet, Channel, Clip, ClipData, ClipEdge, ClipId, ClipLaunch, Command, ComplexProUpdate,
-    ContentHash, CountIn, CrossfadeAssign, Device, DeviceId, DeviceKind, DeviceRole, EditError,
-    Editor, ExternalPort, FileBeats, FollowAction, FollowActions, FollowPatch, GrooveBase,
-    GrooveId, GrooveNote, HardwareLatency, Input, LaunchMode, LaunchQuantization, Locator,
-    LocatorId, MacroStyle, MacroTarget, MetronomeRhythm, MetronomeSound, MidiData, MidiTo,
-    MixerParam, ModelError, Monitor, NewTakeLane, Note, Output, PanMode, ParamId, PluginFormat,
-    Preserve, RackKind, RecordQuantization, SceneId, SendTap, SongStart, TakeClip, TakeClipData,
-    TakeLaneId, Tap, TonesUpdate, TrackDelay, TrackId, TrackKind, Tuning, TuningNote, WarpFrom,
-    WarpMode, WarpPoint,
+    ChangeSet, Channel, ChordRegion, ChordRegionId, Clip, ClipData, ClipEdge, ClipId, ClipLaunch,
+    Command, ComplexProUpdate, ContentHash, CountIn, CrossfadeAssign, Device, DeviceId, DeviceKind,
+    DeviceRole, EditError, Editor, ExternalPort, FileBeats, FollowAction, FollowActions,
+    FollowPatch, GrooveBase, GrooveId, GrooveNote, HardwareLatency, Input, LaunchMode,
+    LaunchQuantization, Locator, LocatorId, MacroStyle, MacroTarget, MetronomeRhythm,
+    MetronomeSound, MidiData, MidiTo, MixerParam, ModelError, Monitor, NewTakeLane, Note, Output,
+    PanMode, ParamId, PluginFormat, Preserve, RackKind, RecordQuantization, SceneId, SectionId,
+    SendTap, SongStart, TakeClip, TakeClipData, TakeLaneId, Tap, TonesUpdate, TrackDelay, TrackId,
+    TrackKind, Tuning, TuningNote, WarpFrom, WarpMode, WarpPoint,
 };
 use serde_json::{Value, json};
 
@@ -70,7 +70,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        280,
+        291,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -110,7 +110,7 @@ fn every_document_command_is_registered() {
              set_global_groove_amount, set_auto_load_groove and set_clip_groove, WP-6.9 \
              five for tunings: set_tuning, remove_tuning, set_tuning_reference, \
              set_tuning_range and set_tuning_bypass, WP-6.9b the two for tunings on plug-ins and controllers: set_plugin_tuning and set_tuning_layout, WP-6.22 move_clip_to_lane, and WP-6.24b \
-             the two for time: insert_time and delete_time, and WP-6.23 set_track_links, and WP-6.30b the five for colours: set_track_colour, assign_colour_to_clips, assign_colour_to_grouped, set_clip_colour and set_scene_colour, and WP-6.57 the two for clearing envelopes: clear_track_automation and clear_device_automation, and WP-6.58 the four for info text: set_track_info_text, set_clip_info_text, set_scene_info_text and set_device_info_text, and WP-7.1 set_remote_mappings, and WP-7.32 set_record_quantization, and WP-7.33 set_device_region, and WP-7.17 set_cv_calibration, and WP-8.8 set_device_wavetable, and the copy fixes set_automation_enabled, and WP-7.21 set_chain_push_colour, and WP-7.22 set_pad_layout, and WP-8.4 the two for modulation routes: set_mod_route and clear_mod_route, and WP-9.10 set_similarity_reference"
+             the two for time: insert_time and delete_time, and WP-6.23 set_track_links, and WP-6.30b the five for colours: set_track_colour, assign_colour_to_clips, assign_colour_to_grouped, set_clip_colour and set_scene_colour, and WP-6.57 the two for clearing envelopes: clear_track_automation and clear_device_automation, and WP-6.58 the four for info text: set_track_info_text, set_clip_info_text, set_scene_info_text and set_device_info_text, and WP-7.1 set_remote_mappings, and WP-7.32 set_record_quantization, and WP-7.33 set_device_region, and WP-7.17 set_cv_calibration, and WP-8.8 set_device_wavetable, and the copy fixes set_automation_enabled, and WP-7.21 set_chain_push_colour, and WP-7.22 set_pad_layout, and WP-8.4 the two for modulation routes: set_mod_route and clear_mod_route, and WP-9.10 set_similarity_reference, and WP-6.45 the four for the arranger track: add_section, remove_section, edit_section and set_arranger_track, and WP-6.48 the five for the chord lane: add_chord_region, move_chord_region, set_chord_region, delete_chord_region and set_follow_chord_lane, and WP-6.44 the two for linked clips: link_clips and unlink_clips"
     );
 
     for op in &ops {
@@ -232,7 +232,10 @@ fn every_command_runs_by_id() {
         "track.set_colour",
         json!({ "tracks": [drums], "colour": 16 }),
     );
-    assert_eq!(agent.editor.document().track(drums).unwrap().colour(), 16);
+    assert_eq!(
+        agent.editor.document().track(drums).unwrap().colour(),
+        bl_model::Colour::Swatch(16)
+    );
     agent.run(
         "track.set_frozen",
         json!({ "frozen": [[drums, { "clips": [], "tails": [], "output": null }]] }),
@@ -685,7 +688,27 @@ fn every_command_runs_by_id() {
         Some(own)
     );
     agent.run("clip.set_colour", json!({ "clips": [riff], "colour": 40 }));
-    assert_eq!(agent.editor.document().clip(riff).unwrap().colour, Some(40));
+    assert_eq!(
+        agent.editor.document().clip(riff).unwrap().colour,
+        Some(bl_model::Colour::Swatch(40))
+    );
+    // Spec: linked-clips R14. A twin of the riff links with it and leaves
+    // again.
+    let twin: ClipId = agent.new_id();
+    agent.run(
+        "clip.create",
+        json!({ "track": bass, "clip": {
+            "id": twin, "name": "", "start": 2 * bar, "length": bar, "mute": false,
+            "data": { "midi": { "notes": [
+                { "key": 36, "velocity": 100, "start": 0, "length": quarter },
+            ] } },
+        } }),
+    );
+    agent.run("clip.link", json!({ "clips": [riff, twin] }));
+    assert!(agent.editor.document().clip(twin).unwrap().link.is_some());
+    agent.run("clip.unlink", json!({ "clips": [twin] }));
+    assert_eq!(agent.editor.document().clip(riff).unwrap().link, None);
+    agent.run("clip.delete", json!({ "clip": twin }));
     agent.run("track.assign_colour_to_clips", json!({ "tracks": [bass] }));
     assert_eq!(
         agent.editor.document().clip(riff).unwrap().colour,
@@ -1265,7 +1288,7 @@ fn every_command_runs_by_id() {
     );
     assert_eq!(
         agent.editor.document().scene(first).unwrap().colour,
-        Some(55)
+        Some(bl_model::Colour::Swatch(55))
     );
     agent.run("scene.set_tempo", json!({ "scene": first, "tempo": 96.5 }));
     agent.run(
@@ -2019,7 +2042,7 @@ fn every_command_runs_by_id() {
     let direct = agent.editor.document().chain(first).unwrap();
     assert_eq!(
         (direct.name.as_str(), direct.colour, direct.info.as_str()),
-        ("Direct", Some(12), "no verb")
+        ("Direct", Some(bl_model::Colour::Swatch(12)), "no verb")
     );
     assert_eq!((direct.mixer.volume, direct.mixer.pan), (0.5, -0.25));
     assert!(!direct.mixer.enabled);
@@ -2550,6 +2573,48 @@ fn every_command_runs_by_id() {
     );
     agent.run("song.delete_locator", json!({ "locator": chorus }));
 
+    // Sections (WP-6.45): adding, editing, showing the lane, and removing.
+    let verse: SectionId = agent.new_id();
+    agent.run(
+        "song.add_section",
+        json!({ "section": { "id": verse, "start": bar * 4, "length": bar, "name": "Verse", "colour": 3 } }),
+    );
+    agent.run(
+        "song.edit_section",
+        json!({ "section": verse, "name": "Chorus", "colour": 5, "length": bar * 2 }),
+    );
+    agent.run("song.set_arranger_track", json!({ "shown": true }));
+    agent.run("song.remove_section", json!({ "section": verse }));
+
+    // The chord lane (WP-6.48): a region drawn, moved, set, deleted, and a
+    // MIDI track's switch.
+    let verse: ChordRegionId = agent.new_id();
+    agent.run(
+        "chord_lane.add_region",
+        json!({ "region": { "id": verse, "start": bar, "end": bar * 2 } }),
+    );
+    agent.run(
+        "chord_lane.move_region",
+        json!({ "region": verse, "start": bar * 2, "end": bar * 4 }),
+    );
+    agent.run(
+        "chord_lane.set_region",
+        json!({ "region": verse, "enabled": true, "root": 2, "name": "dorian", "transpose": 2 }),
+    );
+    agent.run(
+        "track.set_follow_chord_lane",
+        json!({ "track": bass, "follow": true }),
+    );
+    assert!(
+        agent
+            .editor
+            .document()
+            .track(bass)
+            .unwrap()
+            .follow_chord_lane()
+    );
+    agent.run("chord_lane.delete_region", json!({ "region": verse }));
+
     // Time (WP-6.24b): opening a bar of silence on every track at 1.1.1, then
     // closing a quarter note after it.
     let before = agent.editor.document().clone();
@@ -2655,6 +2720,8 @@ fn schemas_match_what_commands_serialise() {
     let scene = SceneId(fresh());
     let scene_copy = SceneId(fresh());
     let locator = LocatorId(fresh());
+    let section = SectionId(fresh());
+    let region = ChordRegionId(fresh());
     let groove = GrooveId(fresh());
     let notes = MidiData::new([Note::new(127, Ticks::ZERO, Ticks::QUARTER, 1)]);
     let mut plugin = Device::new(
@@ -2730,6 +2797,41 @@ fn schemas_match_what_commands_serialise() {
             },
         ),
         (
+            "chord_lane.add_region",
+            Command::AddChordRegion {
+                region: ChordRegion::new(region, Ticks::WHOLE, Ticks::WHOLE * 2),
+            },
+        ),
+        (
+            "chord_lane.move_region",
+            Command::MoveChordRegion {
+                region,
+                start: Ticks::WHOLE * 2,
+                end: Ticks::WHOLE * 3,
+            },
+        ),
+        (
+            "chord_lane.set_region",
+            Command::SetChordRegion {
+                region,
+                enabled: Some(true),
+                root: Some(2),
+                name: Some("dorian".to_owned()),
+                transpose: Some(2),
+            },
+        ),
+        (
+            "chord_lane.delete_region",
+            Command::DeleteChordRegion { region },
+        ),
+        (
+            "track.set_follow_chord_lane",
+            Command::SetFollowChordLane {
+                track,
+                follow: true,
+            },
+        ),
+        (
             "song.rename_locator",
             Command::RenameLocator {
                 locator,
@@ -2761,6 +2863,33 @@ fn schemas_match_what_commands_serialise() {
             },
         ),
         ("song.delete_locator", Command::DeleteLocator { locator }),
+        (
+            "song.add_section",
+            Command::AddSection {
+                section: bl_model::SongSection {
+                    id: section,
+                    start: Ticks::WHOLE,
+                    length: Ticks::WHOLE,
+                    name: "Verse".to_owned(),
+                    colour: 3,
+                },
+            },
+        ),
+        (
+            "song.edit_section",
+            Command::EditSection {
+                section,
+                name: Some("Chorus".to_owned()),
+                colour: Some(5),
+                start: None,
+                length: Some(Ticks::WHOLE * 2),
+            },
+        ),
+        ("song.remove_section", Command::RemoveSection { section }),
+        (
+            "song.set_arranger_track",
+            Command::SetArrangerTrack { shown: true },
+        ),
         (
             "song.insert_time",
             Command::InsertTime {
@@ -4230,7 +4359,7 @@ fn schemas_match_what_commands_serialise() {
             "chain.set_colour",
             Command::SetChainColour {
                 chain: ChainId(fresh_id),
-                colour: Some(3),
+                colour: Some(bl_model::Colour::Swatch(3)),
             },
         ),
         (
@@ -4244,7 +4373,7 @@ fn schemas_match_what_commands_serialise() {
             "track.set_colour",
             Command::SetTrackColour {
                 tracks: vec![track],
-                colour: 3,
+                colour: bl_model::Colour::Swatch(3),
             },
         ),
         (
@@ -4263,14 +4392,21 @@ fn schemas_match_what_commands_serialise() {
             "clip.set_colour",
             Command::SetClipColour {
                 clips: vec![clip],
-                colour: 3,
+                colour: bl_model::Colour::Swatch(3),
             },
         ),
+        (
+            "clip.link",
+            Command::LinkClips {
+                clips: vec![clip, clip],
+            },
+        ),
+        ("clip.unlink", Command::UnlinkClips { clips: vec![clip] }),
         (
             "scene.set_colour",
             Command::SetSceneColour {
                 scenes: vec![scene],
-                colour: Some(3),
+                colour: Some(bl_model::Colour::Swatch(3)),
             },
         ),
         (
@@ -4541,7 +4677,7 @@ fn schemas_match_what_commands_serialise() {
             Command::SetMacroColour {
                 rack,
                 macro_number: 1,
-                colour: Some(2),
+                colour: Some(bl_model::Colour::Swatch(2)),
             },
         ),
         (

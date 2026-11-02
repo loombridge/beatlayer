@@ -274,7 +274,7 @@ impl Shell {
     fn gesture_step(&mut self, invocation: &Invocation) -> Result<Value, ShellError> {
         let listed = self.chain_status();
         let label = if note_ids::handles(&invocation.id) {
-            clip_view::label(&invocation.id)
+            clip_view::label_of(&invocation.id, &invocation.args)
         } else if automation_ids::handles(&invocation.id) {
             automation::label(&invocation.id)
         } else if clip_envelope_ids::handles(&invocation.id) {

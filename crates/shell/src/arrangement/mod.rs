@@ -10,6 +10,7 @@
 //! edits that act on it are in [`editing`] (WP-1.8b), whose behaviour is in
 //! the arrangement editing spec.
 
+pub mod arranger;
 pub mod automation;
 pub mod comping;
 pub mod editing;
@@ -27,7 +28,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use bl_core::time::{Ticks, TimeSignature};
 use bl_model::{
-    AutomationTarget, ClipId, Document, LaneViews, LocatorId, TakeLaneId, TrackId, TrackKind,
+    AutomationTarget, ChordRegionId, ClipId, Document, LaneViews, LocatorId, SectionId, TakeLaneId,
+    TrackId, TrackKind,
 };
 use bl_shell_spec::arrangement::{
     self as ids, ArrangementState, FadeHandle, FadeHandleState, FoldArgs, FoldGroupsArgs,
@@ -184,12 +186,20 @@ pub struct ArrangementView {
     selected_clips: Vec<ClipId>,
     /// The selected locators (WP-6.24): see [`locator`].
     selected_locators: Vec<LocatorId>,
+    /// The selected sections of the arranger track (WP-6.45), and the time
+    /// selection selecting them made.
+    selected_sections: Vec<SectionId>,
+    sections_span: Option<(Ticks, Ticks)>,
     /// The position of the selected time-signature marker (WP-6.61): see
     /// [`locator`].
     selected_signature: Option<Ticks>,
     /// Whether the loop brace was selected by a click on its bar (WP-6.73):
     /// see [`ArrangementView::loop_brace_selected`].
     loop_brace: bool,
+    /// Whether the chord lane shows (WP-6.48; the chord lane spec, R1), and
+    /// its selected region (R3).
+    chord_lane: bool,
+    selected_chord_region: Option<ChordRegionId>,
     /// The take lanes whose headers are selected (the comping spec, R26): see
     /// [`take_lanes`].
     selected_take_lanes: Vec<TakeLaneId>,
@@ -280,8 +290,12 @@ impl ArrangementView {
             selected: Vec::new(),
             selected_clips: Vec::new(),
             selected_locators: Vec::new(),
+            selected_sections: Vec::new(),
+            sections_span: None,
             selected_signature: None,
             loop_brace: false,
+            chord_lane: false,
+            selected_chord_region: None,
             selected_take_lanes: Vec::new(),
             shown_take_lanes: BTreeSet::new(),
             take_heights: BTreeMap::new(),
@@ -307,13 +321,15 @@ impl ArrangementView {
     }
 
     /// Goes back to a new set's view, as a new or opened set shows, keeping
-    /// the window's size, the transport, and the application setting the
-    /// return tracks scroll with the tracks.
+    /// the window's size, the transport, the application setting the
+    /// return tracks scroll with the tracks, and whether the chord lane shows,
+    /// which the set's window views set.
     pub fn reset(&mut self) {
         *self = Self {
             viewport: self.viewport,
             transport: self.transport,
             returns_scroll: self.returns_scroll,
+            chord_lane: self.chord_lane,
             ..Self::new()
         };
     }
@@ -600,8 +616,57 @@ impl ArrangementView {
     pub fn select_locators(&mut self, locators: Vec<LocatorId>) {
         if !locators.is_empty() {
             self.selected_signature = None;
+            self.selected_chord_region = None;
         }
         self.selected_locators = locators;
+    }
+
+    /// The selected sections, in the order they were selected (WP-6.45).
+    /// They stay selected only while their span is still the time selection
+    /// and no clip or locator is, so selecting anything else drops them and
+    /// Delete no longer deletes a section's time (R6, R11).
+    #[must_use]
+    pub fn selected_sections(&self) -> &[SectionId] {
+        if self.time_selection == self.sections_span
+            && self.selected_clips.is_empty()
+            && self.selected_locators.is_empty()
+        {
+            &self.selected_sections
+        } else {
+            &[]
+        }
+    }
+
+    /// Selects sections, as clicking one does, and makes their span the
+    /// time selection on every track (the arranger track spec, R6). An empty
+    /// list clears the section selection and leaves the rest.
+    pub fn select_sections(&mut self, doc: &Document, sections: Vec<SectionId>) {
+        let spans: Vec<_> = sections
+            .iter()
+            .filter_map(|id| doc.section(*id))
+            .map(|section| (section.start, section.end()))
+            .collect();
+        if let (Some(start), Some(end)) = (
+            spans.iter().map(|span| span.0).min(),
+            spans.iter().map(|span| span.1).max(),
+        ) {
+            let lanes = doc
+                .track_order()
+                .iter()
+                .map(|&track| Lane::Track { track })
+                .collect();
+            self.select_span_on(lanes, start, end);
+            self.selected_locators.clear();
+            self.selected_signature = None;
+            self.sections_span = self.time_selection;
+        }
+        self.selected_sections = sections;
+    }
+
+    /// Drops selected sections the document no longer has.
+    pub fn forget_missing_sections(&mut self, doc: &Document) {
+        self.selected_sections
+            .retain(|id| doc.section(*id).is_some());
     }
 
     /// Drops selected locators, and a selected time-signature marker, the
@@ -609,6 +674,12 @@ impl ArrangementView {
     pub fn forget_missing_locators(&mut self, doc: &Document) {
         self.selected_locators
             .retain(|id| doc.locator(*id).is_some());
+        if self
+            .selected_chord_region
+            .is_some_and(|region| doc.chord_region(region).is_none())
+        {
+            self.selected_chord_region = None;
+        }
         let signatures = &doc.settings().time_signatures;
         if self
             .selected_signature
@@ -627,6 +698,38 @@ impl ArrangementView {
         self.loop_brace && self.time_selection == Some((brace.start, brace.start + brace.length))
     }
 
+    /// Whether the chord lane shows (WP-6.48).
+    #[must_use]
+    pub fn chord_lane(&self) -> bool {
+        self.chord_lane
+    }
+
+    /// Shows or hides the chord lane. Hiding it deselects its region.
+    pub fn set_chord_lane(&mut self, shown: bool) {
+        self.chord_lane = shown;
+        if !shown {
+            self.selected_chord_region = None;
+        }
+    }
+
+    /// The selected chord region.
+    #[must_use]
+    pub fn selected_chord_region(&self) -> Option<ChordRegionId> {
+        self.selected_chord_region
+    }
+
+    /// Selects a chord region, or none, as clicking one does. Selecting one
+    /// clears the clips, the time selection, the locators and a marker, as
+    /// a marker's does, so Delete deletes only the region.
+    pub fn select_chord_region(&mut self, region: Option<ChordRegionId>) {
+        self.selected_chord_region = region;
+        if region.is_some() {
+            self.selected_signature = None;
+            self.selected_locators.clear();
+            self.clear_clip_selection();
+        }
+    }
+
     /// The position of the selected time-signature marker (WP-6.61).
     #[must_use]
     pub fn selected_signature(&self) -> Option<Ticks> {
@@ -638,6 +741,7 @@ impl ArrangementView {
     pub fn select_signature(&mut self, at: Option<Ticks>) {
         self.selected_signature = at;
         if at.is_some() {
+            self.selected_chord_region = None;
             self.selected_locators.clear();
             self.clear_clip_selection();
         }
@@ -927,6 +1031,7 @@ impl ArrangementView {
         self.selected.retain(|id| doc.track(*id).is_some());
         self.forget_missing_clips(doc);
         self.forget_missing_locators(doc);
+        self.forget_missing_sections(doc);
         self.folded.retain(|id| doc.track(*id).is_some());
         self.heights.retain(|id, _| doc.track(*id).is_some());
         self.forget_missing_take_lanes(doc);
@@ -1520,7 +1625,11 @@ impl ArrangementView {
             selected_tracks: self.selected.clone(),
             selected_clips: self.selected_clips.clone(),
             selected_locators: self.selected_locators.clone(),
+            selected_sections: self.selected_sections().to_vec(),
+            arranger_track: doc.settings().arranger_track,
             selected_time_signature: self.selected_signature,
+            chord_lane: self.chord_lane,
+            selected_chord_region: self.selected_chord_region,
             selected_take_lanes: self.selected_take_lanes.clone(),
             shown_take_lanes: self.shown_take_lanes.iter().copied().collect(),
             selected_fade: self.selected_fade,

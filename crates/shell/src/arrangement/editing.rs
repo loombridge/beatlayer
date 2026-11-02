@@ -586,6 +586,67 @@ pub(crate) fn settled<T>(
     })
 }
 
+/// Duplicate as Linked Clip in the Arrangement (the linked clips spec, R1):
+/// `arrangement.duplicate` of the clips, each copy then linked to the clip it
+/// copies, as one undo step. The copies become the selection.
+///
+/// # Errors
+///
+/// [`EditFailure`] if no clip is given or selected, or the document refuses a
+/// step.
+pub(crate) fn duplicate_linked(
+    editor: &mut Editor,
+    view: &mut ArrangementView,
+    clips: Option<Vec<ClipId>>,
+    edge_fades: bool,
+) -> Result<EditResult, EditFailure> {
+    let doc = editor.document().clone();
+    let doc = &doc;
+    let args = TargetArgs {
+        clips,
+        ..TargetArgs::default()
+    };
+    let target = target(doc, view, args)?;
+    let (by_place, start, end) = lane_material(doc, &target);
+    let length = end - start;
+    let origins: Vec<ClipId> = by_place
+        .iter()
+        .flat_map(|(_, clips)| clips.iter().map(|clip| clip.id))
+        .collect();
+    let placements = by_place
+        .into_iter()
+        .map(|(place, clips)| {
+            let clips = clips
+                .into_iter()
+                .map(|c| Clip {
+                    start: c.start + length,
+                    ..c
+                })
+                .collect();
+            (place, clips)
+        })
+        .collect();
+    let (created, recorded) = settled(
+        editor,
+        bl_shell_spec::linked_clips::DUPLICATE_LINKED_STEP,
+        (doc, edge_fades),
+        |editor| {
+            let created = place(editor, placements)?;
+            for (origin, copy) in origins.iter().zip(&created) {
+                apply(
+                    editor,
+                    Command::LinkClips {
+                        clips: vec![*origin, *copy],
+                    },
+                )?;
+            }
+            Ok(created)
+        },
+    )?;
+    view.select_clips(editor.document(), created);
+    Ok(result(doc, editor, view, recorded))
+}
+
 /// The clips to act on: those given, or the selected ones. Each must exist;
 /// a clip listed twice counts once.
 fn clips_or_selected(
@@ -1229,6 +1290,7 @@ impl ArrangementView {
         self.selected_breakpoint = from.selected_breakpoint;
         self.selected_signature = from.selected_signature;
         self.loop_brace = from.loop_brace;
+        self.selected_chord_region = from.selected_chord_region;
     }
 
     /// Drops selected clips the document no longer has.

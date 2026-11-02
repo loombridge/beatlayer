@@ -122,6 +122,10 @@ enum Op {
     SetClipMute(Index, bool),
     SetClipLaunchMode(Index, u8),
     SetClipData(Index, Data),
+    /// Linking a clip with every clip of its kind that holds its contents
+    /// (WP-6.44), or taking clips out of their links.
+    LinkLike(Index),
+    UnlinkClips(Vec<Index>),
     TrimClipStart(Index, i16),
     /// One of an audio clip's settings (WP-1.4): its markers, loop brace,
     /// Loop switch, gain, or fades, chosen by the byte, from two numbers.
@@ -250,6 +254,8 @@ fn op() -> impl Strategy<Value = Op> {
         1 => (i(), any::<bool>()).prop_map(|(c, b)| Op::SetClipMute(c, b)),
         1 => (i(), 0u8..4).prop_map(|(c, m)| Op::SetClipLaunchMode(c, m)),
         2 => (i(), data()).prop_map(|(c, d)| Op::SetClipData(c, d)),
+        2 => i().prop_map(Op::LinkLike),
+        1 => prop::collection::vec(i(), 1..3).prop_map(Op::UnlinkClips),
         2 => (i(), -16i16..64).prop_map(|(c, by)| Op::TrimClipStart(c, by)),
         3 => (i(), any::<u8>(), value(0.0..4.0), value(0.0..4.0))
             .prop_map(|(c, which, a, b)| Op::SetAudio(c, which, a, b)),
@@ -704,6 +710,30 @@ impl Op {
                     clip,
                     data: clip_data(data, track_kind),
                 }
+            }
+            Self::LinkLike(c) => {
+                let clip = at.clip(c);
+                let like = doc.clip(clip);
+                Command::LinkClips {
+                    clips: std::iter::once(clip)
+                        .chain(at.clips.iter().copied().filter(|other| {
+                            *other != clip
+                                && like.is_some_and(|like| {
+                                    doc.clip(*other).is_some_and(|other| {
+                                        other.data.is_audio() == like.data.is_audio()
+                                            && other.shares_contents_with(like)
+                                            && (other.link.is_none() || other.link == like.link)
+                                    })
+                                })
+                        }))
+                        .collect(),
+                }
+            }
+            Self::UnlinkClips(cs) => {
+                let mut clips: Vec<ClipId> = cs.iter().map(|c| at.clip(c)).collect();
+                clips.sort_unstable();
+                clips.dedup();
+                Command::UnlinkClips { clips }
             }
             Self::TrimClipStart(c, by) => {
                 // Mostly inside the clip, sometimes past either end.

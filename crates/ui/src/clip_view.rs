@@ -228,7 +228,7 @@ pub(crate) fn title_bar(
     // Spec: themes R18. The name stands on the clip's colour; with several
     // clips selected, on stripes of theirs.
     let selected = shell.arrangement().selected_clips();
-    let swatches: Vec<u8> = if selected.len() > 1 && selected.contains(&clip) {
+    let swatches: Vec<bl_model::Colour> = if selected.len() > 1 && selected.contains(&clip) {
         selected
             .iter()
             .filter_map(|id| doc.clip(*id).and_then(|held| held.colour))
@@ -243,7 +243,7 @@ pub(crate) fn title_bar(
         ui.painter().rect_filled(
             Rect::from_min_max(pos2(x, rect.top()), pos2(x + stripe, rect.bottom())),
             0.0,
-            theme.swatch(*swatch),
+            theme.colour(*swatch),
         );
     }
     // Spec: session-context-menus R4, R9, R14. A right-click on the title
@@ -280,13 +280,26 @@ pub(crate) fn title_bar(
         events,
     );
     if !renaming {
-        ui.painter().text(
+        let name = ui.painter().text(
             pos2(rect.left() + 6.0, rect.center().y),
             Align2::LEFT_CENTER,
             &value.name,
             theme.small_font(),
             c.text.0,
         );
+        // Spec: linked-clips R10. A linked clip shows its link mark beside
+        // its name, and clicking it selects the link's clips.
+        if value.link.is_some() {
+            let area = Rect::from_min_size(
+                pos2(name.right() + 4.0, rect.top()),
+                vec2(crate::link_mark::WIDTH, rect.height()),
+            );
+            let others = doc.linked_clip_ids(clip).len();
+            let id = Id::new("clip-title-link-mark");
+            if crate::link_mark::show(ui, id, area, c.text.0, others, events) {
+                crate::link_mark::select_link(doc, clip, events);
+            }
+        }
     }
     if !audio {
         return;
@@ -2166,7 +2179,7 @@ impl ClipViewUi {
         let face = doc
             .clip(clip)
             .and_then(|held| held.colour)
-            .map_or(theme.colors.accent.0, |swatch| theme.swatch(swatch));
+            .map_or(theme.colors.accent.0, |swatch| theme.colour(swatch));
         let hovered = Self::hovered_note(ui, &layout, &rows, &notes, axis, span_len);
         tuning_readout(ui, shell, clip, &layout, &rows, &notes, hovered);
         let frame = note_lanes::Frame {

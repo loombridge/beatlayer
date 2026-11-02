@@ -53,6 +53,12 @@ pub fn split_off(editor: &mut Editor, clip: ClipId, at: Ticks) -> Result<ClipId,
         None => Command::CreateClip { track, clip: right },
     })?;
     crate::tracks::keep_scale(editor, id, scale)?;
+    // Spec: linked-clips R6. Both parts of a linked clip stay in its link.
+    if original.link.is_some() {
+        editor.apply(Command::LinkClips {
+            clips: vec![clip, id],
+        })?;
+    }
     Ok(id)
 }
 

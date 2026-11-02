@@ -43,8 +43,8 @@ pub struct ClipSpan {
     pub id: ClipId,
     /// Whether it's deactivated.
     pub muted: bool,
-    /// Its colour, a swatch (the themes spec, R18).
-    pub colour: u8,
+    /// Its colour (the themes spec, R18).
+    pub colour: bl_model::Colour,
     /// Its media, for an audio clip.
     pub media: Option<ContentHash>,
     /// Whether it's a video clip, which draws sprocket holes along its title
@@ -293,7 +293,7 @@ pub struct LanesInput<'a> {
 #[must_use]
 pub fn track_colour(theme: &Theme, doc: &Document, track: TrackId) -> Color32 {
     doc.track(track)
-        .map_or(theme.colors.control.0, |held| theme.swatch(held.colour()))
+        .map_or(theme.colors.control.0, |held| theme.colour(held.colour()))
 }
 
 fn rgba(colour: Color32) -> [u8; 4] {
@@ -558,7 +558,7 @@ pub fn build_lanes(
                 let colour = if span.muted {
                     colors.clip_muted.0
                 } else {
-                    theme.swatch(span.colour)
+                    theme.colour(span.colour)
                 };
                 let inset = if h >= 6.0 { px } else { 0.0 };
                 let (top, bottom) = (y0 + inset, y0 + h - inset.max(px));
@@ -909,7 +909,7 @@ pub fn build_overview(
                 color: rgba(if clip.muted {
                     theme.colors.clip_muted.0
                 } else {
-                    theme.swatch(clip.colour)
+                    theme.colour(clip.colour)
                 }),
             });
         }

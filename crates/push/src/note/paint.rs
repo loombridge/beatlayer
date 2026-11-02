@@ -191,12 +191,12 @@ impl Note {
             return;
         }
         let swatch = |index: u8| swatch_rgb(paint.colours, index);
-        let track_colour = swatch(track.colour());
+        let track_colour = track.colour().rgb(paint.colours);
         let clip_colour = frame
             .clip
             .and_then(|id| model.document.clip(id))
             .and_then(|c| c.colour)
-            .map_or(track_colour, swatch);
+            .map_or(track_colour, |colour| colour.rgb(paint.colours));
         let edited: Edited<'_> = frame.clip.and_then(|id| clip::midi(model, id));
         let playhead = frame
             .scene

@@ -32,12 +32,14 @@ The commands, by the part of their ID before its first dot:
 - [`app`](app.md)
 - [`ara`](ara.md)
 - [`arrangement`](arrangement.md)
+- [`arranger`](arranger.md)
 - [`articulation`](articulation.md)
 - [`assistant`](assistant.md)
 - [`audio`](audio.md)
 - [`automation`](automation.md)
 - [`browser`](browser.md)
 - [`chain`](chain.md)
+- [`chord_lane`](chord_lane.md)
 - [`clip`](clip.md)
 - [`clip_view`](clip_view.md)
 - [`control_surface`](control_surface.md)
@@ -1065,6 +1067,7 @@ What the Arrangement View shows: every view command returns it.
 | `selected_tracks` | array of [`TrackId`](#trackid) | yes | The selected tracks, top to bottom. |
 | `selected_clips` | array of [`ClipId`](#clipid) | yes | The selected clips (WP-1.8b), in the order they were selected. The editing commands act on these when there are any, and on the time selection otherwise. |
 | `selected_locators` | array of [`LocatorId`](#locatorid) | yes | The selected locators (WP-6.24), in the order they were selected. The locator commands act on these. |
+| `chord_lane` | boolean | yes | Whether the chord lane shows (WP-6.48; the chord lane spec, R1). |
 | `time_selection` | [`TimeRange`](#timerange) or null | yes | The selected span of time on the selected tracks, if any. |
 | `folded_tracks` | array of [`TrackId`](#trackid) | yes | The folded tracks. |
 | `zoom_back_steps` | integer, at least 0 | yes | How many views `arrangement.zoom_back` can go back to. |
@@ -1073,11 +1076,14 @@ What the Arrangement View shows: every view command returns it.
 | `show_in_out` | boolean | yes | Whether the track headers show their In/Out column. |
 | `show_volume` | boolean | yes | Whether the track headers show their volume, pan, and sends. |
 | `show_return_tracks` | boolean | yes | Whether the return tracks' rows show in the lanes. |
+| `arranger_track` | boolean | no | Whether the arranger track shows above the track lanes (WP-6.45). |
 | `automation_lanes` | array of [`AutomationLane`](#automationlane) | no | Each track's automation lanes, for the tracks whose lanes aren't as a new track's (the main lane showing its volume, and no lanes of its own): the choosers' choices, the lanes of their own and whether they show (the automation spec, R32). |
 | `loop_brace_selected` | boolean | no | Whether the loop brace is selected (WP-6.73): its keys then move and resize it. It is while the time selection is the brace's span, after a click on the brace's bar. |
 | `selected_breakpoint` | [`SelectedBreakpoint`](#selectedbreakpoint) or null | no | The breakpoint selected in that lane (WP-6.26), if any: `automation.select_breakpoint` sets it. |
+| `selected_chord_region` | [`ChordRegionId`](#chordregionid) or null | no | The selected chord region (WP-6.48), if any: Delete deletes it. |
 | `selected_fade` | [`FadeHandleState`](#fadehandlestate) or null | no | The selected fade handle (WP-6.51), if any: Delete deletes its fade. |
 | `selected_lane` | [`Lane`](#lane) or null | no | The automation lane that has the keyboard (WP-6.26): the one the last click, or Up and Down, selected, while Automation Mode is on. The keys of the automation editing spec's R20 to R26 act on its envelope. |
+| `selected_sections` | array of [`SectionId`](#sectionid) | no | The selected sections of the arranger track (WP-6.45), in the order they were selected. The arranger commands act on these. |
 | `selected_take_lanes` | array of [`TakeLaneId`](#takelaneid) | no | The take lanes whose headers are selected (the comping spec, R26), in the order they were selected. Their tracks are selected tracks too. |
 | `selected_time_signature` | [`Ticks`](#ticks) or null | no | The position of the selected time-signature marker (WP-6.61), if any: Delete deletes it and Cmd-R types its signature. |
 | `shown_take_lanes` | array of [`TrackId`](#trackid) | no | The tracks whose take lanes show (the comping spec, R24). |
@@ -1089,6 +1095,10 @@ What the Arrangement View shows: every view command returns it.
 {
   "description": "What the Arrangement View shows: every view command returns it.",
   "properties": {
+    "arranger_track": {
+      "description": "Whether the arranger track shows above the track lanes (WP-6.45).",
+      "type": "boolean"
+    },
     "automation_arm": {
       "description": "Whether Automation Arm is on: while Arrangement Record runs, moving a control writes its values into the parameter's envelope.",
       "type": "boolean"
@@ -1102,6 +1112,11 @@ What the Arrangement View shows: every view command returns it.
     },
     "automation_mode": {
       "description": "Whether Automation Mode is on: each track shows its automation lane under its lane, with the device and parameter choosers.",
+      "type": "boolean"
+    },
+    "chord_lane": {
+      "default": false,
+      "description": "Whether the chord lane shows (WP-6.48; the chord lane spec, R1).",
       "type": "boolean"
     },
     "folded_tracks": {
@@ -1159,6 +1174,17 @@ What the Arrangement View shows: every view command returns it.
       ],
       "description": "The breakpoint selected in that lane (WP-6.26), if any: `automation.select_breakpoint` sets it."
     },
+    "selected_chord_region": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ChordRegionId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The selected chord region (WP-6.48), if any: Delete deletes it."
+    },
     "selected_clips": {
       "default": [],
       "description": "The selected clips (WP-1.8b), in the order they were selected. The editing commands act on these when there are any, and on the time selection otherwise.",
@@ -1194,6 +1220,13 @@ What the Arrangement View shows: every view command returns it.
       "description": "The selected locators (WP-6.24), in the order they were selected. The locator commands act on these.",
       "items": {
         "$ref": "#/$defs/LocatorId"
+      },
+      "type": "array"
+    },
+    "selected_sections": {
+      "description": "The selected sections of the arranger track (WP-6.45), in the order they were selected. The arranger commands act on these.",
+      "items": {
+        "$ref": "#/$defs/SectionId"
       },
       "type": "array"
     },
@@ -1297,6 +1330,7 @@ What the Arrangement View shows: every view command returns it.
     "selected_tracks",
     "selected_clips",
     "selected_locators",
+    "chord_lane",
     "time_selection",
     "folded_tracks",
     "zoom_back_steps",
@@ -1305,6 +1339,43 @@ What the Arrangement View shows: every view command returns it.
     "show_in_out",
     "show_volume",
     "show_return_tracks"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ArrangerResult`
+
+What an arranger command did: the sections selected afterwards, and whether it was recorded as an undo step.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `selected_sections` | array of [`SectionId`](#sectionid) | yes | The sections selected afterwards. |
+| `undo_step` | boolean | yes | Whether the edit was recorded as an undo step: false when it changed nothing. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What an arranger command did: the sections selected afterwards, and whether it was recorded as an undo step.",
+  "properties": {
+    "selected_sections": {
+      "description": "The sections selected afterwards.",
+      "items": {
+        "$ref": "#/$defs/SectionId"
+      },
+      "type": "array"
+    },
+    "undo_step": {
+      "description": "Whether the edit was recorded as an undo step: false when it changed nothing.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "selected_sections",
+    "undo_step"
   ],
   "type": "object"
 }
@@ -4409,7 +4480,7 @@ One chain of a rack: its own name, colour, info text and mixer, and its devices 
 | `name` | string | yes | The chain's name. |
 | `audio_to` | [`TrackId`](#trackid) or null | no | Where a return chain's output goes: one of the set's return tracks, or the rack's own output while there is none (drum racks spec, R8). |
 | `choke` | integer or null | no | The choke group a drum rack's chain is in, from 1 to 16, or none. |
-| `colour` | integer or null | no | The chain's colour: an index into the palette of 5 rows of 14 swatches, from 0 to 69, or none. |
+| `colour` | [`Colour`](#colour) or null | no | The chain's colour: an index into the palette of 5 rows of 14 swatches, from 0 to 69, or none. |
 | `devices` | array of [`Device`](#device) | no | The chain's devices, in signal order. |
 | `info` | string | no | The info text the user gave the chain (Edit Info Text). |
 | `is_return` | boolean | no | Whether this is one of a drum rack's return chains, which sit after its drum chains (drum racks spec, R7). |
@@ -4448,14 +4519,15 @@ One chain of a rack: its own name, colour, info text and mixer, and its devices 
       ]
     },
     "colour": {
-      "description": "The chain's colour: an index into the palette of 5 rows of 14 swatches, from 0 to 69, or none.",
-      "format": "uint8",
-      "maximum": 255,
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Colour"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The chain's colour: an index into the palette of 5 rows of 14 swatches, from 0 to 69, or none."
     },
     "devices": {
       "default": [],
@@ -4798,7 +4870,7 @@ One row of a rack's chain list (racks spec, R21).
 |---|---|---|---|
 | `id` | [`ChainId`](#chainid) | yes | The chain. |
 | `name` | string | yes | Its name. |
-| `colour` | integer or null | yes | Its colour, a swatch of the palette of 5 rows of 14, if it has one. |
+| `colour` | [`Colour`](#colour) or null | yes | Its colour, a swatch of the palette of 5 rows of 14 or a `#RRGGBB` colour, if it has one. |
 | `enabled` | boolean | yes | Its Chain Activator. |
 | `solo` | boolean | yes | Whether it's soloed. |
 | `hot_swap` | boolean | yes | Whether it's armed for hot-swap by its Hot-Swap button. |
@@ -4817,14 +4889,15 @@ One row of a rack's chain list (racks spec, R21).
   "description": "One row of a rack's chain list (racks spec, R21).",
   "properties": {
     "colour": {
-      "description": "Its colour, a swatch of the palette of 5 rows of 14, if it has one.",
-      "format": "uint8",
-      "maximum": 255,
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Colour"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its colour, a swatch of the palette of 5 rows of 14 or a `#RRGGBB` colour, if it has one."
     },
     "drum": {
       "anyOf": [
@@ -5010,7 +5083,7 @@ A chain folded out as a strip in the mixers (racks spec, R27): the chain, the ra
 | `has_mixer` | boolean | yes | Whether the chain has Volume and Pan: all but a MIDI effect rack's chains do. |
 | `enabled` | boolean | yes | Whether the chain's activator is on. |
 | `solo` | boolean | yes | Whether the chain is soloed. |
-| `colour` | integer or null | no | The chain's colour, a swatch of the palette of 5 rows of 14, if it has one. |
+| `colour` | [`Colour`](#colour) or null | no | The chain's colour, a swatch of the palette of 5 rows of 14, if it has one. |
 | `nested` | [`RackFold`](#rackfold) or null | no | The rack inside this chain, if it has one whose chains fold out too (racks spec, R27): a fold button on this strip shows its chains. |
 
 <details><summary>JSON Schema</summary>
@@ -5024,14 +5097,15 @@ A chain folded out as a strip in the mixers (racks spec, R27): the chain, the ra
       "description": "The chain."
     },
     "colour": {
-      "description": "The chain's colour, a swatch of the palette of 5 rows of 14, if it has one.",
-      "format": "uint8",
-      "maximum": 255,
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Colour"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The chain's colour, a swatch of the palette of 5 rows of 14, if it has one."
     },
     "enabled": {
       "description": "Whether the chain's activator is on.",
@@ -5539,6 +5613,79 @@ One of:
 
 </details>
 
+### `ChordRegion`
+
+One stretch of the song and what it does to the tracks that follow the lane.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | [`ChordRegionId`](#chordregionid) | yes | The region's ID. |
+| `start` | [`Ticks`](#ticks) | yes | Where it starts, on the song's beats: 1.1.1 or later. |
+| `end` | [`Ticks`](#ticks) | yes | Where it ends, which it doesn't include: after its start. |
+| `scale` | [`Scale`](#scale) | no | Its scale: the current scale of the following tracks' devices while the song plays through it. A scale with `enabled` false is no scale, and leaves the clips' own. |
+| `transpose` | integer from -128 to 127 | no | How far it moves the notes of the following tracks: degrees of each clip's scale where the clip has Scale Mode on, semitones where it is off. From -24 to 24. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "One stretch of the song and what it does to the tracks that follow the lane.",
+  "properties": {
+    "end": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it ends, which it doesn't include: after its start."
+    },
+    "id": {
+      "$ref": "#/$defs/ChordRegionId",
+      "description": "The region's ID."
+    },
+    "scale": {
+      "$ref": "#/$defs/Scale",
+      "description": "Its scale: the current scale of the following tracks' devices while the song plays through it. A scale with `enabled` false is no scale, and leaves the clips' own."
+    },
+    "start": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it starts, on the song's beats: 1.1.1 or later."
+    },
+    "transpose": {
+      "description": "How far it moves the notes of the following tracks: degrees of each clip's scale where the clip has Scale Mode on, semitones where it is off. From -24 to 24.",
+      "format": "int8",
+      "maximum": 127,
+      "minimum": -128,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "id",
+    "start",
+    "end"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ChordRegionId`
+
+The ID of a chord region: a positive integer, unique within the project and never reused.
+
+Type: integer, at least 1.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The ID of a chord region: a positive integer, unique within the project and never reused.",
+  "format": "uint64",
+  "minimum": 1,
+  "type": "integer"
+}
+```
+
+</details>
+
 ### `ChordState`
 
 One chord of Stacks' progression.
@@ -5611,11 +5758,12 @@ A clip on a track's arrangement lane.
 | `length` | [`Ticks`](#ticks) | yes | How long the clip is. Always positive. |
 | `mute` | boolean | yes | Whether the clip is switched off, so it stays in place but doesn't play. |
 | `data` | [`ClipData`](#clipdata) | yes | What the clip plays. |
-| `colour` | integer or null | no | The clip's colour, a swatch from 0 to 69 (the themes spec, R14). A clip handed to a command without one takes its track's colour as it goes in, and a set saved before colours gives each clip its track's on loading, so a clip in a document always has one. |
+| `colour` | [`Colour`](#colour) or null | no | The clip's colour, a swatch from 0 to 69 or a `#RRGGBB` colour (the themes spec, R14, R29). A clip handed to a command without one takes its track's colour as it goes in, and a set saved before colours gives each clip its track's on loading, so a clip in a document always has one. |
 | `envelopes` | array of [`ClipEnvelope`](#clipenvelope) | no | The clip's envelopes (WP-3.15): one per parameter of its track it modulates, in target order. Empty for a clip with none, which is what a set saved before this package holds. |
 | `groove` | [`GrooveId`](#grooveid) or null | no | The clip's groove (WP-6.19): one of the set's Groove Pool, or none. It changes when the clip's notes play, or where its audio plays, and nothing in the clip itself until it is committed. |
 | `info_text` | string | no | The user's own info text (Edit Info Text), which the Info View shows while the pointer is over the clip; empty for none, and left out of the saved set then (the Info View spec, R9). |
 | `launch` | [`ClipLaunch`](#cliplaunch) | no | The clip's launch settings (WP-3.4), which only a Session clip's launching reads. The defaults for a clip saved without them. |
+| `link` | [`LinkId`](#linkid) or null | no | The link the clip belongs to (WP-6.44, the linked clips spec, R2): the clips of one link hold the same contents (R3), whatever edit reaches one of them (R4). `None` for an independent clip, which is what a set saved before linked clips holds. |
 | `offset` | [`Ticks`](#ticks) | no | How far into its contents a MIDI clip starts: its notes are placed from `start - offset`, and the part before the clip's start doesn't play. 0 (or left out) plays the contents from their beginning. Never negative. Splitting a MIDI clip or trimming its left edge changes it, so each part plays what it played before. An audio clip's is always 0: its Start marker moves instead, as Live's does. |
 | `scale` | [`Scale`](#scale) | no | The clip's scale (WP-6.7): its Scale Mode switch, its root and its scale name. It never changes what the clip plays; it tells the rest of the set which keys belong. A clip off at C, in Major, writes nothing, so a set saved before the scales loads unchanged. |
 
@@ -5626,14 +5774,15 @@ A clip on a track's arrangement lane.
   "description": "A clip on a track's arrangement lane.",
   "properties": {
     "colour": {
-      "description": "The clip's colour, a swatch from 0 to 69 (the themes spec, R14). A clip handed to a command without one takes its track's colour as it goes in, and a set saved before colours gives each clip its track's on loading, so a clip in a document always has one.",
-      "format": "uint8",
-      "maximum": 255,
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Colour"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip's colour, a swatch from 0 to 69 or a `#RRGGBB` colour (the themes spec, R14, R29). A clip handed to a command without one takes its track's colour as it goes in, and a set saved before colours gives each clip its track's on loading, so a clip in a document always has one."
     },
     "data": {
       "$ref": "#/$defs/ClipData",
@@ -5672,6 +5821,17 @@ A clip on a track's arrangement lane.
     "length": {
       "$ref": "#/$defs/Ticks",
       "description": "How long the clip is. Always positive."
+    },
+    "link": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LinkId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The link the clip belongs to (WP-6.44, the linked clips spec, R2): the clips of one link hold the same contents (R3), whatever edit reaches one of them (R4). `None` for an independent clip, which is what a set saved before linked clips holds."
     },
     "mute": {
       "description": "Whether the clip is switched off, so it stays in place but doesn't play.",
@@ -7049,6 +7209,36 @@ One of:
     {
       "const": "ask",
       "description": "Ask first, with Copy, Don't Copy and Cancel.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `Colour`
+
+A swatch of the palette of 5 rows of 14 (0 to 69, numbered from the top row's left, row by row), or a colour of one's own as `#RRGGBB`.
+
+One of:
+
+- integer from 0 to 69
+- string matching `^#[0-9A-Fa-f]{6}$`
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A swatch of the palette of 5 rows of 14 (0 to 69, numbered from the top row's left, row by row), or a colour of one's own as `#RRGGBB`.",
+  "oneOf": [
+    {
+      "maximum": 69,
+      "minimum": 0,
+      "type": "integer"
+    },
+    {
+      "pattern": "^#[0-9A-Fa-f]{6}$",
       "type": "string"
     }
   ]
@@ -8503,6 +8693,73 @@ A cue the Sample Editor shows (the video spec, R12): a marker embedded in a vide
   "required": [
     "time",
     "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `CustomColours`
+
+The row of custom colours under every palette (themes R28): 14 places, each empty or a colour of the person's own, and the order the places were last used in, which says what a full row gives up.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `places` | array of [`Colour`](#colour) or null | yes | The places, from the first: a `#RRGGBB` colour or null. |
+| `used` | array of integer from 0 to 255 | yes | The places that hold a colour, from the one used longest ago to the one used last. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The row of custom colours under every palette (themes R28): 14 places, each empty or a colour of the person's own, and the order the places were last used in, which says what a full row gives up.",
+  "properties": {
+    "places": {
+      "default": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "description": "The places, from the first: a `#RRGGBB` colour or null.",
+      "items": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Colour"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "type": "array"
+    },
+    "used": {
+      "default": [],
+      "description": "The places that hold a colour, from the one used longest ago to the one used last.",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "places",
+    "used"
   ],
   "type": "object"
 }
@@ -10420,7 +10677,8 @@ What `device_view.state` returns.
 | `track` | [`TrackId`](#trackid) or null | yes | The track whose chain shows: the selected track, or `null` with no track selected. |
 | `track_kind` | [`TrackKind`](#trackkind) or null | yes | That track's kind. |
 | `devices` | array of [`DeviceFrame`](#deviceframe) | yes | Its devices, in signal order. |
-| `selected` | [`DeviceId`](#deviceid) or null | yes | The selected device, if it's in this chain. |
+| `selected` | [`DeviceId`](#deviceid) or null | yes | The first selected device, if it's in this chain. |
+| `selection` | array of [`DeviceId`](#deviceid) | yes | Every selected device in this chain, in order: one run of neighbouring devices (device chains R47). |
 | `hot_swap` | [`HotSwap`](#hotswap) or null | yes | The device being hot-swapped, on any track, and what the browser's bar says ("Swapping Audio Effect"). |
 | `can_paste` | boolean | yes | Whether the clipboard holds a device to paste. |
 | `can_paste_chain` | boolean | yes | Whether the chain clipboard holds chains to paste. |
@@ -10516,7 +10774,15 @@ What `device_view.state` returns.
           "type": "null"
         }
       ],
-      "description": "The selected device, if it's in this chain."
+      "description": "The first selected device, if it's in this chain."
+    },
+    "selection": {
+      "default": [],
+      "description": "Every selected device in this chain, in order: one run of neighbouring devices (device chains R47).",
+      "items": {
+        "$ref": "#/$defs/DeviceId"
+      },
+      "type": "array"
     },
     "track": {
       "anyOf": [
@@ -10546,6 +10812,7 @@ What `device_view.state` returns.
     "track_kind",
     "devices",
     "selected",
+    "selection",
     "hot_swap",
     "can_paste",
     "can_paste_chain",
@@ -16135,6 +16402,9 @@ One row of the content pane.
 | `details` | [`ItemDetails`](#itemdetails) or null | no | What the optional columns show for it, left out while none shows (spec: browser-tags R27). |
 | `folder` | string or null | no | In search results, the folder it's in, relative to its place. |
 | `format` | [`PluginFormat`](#pluginformat) or null | no | For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11). |
+| `hidden` | boolean | no | For a plug-in, whether it is hidden, which the row draws dimmed while Show Hidden Plug-Ins is on (spec: browser-tags R43); left out otherwise. |
+| `nested` | array of integer, at least 0 | no | The collections of the person's own it is in, by their numbers (8 and up); left out while it is in none (spec: browser-tags R46, R48). |
+| `presets` | boolean | no | For a plug-in, whether it has presets listed under its row, which its fold triangle opens (the plug-in scanning spec, R15); `open` says whether they are listed. Left out otherwise. |
 
 <details><summary>JSON Schema</summary>
 
@@ -16199,6 +16469,10 @@ One row of the content pane.
       ],
       "description": "For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11)."
     },
+    "hidden": {
+      "description": "For a plug-in, whether it is hidden, which the row draws dimmed while Show Hidden Plug-Ins is on (spec: browser-tags R43); left out otherwise.",
+      "type": "boolean"
+    },
     "kind": {
       "$ref": "#/$defs/ItemKind",
       "description": "What it is."
@@ -16206,6 +16480,15 @@ One row of the content pane.
     "name": {
       "description": "Its name, as the Name column shows it.",
       "type": "string"
+    },
+    "nested": {
+      "description": "The collections of the person's own it is in, by their numbers (8 and up); left out while it is in none (spec: browser-tags R46, R48).",
+      "items": {
+        "format": "uint32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
     },
     "open": {
       "default": false,
@@ -16215,6 +16498,10 @@ One row of the content pane.
     "path": {
       "description": "Its path on disk; in the Plug-Ins label, the row's key instead: a vendor folder's is `plug-ins:/` and the vendor, a plug-in's is its file, `#`, and its identifier (the plug-in scanning spec, R11).",
       "type": "string"
+    },
+    "presets": {
+      "description": "For a plug-in, whether it has presets listed under its row, which its fold triangle opens (the plug-in scanning spec, R15); `open` says whether they are listed. Left out otherwise.",
+      "type": "boolean"
     }
   },
   "required": [
@@ -16856,7 +17143,7 @@ One of:
 
 ### `Label`
 
-A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{"folder": "/its/path"}`, or a saved label, as `{"saved": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{"collection": 3}`.
+A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{"folder": "/its/path"}`, or a saved label, as `{"saved": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{"collection": 3}`, or a collection of the person's own inside one, numbered from 8.
 
 One of:
 
@@ -16877,13 +17164,13 @@ One of:
 - `"current_project"`: The open set's project folder.
 - an object with `folder` (string): A folder the person added to Places, by its path.
 - an object with `saved` (integer): A saved label, by its ID (spec: browser-tags R24).
-- an object with `collection` (integer from 0 to 255): A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34).
+- an object with `collection` (integer, at least 0): A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34); a collection inside another is numbered from 8 (R45).
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{\"folder\": \"/its/path\"}`, or a saved label, as `{\"saved\": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{\"collection\": 3}`.",
+  "description": "A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{\"folder\": \"/its/path\"}`, or a saved label, as `{\"saved\": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{\"collection\": 3}`, or a collection of the person's own inside one, numbered from 8.",
   "oneOf": [
     {
       "const": "all",
@@ -16989,11 +17276,10 @@ One of:
     },
     {
       "additionalProperties": false,
-      "description": "A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34).",
+      "description": "A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34); a collection inside another is numbered from 8 (R45).",
       "properties": {
         "collection": {
-          "format": "uint8",
-          "maximum": 255,
+          "format": "uint32",
           "minimum": 0,
           "type": "integer"
         }
@@ -17021,6 +17307,8 @@ A label as the sidebar lists it.
 | `available` | boolean | yes | Whether its folder can be read now (a place) or it has content (a Library label). A missing folder is listed greyed, as in Live. |
 | `shown` | boolean | yes | Whether the sidebar shows it: the person can hide Library labels and saved labels (spec: browser-tags R26). |
 | `icon` | string or null | no | The icon the person gave it, from [`LABEL_ICONS`] (spec: browser-tags R25). |
+| `open` | boolean | no | For a collection that holds others, whether its list is open in the sidebar. |
+| `parent` | [`Label`](#label) or null | no | For a collection inside another, the one it is in (spec: browser-tags R45, R48). |
 | `path` | string or null | no | For a place, its folder; `null` for Current Project while the set has never been saved. |
 
 <details><summary>JSON Schema</summary>
@@ -17047,6 +17335,21 @@ A label as the sidebar lists it.
     "name": {
       "description": "Its name.",
       "type": "string"
+    },
+    "open": {
+      "description": "For a collection that holds others, whether its list is open in the sidebar.",
+      "type": "boolean"
+    },
+    "parent": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Label"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "For a collection inside another, the one it is in (spec: browser-tags R45, R48)."
     },
     "path": {
       "description": "For a place, its folder; `null` for Current Project while the set has never been saved.",
@@ -18708,6 +19011,25 @@ Type: integer, at least 1.
 
 </details>
 
+### `LinkId`
+
+The ID of a link: a positive integer, unique within the project and never reused.
+
+Type: integer, at least 1.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The ID of a link: a positive integer, unique within the project and never reused.",
+  "format": "uint64",
+  "minimum": 1,
+  "type": "integer"
+}
+```
+
+</details>
+
 ### `LinkState`
 
 What `link.state` returns.
@@ -19378,7 +19700,7 @@ One macro's saved settings beside its value (macros spec, R10, R14, R16, R21 and
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `colour` | integer or null | no | A swatch of the palette of 5 rows of 14, from 0 to 69, or none. |
+| `colour` | [`Colour`](#colour) or null | no | A swatch of the palette of 5 rows of 14, from 0 to 69, or none. |
 | `info` | string | no | The info text the user gave it (Edit Info Text). |
 | `name` | string | no | The name Rename gave it; empty for its default name (R10). |
 | `randomize_excluded` | boolean | no | Whether Randomize leaves it alone (R16). |
@@ -19393,14 +19715,15 @@ One macro's saved settings beside its value (macros spec, R10, R14, R16, R21 and
   "description": "One macro's saved settings beside its value (macros spec, R10, R14, R16, R21 and R30). A macro's value is a parameter of its rack, in `Device::params`.",
   "properties": {
     "colour": {
-      "description": "A swatch of the palette of 5 rows of 14, from 0 to 69, or none.",
-      "format": "uint8",
-      "maximum": 255,
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Colour"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A swatch of the palette of 5 rows of 14, from 0 to 69, or none."
     },
     "info": {
       "description": "The info text the user gave it (Edit Info Text).",
@@ -19444,7 +19767,7 @@ One macro as `rack.macros` reports it.
 |---|---|---|---|
 | `number` | integer from 0 to 255 | yes | Its number, from 1. |
 | `name` | string | yes | Its name: Rename's, its one parameter's, or "Macro N" (macros spec, R10). |
-| `colour` | integer or null | yes | Its colour: a swatch of the palette of 5 rows of 14, or null. |
+| `colour` | [`Colour`](#colour) or null | yes | Its colour: a swatch of the palette of 5 rows of 14, a `#RRGGBB` colour, or null. |
 | `value` | number | yes | Its value, from 0 to 1. |
 | `text` | string | yes | How it reads: its parameter's value and unit, 0 to 127, or a shared unit (R10). |
 | `style` | [`MacroStyle`](#macrostyle) | yes | How it is drawn and which positions it takes (R21). |
@@ -19460,14 +19783,15 @@ One macro as `rack.macros` reports it.
   "description": "One macro as `rack.macros` reports it.",
   "properties": {
     "colour": {
-      "description": "Its colour: a swatch of the palette of 5 rows of 14, or null.",
-      "format": "uint8",
-      "maximum": 255,
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Colour"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its colour: a swatch of the palette of 5 rows of 14, a `#RRGGBB` colour, or null."
     },
     "mappings": {
       "description": "What it drives, in the order the mappings were made (R9).",
@@ -22059,6 +22383,37 @@ A multisampler's views and selection, as `device_view.state` reports them (R30).
     "layers"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `Neighbour`
+
+The section a Move Earlier or Move Later swaps with.
+
+One of:
+
+- `"earlier"`: The section before it.
+- `"later"`: The section after it.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The section a Move Earlier or Move Later swaps with.",
+  "oneOf": [
+    {
+      "const": "earlier",
+      "description": "The section before it.",
+      "type": "string"
+    },
+    {
+      "const": "later",
+      "description": "The section after it.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -24848,6 +25203,37 @@ The Pitch filter: pitch classes C to B.
     "classes"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `PitchUnit`
+
+What a step of a pitch utility is (Spec: pitch-and-time-utilities R2).
+
+One of:
+
+- `"steps"`: A step of the clip's scale in Scale Mode, a semitone otherwise, and a Drum Rack's key on a Drum Rack track.
+- `"semitones"`: A semitone.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a step of a pitch utility is (Spec: pitch-and-time-utilities R2).",
+  "oneOf": [
+    {
+      "const": "steps",
+      "description": "A step of the clip's scale in Scale Mode, a semitone otherwise, and a Drum Rack's key on a Drum Rack track.",
+      "type": "string"
+    },
+    {
+      "const": "semitones",
+      "description": "A semitone.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -28151,7 +28537,7 @@ What a pad or a Scene/Grid button shows in Session Mode (push-2-tracks R73).
 |---|---|---|---|
 | `shows` | string | yes | Of a pad in the slots: `none` (no track or scene), `empty`, `stopped`, `queued`, `playing`, `stopping` or `recording`. Of a pad in Session Overview: `none`, `ring`, `playing` or `block`. Of a Scene/Grid button: `none`, `empty` or `clip`; in the overview, `none`, `part` or `shown`. |
 | `clip` | [`ClipId`](#clipid) or null | yes | The clip in the pad's slot. |
-| `colour` | integer or null | yes | The swatch of the clip's colour, or of the scene's. |
+| `colour` | [`Colour`](#colour) or null | yes | The clip's colour, or the scene's: a swatch or `#RRGGBB`. |
 
 <details><summary>JSON Schema</summary>
 
@@ -28171,14 +28557,15 @@ What a pad or a Scene/Grid button shows in Session Mode (push-2-tracks R73).
       "description": "The clip in the pad's slot."
     },
     "colour": {
-      "description": "The swatch of the clip's colour, or of the scene's.",
-      "format": "uint8",
-      "maximum": 255,
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Colour"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip's colour, or the scene's: a swatch or `#RRGGBB`."
     },
     "shows": {
       "description": "Of a pad in the slots: `none` (no track or scene), `empty`, `stopped`, `queued`, `playing`, `stopping` or `recording`. Of a pad in Session Overview: `none`, `ring`, `playing` or `block`. Of a Scene/Grid button: `none`, `empty` or `clip`; in the overview, `none`, `part` or `shown`.",
@@ -33533,6 +33920,25 @@ One of:
 
 </details>
 
+### `SectionId`
+
+The ID of a section: a positive integer, unique within the project and never reused.
+
+Type: integer, at least 1.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The ID of a section: a positive integer, unique within the project and never reused.",
+  "format": "uint64",
+  "minimum": 1,
+  "type": "integer"
+}
+```
+
+</details>
+
 ### `SelectEdge`
 
 Which edge of the current scene to select (S-SES-020 to S-SES-022).
@@ -34176,7 +34582,9 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
 | `automation_record_mode` | [`AutomationRecordMode`](#automationrecordmode) | yes | The mode an Arrangement recording writes control moves in, as `settings.set_automation_record_mode` sets it (the automation spec, R18). |
 | `file_folder` | [`FileFolderSettings`](#filefoldersettings) | yes | File & Folder: the Temporary Folder, as `settings.set_temporary_folder` sets it. |
 | `library` | [`LibrarySettings`](#librarysettings) | yes | Library: Collect Files on Export and the User Library's folder. |
+| `multiple_plug_in_windows` | boolean | yes | Plug-Ins: Multiple Plug-In Windows, as `settings.set_multiple_plug_in_windows` sets it. |
 | `auto_hide_plug_in_windows` | boolean | yes | Plug-Ins: Auto-Hide Plug-In Windows, as `settings.set_auto_hide_plug_in_windows` sets it. |
+| `auto_open_plug_in_windows` | boolean | yes | Plug-Ins: Auto-Open Plug-In Windows, as `settings.set_auto_open_plug_in_windows` sets it. |
 | `plug_ins` | [`PluginSettings`](#pluginsettings) | yes | Plug-Ins: how the Browser shows plug-ins, as `plugin.settings` sets it. |
 | `agents` | [`AgentsPageSettings`](#agentspagesettings) | yes | Agents. |
 | `assistant` | [`AssistantState`](#assistantstate) | yes | Agents, the assistant: provider, base URL, model, and whether an API key is stored for the provider (the key itself is never reported). |
@@ -34203,6 +34611,10 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
       "description": "Plug-Ins: Auto-Hide Plug-In Windows, as `settings.set_auto_hide_plug_in_windows` sets it.",
       "type": "boolean"
     },
+    "auto_open_plug_in_windows": {
+      "description": "Plug-Ins: Auto-Open Plug-In Windows, as `settings.set_auto_open_plug_in_windows` sets it.",
+      "type": "boolean"
+    },
     "automation_record_mode": {
       "$ref": "#/$defs/AutomationRecordMode",
       "description": "The mode an Arrangement recording writes control moves in, as `settings.set_automation_record_mode` sets it (the automation spec, R18)."
@@ -34226,6 +34638,10 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "library": {
       "$ref": "#/$defs/LibrarySettings",
       "description": "Library: Collect Files on Export and the User Library's folder."
+    },
+    "multiple_plug_in_windows": {
+      "description": "Plug-Ins: Multiple Plug-In Windows, as `settings.set_multiple_plug_in_windows` sets it.",
+      "type": "boolean"
     },
     "page": {
       "$ref": "#/$defs/SettingsPage",
@@ -34290,7 +34706,9 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "automation_record_mode",
     "file_folder",
     "library",
+    "multiple_plug_in_windows",
     "auto_hide_plug_in_windows",
+    "auto_open_plug_in_windows",
     "plug_ins",
     "agents",
     "assistant"
@@ -35399,6 +35817,61 @@ One slot: a track's column and a scene's row.
   "required": [
     "track",
     "scene"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SongSection`
+
+A section of the song.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | [`SectionId`](#sectionid) | yes | The section's ID. |
+| `start` | [`Ticks`](#ticks) | yes | Where it starts: 0 (1.1.1) or later. |
+| `length` | [`Ticks`](#ticks) | yes | How long it is: more than 0. |
+| `name` | string | yes | Its name, which may be empty. |
+| `colour` | integer from 0 to 255 | yes | Its colour, a swatch from 0 to 69 (the themes spec, R14). |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A section of the song.",
+  "properties": {
+    "colour": {
+      "description": "Its colour, a swatch from 0 to 69 (the themes spec, R14).",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "id": {
+      "$ref": "#/$defs/SectionId",
+      "description": "The section's ID."
+    },
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "How long it is: more than 0."
+    },
+    "name": {
+      "description": "Its name, which may be empty.",
+      "type": "string"
+    },
+    "start": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it starts: 0 (1.1.1) or later."
+    }
+  },
+  "required": [
+    "id",
+    "start",
+    "length",
+    "name",
+    "colour"
   ],
   "type": "object"
 }
@@ -37995,6 +38468,8 @@ Theme & Colors in `settings.state` (themes R12).
 | `default_track_colour` | integer from 0 to 255 | yes | Default Track Color, a swatch from 0 to 69, which new tracks take while Auto-Assign Track Colors is off. |
 | `reduced_automatic_colours` | boolean | yes | Reduced Automatic Colors. |
 | `clip_colour` | [`ClipColour`](#clipcolour) | yes | Clip Color. |
+| `new_tracks_take_group_colour` | boolean | yes | New Tracks Take Group Color (themes R30). |
+| `custom_colours` | [`CustomColours`](#customcolours) | yes | The row of custom colours under every palette (themes R28). |
 | `appearance` | [`Appearance`](#appearance) | yes | The Appearance chosen. |
 | `drawn_appearance` | [`Appearance`](#appearance) | yes | The appearance drawn now, `light` or `dark`: Follow System resolved. |
 | `themes` | array of string | yes | The themes the Theme chooser offers, in its order. |
@@ -38043,6 +38518,29 @@ Theme & Colors in `settings.state` (themes R12).
       "minimum": -32768,
       "type": "integer"
     },
+    "custom_colours": {
+      "$ref": "#/$defs/CustomColours",
+      "default": {
+        "places": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "used": []
+      },
+      "description": "The row of custom colours under every palette (themes R28)."
+    },
     "default_track_colour": {
       "default": 12,
       "description": "Default Track Color, a swatch from 0 to 69, which new tracks take while Auto-Assign Track Colors is off.",
@@ -38066,6 +38564,11 @@ Theme & Colors in `settings.state` (themes R12).
     "high_contrast": {
       "default": false,
       "description": "High Contrast.",
+      "type": "boolean"
+    },
+    "new_tracks_take_group_colour": {
+      "default": false,
+      "description": "New Tracks Take Group Color (themes R30).",
       "type": "boolean"
     },
     "reduced_automatic_colours": {
@@ -38103,6 +38606,8 @@ Theme & Colors in `settings.state` (themes R12).
     "default_track_colour",
     "reduced_automatic_colours",
     "clip_colour",
+    "new_tracks_take_group_colour",
+    "custom_colours",
     "appearance",
     "drawn_appearance",
     "themes"
@@ -39788,7 +40293,7 @@ What `transport.state` returns: the transport and the Control Bar's transport se
 | `arrangement_position` | string | yes | What the Control Bar's Arrangement Position fields show, as bar.beat.sixteenth by the song's time signatures: the play position while the song plays, and the insert marker while it's stopped. |
 | `loop_start` | [`Ticks`](#ticks) | yes | Where the Arrangement loop brace starts, in ticks. |
 | `loop_length` | [`Ticks`](#ticks) | yes | How long the loop brace is, in ticks. |
-| `loop_on` | boolean | yes | Whether the Arrangement Loop switch is on. |
+| `loop_on` | boolean | yes | Whether the Arrangement Loop switch is on. While a Play Selection that stops at the selection's end plays, it reads off (the transport spec, R35). |
 | `loop_start_position` | string | yes | The loop brace's start as the Loop Start fields show it, as bar.beat.sixteenth. |
 | `loop_length_bars` | string | yes | The brace's length as the Loop Length fields show it: bars, beats, and sixteenths counted from 0, such as `4.0.0` for four bars. |
 | `tempo` | number | yes | The tempo where the Arrangement Position fields are, in quarter notes per minute, as the Tempo field shows it. |
@@ -39893,7 +40398,7 @@ What `transport.state` returns: the transport and the Control Bar's transport se
       "type": "string"
     },
     "loop_on": {
-      "description": "Whether the Arrangement Loop switch is on.",
+      "description": "Whether the Arrangement Loop switch is on. While a Play Selection that stops at the selection's end plays, it reads off (the transport spec, R35).",
       "type": "boolean"
     },
     "loop_start": {
@@ -40739,6 +41244,127 @@ What `settings.set_user_library` returns: the User Library in use afterwards.
   },
   "required": [
     "path"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `UtilitiesState`
+
+The Pitch and Time Utilities panel's values and what it shows.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `interval` | integer | yes | Interval Size. |
+| `interval_range` | pair of integer and integer | yes | The least and the most Interval Size can be set to with the notes it would copy now: those that keep every copy on the keyboard. |
+| `stretch` | number | yes | The Stretch knob's position. |
+| `stretch_factor` | number | yes | The factor that position is, from 0.1 to 10. |
+| `duration` | string | yes | Duration. |
+| `humanize_amount` | integer from 0 to 255 | yes | Humanize Amount, in percent. |
+| `scale` | string or null | yes | The root and name of the clip's scale; `null` while Scale Mode is off. |
+| `fit_to_scale` | boolean | yes | Whether Fit to Scale is available: Scale Mode is on. |
+| `time_range` | boolean | yes | Whether Duration's Time Range is available: there is a time selection. |
+| `lowest` | integer or null | yes | The lowest key of the notes the utilities act on now. |
+| `highest` | integer or null | yes | The highest key of the notes the utilities act on now. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Pitch and Time Utilities panel's values and what it shows.",
+  "properties": {
+    "duration": {
+      "description": "Duration.",
+      "type": "string"
+    },
+    "fit_to_scale": {
+      "description": "Whether Fit to Scale is available: Scale Mode is on.",
+      "type": "boolean"
+    },
+    "highest": {
+      "description": "The highest key of the notes the utilities act on now.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "humanize_amount": {
+      "description": "Humanize Amount, in percent.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "interval": {
+      "description": "Interval Size.",
+      "format": "int32",
+      "type": "integer"
+    },
+    "interval_range": {
+      "description": "The least and the most Interval Size can be set to with the notes it would copy now: those that keep every copy on the keyboard.",
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "format": "int32",
+          "type": "integer"
+        },
+        {
+          "format": "int32",
+          "type": "integer"
+        }
+      ],
+      "type": "array"
+    },
+    "lowest": {
+      "description": "The lowest key of the notes the utilities act on now.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "scale": {
+      "description": "The root and name of the clip's scale; `null` while Scale Mode is off.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "stretch": {
+      "description": "The Stretch knob's position.",
+      "format": "double",
+      "type": "number"
+    },
+    "stretch_factor": {
+      "description": "The factor that position is, from 0.1 to 10.",
+      "format": "double",
+      "type": "number"
+    },
+    "time_range": {
+      "description": "Whether Duration's Time Range is available: there is a time selection.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "interval",
+    "interval_range",
+    "stretch",
+    "stretch_factor",
+    "duration",
+    "humanize_amount",
+    "scale",
+    "fit_to_scale",
+    "time_range",
+    "lowest",
+    "highest"
   ],
   "type": "object"
 }

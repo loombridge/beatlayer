@@ -35,6 +35,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("chain.set_gain", query(Device, "chains")),
     ("chain.set_zone", query(Device, "chains")),
     ("chain.solo", query(Device, "chains")),
+    ("collision.copy_resonator", query(Device, "params")),
     ("cv.calibrate", query(Device, "cv")),
     ("cv.clear_calibration", query(Device, "cv")),
     ("cv.set_calibration", query(Device, "cv")),

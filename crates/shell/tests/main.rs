@@ -41,6 +41,7 @@ mod clip_properties;
 mod clip_streaming;
 mod clip_view;
 mod clip_view_tabs;
+mod collision;
 mod colours;
 mod comping;
 mod control_surfaces;

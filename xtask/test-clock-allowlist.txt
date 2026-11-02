@@ -17,6 +17,7 @@ crates/cli/src/tone.rs # tests the test tone against real-time pacing
 crates/cli/tests/agent_session_recording.rs # a timeout on a recording
 crates/cli/tests/capacity.rs # measures a real-time streaming load
 crates/cli/tests/m2_song.rs # a timeout on the playhead
+crates/devices/tests/collision.rs # measures Collision's real-time load
 crates/devices/tests/instrument_filter.rs # measures the instruments' filter's real-time load
 crates/devices/tests/meld.rs # measures Meld's real-time load
 crates/devices/tests/multisampler.rs # a timeout on a sample's disk read

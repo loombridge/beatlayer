@@ -64,6 +64,7 @@ pub mod automation;
 pub mod base64;
 pub mod bounce;
 mod changes;
+mod chord_lane;
 mod clip;
 mod clip_param;
 mod colour;
@@ -78,7 +79,6 @@ mod editor;
 mod error;
 mod external;
 pub mod fader;
-mod chord_lane;
 mod fades;
 mod follow;
 pub mod graph;
@@ -161,6 +161,7 @@ pub use mpe_settings::{MAX_NOTE_CHANNELS, MpeMode, MpeSettings, MpeZone, PluginM
 pub use mpe_view::{DEFAULT_LANE_HEIGHT, MpeLane, MpeView};
 pub use note_expression::Expression;
 pub mod freeze;
+pub use chord_lane::{ChordRegion, MAX_TRANSPOSE};
 pub use colour::{DEFAULT_TRACK_PALETTE, SWATCHES, TRACK_COLOURS, id_swatch, swatch_rgb};
 pub use external::{
     CvCalibration, CvPort, CvStep, External, ExternalPort, HardwareLatency, MAX_CV_PORTS,
@@ -187,7 +188,6 @@ pub use layers::{
     LayerSettings, LayerSort, LayerZone, Layers, MultisamplerView, MultisamplerViews, ReleaseMode,
     SamplerTab, SustainMode, Zone, ZoneKind, snap_to_zero_crossing,
 };
-pub use chord_lane::{ChordRegion, MAX_TRANSPOSE};
 pub use locator::{Locator, SongStart};
 pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound};
 pub use pad_layout::{PadDirection, PadLayout, PadSpacing};

@@ -33,6 +33,7 @@ mod browser_columns;
 mod browser_filters;
 mod browser_tags;
 mod capture_midi;
+mod chord_lane;
 mod clip_envelope_editing;
 mod clip_files;
 mod clip_properties;

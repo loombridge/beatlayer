@@ -33,8 +33,6 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("arrangement.resize_clips", query(Track, "clips")),
     ("arrangement.set_crossfade", query(Clip, "data.audio.fade_in_before")),
     ("arrangement.split", query(Track, "clips")),
-    ("chord_lane.select_region", read("arrangement.state", "selected_chord_region")),
-    ("view.chord_lane", read("arrangement.state", "chord_lane")),
     ("locator.add", query(Song, "settings.locators")),
     ("locator.delete", query(Song, "settings.locators")),
     ("locator.loop_to_next", query(Song, "settings.arrangement_loop")),

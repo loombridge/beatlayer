@@ -823,7 +823,8 @@ impl ArrangementUi {
                 theme,
             );
             // The header column's cell, which names the lane.
-            ui.painter_at(header).rect_filled(header, 0.0, theme.colors.bar.0);
+            ui.painter_at(header)
+                .rect_filled(header, 0.0, theme.colors.bar.0);
             ui.painter_at(header).text(
                 pos2(header.left() + 6.0, header.center().y),
                 egui::Align2::LEFT_CENTER,
@@ -854,7 +855,7 @@ impl ArrangementUi {
 
         if let Some(lane) = layout.chord_lane {
             self.chord_lane
-                .show(ui, shell, theme, lane, &mut self.snap_line, events);
+                .show(ui, shell, lane, &mut self.snap_line, events);
         }
 
         // The playhead, over the rulers and the lanes.

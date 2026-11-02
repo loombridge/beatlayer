@@ -16,8 +16,8 @@ use std::sync::Arc;
 
 use bl_core::time::{Frames, SampleRate, TempoMap, Ticks};
 use bl_model::{
-    ChordRegion, Clip, ClipData, ClipId, GroovePlay, GroovePool, GroupKind, MidiData, Note, Scale, SceneId,
-    Track, TrackId, clip_seed, noise,
+    ChordRegion, Clip, ClipData, ClipId, GroovePlay, GroovePool, GroupKind, MidiData, Note, Scale,
+    SceneId, Track, TrackId, clip_seed, noise,
 };
 
 use crate::midi_controllers::{PlacedController, Sounding, Stretch, play_expressions};
@@ -1477,7 +1477,13 @@ mod tests {
             })
             .unwrap();
         let track = editor.document().track(track).unwrap();
-        MidiClipList::build(track, &TempoMap::default(), RATE, &GroovePool::default(), &[])
+        MidiClipList::build(
+            track,
+            &TempoMap::default(),
+            RATE,
+            &GroovePool::default(),
+            &[],
+        )
     }
 
     /// The note-ons the clip's whole length plays in the blocks from frame

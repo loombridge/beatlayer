@@ -92,6 +92,8 @@ pub struct TrackData {
     pub keep_monitoring_latency: bool,
     /// Whether it bypasses the set's tuning (WP-6.9).
     pub tuning_bypass: bool,
+    /// Whether it follows the chord lane (WP-6.48).
+    pub follow_chord_lane: bool,
     /// Its MIDI Controller Layout.
     pub tuning_layout: TuningLayout,
     /// Its info text.
@@ -204,6 +206,7 @@ pub fn snapshot(doc: &Document, id: TrackId) -> Option<TrackData> {
         delay: track.delay(),
         keep_monitoring_latency: track.keep_monitoring_latency(),
         tuning_bypass: track.tuning_bypass(),
+        follow_chord_lane: track.follow_chord_lane(),
         tuning_layout: track.tuning_layout().clone(),
         info_text: track.info_text().to_owned(),
         frozen: track.frozen().cloned(),
@@ -562,13 +565,14 @@ fn remap_clip(clip: &mut Clip, copies: &Copies, doc: &Document) {
 
 /// Gives the track `id` the settings of a copy's source beyond its volume,
 /// pan, mute, solo and arm: crossfade assign, pan mode, split pans, keeping
-/// the monitoring latency, bypassing the tuning and the delay.
+/// the monitoring latency, bypassing the tuning, following the chord lane
+/// and the delay.
 fn copy_settings(
     editor: &mut Editor,
     id: TrackId,
     mixer: &Mixer,
     keep_monitoring_latency: bool,
-    tuning_bypass: bool,
+    (tuning_bypass, follow_chord_lane): (bool, bool),
     delay: TrackDelay,
 ) -> Result<(), EditError> {
     if !mixer.crossfade.is_none() {
@@ -605,6 +609,12 @@ fn copy_settings(
         editor.apply(Command::SetTuningBypass {
             track: id,
             bypass: true,
+        })?;
+    }
+    if follow_chord_lane {
+        editor.apply(Command::SetFollowChordLane {
+            track: id,
+            follow: true,
         })?;
     }
     if !delay.is_default() {
@@ -655,7 +665,7 @@ fn finish(editor: &mut Editor, data: &TrackData, copies: &Copies) -> Result<(), 
         id,
         &mixer,
         data.keep_monitoring_latency,
-        data.tuning_bypass,
+        (data.tuning_bypass, data.follow_chord_lane),
         data.delay,
     )?;
     if !data.info_text.is_empty() {
@@ -1106,7 +1116,7 @@ fn copy_track(
         id,
         &mixer,
         source.keep_monitoring_latency(),
-        source.tuning_bypass(),
+        (source.tuning_bypass(), source.follow_chord_lane()),
         source.delay(),
     )?;
     for (to, level) in source.sends() {

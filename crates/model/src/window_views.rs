@@ -18,8 +18,14 @@ pub struct WindowViews {
     /// Whether the second window is open.
     pub second_window: bool,
     /// Whether the Arrangement shows the chord lane (the chord lane spec,
-    /// R1).
+    /// R1). A set with it hidden doesn't write it, so a set saved before the
+    /// lane keeps its saved form.
+    #[serde(skip_serializing_if = "is_off")]
     pub chord_lane: bool,
+}
+
+fn is_off(value: &bool) -> bool {
+    !*value
 }
 
 impl WindowViews {

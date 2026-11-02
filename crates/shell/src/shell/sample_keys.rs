@@ -346,7 +346,9 @@ impl Shell {
         // issues, which the pointer can't know.
         if step.id == "chord_lane.add_region" && step.args["region"]["id"].is_null() {
             let mut args = step.args.clone();
-            args["region"]["id"] = serde_json::json!(self.new_id::<bl_model::ChordRegionId>());
+            let region = self.new_id::<bl_model::ChordRegionId>();
+            args["region"]["id"] = serde_json::json!(region);
+            self.arrangement.select_chord_region(Some(region));
             return Ok(Invocation::new(&step.id, args));
         }
         if !GESTURE_WARP.contains(&step.id.as_str()) {

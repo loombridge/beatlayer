@@ -164,10 +164,7 @@ fn a_note_moved_off_the_keyboard_does_not_play() {
     let heard = heard(&mut rig, 3 * BEAT_FRAMES as usize, 512);
     assert_eq!(
         heard,
-        [
-            (BEAT_FRAMES, true, 62),
-            (2 * BEAT_FRAMES, false, 62)
-        ]
+        [(BEAT_FRAMES, true, 62), (2 * BEAT_FRAMES, false, 62)]
     );
 }
 
@@ -184,7 +181,12 @@ fn a_track_that_does_not_follow_and_a_session_clip_play_as_written() {
         rig.editor.new_id(),
         bl_core::time::Ticks::ZERO,
         BEAT * 4,
-        ClipData::Midi(MidiData::new([Note::new(62, bl_core::time::Ticks::ZERO, BEAT, 100)])),
+        ClipData::Midi(MidiData::new([Note::new(
+            62,
+            bl_core::time::Ticks::ZERO,
+            BEAT,
+            100,
+        )])),
     );
     rig.editor
         .apply(Command::CreateSlotClip {
@@ -215,7 +217,12 @@ fn a_track_that_does_not_follow_and_a_session_clip_play_as_written() {
         rig.editor.new_id(),
         bl_core::time::Ticks::ZERO,
         BEAT * 4,
-        ClipData::Midi(MidiData::new([Note::new(62, bl_core::time::Ticks::ZERO, BEAT, 100)])),
+        ClipData::Midi(MidiData::new([Note::new(
+            62,
+            bl_core::time::Ticks::ZERO,
+            BEAT,
+            100,
+        )])),
     );
     rig.editor
         .apply(Command::CreateSlotClip {
@@ -225,7 +232,8 @@ fn a_track_that_does_not_follow_and_a_session_clip_play_as_written() {
         })
         .unwrap();
     rig.sync();
-    rig.sender.session(SessionCommand::Launch { track: id, scene });
+    rig.sender
+        .session(SessionCommand::Launch { track: id, scene });
     rig.sender.transport(TransportCommand::Play);
     rig.render(2 * BEAT_FRAMES as usize, 64);
     let launched: Vec<u8> = summary(rig.probe.recorded_notes())
@@ -267,7 +275,10 @@ fn the_region_s_scale_is_the_following_track_s_current_scale() {
         rig.sync();
         rig.sender.transport(TransportCommand::Play);
         let out = rig.render(4 * BEAT_FRAMES as usize, size);
-        let (major, dorian) = (scale_code(&Scale::new(0, ScaleName::Major)), scale_code(&d_dorian()));
+        let (major, dorian) = (
+            scale_code(&Scale::new(0, ScaleName::Major)),
+            scale_code(&d_dorian()),
+        );
         for (frame, want) in [
             (0, major),
             (BEAT_FRAMES - 1, major),
@@ -276,7 +287,10 @@ fn the_region_s_scale_is_the_following_track_s_current_scale() {
             (2 * BEAT_FRAMES, major),
             (4 * BEAT_FRAMES - 1, major),
         ] {
-            assert_eq!(out[frame as usize], want, "block size {size}, frame {frame}");
+            assert_eq!(
+                out[frame as usize], want,
+                "block size {size}, frame {frame}"
+            );
         }
     }
 }
@@ -302,7 +316,10 @@ fn a_lane_edit_sends_data_and_no_program() {
         name: Some("dorian".to_owned()),
         transpose: Some(7),
     });
-    assert!(!synced.program, "a region's scale and transposition make no program");
+    assert!(
+        !synced.program,
+        "a region's scale and transposition make no program"
+    );
     let synced = rig.apply(Command::MoveChordRegion {
         region: region_id,
         start: BEAT,
@@ -334,7 +351,15 @@ fn a_moved_note_s_expressions_go_to_the_key_its_note_on_went_to() {
                 bend: 0.0,
             },
         ];
-        let clip = rig.editor.document().track(id).unwrap().clips().next().unwrap().id;
+        let clip = rig
+            .editor
+            .document()
+            .track(id)
+            .unwrap()
+            .clips()
+            .next()
+            .unwrap()
+            .id;
         rig.editor
             .apply(Command::SetClipData {
                 clip,
@@ -346,7 +371,11 @@ fn a_moved_note_s_expressions_go_to_the_key_its_note_on_went_to() {
         rig.sender.transport(TransportCommand::Play);
         rig.render(4 * BEAT_FRAMES as usize, size);
         let notes = rig.probe.recorded_notes();
-        assert!(notes.len() > 2, "the note and its pressure: {}", notes.len());
+        assert!(
+            notes.len() > 2,
+            "the note and its pressure: {}",
+            notes.len()
+        );
         assert!(notes.iter().all(|n| n.event.key == 65), "block size {size}");
     }
 }

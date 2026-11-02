@@ -535,7 +535,8 @@ impl Compiler {
                 .tracks()
                 .filter(|track| {
                     track.kind() == TrackKind::Midi
-                        && (track.follow_chord_lane() != old.track(track.id()).is_some_and(Track::follow_chord_lane)
+                        && (track.follow_chord_lane()
+                            != old.track(track.id()).is_some_and(Track::follow_chord_lane)
                             || (lane_changed && track.follow_chord_lane()))
                 })
                 .map(Track::id),

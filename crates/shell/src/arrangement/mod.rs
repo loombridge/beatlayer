@@ -310,13 +310,15 @@ impl ArrangementView {
     }
 
     /// Goes back to a new set's view, as a new or opened set shows, keeping
-    /// the window's size, the transport, and the application setting the
-    /// return tracks scroll with the tracks.
+    /// the window's size, the transport, the application setting the
+    /// return tracks scroll with the tracks, and whether the chord lane shows,
+    /// which the set's window views set.
     pub fn reset(&mut self) {
         *self = Self {
             viewport: self.viewport,
             transport: self.transport,
             returns_scroll: self.returns_scroll,
+            chord_lane: self.chord_lane,
             ..Self::new()
         };
     }

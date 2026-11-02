@@ -10,15 +10,15 @@ use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::registry::{self, RunError};
 use bl_model::{
     ArrangementLoop, AudioData, AutomationTarget, BeatsUpdate, Breakpoint, Chain, ChainId, Change,
-    ChangeSet, Channel, ChordRegion, ChordRegionId, Clip, ClipData, ClipEdge, ClipId, ClipLaunch, Command, ComplexProUpdate,
-    ContentHash, CountIn, CrossfadeAssign, Device, DeviceId, DeviceKind, DeviceRole, EditError,
-    Editor, ExternalPort, FileBeats, FollowAction, FollowActions, FollowPatch, GrooveBase,
-    GrooveId, GrooveNote, HardwareLatency, Input, LaunchMode, LaunchQuantization, Locator,
-    LocatorId, MacroStyle, MacroTarget, MetronomeRhythm, MetronomeSound, MidiData, MidiTo,
-    MixerParam, ModelError, Monitor, NewTakeLane, Note, Output, PanMode, ParamId, PluginFormat,
-    Preserve, RackKind, RecordQuantization, SceneId, SendTap, SongStart, TakeClip, TakeClipData,
-    TakeLaneId, Tap, TonesUpdate, TrackDelay, TrackId, TrackKind, Tuning, TuningNote, WarpFrom,
-    WarpMode, WarpPoint,
+    ChangeSet, Channel, ChordRegion, ChordRegionId, Clip, ClipData, ClipEdge, ClipId, ClipLaunch,
+    Command, ComplexProUpdate, ContentHash, CountIn, CrossfadeAssign, Device, DeviceId, DeviceKind,
+    DeviceRole, EditError, Editor, ExternalPort, FileBeats, FollowAction, FollowActions,
+    FollowPatch, GrooveBase, GrooveId, GrooveNote, HardwareLatency, Input, LaunchMode,
+    LaunchQuantization, Locator, LocatorId, MacroStyle, MacroTarget, MetronomeRhythm,
+    MetronomeSound, MidiData, MidiTo, MixerParam, ModelError, Monitor, NewTakeLane, Note, Output,
+    PanMode, ParamId, PluginFormat, Preserve, RackKind, RecordQuantization, SceneId, SendTap,
+    SongStart, TakeClip, TakeClipData, TakeLaneId, Tap, TonesUpdate, TrackDelay, TrackId,
+    TrackKind, Tuning, TuningNote, WarpFrom, WarpMode, WarpPoint,
 };
 use serde_json::{Value, json};
 
@@ -2565,8 +2565,18 @@ fn every_command_runs_by_id() {
         "chord_lane.set_region",
         json!({ "region": verse, "enabled": true, "root": 2, "name": "dorian", "transpose": 2 }),
     );
-    agent.run("track.set_follow_chord_lane", json!({ "track": bass, "follow": true }));
-    assert!(agent.editor.document().track(bass).unwrap().follow_chord_lane());
+    agent.run(
+        "track.set_follow_chord_lane",
+        json!({ "track": bass, "follow": true }),
+    );
+    assert!(
+        agent
+            .editor
+            .document()
+            .track(bass)
+            .unwrap()
+            .follow_chord_lane()
+    );
     agent.run("chord_lane.delete_region", json!({ "region": verse }));
 
     // Time (WP-6.24b): opening a bar of silence on every track at 1.1.1, then

@@ -18,7 +18,6 @@ use serde_json::json;
 use super::editing::EditKeys;
 use super::{invoke, rulers};
 use crate::main_window::UiEvent;
-use crate::theme::Theme;
 
 /// How wide a region's edge handle is, for resizing it.
 const EDGE: f32 = 5.0;
@@ -61,7 +60,6 @@ impl ChordLane {
         &mut self,
         ui: &mut Ui,
         shell: &Shell,
-        theme: &Theme,
         lane: Rect,
         snap_line: &mut Option<Ticks>,
         events: &mut Vec<UiEvent>,
@@ -129,7 +127,13 @@ impl ChordLane {
                 continue;
             };
             self.region(
-                ui, shell, theme, (lane, block), region, (&snap, &at_x), snap_line, events,
+                ui,
+                shell,
+                (lane, block),
+                region,
+                (&snap, &at_x),
+                snap_line,
+                events,
             );
         }
 
@@ -151,7 +155,6 @@ impl ChordLane {
         &mut self,
         ui: &mut Ui,
         shell: &Shell,
-        theme: &Theme,
         (lane, block): (Rect, Rect),
         region: &ChordRegion,
         (snap, at_x): (&dyn Fn(Ticks) -> Ticks, &dyn Fn(Pos2) -> Ticks),
@@ -201,8 +204,8 @@ impl ChordLane {
         if body.has_focus() && crate::menus::context_menu_keys(ui) {
             crate::menus::open_keyboard_context_menu(ui.ctx(), body.id, block.left_bottom());
         }
-        body.context_menu(|ui| menu(ui, shell, region, events));
-        crate::menus::keyboard_context_menu(&body, |ui| menu(ui, shell, region, events));
+        body.context_menu(|ui| menu(ui, region, events));
+        crate::menus::keyboard_context_menu(&body, |ui| menu(ui, region, events));
 
         // The body drags the region along.
         if body.drag_started()
@@ -214,8 +217,13 @@ impl ChordLane {
             });
         }
         if body.dragged()
-            && let (Some(Drag::Move { region: moving, grab }), Some(pos)) =
-                (self.drag, body.interact_pointer_pos())
+            && let (
+                Some(Drag::Move {
+                    region: moving,
+                    grab,
+                }),
+                Some(pos),
+            ) = (self.drag, body.interact_pointer_pos())
             && moving == region.id
         {
             let start = snap(at_x(pos) - grab);
@@ -269,7 +277,7 @@ impl ChordLane {
             if edge.secondary_clicked() && !chosen {
                 invoke(events, ids::SELECT_REGION, json!({ "region": region.id }));
             }
-            edge.context_menu(|ui| menu(ui, shell, region, events));
+            edge.context_menu(|ui| menu(ui, region, events));
             if edge.drag_started() {
                 self.drag = Some(Drag::Edge {
                     region: region.id,
@@ -280,8 +288,13 @@ impl ChordLane {
                 }
             }
             if edge.dragged()
-                && let (Some(Drag::Edge { region: sizing, end: sizing_end }), Some(pos)) =
-                    (self.drag, edge.interact_pointer_pos())
+                && let (
+                    Some(Drag::Edge {
+                        region: sizing,
+                        end: sizing_end,
+                    }),
+                    Some(pos),
+                ) = (self.drag, edge.interact_pointer_pos())
                 && sizing == region.id
                 && sizing_end == end
             {
@@ -311,25 +324,26 @@ impl ChordLane {
                 });
             }
         }
-        let _ = theme;
     }
 }
 
 /// A region's context menu (R4): its scale, by root and by name or none,
-/// its transposition, and Delete.
-fn menu(ui: &mut Ui, shell: &Shell, region: &ChordRegion, events: &mut Vec<UiEvent>) {
-    let _ = shell;
+/// its transposition by a step or an octave, and Delete.
+fn menu(ui: &mut Ui, region: &ChordRegion, events: &mut Vec<UiEvent>) {
     let set = |events: &mut Vec<UiEvent>, ui: &mut Ui, args: serde_json::Value| {
         let mut args = args;
         args["region"] = json!(region.id);
         invoke(events, ids::SET_REGION, args);
         ui.close();
     };
-    let tick = |on: bool, text: &str| if on { format!("✔ {text}") } else { text.to_owned() };
-    if ui
-        .button(tick(!region.scale.enabled, "No Scale"))
-        .clicked()
-    {
+    let tick = |on: bool, text: &str| {
+        if on {
+            format!("✔ {text}")
+        } else {
+            text.to_owned()
+        }
+    };
+    if ui.button(tick(!region.scale.enabled, "No Scale")).clicked() {
         set(events, ui, json!({ "enabled": false }));
     }
     ui.menu_button("Root", |ui| {
@@ -351,15 +365,22 @@ fn menu(ui: &mut Ui, shell: &Shell, region: &ChordRegion, events: &mut Vec<UiEve
             }
         }
     });
+    // The transposition moves by a step or an octave, from -24 to 24.
     ui.menu_button("Transposition", |ui| {
-        egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
-            for by in (-i32::from(bl_model::MAX_TRANSPOSE)..=i32::from(bl_model::MAX_TRANSPOSE)).rev() {
-                let on = i32::from(region.transpose) == by;
-                if ui.button(tick(on, &format!("{by:+}"))).clicked() {
-                    set(events, ui, json!({ "transpose": by }));
-                }
+        let limit = i32::from(bl_model::MAX_TRANSPOSE);
+        let now = i32::from(region.transpose);
+        for (label, to) in [
+            ("Up 1", now + 1),
+            ("Down 1", now - 1),
+            ("Up an Octave", now + 12),
+            ("Down an Octave", now - 12),
+            ("None", 0),
+        ] {
+            let allowed = to.abs() <= limit && to != now;
+            if ui.add_enabled(allowed, egui::Button::new(label)).clicked() {
+                set(events, ui, json!({ "transpose": to }));
             }
-        });
+        }
     });
     ui.separator();
     if ui.button("Delete").clicked() {

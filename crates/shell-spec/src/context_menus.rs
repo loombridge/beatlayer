@@ -1374,9 +1374,13 @@ mod tests {
     fn the_track_menus_other_states_add_the_items_menus_md_lists() {
         let base = track(TrackMenu::default());
         let all = track(EVERY_STATE);
+        // IMP-33's Follow Chord Lane is Beatlayer's own, so menus.md's Live rows
+        // don't list it by a C-TRACK ID; its own test follows.
         let added: Vec<_> = all
             .iter()
-            .filter(|i| !i.is_separator() && !base.iter().any(|b| b.row == i.row))
+            .filter(|i| {
+                !i.is_separator() && i.row != IMP_33_FOLLOW && !base.iter().any(|b| b.row == i.row)
+            })
             .collect();
         assert_eq!(added.len(), 10);
         let Some(text) = std::fs::read_to_string(
@@ -1393,6 +1397,28 @@ mod tests {
                 .unwrap_or_else(|| panic!("{id} isn't in menus.md"));
             assert!(line.contains(item.label), "{}: {line}", item.label);
         }
+    }
+
+    // Spec: chord-lane R5
+    #[test]
+    fn a_midi_tracks_menu_adds_follow_chord_lane_after_save_as_default_midi_track() {
+        let rows = |state| -> Vec<&'static str> { track(state).iter().map(|i| i.row).collect() };
+        assert!(!rows(TrackMenu::default()).contains(&IMP_33_FOLLOW));
+        let midi = rows(TrackMenu {
+            midi: true,
+            ..TrackMenu::default()
+        });
+        let default = midi.iter().position(|r| *r == "C-TRACK-014").unwrap();
+        assert_eq!(midi[default + 1], "", "in a group of its own");
+        assert_eq!(midi[default + 2], IMP_33_FOLLOW);
+        let item = track(TrackMenu {
+            midi: true,
+            ..TrackMenu::default()
+        })
+        .into_iter()
+        .find(|i| i.row == IMP_33_FOLLOW)
+        .unwrap();
+        assert_eq!(item.command(), Some("track.set_follow_chord_lane"));
     }
 
     #[test]

@@ -6,10 +6,10 @@ use imbl::{OrdMap, Vector};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::chord_lane::ChordRegion;
 use crate::clip::{Clip, ClipData};
 use crate::device::Device;
 use crate::groove::GroovePool;
-use crate::chord_lane::ChordRegion;
 use crate::ids::{
     ChainId, ChordRegionId, ClipId, DeviceId, GrooveId, LocatorId, SceneId, TakeLaneId, TrackId,
 };
@@ -987,11 +987,13 @@ impl Document {
             .iter()
             .map(|region| region.id.0)
             .max();
-        [track, clip, lane, device, chain, scene, locator, groove, region]
-            .into_iter()
-            .flatten()
-            .max()
-            .unwrap_or(self.main.0)
+        [
+            track, clip, lane, device, chain, scene, locator, groove, region,
+        ]
+        .into_iter()
+        .flatten()
+        .max()
+        .unwrap_or(self.main.0)
     }
 
     /// Checks that the document's derived lookups match its tree and that the

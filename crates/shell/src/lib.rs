@@ -165,6 +165,9 @@ pub use bl_shell_spec::link as link_commands;
 /// (WP-9.13).
 pub use bl_shell_spec::tempo_follower as tempo_follower_commands;
 
+/// The Arrangement's locator command IDs and their argument and result
+/// types (WP-6.24).
+pub use bl_shell_spec::chord_lane as chord_lane_commands;
 /// The envelope keys' command IDs and their argument and result types
 /// (WP-6.26).
 pub use bl_shell_spec::envelope_keys as envelope_commands;
@@ -176,9 +179,6 @@ pub use bl_shell_spec::file_manager as file_manager_commands;
 /// The grooves' commands that need the shell, and the Groove Pool's view
 /// (WP-6.19, WP-6.20), for the UI to run by ID.
 pub use bl_shell_spec::groove as groove_commands;
-/// The Arrangement's locator command IDs and their argument and result
-/// types (WP-6.24).
-pub use bl_shell_spec::chord_lane as chord_lane_commands;
 pub use bl_shell_spec::locator as locator_commands;
 /// The MIDI file commands' IDs and their argument and result types
 /// (WP-2.21).

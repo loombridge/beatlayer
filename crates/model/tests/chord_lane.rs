@@ -98,7 +98,11 @@ fn regions_never_overlap_and_a_refused_edit_changes_nothing() {
     let first = add(&mut editor, BAR, BAR * 2).unwrap();
     let second = add(&mut editor, BAR * 2, BAR * 3).unwrap();
     let before = editor.document().clone();
-    for (start, end) in [(BAR * 2 - Ticks(1), BAR * 3), (ZERO, BAR * 4), (BAR, BAR * 2)] {
+    for (start, end) in [
+        (BAR * 2 - Ticks(1), BAR * 3),
+        (ZERO, BAR * 4),
+        (BAR, BAR * 2),
+    ] {
         let id: ChordRegionId = editor.new_id();
         let refused = editor.apply(Command::AddChordRegion {
             region: ChordRegion::new(id, start, end),
@@ -126,7 +130,12 @@ fn regions_never_overlap_and_a_refused_edit_changes_nothing() {
         })
         .unwrap();
     assert_ne!(editor.document(), &before);
-    let lane: Vec<_> = editor.document().chord_lane().iter().map(|r| r.id).collect();
+    let lane: Vec<_> = editor
+        .document()
+        .chord_lane()
+        .iter()
+        .map(|r| r.id)
+        .collect();
     assert_eq!(lane, [first, second]);
 }
 
@@ -136,9 +145,15 @@ const ZERO: Ticks = Ticks::ZERO;
 fn a_region_that_breaks_a_rule_is_refused() {
     // Spec: chord-lane R2
     let (mut editor, ..) = song();
-    assert!(add(&mut editor, BAR * 2, BAR).is_err(), "ends before it starts");
+    assert!(
+        add(&mut editor, BAR * 2, BAR).is_err(),
+        "ends before it starts"
+    );
     assert!(add(&mut editor, BAR, BAR).is_err(), "is empty");
-    assert!(add(&mut editor, Ticks(-1), BAR).is_err(), "starts before 1.1.1");
+    assert!(
+        add(&mut editor, Ticks(-1), BAR).is_err(),
+        "starts before 1.1.1"
+    );
     let region = add(&mut editor, BAR, BAR * 2).unwrap();
     for transpose in [25, -25, 300] {
         let refused = editor.apply(Command::SetChordRegion {
@@ -170,7 +185,11 @@ fn a_region_that_breaks_a_rule_is_refused() {
     });
     assert!(bad_root.is_err());
     let missing: ChordRegionId = editor.new_id();
-    assert!(editor.apply(Command::DeleteChordRegion { region: missing }).is_err());
+    assert!(
+        editor
+            .apply(Command::DeleteChordRegion { region: missing })
+            .is_err()
+    );
 }
 
 #[test]
@@ -178,12 +197,20 @@ fn only_a_midi_track_follows_the_lane() {
     // Spec: chord-lane R5
     let (mut editor, midi, audio) = song();
     assert!(!editor.document().track(midi).unwrap().follow_chord_lane());
-    assert!(editor
-        .apply(Command::SetFollowChordLane { track: audio, follow: true })
-        .is_err());
+    assert!(
+        editor
+            .apply(Command::SetFollowChordLane {
+                track: audio,
+                follow: true
+            })
+            .is_err()
+    );
     let before = editor.undo_history().len();
     editor
-        .apply(Command::SetFollowChordLane { track: midi, follow: true })
+        .apply(Command::SetFollowChordLane {
+            track: midi,
+            follow: true,
+        })
         .unwrap();
     assert_eq!(editor.undo_history().len(), before + 1);
     assert!(editor.document().track(midi).unwrap().follow_chord_lane());
@@ -209,14 +236,20 @@ fn the_lane_and_the_switch_are_saved_and_a_set_from_before_loads_with_neither() 
         })
         .unwrap();
     editor
-        .apply(Command::SetFollowChordLane { track: midi, follow: true })
+        .apply(Command::SetFollowChordLane {
+            track: midi,
+            follow: true,
+        })
         .unwrap();
     let saved = serde_json::to_value(editor.document()).unwrap();
     assert_eq!(saved["settings"]["chord_lane"][0]["transpose"], 3);
     let loaded: Document = serde_json::from_value(saved).unwrap();
     assert_eq!(&loaded, editor.document());
     assert!(loaded.track(midi).unwrap().follow_chord_lane());
-    assert_eq!(loaded.chord_lane()[0].scale, Scale::new(7, ScaleName::Minor));
+    assert_eq!(
+        loaded.chord_lane()[0].scale,
+        Scale::new(7, ScaleName::Minor)
+    );
 }
 
 #[test]

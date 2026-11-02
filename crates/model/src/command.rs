@@ -15,6 +15,7 @@ use crate::automation::{
     AutomationTarget, Breakpoint, Envelope, MixerParam, PointError, check_bend, entry,
     override_device,
 };
+use crate::chord_lane::ChordRegion;
 use crate::clip::{
     AudioData, Clip, ClipData, ClipEnvelope, EnvelopeKind, MIN_MIDI_BRACE, MidiData, NewTakeLane,
     TakeLane, clip_entry, crossfades,
@@ -22,7 +23,6 @@ use crate::clip::{
 use crate::clip_param::ClipParam;
 use crate::device::{Device, DeviceKind, DeviceRole, WavetableChoice};
 use crate::document::Document;
-use crate::chord_lane::ChordRegion;
 use crate::error::ModelError;
 use crate::external::{CvCalibration, ExternalPort, HardwareLatency};
 use crate::follow::FollowPatch;
@@ -3597,7 +3597,11 @@ impl Document {
                 Ok(())
             }
             Command::SetFollowChordLane { track, follow } => {
-                check_kind(self.track_ref(*track)?, |kind| kind == TrackKind::Midi, "a MIDI track")?;
+                check_kind(
+                    self.track_ref(*track)?,
+                    |kind| kind == TrackKind::Midi,
+                    "a MIDI track",
+                )?;
                 if self.track_ref(*track)?.follow_chord_lane != *follow {
                     self.track_mut(*track)?.follow_chord_lane = *follow;
                 }

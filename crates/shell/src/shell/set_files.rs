@@ -409,6 +409,8 @@ impl Shell {
                 self.dirty = false;
                 self.message = None;
                 self.arrangement.reset();
+                // An imported set has no chord lane to show.
+                self.arrangement.set_chord_lane(false);
                 self.clip_view.forget_selection();
                 self.mixer.reset();
                 self.session.reset();

@@ -124,6 +124,9 @@ pub struct SessionView {
     /// The track a Shift-click extends from.
     track_anchor: Option<TrackId>,
     scroll_y: f64,
+    /// The scene whose Scene View a double-click on its number opened; it
+    /// shows while that scene stays the first one selected.
+    scene_view: Option<SceneId>,
     /// Counts `session.focus` runs, so the window moves the focus once for
     /// each.
     focus_requests: u64,
@@ -161,7 +164,16 @@ impl SessionView {
             rings: Vec::new(),
             title_tracks: self.title_tracks,
             scroll_y: self.scroll_y,
+            scene_view: self.scene_view(),
         }
+    }
+
+    /// The scene whose Scene View is open: one a double-click on its number
+    /// opened, while it's still the first scene selected.
+    #[must_use]
+    pub fn scene_view(&self) -> Option<SceneId> {
+        self.scene_view
+            .filter(|scene| self.scenes.first() == Some(scene))
     }
 
     /// How many times `session.focus` has run.
@@ -268,6 +280,7 @@ impl SessionView {
             }
             ids::SELECT_ALL => {
                 no_args(args)?;
+                self.scene_view = None;
                 self.slots = every_slot(ctx.columns, ctx.scenes);
                 self.scenes.clear();
                 self.tracks.clear();
@@ -637,6 +650,11 @@ impl SessionView {
         columns: &[TrackId],
         doc_scenes: &[SceneId],
     ) -> Result<(), SessionViewError> {
+        // Adding to the selection leaves an open Scene View open while its
+        // scene stays the first one selected.
+        if args.mode != SessionSelectMode::Add {
+            self.scene_view = None;
+        }
         match (args.track, args.scene) {
             (Some(track), Some(scene)) => {
                 if !columns.contains(&track) || !doc_scenes.contains(&scene) {
@@ -734,6 +752,9 @@ impl SessionView {
                 ));
             }
         }
+        if args.scene_view && args.track.is_none() {
+            self.scene_view = args.scene;
+        }
         Ok(())
     }
 
@@ -741,6 +762,7 @@ impl SessionView {
     /// (S-SES-020 to S-SES-022): on the last track, a second End selects the
     /// scene itself.
     fn select_edge(&mut self, edge: SelectEdge, columns: &[TrackId], doc_scenes: &[SceneId]) {
+        self.scene_view = None;
         if columns.is_empty() || doc_scenes.is_empty() {
             return;
         }

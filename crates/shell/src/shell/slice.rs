@@ -1082,7 +1082,7 @@ impl Shell {
             .ok_or_else(|| failed(id, format!("{} isn't in a chain", slices.device.id)))?
             .track;
         let (parent, index) = self.track_after(track);
-        let scene = self.scene_view_scene();
+        let scene = self.selected_scene();
         let start = if scene.is_some() {
             Ticks::ZERO
         } else {

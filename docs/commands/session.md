@@ -648,7 +648,7 @@ Result: [`SessionViewState`](README.md#sessionviewstate).
 
 **Select in the Session View**. Permission: `read`. Contexts: `session`.
 
-Selects a slot, a scene, or a track's title bar, as clicking the grid does. `track` and `scene` together name a slot, `scene` alone a scene, and `track` alone a title bar. `mode` is `replace` for a plain click, `add` for Cmd-click (Ctrl on Windows and Linux), which adds the item or removes it when it's already selected, and `range` for Shift-click, which selects from the last item clicked to this one. Changes only the view.
+Selects a slot, a scene, or a track's title bar, as clicking the grid does. `track` and `scene` together name a slot, `scene` alone a scene, and `track` alone a title bar. `mode` is `replace` for a plain click, `add` for Cmd-click (Ctrl on Windows and Linux), which adds the item or removes it when it's already selected, and `range` for Shift-click, which selects from the last item clicked to this one. With `scene_view` true, `scene` also opens its Scene View in the detail area, as a double-click on the scene's number does. Changes only the view.
 
 Default keys: none.
 
@@ -658,6 +658,7 @@ Arguments:
 |---|---|---|---|
 | `mode` | [`SessionSelectMode`](README.md#sessionselectmode) | no | How the click changes the selection. |
 | `scene` | [`SceneId`](README.md#sceneid) or null | no | The scene, for a slot or a scene. |
+| `scene_view` | boolean | no | Also open the Scene View for `scene`, as a double-click on the scene's number does. Ignored when `track` is given. |
 | `track` | [`TrackId`](README.md#trackid) or null | no | The track, for a slot or a title bar. |
 
 Result: [`SessionViewState`](README.md#sessionviewstate).

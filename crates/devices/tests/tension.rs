@@ -946,8 +946,6 @@ fn the_filter_has_the_modes_and_a_cutoff_and_formants_move_with_reso() {
 // Spec: tension R13
 #[test]
 fn the_filters_envelope_lfo_and_key_move_its_cutoff_while_they_are_on() {
-    let base = [FILTER_ON.0 as f64];
-    let _ = base;
     let slice = |out: &[f32], a: f64, b: f64| {
         band(&out[(a * HZ) as usize..(b * HZ) as usize], 1_500.0, 6_000.0)
     };
@@ -980,6 +978,15 @@ fn the_filters_envelope_lfo_and_key_move_its_cutoff_while_they_are_on() {
     ];
     let enveloped = filtered(&env);
     assert!(slice(&enveloped, 0.0, 0.3) > slice(&enveloped, 1.4, 1.9) + 10.0);
+    // Velocity shortens the attack by its Vel amount.
+    let slow = [
+        (ENV_ON, 1.0),
+        (C::FreqEnv.id(), 100.0),
+        (C::EnvAttack.id(), 500.0),
+        (C::EnvSustain.id(), 100.0),
+    ];
+    let quick = filtered(&[&slow[..], &[(C::EnvAttack.vel(), 100.0)]].concat());
+    assert!(slice(&quick, 0.03, 0.15) > slice(&filtered(&slow), 0.03, 0.15) + 6.0);
     // Switched off, the amounts do nothing.
     synth::assert_near(
         &filtered(&[(ENV_ON, 0.0), (C::FreqEnv.id(), 100.0)]),

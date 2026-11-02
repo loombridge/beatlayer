@@ -682,8 +682,10 @@ impl Engine {
     ) -> f64 {
         let (n, s) = (c.n(), &self.settings);
         let descriptor = &self.descriptors[n];
-        let travel = descriptor.normalize(s.base[n])
-            + 0.5 * (s.vel[n] * (2.0 * velocity - 1.0) + s.key[n] * key);
+        // The envelope's attack takes its Vel amount as a factor of its own (R13).
+        let vel = if c == C::EnvAttack { 0.0 } else { s.vel[n] };
+        let travel =
+            descriptor.normalize(s.base[n]) + 0.5 * (vel * (2.0 * velocity - 1.0) + s.key[n] * key);
         let travel = travel.clamp(0.0, 1.0);
         let moved = match self.dests[n] {
             Some(dest) => self.matrix.position(dest, travel, voice, at, due, read),

@@ -449,7 +449,9 @@ pub(crate) fn draw_item(
     if state.checked == Some(true) {
         text = format!("✔ {text}");
     }
-    let mut button = egui::Button::new(text);
+    // An item never wraps: the menu grows to fit its widest one, keys and
+    // all ("Ctrl+Alt+U" is wider than "⌃⌥U").
+    let mut button = egui::Button::new(text).wrap_mode(egui::TextWrapMode::Extend);
     if let Some(chord) = &state.chord {
         button = button.shortcut_text(chord_text(chord, platform));
     }

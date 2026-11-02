@@ -1946,9 +1946,18 @@ fn a_set_from_before_colours_loads_in_the_colours_it_was_drawn_in() {
         decode_json(&serde_json::to_vec(&old).unwrap(), &LoadOptions::default()).unwrap();
     for (track, clip, slot) in clips {
         let swatch = (track.0.get() % 14) as u8;
-        assert_eq!(loaded.document.track(track).unwrap().colour(), swatch);
-        assert_eq!(loaded.document.clip(clip).unwrap().colour, Some(swatch));
-        assert_eq!(loaded.document.clip(slot).unwrap().colour, Some(swatch));
+        assert_eq!(
+            loaded.document.track(track).unwrap().colour(),
+            bl_model::Colour::Swatch(swatch)
+        );
+        assert_eq!(
+            loaded.document.clip(clip).unwrap().colour,
+            Some(bl_model::Colour::Swatch(swatch))
+        );
+        assert_eq!(
+            loaded.document.clip(slot).unwrap().colour,
+            Some(bl_model::Colour::Swatch(swatch))
+        );
     }
     assert!(loaded.document.scenes().all(|scene| scene.colour.is_none()));
 }

@@ -847,6 +847,9 @@ pub struct Shell {
     /// The engine's insert marker when the shell last looked, so a move of
     /// it reaches the Arrangement View once (WP-1.18).
     seen_insert_marker: Option<Ticks>,
+    /// Whether the engine plays a Play Selection to the selection's end, so
+    /// the Loop switch shows off (the transport spec, R35).
+    loop_suspended: bool,
     /// Whether a person's gesture (a drag on a value) holds a transaction
     /// open, so its document commands are one undo step.
     gesture: bool,
@@ -904,6 +907,9 @@ pub struct Shell {
     /// The states a preset gave plug-ins the engine hasn't started yet, which
     /// they take when they run (the plug-in scanning spec, R16).
     pending_states: BTreeMap<bl_model::DeviceId, Vec<u8>>,
+    /// Plug-ins inserted from the Browser whose windows Auto-Open Plug-In
+    /// Windows opens once they've started (WP-6.75).
+    auto_open: Vec<bl_model::DeviceId>,
     /// The native device types the engine offers, which the plug-ins'
     /// join in the Device View (WP-2.6).
     native_types: Vec<bl_engine::DeviceType>,
@@ -1448,6 +1454,7 @@ impl Shell {
             envelope_control_focused: false,
             au,
             seen_insert_marker: None,
+            loop_suspended: false,
             gesture: false,
             mixer: MixerView::new(),
             session: SessionView::new(),
@@ -1480,6 +1487,7 @@ impl Shell {
             automation_recording: false,
             plug_in_windows: true,
             pending_states: BTreeMap::new(),
+            auto_open: Vec::new(),
             devices: {
                 // Beatlayer's native devices (WP-2.5; none ship yet).
                 let mut devices = DeviceView::new();

@@ -346,12 +346,13 @@ fn a_midi_clips_menu_lists_lives_items_and_runs_the_working_ones() {
     );
     assert!(!item(&output, "Export MIDI Clip...").disabled);
     assert!(!item(&output, "Deactivate Clip").disabled);
-    // The palette is one grid of 70 swatches.
+    // The palette is one grid of 70 swatches, the custom row's 14 places and
+    // Custom Color….
     let grid = Harness::nodes(&output)
         .into_iter()
         .find(|n| n.role == Role::Grid && n.label == "Colour palette")
         .expect("the palette");
-    assert_eq!(grid.children.len(), 70);
+    assert_eq!(grid.children.len(), 70 + 14 + 1);
 
     // Deactivate Clip runs session.deactivate on the selection.
     choose(&mut h, "Deactivate Clip");
@@ -465,8 +466,14 @@ fn an_item_acts_on_every_selected_clip_and_a_click_outside_the_selection_selects
     h.take_events();
     click_node(&mut h, &swatch(3, 4));
     let doc = h.shell.editor().document();
-    assert_eq!(doc.clip(a).unwrap().colour, Some(2 * 14 + 3));
-    assert_eq!(doc.clip(b).unwrap().colour, Some(2 * 14 + 3));
+    assert_eq!(
+        doc.clip(a).unwrap().colour,
+        Some(bl_model::Colour::Swatch(2 * 14 + 3))
+    );
+    assert_eq!(
+        doc.clip(b).unwrap().colour,
+        Some(bl_model::Colour::Swatch(2 * 14 + 3))
+    );
     assert!(
         !egui::Popup::is_any_open(&h.ctx),
         "choosing closes the menu"
@@ -587,8 +594,14 @@ fn the_scene_palette_colours_the_selected_scenes_and_no_color_clears_them() {
         .unwrap();
     click_node(&mut h, &swatch);
     let doc = h.shell.editor().document();
-    assert_eq!(doc.scene(g.scenes[0]).unwrap().colour, Some(14 + 4));
-    assert_eq!(doc.scene(g.scenes[2]).unwrap().colour, Some(14 + 4));
+    assert_eq!(
+        doc.scene(g.scenes[0]).unwrap().colour,
+        Some(bl_model::Colour::Swatch(14 + 4))
+    );
+    assert_eq!(
+        doc.scene(g.scenes[2]).unwrap().colour,
+        Some(bl_model::Colour::Swatch(14 + 4))
+    );
     assert_eq!(doc.scene(g.scenes[1]).unwrap().colour, None);
 
     choose_from(&mut h, g.scene_row(0).name.center(), "No Color");
@@ -829,7 +842,7 @@ fn the_clip_views_title_bar_opens_its_menu_and_rename_types_in_it() {
     click_node(&mut h, &swatch);
     assert_eq!(
         h.shell.editor().document().clip(clip).unwrap().colour,
-        Some(2)
+        Some(bl_model::Colour::Swatch(2))
     );
 
     // Rename types the name in the title bar; Return renames the clip.

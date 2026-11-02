@@ -9,6 +9,7 @@
 use crate::common;
 use bl_devices::testing::{self, SCOPE_TIME};
 use bl_model::{DeviceId, ParamId, TrackId};
+use bl_shell::Shell;
 use bl_shell::device_commands::{DeviceAdded, TITLE_BAR_HEIGHT, frame_width};
 use bl_shell::settings::SettingsPage;
 use bl_ui::device_panel::{body_rect, place};
@@ -243,22 +244,40 @@ fn value(h: &Harness, device: DeviceId, param: ParamId) -> f64 {
     panel.value(index)
 }
 
-// Spec: device-chains R31
+// Spec: device-chains R31; clap-hosting R27, R28
 #[test]
-fn the_plug_ins_page_switches_auto_hide_plug_in_windows() {
+fn the_plug_ins_page_switches_the_plug_in_windows() {
     let mut h = Harness::new(Window::Settings);
     h.shell
         .run("app.settings", json!({ "page": SettingsPage::PlugIns }))
         .unwrap();
+    let state = |shell: &Shell| {
+        [
+            shell.multiple_plug_in_windows(),
+            shell.auto_hide_plug_in_windows(),
+            shell.auto_open_plug_in_windows(),
+        ]
+    };
+    // In Live's order: the rows sit one below the other.
+    let labels = [
+        "Multiple Plug-In Windows",
+        "Auto-Hide Plug-In Windows",
+        "Auto-Open Plug-In Windows",
+    ];
     let nodes = Harness::nodes(&h.settle());
-    let switch = Harness::node(&nodes, "Auto-Hide Plug-In Windows");
-    assert!(!switch.disabled);
-    for pending in ["Multiple Plug-In Windows", "Auto-Open Plug-In Windows"] {
-        let node = Harness::node(&nodes, pending);
-        assert!(node.description.contains("WP-2.6"), "{pending}");
+    let tops: Vec<f64> = labels
+        .iter()
+        .map(|label| Harness::node(&nodes, label).bounds.unwrap().y0)
+        .collect();
+    assert!(tops.windows(2).all(|pair| pair[0] < pair[1]), "{tops:?}");
+    assert_eq!(state(&h.shell), [true; 3], "on in a new install");
+    for (row, label) in labels.into_iter().enumerate() {
+        let nodes = Harness::nodes(&h.settle());
+        let switch = Harness::node(&nodes, label);
+        assert!(!switch.disabled, "{label}");
+        h.click(bounds(switch).center());
+        h.settle();
+        assert!(!state(&h.shell)[row], "{label}: the press switched it off");
     }
-    assert!(h.shell.auto_hide_plug_in_windows());
-    h.click(bounds(switch).center());
-    h.settle();
-    assert!(!h.shell.auto_hide_plug_in_windows());
+    assert_eq!(state(&h.shell), [false; 3]);
 }

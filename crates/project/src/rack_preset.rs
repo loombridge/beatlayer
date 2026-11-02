@@ -351,7 +351,7 @@ mod tests {
         let mut outer = Device::rack(DeviceId(id(3)), RackKind::Instrument).with_chain({
             let mut chain = Chain::new(ChainId(id(21)), "Layer").with_devices(vec![inner, plugin]);
             chain.mixer.volume = 0.5;
-            chain.colour = Some(12);
+            chain.colour = Some(12.into());
             chain
         });
         outer.name = "My Rack".to_owned();

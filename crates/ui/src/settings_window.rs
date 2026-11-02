@@ -1518,28 +1518,35 @@ fn plug_ins_page(
         )));
     }
     rows.heading(ui, "Plug-In Windows");
-    rows.pending(
-        ui,
-        &switch_row("Multiple Plug-In Windows", "WP-2.6").showing("On"),
-    );
-    let rect = rows.row(ui, "Auto-Hide Plug-In Windows", SettingsLayout::SWITCH);
-    if let Some(on) = switch(
-        ui,
-        theme,
-        "auto-hide-plug-in-windows",
-        "Auto-Hide Plug-In Windows",
-        rect,
-        shell.auto_hide_plug_in_windows(),
-    ) {
-        events.push(UiEvent::Invoke(Invocation::new(
+    let windows = [
+        (
+            "Multiple Plug-In Windows",
+            "multiple-plug-in-windows",
+            shell.multiple_plug_in_windows(),
+            ids::SETTINGS_SET_MULTIPLE_PLUG_IN_WINDOWS,
+        ),
+        (
+            "Auto-Hide Plug-In Windows",
+            "auto-hide-plug-in-windows",
+            shell.auto_hide_plug_in_windows(),
             ids::SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
-            json!({ "on": on }),
-        )));
+        ),
+        (
+            "Auto-Open Plug-In Windows",
+            "auto-open-plug-in-windows",
+            shell.auto_open_plug_in_windows(),
+            ids::SETTINGS_SET_AUTO_OPEN_PLUG_IN_WINDOWS,
+        ),
+    ];
+    for (label, id_salt, value, command) in windows {
+        let rect = rows.row(ui, label, SettingsLayout::SWITCH);
+        if let Some(on) = switch(ui, theme, id_salt, label, rect, value) {
+            events.push(UiEvent::Invoke(Invocation::new(
+                command,
+                json!({ "on": on }),
+            )));
+        }
     }
-    rows.pending(
-        ui,
-        &switch_row("Auto-Open Plug-In Windows", "WP-2.6").showing("On"),
-    );
 }
 
 /// A push button in the Settings window, as Live's Rescan is: a rounded
@@ -1772,6 +1779,21 @@ fn theme_page(
             json!({ "on": on }),
         )));
     }
+    // Spec: themes R30. After Reduced Automatic Colors.
+    let rect = rows.row(ui, "New Tracks Take Group Color", SettingsLayout::SWITCH);
+    if let Some(on) = switch(
+        ui,
+        theme,
+        "new-tracks-take-group-colour",
+        "New Tracks Take Group Color",
+        rect,
+        look.new_tracks_take_group_colour,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_NEW_TRACKS_TAKE_GROUP_COLOUR,
+            json!({ "on": on }),
+        )));
+    }
     let rect = rows.row(ui, "Clip Color", SettingsLayout::CHOOSER);
     let clip_colours = choices(ClipColour::ALL.map(|c| (c.label().to_owned(), c)));
     if let Some(clip_colour) = chooser(
@@ -1859,7 +1881,7 @@ fn swatch_chooser(
         ));
     });
     egui::Popup::menu(&response).show(|ui| {
-        if let Some(swatch) = crate::palette::show(ui, theme, id_salt, Some(current)) {
+        if let Some(swatch) = crate::palette::show_swatches(ui, theme, id_salt, Some(current)) {
             chosen = Some(swatch);
             ui.close();
         }

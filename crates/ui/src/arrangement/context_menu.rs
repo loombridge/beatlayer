@@ -274,14 +274,15 @@ impl ContextMenus {
                     .first()
                     .and_then(|clip| doc.clip(*clip))
                     .and_then(|clip| clip.colour);
-                if let Some(colour) = crate::palette::show(ui, theme, "clip-colour", current) {
-                    invoke(
-                        events,
-                        "clip.set_colour",
-                        json!({ "clips": selected, "colour": colour }),
-                    );
-                    ui.close();
-                }
+                crate::palette::show(
+                    ui,
+                    theme,
+                    shell,
+                    "clip-colour",
+                    current,
+                    crate::palette::Target::new("clip.set_colour", json!({ "clips": selected })),
+                    events,
+                );
             } else if SHAPE_ROWS.contains(&item.row) {
                 // Spec: automation-editing R11. Five buttons a row.
                 let shapes = if item.row == SHAPE_ROWS[0] {

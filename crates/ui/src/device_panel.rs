@@ -44,7 +44,7 @@ use crate::widgets::{modulated_text, paint_ring_segment, ring_segment};
 /// items (the automation spec, R29).
 pub type ParamLookups<'a> = (
     &'a dyn Fn(ParamId) -> Option<(f64, f64)>,
-    &'a dyn Fn(ParamId) -> Option<ParamMenu>,
+    &'a dyn Fn(ParamId) -> Option<ParamMenu<'a>>,
 );
 
 /// Points of vertical drag that move a control from one end of its range to
@@ -943,7 +943,7 @@ struct Control<'a> {
     /// articulation's name).
     text: Option<String>,
     /// The automation items of its context menu (the automation spec, R29).
-    automation: Option<ParamMenu>,
+    automation: Option<ParamMenu<'a>>,
     /// How many steps Shift with Up or Down moves it: 12 for Roar's
     /// Feedback Note, an octave (the roar spec, R26), else 1.
     coarse: i32,

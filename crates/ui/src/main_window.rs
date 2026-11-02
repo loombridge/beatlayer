@@ -1359,6 +1359,10 @@ impl MainWindowUi {
             if *el == Element::LinkMenu {
                 egui::Popup::menu(&response).show(|ui| Self::link_menu_content(ui, shell, events));
             }
+            // Menus.md C-CPU: the meter's box and its arrow open one menu.
+            if matches!(*el, Element::Cpu | Element::CpuMenu) {
+                egui::Popup::menu(&response).show(|ui| Self::cpu_menu_content(ui, shell, events));
+            }
             if *el == Element::Tempo {
                 // Spec: warping R46. The tempo field's context menu holds
                 // Unfollow Tempo Automation.
@@ -1401,9 +1405,9 @@ impl MainWindowUi {
         });
     }
 
-    /// The Link menu (the Link spec, R19): Link, Start Stop Sync, Link Audio,
-    /// the peers that have Link Audio on (not clickable), and Configure
-    /// Link….
+    /// The Link menu (the Link spec, R19; menus.md C-LINK): Link Start Stop
+    /// Sync and Link Audio, then the peers that have Link Audio on (not
+    /// clickable) or a note that there are none, then Configure Link….
     fn link_menu_content(ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
         let ticked = |on: bool, label: &str| {
             if on {
@@ -1416,24 +1420,82 @@ impl MainWindowUi {
             events.push(UiEvent::Invoke(Invocation::new(id, args)));
             ui.close();
         };
-        let on = shell.link_enabled();
-        if ui.button(ticked(on, "Link")).clicked() {
-            run(ui, link_ids::SET_ENABLED, json!({ "on": !on }));
-        }
         let sync = shell.link_start_stop_sync();
-        if ui.button(ticked(sync, "Start Stop Sync")).clicked() {
+        if ui.button(ticked(sync, "Link Start Stop Sync")).clicked() {
             run(ui, link_ids::SET_START_STOP_SYNC, json!({ "on": !sync }));
         }
         let audio = shell.link_audio_enabled();
         if ui.button(ticked(audio, "Link Audio")).clicked() {
             run(ui, link_ids::SET_AUDIO, json!({ "on": !audio }));
         }
-        for peer in shell.link_audio_peers() {
+        ui.separator();
+        let peers = shell.link_audio_peers();
+        if peers.is_empty() {
+            crate::menus::heading(ui, "No Link Audio peers available.");
+        }
+        for peer in peers {
             ui.add_enabled(false, egui::Button::new(peer.name));
         }
         ui.separator();
         if ui.button("Configure Link…").clicked() {
             run(ui, ids::APP_SETTINGS, json!({ "page": "link" }));
+        }
+    }
+
+    /// The CPU meter's menu (menus.md C-CPU), which the meter's box and its
+    /// arrow both open. Beatlayer measures one load, the Current reading;
+    /// Enable CPU Meter, Average, the meter text's choice and Warn on Current
+    /// CPU Overload have nothing behind them yet and are drawn dim.
+    fn cpu_menu_content(ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
+        let status = shell.audio().status();
+        let current = status
+            .cpu_load
+            .filter(|_| status.engine_on)
+            .map_or_else(|| "---".to_owned(), |load| format!("{:.0} %", load.ceil()));
+        let dim = |ui: &mut Ui, text: &str, reading: Option<&str>| {
+            let mut button = egui::Button::new(text);
+            if let Some(reading) = reading {
+                button = button.shortcut_text(reading);
+            }
+            let response = ui.add_enabled(false, button);
+            crate::menus::register_item(ui.ctx(), &response);
+        };
+        dim(ui, "✔ Enable CPU Meter", None);
+        ui.separator();
+        dim(ui, "✔ Average", Some("---"));
+        dim(ui, "Current", Some(&current));
+        ui.separator();
+        crate::menus::heading(ui, "Meter Text Shows:");
+        ui.horizontal(|ui| {
+            for text in ["✔ Average", "Current"] {
+                ui.add_enabled(false, egui::Button::new(text));
+            }
+        });
+        ui.separator();
+        dim(ui, "Warn on Current CPU Overload", None);
+        ui.separator();
+        let keymap = crate::keymap::Keymap::from_data(shell.keymap().clone());
+        let engine = bl_shell::menus::MenuItem {
+            row: "C-CPU-007",
+            label: "Audio Engine On",
+            action: bl_shell::menus::Action::Command(ids::AUDIO_TOGGLE_ENGINE),
+            items: Vec::new(),
+        };
+        let response = crate::menus::item(
+            ui,
+            &engine,
+            shell,
+            &keymap,
+            crate::keymap::Platform::current(),
+            events,
+        );
+        crate::menus::take_focus_first(ui, &response);
+        if ui.button("Configure Audio…").clicked() {
+            events.push(UiEvent::Invoke(Invocation::new(
+                ids::APP_SETTINGS,
+                json!({ "page": "audio" }),
+            )));
+            ui.close();
         }
     }
 

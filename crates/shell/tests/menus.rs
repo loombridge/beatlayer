@@ -72,7 +72,8 @@ fn every_item_reaches_a_command_or_is_pending() {
                     Action::Pending(None)
                     | Action::System(_)
                     | Action::Omitted(_)
-                    | Action::Separator => {}
+                    | Action::Separator
+                    | Action::Heading => {}
                 }
                 if item.is_shown() {
                     assert!(!item.label.contains("Live"), "{}: {}", item.row, item.label);

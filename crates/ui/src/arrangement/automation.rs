@@ -1834,8 +1834,9 @@ pub(super) fn own_lane_header(
     lane_menu(ui, &background, shell, lane, events);
 }
 
-/// The lane header's context menu (R28): its view items, then the two that
-/// clear envelopes. Their order and names are Beatlayer's own.
+/// The lane header's context menu (R28; menus.md C-ALANE), in Live's order:
+/// Remove Automation Lane and Add Lane for Each Automated Envelope, then the
+/// three that clear envelopes.
 pub(super) fn lane_menu(
     ui: &Ui,
     response: &egui::Response,
@@ -1846,55 +1847,79 @@ pub(super) fn lane_menu(
     let view = shell.arrangement();
     let doc = shell.editor().document();
     let choice = view.lane_choice(track, number).unwrap_or_default();
-    let has_lanes = !view.own_lanes(track).is_empty();
     let owner = doc.track(track);
     let device = choice.target.map(device_of);
-    // The device the lane shows, for Clear Envelopes: a device, or the
+    // The device the lane shows, for Clear All Envelopes of: a device, or the
     // track's mixer. A lane showing a clip's controls or None has none.
     let clearing = match device {
-        Some(AutomationDevice::Mixer) => Some((None, "Track Mixer".to_owned())),
+        Some(AutomationDevice::Mixer) => Some((None, "Mixer".to_owned())),
         Some(AutomationDevice::Device(id)) => doc
             .device(id)
             .map(|device| (Some(id), device_title(device))),
         _ => None,
     };
     let menu = |ui: &mut Ui| {
-        if ui
-            .selectable_label(choice.only_automated, "Show Automated Parameters Only")
-            .clicked()
-        {
+        let keymap = crate::keymap::Keymap::from_data(shell.keymap().clone());
+        let platform = crate::keymap::Platform::current();
+        let item = |ui: &mut Ui, text: String, enabled: bool, keys: Option<&str>| {
+            let mut button = egui::Button::new(text);
+            if let Some(chord) = keys.and_then(|id| keymap.chord_for_shortcut(id, platform)) {
+                button = button.shortcut_text(crate::keymap::chord_text(chord, platform));
+            }
+            let response = ui.add_enabled(enabled, button);
+            crate::menus::register_item(ui.ctx(), &response);
+            response.clicked()
+        };
+        // Spec: automation R28. The main lane can't be removed.
+        if item(ui, "Remove Automation Lane".to_owned(), number > 0, None) {
             invoke(
                 events,
-                view_ids::SHOW_AUTOMATED_ONLY,
-                json!({ "track": track, "lane": number, "on": !choice.only_automated }),
+                view_ids::REMOVE_AUTOMATION_LANE,
+                json!({ "track": track, "lane": number, "and_after": false }),
             );
             ui.close();
         }
-        for (label, on) in [("Show All Lanes", true), ("Hide All Lanes", false)] {
-            if ui
-                .add_enabled(has_lanes, egui::Button::new(label))
-                .clicked()
-            {
-                invoke(
-                    events,
-                    view_ids::SHOW_AUTOMATION_LANES,
-                    json!({ "tracks": [track], "on": on }),
-                );
-                ui.close();
-            }
+        let unlaned = owner.is_some_and(|owner| {
+            owner.automation().any(|(target, _)| {
+                !view
+                    .own_lanes(track)
+                    .iter()
+                    .any(|lane| lane.target == Some(*target))
+            })
+        });
+        if item(
+            ui,
+            "Add Lane for Each Automated Envelope".to_owned(),
+            unlaned,
+            None,
+        ) {
+            invoke(
+                events,
+                view_ids::ADD_AUTOMATION_LANE,
+                json!({ "track": track, "lane": number, "all": true }),
+            );
+            ui.close();
         }
         ui.separator();
-        let any = owner.is_some_and(|owner| owner.automation().next().is_some());
-        if ui
-            .add_enabled(any, egui::Button::new("Clear All Envelopes"))
-            .clicked()
-        {
-            invoke(events, "automation.clear_track", json!({ "track": track }));
+        let shown_has = choice.target.is_some_and(|target| {
+            owner.is_some_and(|owner| owner.automation_for(&target).is_some())
+        });
+        if item(
+            ui,
+            "Clear Envelope".to_owned(),
+            shown_has,
+            Some("S-ENV-005"),
+        ) {
+            invoke(
+                events,
+                "automation.delete",
+                json!({ "track": track, "target": choice.target }),
+            );
             ui.close();
         }
         let label = clearing.as_ref().map_or_else(
-            || "Clear Envelopes".to_owned(),
-            |(_, name)| format!("Clear Envelopes of {name}"),
+            || "Clear All Envelopes of".to_owned(),
+            |(_, name)| format!("Clear All Envelopes of {name}"),
         );
         let has = clearing.is_some()
             && owner.is_some_and(|owner| {
@@ -1902,12 +1927,17 @@ pub(super) fn lane_menu(
                     .automation()
                     .any(|(target, _)| Some(device_of(*target)) == device)
             });
-        if ui.add_enabled(has, egui::Button::new(label)).clicked() {
+        if item(ui, label, has, None) {
             invoke(
                 events,
                 "automation.clear_device",
                 json!({ "track": track, "device": clearing.as_ref().and_then(|(id, _)| *id) }),
             );
+            ui.close();
+        }
+        let any = owner.is_some_and(|owner| owner.automation().next().is_some());
+        if item(ui, "Clear All Envelopes".to_owned(), any, None) {
+            invoke(events, "automation.clear_track", json!({ "track": track }));
             ui.close();
         }
     };

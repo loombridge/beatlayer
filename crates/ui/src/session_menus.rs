@@ -318,13 +318,6 @@ impl SessionMenus {
                 crate::menus::take_focus_first(ui, &response);
                 continue;
             }
-            // Edit Info Text opens the Info View's field for the first clip.
-            if item.row == "C-CLIPTITLE-002"
-                && let (Some(clip), Some(invocation)) = (clips.first(), state.invocation.as_mut())
-            {
-                invocation.args = json!({ "clip": clip });
-                state.enabled = shell.can_invoke_in(&invocation.id, &invocation.args, &contexts);
-            }
             let response = draw_item(ui, state, self.platform, events);
             let response = pending(ui, response, item.row);
             crate::menus::take_focus_first(ui, &response);

@@ -100,6 +100,19 @@ impl FilterPrefs {
         }
     }
 
+    /// Makes `label` hide every group of these.
+    pub fn hide_all(&mut self, label: &Label, groups: &[(String, bool)]) {
+        for (name, builtin) in groups {
+            self.set_group(label, name, *builtin, false);
+        }
+    }
+
+    /// Whether a label's groups differ from the default ones.
+    #[must_use]
+    pub fn customized(&self, label: &Label) -> bool {
+        self.groups.contains_key(&label.key())
+    }
+
     /// Puts a label's groups back to the default ones.
     pub fn reset(&mut self, label: &Label) {
         self.groups.remove(&label.key());
@@ -417,6 +430,7 @@ impl BrowserView {
             menu,
             selected: self.filter_tags(),
             include_auto_tags: self.filter_prefs.include_auto_tags,
+            customized: self.filter_prefs.customized(&self.label),
         }
     }
 
@@ -437,22 +451,27 @@ impl BrowserView {
         }
         let modes = usize::from(args.group.is_some())
             + usize::from(args.show_all)
+            + usize::from(args.hide_all)
             + usize::from(args.reset);
         if modes != 1 {
             return Err(BrowserError::InvalidArgs(
-                "give one of `group`, `show_all` and `reset`".to_owned(),
+                "give one of `group`, `show_all`, `hide_all` and `reset`".to_owned(),
             ));
         }
         if args.reset {
             self.filter_prefs.reset(&label);
-        } else if args.show_all {
+        } else if args.show_all || args.hide_all {
             let groups: Vec<(String, bool)> = self
                 .tags
                 .groups()
                 .iter()
                 .map(|group| (group.name.clone(), group.builtin))
                 .collect();
-            self.filter_prefs.show_all(&label, &groups);
+            if args.show_all {
+                self.filter_prefs.show_all(&label, &groups);
+            } else {
+                self.filter_prefs.hide_all(&label, &groups);
+            }
         } else if let Some(group) = args.group {
             let found = self
                 .tags

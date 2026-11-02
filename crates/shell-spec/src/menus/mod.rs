@@ -97,6 +97,9 @@ pub enum Action {
     Omitted(&'static str),
     /// A line between groups of items, where Live draws one.
     Separator,
+    /// A dim line of text that heads the items after it, or notes
+    /// something about them. It is not an item: nothing can choose it.
+    Heading,
 }
 
 /// The row of Beatlayer's own Assistant item in the View menu (D24): Live

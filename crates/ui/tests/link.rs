@@ -147,9 +147,9 @@ fn a_click_switches_link_and_the_toggle_reads_the_peers_as_they_come_and_go() {
 }
 
 // Spec: link R19, R23; link-audio R1. The arrow beside the toggle opens a
-// menu of Link, Start Stop Sync and Link Audio, then Configure Link…: the
-// first three tick while on and run their commands, and Configure Link…
-// opens Settings on the Link page.
+// menu of Link Start Stop Sync and Link Audio, a note on the peers, and
+// Configure Link…: the first two tick while on and run their commands, and
+// Configure Link… opens Settings on the Link page.
 #[test]
 fn the_menu_ticks_its_items_runs_their_commands_and_configures_link() {
     let mut h = main_window();
@@ -162,9 +162,20 @@ fn the_menu_ticks_its_items_runs_their_commands_and_configures_link() {
     );
 
     let nodes = open_menu(&mut h);
-    for label in ["Link", "Start Stop Sync", "Link Audio", "Configure Link…"] {
-        assert!(!menu_item(&nodes, label).disabled, "{label}");
-    }
+    // C-LINK: Link isn't in the menu, the toggle is; with no peer a note says
+    // so where the peers would be listed.
+    use common::MenuRow::{Dim, Item, Sep};
+    common::assert_menu(
+        &nodes,
+        &[
+            Item("Link Start Stop Sync"),
+            Item("Link Audio"),
+            Sep,
+            Dim("No Link Audio peers available."),
+            Sep,
+            Item("Configure Link…"),
+        ],
+    );
     h.click(bounds(&menu_item(&nodes, "Link Audio")).center());
     assert!(h.shell.link_audio_enabled());
     assert!(!h.shell.link_enabled(), "only the item's own command ran");
@@ -175,17 +186,13 @@ fn the_menu_ticks_its_items_runs_their_commands_and_configures_link() {
         "the ticked item switches it off"
     );
     let nodes = open_menu(&mut h);
-    h.click(bounds(&menu_item(&nodes, "Start Stop Sync")).center());
+    h.click(bounds(&menu_item(&nodes, "Link Start Stop Sync")).center());
     assert!(h.shell.link_start_stop_sync());
     assert!(!h.shell.link_enabled(), "only the item's own command ran");
     let nodes = open_menu(&mut h);
-    menu_item(&nodes, "✔ Start Stop Sync");
-    h.click(bounds(&menu_item(&nodes, "Link")).center());
-    assert!(h.shell.link_enabled());
-    let nodes = open_menu(&mut h);
-    menu_item(&nodes, "✔ Link");
-    h.click(bounds(&menu_item(&nodes, "✔ Link")).center());
-    assert!(!h.shell.link_enabled(), "the ticked item switches it off");
+    menu_item(&nodes, "✔ Link Start Stop Sync");
+    h.click(bounds(&menu_item(&nodes, "✔ Link Start Stop Sync")).center());
+    assert!(!h.shell.link_start_stop_sync());
 
     let nodes = open_menu(&mut h);
     h.click(bounds(&menu_item(&nodes, "Configure Link…")).center());

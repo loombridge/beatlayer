@@ -2156,144 +2156,7 @@ impl DeviceViewUi {
             InfoTarget::Macro(frame.id, item.number),
         );
         response.context_menu(|ui| {
-            if ui.button("Rename").clicked() {
-                self.renaming_macro = Some(MacroRenaming {
-                    rack: frame.id,
-                    number: item.number,
-                    text: None,
-                    focused: false,
-                    drawn: true,
-                });
-                ui.close();
-            }
-            // Spec: info-view R10. Edit Info Text types the text in the
-            // Info View.
-            if ui.button("Edit Info Text").clicked() {
-                invoke(
-                    events,
-                    "rack.set_macro_info_text",
-                    json!({ "rack": frame.id, "macro_number": item.number }),
-                );
-                ui.close();
-            }
-            let excluded = info.is_some_and(|m| m.randomize_excluded);
-            let label = if excluded {
-                "Include in Randomization"
-            } else {
-                "Exclude Macro from Randomization"
-            };
-            if ui.button(label).clicked() {
-                invoke(
-                    events,
-                    "rack.set_macro_randomize_excluded",
-                    json!({
-                        "rack": frame.id,
-                        "macro_number": item.number,
-                        "excluded": !excluded,
-                    }),
-                );
-                ui.close();
-            }
-            // Spec: macros R30. Exclude Macro From Variations keeps this
-            // macro out of a variation launch.
-            let left_out = info.is_some_and(|m| m.variation_excluded);
-            let label = if left_out {
-                "Include in Variations"
-            } else {
-                "Exclude Macro From Variations"
-            };
-            if ui.button(label).clicked() {
-                invoke(
-                    events,
-                    "rack.set_macro_variation_excluded",
-                    json!({
-                        "rack": frame.id,
-                        "macro_number": item.number,
-                        "excluded": !left_out,
-                    }),
-                );
-                ui.close();
-            }
-            // Spec: macros R21. The Macro Style submenu, after the
-            // exclusion items.
-            ui.menu_button("Macro Style", |ui| {
-                for (choice, label) in [
-                    (bl_model::MacroStyle::Knob, "Knob"),
-                    (bl_model::MacroStyle::Stepped, "Stepped"),
-                    (bl_model::MacroStyle::RadioButtons, "Radio Buttons"),
-                ] {
-                    if ui.selectable_label(choice == style, label).clicked() {
-                        invoke(
-                            events,
-                            "rack.set_macro_style",
-                            json!({
-                                "rack": frame.id,
-                                "macro_number": item.number,
-                                "style": choice,
-                            }),
-                        );
-                        ui.close();
-                    }
-                }
-                ui.separator();
-                ui.menu_button("Steps", |ui| {
-                    for count in bl_model::MACRO_STEPS_MIN..=bl_model::MACRO_STEPS_MAX {
-                        if ui
-                            .selectable_label(count == steps, count.to_string())
-                            .clicked()
-                        {
-                            invoke(
-                                events,
-                                "rack.set_macro_style",
-                                json!({
-                                    "rack": frame.id,
-                                    "macro_number": item.number,
-                                    "style": style,
-                                    "steps": count,
-                                }),
-                            );
-                            ui.close();
-                        }
-                    }
-                });
-            });
-            ui.menu_button("Colour", |ui| {
-                let current = shell
-                    .editor()
-                    .document()
-                    .device(frame.id)
-                    .and_then(|rack| rack.macros.setting(item.number).colour);
-                crate::palette::show(
-                    ui,
-                    theme,
-                    shell,
-                    ("macro-colour", frame.id, item.number),
-                    current,
-                    crate::palette::Target::new(
-                        "rack.set_macro_colour",
-                        json!({
-                            "rack": frame.id,
-                            "macro_number": item.number,
-                        }),
-                    ),
-                    events,
-                );
-            });
-            if ui.button("None").clicked() {
-                invoke(
-                    events,
-                    "rack.set_macro_colour",
-                    json!({
-                        "rack": frame.id,
-                        "macro_number": item.number,
-                        "colour": null,
-                    }),
-                );
-                ui.close();
-            }
-            if !info.is_some_and(|m| m.mappings.is_empty()) {
-                ui.separator();
-            }
+            self.macro_menu(ui, shell, theme, frame, item, info, events);
         });
         if map_mode {
             let pressed = macro_button(
@@ -2320,6 +2183,154 @@ impl DeviceViewUi {
             }
         }
         let _ = shell;
+    }
+
+    /// A macro knob's context menu (C-MACRO; macros spec, R21, R30, R34), in
+    /// Live's order: the automation items, the maps, Rename and the macro's
+    /// own switches, and the colours.
+    #[expect(clippy::too_many_arguments, reason = "the menu's inputs")]
+    fn macro_menu(
+        &mut self,
+        ui: &mut Ui,
+        shell: &Shell,
+        theme: &Theme,
+        frame: &DeviceFrame,
+        item: &MacroItem,
+        info: Option<&bl_shell::device_commands::MacroInfo>,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let keymap = crate::keymap::Keymap::from_data(shell.keymap().clone());
+        let contexts = shell.active_contexts();
+        let doc = shell.editor().document();
+        let target = bl_model::AutomationTarget::Device {
+            device: frame.id,
+            param: bl_model::macro_param(item.number),
+        };
+        let automation = doc
+            .device_track(frame.id)
+            .map(|track| crate::param_menu::ParamMenu::new(shell, track, target));
+        let macro_args = json!({ "rack": frame.id, "macro_number": item.number });
+        for entry in bl_shell::menus::shown(&context_menus::macro_knob()) {
+            if entry.is_separator() {
+                ui.separator();
+                continue;
+            }
+            let row = entry.row;
+            let toggle = |excluded: bool| {
+                let mut args = macro_args.clone();
+                args["excluded"] = json!(!excluded);
+                args
+            };
+            let excluded = info.is_some_and(|m| m.randomize_excluded);
+            let left_out = info.is_some_and(|m| m.variation_excluded);
+            let (enabled, checked, invocation) = match row {
+                "C-MACRO-001" | "C-MACRO-002" => {
+                    // Show Automation and Show Automation In New Lane.
+                    let response =
+                        ui.add_enabled(automation.is_some(), egui::Button::new(entry.label));
+                    crate::menus::register_item(ui.ctx(), &response);
+                    if response.clicked()
+                        && let Some(automation) = &automation
+                    {
+                        automation.show(row == "C-MACRO-002", events);
+                        ui.close();
+                    }
+                    continue;
+                }
+                context_menus::MACRO_RENAME_ROW => {
+                    let response = ui.add_enabled(true, egui::Button::new(entry.label));
+                    crate::menus::register_item(ui.ctx(), &response);
+                    if response.clicked() {
+                        self.renaming_macro = Some(MacroRenaming {
+                            rack: frame.id,
+                            number: item.number,
+                            text: None,
+                            focused: false,
+                            drawn: true,
+                        });
+                        ui.close();
+                    }
+                    continue;
+                }
+                context_menus::MACRO_INFO_ROW => (
+                    true,
+                    None,
+                    Some(Invocation::new(
+                        "rack.set_macro_info_text",
+                        macro_args.clone(),
+                    )),
+                ),
+                context_menus::MACRO_RANDOMIZE_ROW => (
+                    true,
+                    Some(excluded),
+                    Some(Invocation::new(
+                        "rack.set_macro_randomize_excluded",
+                        toggle(excluded),
+                    )),
+                ),
+                context_menus::MACRO_VARIATIONS_ROW => (
+                    true,
+                    Some(left_out),
+                    Some(Invocation::new(
+                        "rack.set_macro_variation_excluded",
+                        toggle(left_out),
+                    )),
+                ),
+                context_menus::MACRO_NO_COLOUR_ROW => {
+                    let mut args = macro_args.clone();
+                    args["colour"] = serde_json::Value::Null;
+                    (
+                        true,
+                        None,
+                        Some(Invocation::new("rack.set_macro_colour", args)),
+                    )
+                }
+                context_menus::MACRO_COLOUR_ROW => {
+                    let current = doc
+                        .device(frame.id)
+                        .and_then(|rack| rack.macros.setting(item.number).colour);
+                    crate::palette::show(
+                        ui,
+                        theme,
+                        shell,
+                        ("macro-colour", frame.id, item.number),
+                        current,
+                        crate::palette::Target::new("rack.set_macro_colour", macro_args.clone()),
+                        events,
+                    );
+                    continue;
+                }
+                _ => {
+                    // The maps, and the items Beatlayer has no feature for.
+                    let response = crate::menus::item_in(
+                        ui,
+                        entry,
+                        shell,
+                        &keymap,
+                        self.platform,
+                        &contexts,
+                        events,
+                    );
+                    let response = match context_menus::pending_package(row) {
+                        Some(package) => response.on_disabled_hover_text(format!(
+                            "Not built yet: arrives with {package}."
+                        )),
+                        None => response,
+                    };
+                    crate::menus::take_focus_first(ui, &response);
+                    continue;
+                }
+            };
+            let state = crate::menus::ItemState {
+                label: entry.label.to_owned(),
+                enabled,
+                checked,
+                chord: None,
+                invocation,
+            };
+            let response = crate::menus::draw_item(ui, state, self.platform, events);
+            crate::menus::take_focus_first(ui, &response);
+        }
     }
 
     /// A macro's knob (macros spec, R20): its arc, its pointer and its
@@ -3369,8 +3380,9 @@ impl DeviceViewUi {
         }
     }
 
-    /// A chain's context menu (racks spec, R26): Rename, Edit Info Text, and
-    /// the colour palette.
+    /// A chain's context menu (racks spec, R26; C-CHAIN): Duplicate, Rename,
+    /// Edit Info Text, Create Chain, Color Automatically and the colour
+    /// palette.
     fn chain_menu(
         &self,
         ui: &mut Ui,
@@ -3389,12 +3401,29 @@ impl DeviceViewUi {
                 continue;
             }
             if item.row == CHAIN_COLOUR_ROW {
-                ui.label("Colour");
                 self.chain_palette(ui, theme, shell, row, events);
                 continue;
             }
-            let response =
-                crate::menus::item_in(ui, item, shell, &keymap, self.platform, &contexts, events);
+            // Create Chain adds an empty chain to this chain's rack.
+            let args = (item.row == context_menus::CHAIN_CREATE_ROW)
+                .then(|| {
+                    shell
+                        .editor()
+                        .document()
+                        .chain_rack(row.id)
+                        .map(|rack| json!({ "rack": rack.id }))
+                })
+                .flatten();
+            let response = crate::menus::item_in_with_args(
+                ui,
+                item,
+                shell,
+                &keymap,
+                self.platform,
+                &contexts,
+                events,
+                args,
+            );
             let response = match context_menus::pending_package(item.row) {
                 Some(package) => {
                     let text = format!("Not built yet: arrives with {package}.");

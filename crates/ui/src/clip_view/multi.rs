@@ -748,8 +748,14 @@ impl ClipViewUi {
                 if !selected {
                     invoke(events, ids::SELECT_LOOP_BARS, json!({ "clips": [c.clip] }));
                 }
-                self.menus
-                    .show(ui, shell, &context_menus::loop_bar(), events);
+                self.menus.show(
+                    ui,
+                    shell,
+                    &context_menus::loop_bar(),
+                    false,
+                    &mut |_, _, _| false,
+                    events,
+                );
             });
         }
         let pointer = ui.input(|i| i.pointer.interact_pos());
@@ -1048,8 +1054,18 @@ impl ClipViewUi {
                 }
             }
         }
+        if response.secondary_clicked()
+            && let Some(pos) = response.interact_pointer_pos()
+        {
+            self.menus.on_grid = hit(pos).is_none();
+        }
         response.context_menu(|ui| {
-            self.menus.show(ui, shell, &context_menus::note(), events);
+            let menu = context_menus::note(context_menus::NoteMenu {
+                grid: self.menus.on_grid,
+                mpe: false,
+            });
+            self.menus
+                .show(ui, shell, &menu, false, &mut |_, _, _| false, events);
         });
         // The wheel and a middle-button drag scroll the key track.
         if ui.rect_contains_pointer(grid) {

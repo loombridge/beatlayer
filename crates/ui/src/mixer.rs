@@ -3216,24 +3216,9 @@ impl StripParts<'_> {
         };
         let spoken = modulated_text(pan_text(pan), modulated.map(|(_, played)| pan_text(played)));
         self.describe_value(ui, &response, name, spoken, pan, (-1.0, 1.0));
-        // The pan control's context menu (C-PAN-001, C-PAN-002): two
-        // radio-ticked items, as a device parameter's menu is.
-        let mode = track.mixer().pan_mode;
+        // The pan control's context menu (C-PAN): the pan mode to switch to,
+        // then the items every control has (the automation spec, R29).
         response.context_menu(|ui| {
-            for (item, wanted) in [
-                ("Stereo Pan Mode", PanMode::Stereo),
-                ("Split Stereo Pan Mode", PanMode::Split),
-            ] {
-                if ui.selectable_label(mode == wanted, item).clicked() {
-                    events.push(UiEvent::Invoke(Invocation::new(
-                        "mixer.set_pan_mode",
-                        json!({ "track": self.track, "mode": wanted }),
-                    )));
-                    ui.close();
-                }
-            }
-            // Spec: automation R29. The automation items come after the
-            // control's own.
             crate::param_menu::ParamMenu::new(
                 self.shell,
                 self.track,
@@ -3241,7 +3226,7 @@ impl StripParts<'_> {
                     param: MixerParam::Pan,
                 },
             )
-            .items(ui, true, events);
+            .items(ui, false, events);
         });
         // A click on the control while Automation Mode is on shows its
         // envelope.

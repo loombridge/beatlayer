@@ -88,34 +88,43 @@ impl TrackMenus {
         let doc = shell.editor().document();
         let in_arrangement =
             arrangement && crate::window::main_view(ui.ctx(), shell) == MainView::Arrangement;
-        let menu = context_menus::track(TrackMenu {
-            group: doc
-                .track(track)
-                .is_some_and(|t| t.kind() == bl_model::TrackKind::Group),
-            several: view.selected_tracks().len() > 1,
-            arrangement: in_arrangement,
-            midi: doc
-                .track(track)
-                .is_some_and(|t| t.kind() == bl_model::TrackKind::Midi),
-            time_selection: in_arrangement
-                && view.time_selection().is_some()
-                && view.selected_tracks().contains(&track),
-            // IMP-25: Deactivate All Devices reads Activate All Devices when
-            // every top-level device on the selection is already off.
-            devices_off: {
-                let mut any = false;
-                let mut all_off = true;
-                for &selected in view.selected_tracks() {
-                    if let Some(track) = doc.track(selected) {
-                        for device in track.devices() {
-                            any = true;
-                            all_off &= !device.enabled;
+        // Spec: session-context-menus R18. The Main track's header has a
+        // menu of its own.
+        let is_main = doc
+            .track(track)
+            .is_some_and(|t| t.kind() == bl_model::TrackKind::Main);
+        let menu = if is_main {
+            context_menus::main_track()
+        } else {
+            context_menus::track(TrackMenu {
+                group: doc
+                    .track(track)
+                    .is_some_and(|t| t.kind() == bl_model::TrackKind::Group),
+                several: view.selected_tracks().len() > 1,
+                arrangement: in_arrangement,
+                midi: doc
+                    .track(track)
+                    .is_some_and(|t| t.kind() == bl_model::TrackKind::Midi),
+                time_selection: in_arrangement
+                    && view.time_selection().is_some()
+                    && view.selected_tracks().contains(&track),
+                // IMP-25: Deactivate All Devices reads Activate All Devices when
+                // every top-level device on the selection is already off.
+                devices_off: {
+                    let mut any = false;
+                    let mut all_off = true;
+                    for &selected in view.selected_tracks() {
+                        if let Some(track) = doc.track(selected) {
+                            for device in track.devices() {
+                                any = true;
+                                all_off &= !device.enabled;
+                            }
                         }
                     }
-                }
-                any && all_off
-            },
-        });
+                    any && all_off
+                },
+            })
+        };
         let contexts = shell.track_menu_contexts();
         for item in shown(&menu) {
             if item.is_separator() {
@@ -124,7 +133,7 @@ impl TrackMenus {
             }
             let package = context_menus::pending_package(item.row);
             // Spec: themes R16, R26. The palette colours the selected tracks.
-            if item.row == "C-TRACK-015" {
+            if item.row == "C-TRACK-015" || item.row == context_menus::MAIN_COLOUR_ROW {
                 let current = doc.track(track).map(bl_model::Track::colour);
                 crate::palette::show(
                     ui,

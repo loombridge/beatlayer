@@ -14,6 +14,7 @@
 
 use bl_core::time::Ticks;
 use bl_model::{Breakpoint, ClipId, Expression, MpeLane, Note, envelope_value};
+use bl_shell::menus::MenuItem;
 use bl_shell::note_commands::{self as ids, BreakpointRef, NoteField, TickRange};
 use bl_shell::{GesturePhase, Invocation};
 use egui::accesskit::Role;
@@ -1918,10 +1919,71 @@ impl MpeUi {
         self.menu = Some(self.menu_at(frame, &frame.pitch_targets(), pos, keys));
     }
 
-    /// The items the tab adds to a context menu: Edit Value or Add Value
-    /// where the right-click fell, and Clear All Envelopes (C-MPE-001 to
-    /// C-MPE-003).
+    /// The items a lane's menu has: Edit Value or Add Value where the
+    /// right-click fell, and Clear All MPE Envelopes.
     pub fn menu_items(&mut self, ui: &mut Ui, frame: &Frame<'_>, events: &mut Vec<UiEvent>) {
+        self.value_items(ui, frame);
+        clear_item(ui, frame, events);
+    }
+
+    /// The rows of the note editor's menu in the MPE tab that are the tab's
+    /// (C-MPE-001 to C-MPE-003): the two that clear envelopes, and Pitch
+    /// Bend Range Settings..., which is dim. Draws `item` and returns true if
+    /// it is one of them.
+    pub fn menu_row(
+        &mut self,
+        ui: &mut Ui,
+        item: &MenuItem,
+        frame: &Frame<'_>,
+        (keymap, platform): (&crate::keymap::Keymap, crate::keymap::Platform),
+        events: &mut Vec<UiEvent>,
+    ) -> bool {
+        let focus = frame.focus.unwrap_or(Expression::Pitch);
+        let has = |only: Option<Expression>| {
+            frame.selected.iter().any(|place| {
+                frame.note(*place).is_some_and(|note| {
+                    Expression::ALL
+                        .into_iter()
+                        .filter(|each| only.is_none_or(|only| only == *each))
+                        .any(|each| !note.envelope(each).is_empty())
+                })
+            })
+        };
+        let (label, only) = match item.row {
+            "C-MPE-001" => (
+                format!("Clear Envelope ({})", menu_name(focus)),
+                Some(focus),
+            ),
+            "C-MPE-002" => (item.label.to_owned(), None),
+            // Dim: Beatlayer has no pitch bend range of a clip.
+            "C-MPE-003" => {
+                let response = ui.add_enabled(false, egui::Button::new(item.label));
+                crate::menus::register_item(ui.ctx(), &response);
+                return true;
+            }
+            _ => return false,
+        };
+        let mut button = egui::Button::new(label);
+        // Clear Envelope has the key that deletes an envelope.
+        if let Some(chord) = only.and(keymap.chord_for_shortcut("S-ENV-005", platform)) {
+            button = button.shortcut_text(crate::keymap::chord_text(chord, platform));
+        }
+        let response = ui.add_enabled(has(only), button);
+        crate::menus::register_item(ui.ctx(), &response);
+        if response.clicked() {
+            let mut args = json!({ "clip": frame.clip, "notes": frame.selected });
+            if let Some(only) = only {
+                args["envelope"] = json!(only);
+            }
+            invoke(events, ids::CLEAR_EXPRESSIONS, args);
+            ui.close();
+        }
+        true
+    }
+
+    /// Edit Value or Add Value, where the right-click fell on an envelope
+    /// (C-MPE-004, C-MPE-005).
+    pub fn value_items(&mut self, ui: &mut Ui, frame: &Frame<'_>) {
         match self.menu.clone() {
             Some(Menu::Edit {
                 expression,
@@ -1972,7 +2034,6 @@ impl MpeUi {
             }
             _ => {}
         }
-        clear_item(ui, frame, events);
     }
 
     /// Reads the keys of a value being typed (R26): digits, a minus and a
@@ -2195,12 +2256,21 @@ fn bounds(rect: Rect) -> egui::accesskit::Rect {
     }
 }
 
-/// Clear All Envelopes (C-MPE-001), in the note area's and each lane's menu.
+/// The name of an envelope in the note editor's menu: Live calls Pitch
+/// Pitch Bend.
+fn menu_name(expression: Expression) -> &'static str {
+    match expression {
+        Expression::Pitch => "Pitch Bend",
+        other => expression_name(other),
+    }
+}
+
+/// Clear All MPE Envelopes, in each lane's menu.
 fn clear_item(ui: &mut Ui, frame: &Frame<'_>, events: &mut Vec<UiEvent>) {
     ui.separator();
     let item = ui.add_enabled(
         !frame.selected.is_empty(),
-        egui::Button::new("Clear All Envelopes"),
+        egui::Button::new("Clear All MPE Envelopes"),
     );
     crate::menus::register_item(ui.ctx(), &item);
     if item.clicked() {

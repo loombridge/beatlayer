@@ -156,7 +156,7 @@ Result: [`NoteEditResult`](README.md#noteeditresult).
 
 **Clear All Envelopes**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
 
-Clears the Pitch, Slide and Pressure envelopes of notes (`notes`, or the selected notes), as Clear All Envelopes in the MPE tab's context menus does. One undo step, Clear All Envelopes. The clip query's notes read the envelopes back.
+Clears the Pitch, Slide and Pressure envelopes of notes (`notes`, or the selected notes), as Clear All MPE Envelopes in the MPE tab's context menu does, or only `envelope`'s, as Clear Envelope does. One undo step, Clear All Envelopes. The clip query's notes read the envelopes back.
 
 Default keys: none.
 
@@ -165,6 +165,7 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `clip` | [`ClipId`](README.md#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows. |
+| `envelope` | [`Expression`](README.md#expression) or null | no | The one envelope to clear, as Clear Envelope in the MPE tab's menu does. Left out, all three. |
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order. Left out, the selected notes. |
 
 Result: [`NoteEditResult`](README.md#noteeditresult).

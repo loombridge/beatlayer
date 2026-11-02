@@ -480,7 +480,7 @@ pub const ELEMENTS: &[Placement] = &[
     p(E::MidiMap, "L-CTRL-022", "MIDI Map Mode", CB, 1339.0, 28.0, Right, Switch, None),
     p(E::SampleRate, "L-CTRL-023", "Sample Rate", CB, 1369.0, 50.0, Right, Display, None),
     p(E::Cpu, "L-CTRL-024", "CPU Load", CB, 1419.0, 49.0, Right, Meter, None),
-    p(E::CpuMenu, "L-CTRL-024", "CPU Meter Options", CB, 1468.0, 8.0, Right, MenuArrow, Some("M5")),
+    p(E::CpuMenu, "L-CTRL-024", "CPU Meter Options", CB, 1468.0, 8.0, Right, MenuArrow, None),
     p(E::Overload, "L-CTRL-025", "Disk Overload", CB, 1478.0, 18.0, Right, Indicator, Some("WP-1.3")),
     p(E::RemoteIndicators, "L-CTRL-026", "Remote Input and Output Indicators", CB, 1498.0, 7.0, Right, Indicator, None),
     p(E::MidiIndicators, "L-CTRL-026", "MIDI Track Input and Output Indicators", CB, 1507.0, 14.0, Right, Indicator, None),

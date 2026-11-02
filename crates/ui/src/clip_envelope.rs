@@ -151,6 +151,52 @@ enum Menu {
     /// The time selection's: the shapes and Simplify Envelope (the clip
     /// envelopes spec, R13), with Add Value too where the line is.
     Selection(Option<Ticks>),
+    /// Empty space away from the line and the time selection: the grid's
+    /// settings, Draw Mode and the shapes (C-ENV).
+    Grid,
+}
+
+/// The menu on empty space in the editor (C-ENV): Snap to Grid, the grid's
+/// settings, Draw Mode and the shapes, in Live's order. With nothing drawn
+/// there are no Clear items.
+fn grid_menu(
+    ui: &mut Ui,
+    shell: &Shell,
+    contexts: &[bl_commands::Context],
+    events: &mut Vec<UiEvent>,
+) {
+    let keymap = crate::keymap::Keymap::from_data(shell.keymap().clone());
+    let platform = crate::keymap::Platform::current();
+    for item in bl_shell::menus::shown(&bl_shell::context_menus::clip_envelope()) {
+        if item.is_separator() {
+            ui.separator();
+        } else if item.action == bl_shell::menus::Action::Heading {
+            crate::menus::heading(ui, item.label);
+        } else if crate::arrangement::context_menu::grid_row(ui, shell, item.row, events) {
+        } else if bl_shell::context_menus::SHAPE_ROWS.contains(&item.row) {
+            let shapes = if item.row == "C-ENV-011" {
+                &bl_model::Shape::ALL[..5]
+            } else {
+                &bl_model::Shape::ALL[5..]
+            };
+            ui.horizontal(|ui| {
+                for shape in shapes {
+                    shape_button(
+                        ui,
+                        shell,
+                        *shape,
+                        bl_shell::clip_envelope_commands::INSERT_SHAPE,
+                        contexts,
+                        events,
+                    );
+                }
+            });
+        } else {
+            let response =
+                crate::menus::item_in(ui, item, shell, &keymap, platform, contexts, events);
+            crate::menus::take_focus_first(ui, &response);
+        }
+    }
 }
 
 /// The editor's area: the note area's width, down to the footer.
@@ -738,7 +784,7 @@ impl EnvelopeEditor {
                 Hit::Segment(_) if inside => Some(Menu::Selection(Some(add()))),
                 Hit::Empty if inside => Some(Menu::Selection(None)),
                 Hit::Segment(_) => Some(Menu::Add(add())),
-                Hit::Empty => None,
+                Hit::Empty => Some(Menu::Grid),
             };
         }
         let Some(menu) = self.menu else {
@@ -788,6 +834,7 @@ impl EnvelopeEditor {
                 }
             }
             Menu::Add(at) => add_value(ui, at),
+            Menu::Grid => grid_menu(ui, shell, &contexts, events),
             Menu::Selection(add) => {
                 for shapes in [&bl_model::Shape::ALL[..5], &bl_model::Shape::ALL[5..]] {
                     ui.horizontal(|ui| {

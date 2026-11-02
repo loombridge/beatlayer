@@ -49,6 +49,7 @@ use bl_plugin_host::lv2::Lv2Host;
 use bl_plugin_host::scan::Scanner;
 use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::arrangement as view_ids;
+use bl_shell_spec::arranger as arranger_ids;
 use bl_shell_spec::audio_editing as audio_ids;
 use bl_shell_spec::automation as automation_ids;
 use bl_shell_spec::autosampler as autosampler_ids;
@@ -431,6 +432,10 @@ pub enum Effect {
     /// person types the new name; Return runs `locator.rename` with it
     /// (WP-6.24; the time editing spec, R8).
     RenameLocator(bl_model::LocatorId),
+    /// Start renaming a section in the arranger track, where the person
+    /// types the new name; Return runs `arranger.rename_section` with it
+    /// (WP-6.45; the arranger track spec, R7).
+    RenameSection(bl_model::SectionId),
     /// Start typing a new signature for the time-signature marker at this
     /// position, in the lane under the beat-time ruler; Return runs
     /// `arrangement.edit_time_signature` with it (WP-6.61; the time editing
@@ -904,6 +909,9 @@ pub struct Shell {
     /// floating devices' windows and the plug-ins' editor windows;
     /// WP-2.5b): view state, never part of the set.
     plug_in_windows: bool,
+    /// The states a preset gave plug-ins the engine hasn't started yet, which
+    /// they take when they run (the plug-in scanning spec, R16).
+    pending_states: BTreeMap<bl_model::DeviceId, Vec<u8>>,
     /// Plug-ins inserted from the Browser whose windows Auto-Open Plug-In
     /// Windows opens once they've started (WP-6.75).
     auto_open: Vec<bl_model::DeviceId>,
@@ -1483,6 +1491,7 @@ impl Shell {
             session_watch: crate::session_capture::Watch::default(),
             automation_recording: false,
             plug_in_windows: true,
+            pending_states: BTreeMap::new(),
             auto_open: Vec::new(),
             devices: {
                 // Beatlayer's native devices (WP-2.5; none ship yet).
@@ -1897,6 +1906,9 @@ impl Shell {
         if locator_ids::handles(id) {
             return self.run_locator(id, args);
         }
+        if arranger_ids::handles(id) {
+            return self.run_arranger(id, args);
+        }
         if bl_shell_spec::chord_lane::handles(id) {
             return self.run_chord_lane(id, args);
         }
@@ -2069,10 +2081,12 @@ impl Shell {
         if id == browser_ids::LOAD_SELECTED
             && let Some(plugin) = self.browser_view.selected_plugin().cloned()
         {
-            // Spec: plugin-scanning R11. A plug-in chosen in the browser
-            // loads as `plugin.load` loads it.
+            // Spec: plugin-scanning R11, R17. A plug-in chosen in the
+            // browser loads as `plugin.load` loads it, and a preset of one
+            // loads it with that preset.
             Self::args::<NoArgs>(id, args)?;
-            let loaded = self.load_browser_plugin(id, &plugin)?;
+            let preset = self.browser_view.selected_plugin_preset();
+            let loaded = self.load_browser_plugin(id, &plugin, preset)?;
             self.touch();
             return Ok(loaded);
         }

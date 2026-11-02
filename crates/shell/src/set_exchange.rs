@@ -217,6 +217,7 @@ impl Opened {
             details: None,
             collections: Vec::new(),
             hidden: false,
+            presets: false,
             nested: Vec::new(),
         });
         if !shown {
@@ -250,6 +251,7 @@ impl Opened {
                         details: None,
                         collections: Vec::new(),
                         hidden: false,
+                        presets: false,
                         nested: Vec::new(),
                     });
                 }
@@ -268,6 +270,7 @@ impl Opened {
             details: None,
             collections: Vec::new(),
             hidden: false,
+            presets: false,
             nested: Vec::new(),
         });
     }

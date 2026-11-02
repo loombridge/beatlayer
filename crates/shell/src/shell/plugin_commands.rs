@@ -1,10 +1,12 @@
 //! The plug-in commands and loading a plug-in from the Browser.
 
 use super::{Effect, MpeDialogTarget, Shell, ShellError, to_value};
+use crate::browser::PluginPreset;
 use crate::devices;
 use crate::devices::DeviceView;
 use bl_model::AutomationTarget;
 use bl_model::TrackId;
+use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::plugins as plugin_ids;
 use serde_json::Value;
@@ -790,11 +792,45 @@ impl Shell {
     /// Loads a plug-in the browser lists (WP-2.9b): onto the selected track
     /// as `plugin.load` (or `plugin.load_au`) places it, or, while a device
     /// is being hot-swapped, in its place, as one undo step.
+    ///
+    /// With a `preset`, the plug-in loads with it (the plug-in scanning
+    /// spec, R17): into the device being hot-swapped, in place, when that is
+    /// a device of the same plug-in; otherwise into the new device, and the
+    /// device armed for hot-swap that it replaced stays armed, now on it.
     pub(super) fn load_browser_plugin(
         &mut self,
         id: &str,
         plugin: &bl_plugin_host::scan::ScannedPlugin,
+        preset: Option<PluginPreset>,
     ) -> Result<Value, ShellError> {
+        let armed = self.devices.hot_swap();
+        if let Some(preset) = &preset
+            && let Some(device) = armed
+            && self.editor.document().device(device).is_some_and(|d| {
+                matches!(&d.kind, bl_model::DeviceKind::Plugin { format, plugin_id }
+                    if *format == plugin.format && *plugin_id == plugin.plugin_id)
+            })
+        {
+            self.editor.begin("Load Preset");
+            return match self.load_plugin_preset(id, device, preset) {
+                Ok(()) => {
+                    if self.editor.commit().unwrap_or(false) {
+                        self.dirty = true;
+                    }
+                    self.document_changed();
+                    Ok(to_value(&device_ids::PresetResult {
+                        device,
+                        path: preset_file(preset).to_string_lossy().into_owned(),
+                        name: bl_project::preset::preset_name(preset_file(preset)),
+                    }))
+                }
+                Err(error) => {
+                    self.editor.cancel().ok();
+                    self.document_changed();
+                    Err(error)
+                }
+            };
+        }
         let swapped = self.devices.hot_swap().and_then(|device| {
             let doc = self.editor.document();
             let track = doc.device_track(device)?;
@@ -817,7 +853,11 @@ impl Shell {
             Some((device, track, chain.device_position(device)?))
         });
         let (mut track, index) = swapped.map_or((None, None), |(_, t, i)| (Some(t), Some(i)));
-        self.editor.begin("Load Plug-In");
+        self.editor.begin(if preset.is_some() {
+            "Load Preset"
+        } else {
+            "Load Plug-In"
+        });
         let loaded = (|| {
             // Live always has a track selected; a set with none gets a new
             // track for the plug-in: MIDI for an instrument or a MIDI
@@ -883,6 +923,12 @@ impl Shell {
                     }),
                 )?,
             };
+            if let Some(preset) = &preset
+                && let Ok(device) =
+                    serde_json::from_value::<plugin_ids::PluginLoaded>(loaded.clone())
+            {
+                self.load_plugin_preset(id, device.device, preset)?;
+            }
             Ok(loaded)
         })();
         match loaded {
@@ -891,6 +937,14 @@ impl Shell {
                     self.dirty = true;
                 }
                 self.document_changed();
+                // Spec: racks R45. Hot-swap stays on, now on the new device.
+                if let Some(old) = swapped.map(|(old, _, _)| old)
+                    && armed == Some(old)
+                    && let Ok(device) =
+                        serde_json::from_value::<plugin_ids::PluginLoaded>(loaded.clone())
+                {
+                    self.devices.rearm_hot_swap(device.device);
+                }
                 // Spec: clap-hosting R28. Its window opens once the
                 // plug-in has started.
                 if self.prefs.auto_open_plug_in_windows.0
@@ -946,5 +1000,158 @@ impl Shell {
             track,
             settings,
         }
+    }
+    /// Loads `preset` into plug-in `device` (the plug-in scanning spec, R16,
+    /// R19): a Beatlayer preset's values, name and state, as
+    /// `device.load_preset` does; an Audio Unit's file as the unit's state,
+    /// with the file's name for the device's. The steps join the open
+    /// transaction, if there is one.
+    fn load_plugin_preset(
+        &mut self,
+        id: &str,
+        device: bl_model::DeviceId,
+        preset: &PluginPreset,
+    ) -> Result<(), ShellError> {
+        let failed = |message: String| ShellError::Failed {
+            command: id.to_owned(),
+            message,
+        };
+        match preset {
+            PluginPreset::Beatlayer(file) => {
+                devices::load_preset(&self.devices, &mut self.editor, device, file)
+                    .map_err(|e| super::device_error(id, e))?;
+                self.give_preset_state(device, file).map_err(failed)
+            }
+            PluginPreset::AudioUnit(file) => {
+                let data =
+                    std::fs::read(file).map_err(|e| failed(format!("{}: {e}", file.display())))?;
+                let current = self
+                    .editor
+                    .document()
+                    .device(device)
+                    .ok_or_else(|| failed(format!("no {device}")))?;
+                let params = current.params.clone();
+                self.hand_state(device, &data).map_err(failed)?;
+                self.editor
+                    .apply(bl_model::Command::SetDeviceState {
+                        device,
+                        params,
+                        name: bl_project::preset::preset_name(file),
+                        shape: None,
+                        articulations: None,
+                        routes: None,
+                        mpe: None,
+                        similarity_reference: None,
+                    })
+                    .map(|_| ())
+                    .map_err(|e| failed(e.to_string()))
+            }
+        }
+    }
+
+    /// Gives plug-in `device` the state the Beatlayer preset at `file`
+    /// holds, if it holds one for that plug-in (the plug-in scanning spec,
+    /// R16): the preset's load has set its values and name.
+    pub(super) fn give_preset_state(
+        &mut self,
+        device: bl_model::DeviceId,
+        file: &std::path::Path,
+    ) -> Result<(), String> {
+        // Only a plug-in device's preset can hold a state; the others aren't
+        // read again.
+        let kind = self
+            .editor
+            .document()
+            .device(device)
+            .map(|d| d.kind.clone())
+            .filter(|kind| matches!(kind, bl_model::DeviceKind::Plugin { .. }));
+        let Some(kind) = kind else {
+            return Ok(());
+        };
+        match bl_project::preset::Preset::load(file) {
+            Ok(preset) if preset.kind == kind => match preset.state {
+                Some(state) => self.hand_state(device, &state),
+                None => Ok(()),
+            },
+            _ => Ok(()),
+        }
+    }
+
+    /// Gives plug-in `device` a state now, or when the engine starts it.
+    fn hand_state(&mut self, device: bl_model::DeviceId, data: &[u8]) -> Result<(), String> {
+        let running = crate::plugins::apply_state(
+            &self.plugins,
+            &self.au,
+            &self.vst3,
+            &self.lv2,
+            &mut self.editor,
+            device,
+            data,
+        )?;
+        if running {
+            self.pending_states.remove(&device);
+        } else {
+            self.pending_states.insert(device, data.to_vec());
+        }
+        Ok(())
+    }
+
+    /// Gives the plug-ins the engine has started since their preset's state
+    /// was handed over that state. Returns whether any took it.
+    pub(super) fn apply_pending_states(&mut self) -> bool {
+        let mut took = false;
+        for (device, data) in std::mem::take(&mut self.pending_states) {
+            if self.editor.document().device(device).is_none() {
+                continue;
+            }
+            match self.hand_state(device, &data) {
+                Ok(()) => took |= !self.pending_states.contains_key(&device),
+                Err(why) => self.set_message(
+                    format!("The plug-in refused the preset's state: {why}"),
+                    true,
+                ),
+            }
+        }
+        took
+    }
+
+    /// Shows the presets of the plug-in `device` runs in the browser, with
+    /// the one it last loaded selected (the plug-in scanning spec, R18).
+    /// Returns whether the browser lists the plug-in.
+    pub(super) fn show_plugin_presets(&mut self, device: bl_model::DeviceId) -> bool {
+        let Some((bl_model::DeviceKind::Plugin { format, plugin_id }, last)) = self
+            .editor
+            .document()
+            .device(device)
+            .map(|d| (d.kind.clone(), d.preset_name.clone()))
+        else {
+            return false;
+        };
+        let Some(reveal) = self
+            .browser_view
+            .reveal_plugin(format, &plugin_id, last.as_deref())
+        else {
+            return false;
+        };
+        self.browser = true;
+        self.run_browser(browser_ids::OPEN_PLACE, json!({ "label": "plug_ins" }))
+            .ok();
+        for path in reveal.vendor.iter().chain([&reveal.plugin]) {
+            self.run_browser(
+                browser_ids::OPEN_FOLDER,
+                json!({ "path": path, "open": true, "keep_others": true }),
+            )
+            .ok();
+        }
+        self.run_browser(browser_ids::SELECT, json!({ "paths": [reveal.select] }))
+            .ok();
+        true
+    }
+}
+
+/// The file a plug-in preset names.
+fn preset_file(preset: &PluginPreset) -> &std::path::Path {
+    match preset {
+        PluginPreset::Beatlayer(file) | PluginPreset::AudioUnit(file) => file,
     }
 }

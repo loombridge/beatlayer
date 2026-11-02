@@ -121,6 +121,11 @@ object_id!(
     "locator"
 );
 object_id!(
+    /// The ID of a section of the song (WP-6.45).
+    SectionId,
+    "section"
+);
+object_id!(
     /// The ID of a region of the chord lane (WP-6.48).
     ChordRegionId,
     "chord region"

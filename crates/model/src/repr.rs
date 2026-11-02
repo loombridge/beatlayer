@@ -339,6 +339,10 @@ impl TryFrom<DocumentRepr> for Document {
             settings.arrangement_loop.length,
         )?;
         check_locators(&settings.locators)?;
+        crate::section::check_sections(&settings.sections)?;
+        for section in &settings.sections {
+            loader.claim(section.id.0)?;
+        }
         crate::chord_lane::check_all(&settings.chord_lane)?;
         // The engine looks a note's region up by its order.
         settings.chord_lane.sort_by_key(|region| region.start);

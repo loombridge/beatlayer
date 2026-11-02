@@ -113,6 +113,15 @@ impl AuHost {
         Err(AuError::NoInstance(device))
     }
 
+    /// Gives the device's unit a state: it has none, on this platform.
+    ///
+    /// # Errors
+    ///
+    /// [`AuError::NoInstance`]: no device has a running unit here.
+    pub fn load_state(&self, device: DeviceId, _data: &[u8]) -> Result<(), AuError> {
+        Err(AuError::NoInstance(device))
+    }
+
     /// What the device's unit is doing: nothing, on this platform.
     #[must_use]
     pub fn status(&self, _device: DeviceId) -> Option<PluginStatus> {

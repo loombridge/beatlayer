@@ -117,6 +117,11 @@ pub const IMP_21: &str = "IMP-21";
 /// Clip in the clips' context menus.
 pub const IMP_21_UNLINK: &str = "IMP-21-unlink";
 
+/// The row of Beatlayer's own Arranger Track item in the View menu (IMP-22),
+/// straight after Overview: an improvement, so not one of menus.md's Live
+/// rows, though the reference names it IMP-22.
+pub const IMP_22: &str = "IMP-22";
+
 /// The row of Beatlayer's own Return Tracks Scroll with Tracks (IMP-01),
 /// straight after Return Tracks in the Mixer Controls submenu and in the
 /// Arrangement Track Controls submenu: an improvement, so not one of

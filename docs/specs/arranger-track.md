@@ -1,6 +1,6 @@
 # The arranger track: sections of the song, moved, copied and deleted across every track
 
-- **Status:** draft
+- **Status:** built (WP-6.45 builds R1 to R16, each with a passing test)
 - **Work packages:** WP-6.45 (R1 to R16)
 - **Parity-matrix row:** none (Beatlayer's own); [the improvements](../05-improvements.md), IMP-22 (arranger track)
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026, for the locators and …Time commands it builds on ([time-editing.md](time-editing.md)); [the improvements](../05-improvements.md), IMP-22 and the rules for improvements
@@ -22,7 +22,7 @@ Moving a section is a Cut Time and a Paste Time in one step ([time-editing.md](t
 
 ## Rules
 
-- **R1.** View ▸ Arranger Track, straight after Overview (M-VIEW-034) and ticked while shown, shows and hides the arranger track (`arrangement.arranger_track`, `read`, view state). It's hidden in a new set and in a set saved before it; whether it shows is saved with the set and isn't an undo step. While it's hidden the Arrangement is laid out as [arrangement-view.md](arrangement-view.md) R1 says. (S1, S2)
+- **R1.** View ▸ Arranger Track, straight after Overview (M-VIEW-034) and ticked while shown, shows and hides the arranger track (`arrangement.arranger_track`, `edit`, since it changes what the set saves). It's hidden in a new set and in a set saved before it; whether it shows is saved with the set and isn't an undo step. While it's hidden the Arrangement is laid out as [arrangement-view.md](arrangement-view.md) R1 says. (S1, S2)
 - **R2.** While shown, the arranger track (L-ARR-023) is an 18-point row across the lanes at the top of the track lanes, under the rulers, the scrub area and the time-signature lane, which stays in place as the tracks scroll; the track lanes start under it. Its header, in the header column, reads Arranger. (S1, S3, S4)
 - **R3.** A set holds any number of sections. Each has a stable ID, a start in ticks from 1.1.1 on, a length longer than zero, a name, and a colour from the theme's palette; sections don't overlap and may leave gaps between them. The set saves them, and a set saved before them loads with none; sections that overlap, or one with no length or before 1.1.1, don't load. (S1)
 - **R4.** Each section is drawn over its span in the lane in its colour, with its name, and a selected section in the selection colour. Assistive technology reads the lane as a list named Arranger Track and each section as an item named for it, its value its span in bars, beats and sixteenths, and whether it's selected. (S1, S3)
@@ -36,26 +36,26 @@ Moving a section is a Cut Time and a Paste Time in one step ([time-editing.md](t
 - **R12.** Move Earlier and Move Later, in a section's context menu, swap it with the section before or after it, moving both spans' material as R8 does: one undo step each. They're disabled where there's no section that way. (S1, S3)
 - **R13.** The …Time commands treat sections as they treat locators ([time-editing.md](time-editing.md) R14): Delete Time and Cut Time remove the part of a section inside the span, deleting a section wholly inside it, and move later ones earlier; Insert Silence and Paste Time inside a section lengthen it, and at or before its start move it later; Copy Time and Paste Time carry the sections inside the span with the rest, cut to it. Edits of clips alone never move sections. (S1, S3)
 - **R14.** The lane's sections are in the Arrangement's Tab order straight after Lock Envelopes ([accessibility.md](accessibility.md) R10), in time order: Tab reaching a section selects it, Cmd-R renames it, Cmd-D duplicates it, Delete deletes it as R11 says, and the context-menu key opens its context menu, which reaches Move Earlier and Move Later. (S2, S3)
-- **R15.** Every action here is a registered command with a schema, a description written for a model, and a permission class, run headless with explicit section IDs, spans and positions in ticks or as bars, beats and sixteenths, or on the selection: `arranger.add_section`, `arranger.sections_from_locators`, `arranger.rename_section`, `arranger.set_section_colour`, `arranger.resize_section`, `arranger.move_section`, `arranger.copy_section`, `arranger.duplicate_section` and `arranger.remove_section` are `edit`; `arranger.delete_section` is `destructive`; `arranger.select_section` and `arrangement.arranger_track` are `read`. The query tool's song reads sections back (`settings.sections`), and `arrangement.state` reports whether the lane shows and the selected sections. (S2)
+- **R15.** Every action here is a registered command with a schema, a description written for a model, and a permission class, run headless with explicit section IDs, spans and positions in ticks or as bars, beats and sixteenths, or on the selection: `arranger.add_section`, `arranger.sections_from_locators`, `arranger.rename_section`, `arranger.set_section_colour`, `arranger.resize_section`, `arranger.move_section`, `arranger.copy_section`, `arranger.duplicate_section` and `arranger.remove_section` are `edit`; `arranger.delete_section` is `destructive`; `arranger.select_section` is `read`, and `arrangement.arranger_track` is `edit` (no undo step). The query tool's song reads sections back (`settings.sections`), and `arrangement.state` reports whether the lane shows and the selected sections. (S2)
 - **R16.** After any section edit no two sections overlap, no two clips on a track overlap, and undo returns the set exactly as it was before the edit. (S3)
 
 ## Tests
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.45 | |
-| R2 | to be written in WP-6.45 | |
-| R3 | to be written in WP-6.45 | |
-| R4 | to be written in WP-6.45 | |
-| R5 | to be written in WP-6.45 | |
-| R6 | to be written in WP-6.45 | |
-| R7 | to be written in WP-6.45 | |
-| R8 | to be written in WP-6.45 | |
-| R9 | to be written in WP-6.45 | |
-| R10 | to be written in WP-6.45 | |
-| R11 | to be written in WP-6.45 | |
-| R12 | to be written in WP-6.45 | |
-| R13 | to be written in WP-6.45 | |
-| R14 | to be written in WP-6.45 | |
-| R15 | to be written in WP-6.45 | |
-| R16 | to be written in WP-6.45 | |
+| R1 | `crates/ui/tests/arranger.rs`, `the_lane_is_hidden_until_the_view_menu_shows_it_and_sits_above_the_track_lanes`; `crates/shell/tests/arranger.rs`, `the_lane_shows_from_the_view_command_and_is_saved_with_no_undo_step`; `crates/cli/tests/older_sets.rs`, `sections_and_the_arranger_track_are_saved_and_an_older_set_has_none` | UI script, unit |
+| R2 | `crates/ui/tests/arranger.rs`, `the_lane_is_hidden_until_the_view_menu_shows_it_and_sits_above_the_track_lanes` | UI script |
+| R3 | `crates/model/src/section.rs`, `sections_are_saved_when_there_are_some_and_overlaps_dont_load`; `crates/cli/tests/older_sets.rs`, `sections_and_the_arranger_track_are_saved_and_an_older_set_has_none` | unit |
+| R4 | `crates/ui/tests/arranger.rs`, `the_lane_is_a_list_of_sections_named_with_their_span_and_selection` | accessibility |
+| R5 | `crates/shell/tests/arranger.rs`, `a_section_is_made_by_span_cut_short_and_never_over_another`, `sections_are_made_from_the_locators_where_none_is`; `crates/ui/tests/arranger.rs`, `dragging_across_an_empty_stretch_makes_a_section_cut_short_at_the_next`, `the_lanes_menu_creates_sections_from_the_time_selection_and_the_locators` | unit, UI script |
+| R6 | `crates/shell/tests/arranger.rs`, `selecting_a_section_selects_its_time_and_is_no_undo_step`; `crates/ui/tests/arranger.rs`, `clicking_selects_a_section_and_its_time_and_shift_extends` | unit, UI script |
+| R7 | `crates/shell/tests/arranger.rs`, `renaming_colouring_and_resizing_are_one_undo_step_each`; `crates/ui/tests/arranger.rs`, `dragging_an_edge_moves_it_and_nothing_on_the_tracks`, `double_click_and_cmd_r_type_a_name_and_return_keeps_it`, `a_sections_menu_moves_colours_removes_and_deletes_it` | unit, UI script |
+| R8 | `crates/shell/tests/arranger.rs`, `moving_a_section_is_a_cut_time_and_a_paste_time_in_one_step`, `moving_a_section_later_lands_it_after_the_one_it_passes`, `a_drop_inside_the_sections_own_span_changes_nothing`, `a_section_dropped_inside_another_is_cut_to_the_free_part`; `crates/cli/tests/arranger_goldens.rs`, `a_set_after_a_section_move_renders_as_the_arrangement_built_by_hand`; `crates/ui/tests/arranger.rs`, `dragging_a_section_moves_it_and_option_copies_it_each_as_one_undo_step` | unit, golden, UI script |
+| R9 | `crates/shell/tests/arranger.rs`, `copying_a_section_is_a_copy_time_and_a_paste_time_and_leaves_the_original`; `crates/ui/tests/arranger.rs`, `dragging_a_section_moves_it_and_option_copies_it_each_as_one_undo_step` | unit, UI script |
+| R10 | `crates/shell/tests/arranger.rs`, `duplicating_a_section_puts_a_copy_straight_after_it`; `crates/ui/tests/arranger.rs`, `cmd_d_duplicates_and_delete_deletes_the_selected_section` | unit, UI script |
+| R11 | `crates/shell/tests/arranger.rs`, `deleting_a_section_closes_the_song_up_and_removing_one_leaves_the_tracks`; `crates/ui/tests/arranger.rs`, `cmd_d_duplicates_and_delete_deletes_the_selected_section`, `a_sections_menu_moves_colours_removes_and_deletes_it` | unit, UI script |
+| R12 | `crates/shell/tests/arranger.rs`, `moving_a_section_later_lands_it_after_the_one_it_passes`; `crates/ui/tests/arranger.rs`, `a_sections_menu_moves_colours_removes_and_deletes_it` | unit, UI script |
+| R13 | `crates/model/src/section.rs`, `time_edits_lengthen_cut_and_move_sections`; `crates/shell/tests/arranger.rs`, `the_time_commands_lengthen_cut_move_and_carry_sections` | unit |
+| R14 | `crates/ui/tests/accessibility/tab_order.rs`, `tab_reaches_the_sections_in_time_order_straight_after_lock_envelopes`; `crates/ui/tests/arranger.rs`, `cmd_d_duplicates_and_delete_deletes_the_selected_section`, `double_click_and_cmd_r_type_a_name_and_return_keeps_it`, `a_sections_menu_moves_colours_removes_and_deletes_it` | accessibility, UI script |
+| R15 | `crates/shell/tests/arranger.rs`, `every_arranger_command_is_registered_with_its_class`; `crates/model/tests/command_registry.rs`; `crates/agent/tests/permissions.rs`, `an_agent_s_delete_section_asks_first_and_the_other_arranger_edits_don_t`; `crates/agent/tests/readback.rs`, `the_fixture_sets_a_non_default_value_of_every_saved_field` | unit, agent |
+| R16 | `crates/shell/tests/arranger.rs`, `random_section_edits_among_time_edits_keep_the_rules_and_undo_exactly` | property |

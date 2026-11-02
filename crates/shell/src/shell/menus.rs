@@ -37,6 +37,7 @@ use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::envelope_keys as envelope_key_ids;
 use bl_shell_spec::export as export_ids;
 use bl_shell_spec::freeze as freeze_ids;
+use bl_shell_spec::arranger as arranger_ids;
 use bl_shell_spec::locator as locator_ids;
 use bl_shell_spec::midi_tools as tool_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
@@ -224,6 +225,10 @@ impl Shell {
                         == selected.map(bl_model::SongStart::Locator),
                 )
             }
+            // Spec: arranger-track R1. Ticked while the lane shows.
+            arranger_ids::ARRANGER_TRACK => {
+                Some(self.editor.document().settings().arranger_track)
+            }
             ids::VIEW_FULL_SCREEN => Some(self.full_screen_of(self.acting_window())),
             ids::VIEW_TOGGLE_SECOND_WINDOW => Some(self.second.open),
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser_of(self.acting_window())),
@@ -332,6 +337,16 @@ impl Shell {
         // Spec: comping R28. Edit ▸ Rename renames the selected take lanes.
         if id == "clip.rename" && !self.arrangement.selected_take_lanes().is_empty() {
             return "take_lane.rename";
+        }
+        // Spec: arranger-track R10, R11. With a section selected, Edit ▸
+        // Rename, Duplicate and Delete act on it.
+        if !self.arrangement.selected_sections().is_empty() {
+            match id {
+                "clip.rename" => return arranger_ids::RENAME_SECTION,
+                edit_ids::DUPLICATE => return arranger_ids::DUPLICATE_SECTION,
+                edit_ids::DELETE => return arranger_ids::DELETE_SECTION,
+                _ => {}
+            }
         }
         if self.arrangement.selected_locators().is_empty() {
             return id;
@@ -672,6 +687,7 @@ impl Shell {
             // while there are any.
             "clip.rename" => {
                 return self.arrangement.selected_locators().is_empty()
+                    && self.arrangement.selected_sections().is_empty()
                     && self.arrangement.selected_signature().is_none()
                     && self.arrangement.selected_take_lanes().is_empty();
             }
@@ -1003,6 +1019,8 @@ impl Shell {
                 .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
                 // Spec: time-editing R4. The Delete key deletes the
                 // selected locators while there are any.
+                && !(matches!(id, edit_ids::DELETE | edit_ids::DUPLICATE)
+                    && !self.arrangement.selected_sections().is_empty())
                 && !(id == edit_ids::DELETE
                     && (!self.arrangement.selected_locators().is_empty()
                         || self.arrangement.selected_signature().is_some()
@@ -1103,6 +1121,51 @@ impl Shell {
                 // Spec: time-editing R13. The jumps need the engine.
                 locator_ids::JUMP | locator_ids::JUMP_PREVIOUS | locator_ids::JUMP_NEXT => {
                     self.audio.engine_running()
+                }
+                _ => true,
+            };
+        }
+        if arranger_ids::handles(id) {
+            let args = if args.is_null() {
+                json!({})
+            } else {
+                args.clone()
+            };
+            if !spec
+                .args
+                .as_ref()
+                .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
+            {
+                return false;
+            }
+            let doc = self.editor.document();
+            let selected = self.arrangement.selected_sections();
+            let named = args.get("section").is_some() || !selected.is_empty();
+            return match id {
+                arranger_ids::RENAME_SECTION
+                | arranger_ids::SET_SECTION_COLOUR
+                | arranger_ids::RESIZE_SECTION
+                | arranger_ids::COPY_SECTION
+                | arranger_ids::DUPLICATE_SECTION
+                | arranger_ids::REMOVE_SECTION
+                | arranger_ids::DELETE_SECTION => named,
+                // Spec: arranger-track R12. Move Earlier and Move Later are
+                // disabled where there is no section that way.
+                arranger_ids::MOVE_SECTION => {
+                    let section = args
+                        .get("section")
+                        .and_then(|v| serde_json::from_value(v.clone()).ok())
+                        .or_else(|| selected.first().copied())
+                        .and_then(|id| doc.section(id));
+                    section.is_some_and(|section| match args["with"].as_str() {
+                        Some("earlier") => doc.sections().iter().any(|s| s.start < section.start),
+                        Some("later") => doc.sections().iter().any(|s| s.start > section.start),
+                        _ => true,
+                    })
+                }
+                // Create Section needs a time selection or a span.
+                arranger_ids::ADD_SECTION => {
+                    args.get("start").is_some() || self.arrangement.time_selection().is_some()
                 }
                 _ => true,
             };

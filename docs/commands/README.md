@@ -32,6 +32,7 @@ The commands, by the part of their ID before its first dot:
 - [`app`](app.md)
 - [`ara`](ara.md)
 - [`arrangement`](arrangement.md)
+- [`arranger`](arranger.md)
 - [`articulation`](articulation.md)
 - [`assistant`](assistant.md)
 - [`audio`](audio.md)
@@ -1073,10 +1074,12 @@ What the Arrangement View shows: every view command returns it.
 | `show_in_out` | boolean | yes | Whether the track headers show their In/Out column. |
 | `show_volume` | boolean | yes | Whether the track headers show their volume, pan, and sends. |
 | `show_return_tracks` | boolean | yes | Whether the return tracks' rows show in the lanes. |
+| `arranger_track` | boolean | no | Whether the arranger track shows above the track lanes (WP-6.45). |
 | `automation_lanes` | array of [`AutomationLane`](#automationlane) | no | Each track's automation lanes, for the tracks whose lanes aren't as a new track's (the main lane showing its volume, and no lanes of its own): the choosers' choices, the lanes of their own and whether they show (the automation spec, R32). |
 | `selected_breakpoint` | [`SelectedBreakpoint`](#selectedbreakpoint) or null | no | The breakpoint selected in that lane (WP-6.26), if any: `automation.select_breakpoint` sets it. |
 | `selected_fade` | [`FadeHandleState`](#fadehandlestate) or null | no | The selected fade handle (WP-6.51), if any: Delete deletes its fade. |
 | `selected_lane` | [`Lane`](#lane) or null | no | The automation lane that has the keyboard (WP-6.26): the one the last click, or Up and Down, selected, while Automation Mode is on. The keys of the automation editing spec's R20 to R26 act on its envelope. |
+| `selected_sections` | array of [`SectionId`](#sectionid) | no | The selected sections of the arranger track (WP-6.45), in the order they were selected. The arranger commands act on these. |
 | `selected_take_lanes` | array of [`TakeLaneId`](#takelaneid) | no | The take lanes whose headers are selected (the comping spec, R26), in the order they were selected. Their tracks are selected tracks too. |
 | `selected_time_signature` | [`Ticks`](#ticks) or null | no | The position of the selected time-signature marker (WP-6.61), if any: Delete deletes it and Cmd-R types its signature. |
 | `shown_take_lanes` | array of [`TrackId`](#trackid) | no | The tracks whose take lanes show (the comping spec, R24). |
@@ -1088,6 +1091,10 @@ What the Arrangement View shows: every view command returns it.
 {
   "description": "What the Arrangement View shows: every view command returns it.",
   "properties": {
+    "arranger_track": {
+      "description": "Whether the arranger track shows above the track lanes (WP-6.45).",
+      "type": "boolean"
+    },
     "automation_arm": {
       "description": "Whether Automation Arm is on: while Arrangement Record runs, moving a control writes its values into the parameter's envelope.",
       "type": "boolean"
@@ -1189,6 +1196,13 @@ What the Arrangement View shows: every view command returns it.
       "description": "The selected locators (WP-6.24), in the order they were selected. The locator commands act on these.",
       "items": {
         "$ref": "#/$defs/LocatorId"
+      },
+      "type": "array"
+    },
+    "selected_sections": {
+      "description": "The selected sections of the arranger track (WP-6.45), in the order they were selected. The arranger commands act on these.",
+      "items": {
+        "$ref": "#/$defs/SectionId"
       },
       "type": "array"
     },
@@ -1300,6 +1314,43 @@ What the Arrangement View shows: every view command returns it.
     "show_in_out",
     "show_volume",
     "show_return_tracks"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ArrangerResult`
+
+What an arranger command did: the sections selected afterwards, and whether it was recorded as an undo step.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `selected_sections` | array of [`SectionId`](#sectionid) | yes | The sections selected afterwards. |
+| `undo_step` | boolean | yes | Whether the edit was recorded as an undo step: false when it changed nothing. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What an arranger command did: the sections selected afterwards, and whether it was recorded as an undo step.",
+  "properties": {
+    "selected_sections": {
+      "description": "The sections selected afterwards.",
+      "items": {
+        "$ref": "#/$defs/SectionId"
+      },
+      "type": "array"
+    },
+    "undo_step": {
+      "description": "Whether the edit was recorded as an undo step: false when it changed nothing.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "selected_sections",
+    "undo_step"
   ],
   "type": "object"
 }
@@ -21961,6 +22012,37 @@ A multisampler's views and selection, as `device_view.state` reports them (R30).
 
 </details>
 
+### `Neighbour`
+
+The section a Move Earlier or Move Later swaps with.
+
+One of:
+
+- `"earlier"`: The section before it.
+- `"later"`: The section after it.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The section a Move Earlier or Move Later swaps with.",
+  "oneOf": [
+    {
+      "const": "earlier",
+      "description": "The section before it.",
+      "type": "string"
+    },
+    {
+      "const": "later",
+      "description": "The section after it.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `NewDevice`
 
 The device `device.add` adds.
@@ -33430,6 +33512,25 @@ One of:
 
 </details>
 
+### `SectionId`
+
+The ID of a section: a positive integer, unique within the project and never reused.
+
+Type: integer, at least 1.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The ID of a section: a positive integer, unique within the project and never reused.",
+  "format": "uint64",
+  "minimum": 1,
+  "type": "integer"
+}
+```
+
+</details>
+
 ### `SelectEdge`
 
 Which edge of the current scene to select (S-SES-020 to S-SES-022).
@@ -35296,6 +35397,61 @@ One slot: a track's column and a scene's row.
   "required": [
     "track",
     "scene"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SongSection`
+
+A section of the song.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | [`SectionId`](#sectionid) | yes | The section's ID. |
+| `start` | [`Ticks`](#ticks) | yes | Where it starts: 0 (1.1.1) or later. |
+| `length` | [`Ticks`](#ticks) | yes | How long it is: more than 0. |
+| `name` | string | yes | Its name, which may be empty. |
+| `colour` | integer from 0 to 255 | yes | Its colour, a swatch from 0 to 69 (the themes spec, R14). |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A section of the song.",
+  "properties": {
+    "colour": {
+      "description": "Its colour, a swatch from 0 to 69 (the themes spec, R14).",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "id": {
+      "$ref": "#/$defs/SectionId",
+      "description": "The section's ID."
+    },
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "How long it is: more than 0."
+    },
+    "name": {
+      "description": "Its name, which may be empty.",
+      "type": "string"
+    },
+    "start": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it starts: 0 (1.1.1) or later."
+    }
+  },
+  "required": [
+    "id",
+    "start",
+    "length",
+    "name",
+    "colour"
   ],
   "type": "object"
 }

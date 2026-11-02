@@ -397,6 +397,13 @@ pub struct ArrangementState {
     /// The locator commands act on these.
     #[serde(default)]
     pub selected_locators: Vec<LocatorId>,
+    /// The selected sections of the arranger track (WP-6.45), in the order
+    /// they were selected. The arranger commands act on these.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub selected_sections: Vec<bl_model::SectionId>,
+    /// Whether the arranger track shows above the track lanes (WP-6.45).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub arranger_track: bool,
     /// The position of the selected time-signature marker (WP-6.61), if
     /// any: Delete deletes it and Cmd-R types its signature.
     #[serde(default, skip_serializing_if = "Option::is_none")]

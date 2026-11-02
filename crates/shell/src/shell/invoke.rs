@@ -15,6 +15,7 @@ use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::dawproject as dawproject_ids;
 use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::file_manager as file_manager_ids;
+use bl_shell_spec::arranger as arranger_ids;
 use bl_shell_spec::locator as locator_ids;
 use bl_shell_spec::midi_files as midi_ids;
 use bl_shell_spec::session_launch as session_launch_ids;
@@ -512,6 +513,21 @@ impl Shell {
                             reason: "select a locator first".to_owned(),
                         })?;
                 self.effects.push(Effect::RenameLocator(locator));
+                self.touch();
+                Ok(Value::Null)
+            }
+            arranger_ids::RENAME_SECTION if !has("name") => {
+                // Spec: arranger-track R7. Cmd-R types the new name in
+                // the section.
+                let section = args
+                    .get("section")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .or_else(|| self.arrangement.selected_sections().first().copied())
+                    .ok_or_else(|| ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "select a section first".to_owned(),
+                    })?;
+                self.effects.push(Effect::RenameSection(section));
                 self.touch();
                 Ok(Value::Null)
             }

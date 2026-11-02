@@ -88,6 +88,7 @@ mod launch;
 mod layers;
 mod linked;
 mod locator;
+mod section;
 pub mod matrix;
 mod metronome;
 pub mod modulation;
@@ -176,7 +177,7 @@ pub use groove::{
 };
 pub use ids::{
     ChainId, ClipId, ContentHash, DeviceId, GrooveId, LinkGroupId, LocatorId, ParamId,
-    ParseContentHashError, SceneId, TakeLaneId, TrackId,
+    ParseContentHashError, SceneId, SectionId, TakeLaneId, TrackId,
 };
 /// The persistent collections the document's public types hold.
 pub use imbl::{OrdMap, Vector};
@@ -187,6 +188,7 @@ pub use layers::{
     SamplerTab, SustainMode, Zone, ZoneKind, snap_to_zero_crossing,
 };
 pub use locator::{Locator, SongStart};
+pub use section::{SongSection, next_section_colour, next_section_name};
 pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound};
 pub use pad_layout::{PadDirection, PadLayout, PadSpacing};
 pub use param::{

@@ -4024,6 +4024,54 @@ const ENTRIES: &[Entry] = &[
             `arrangement.delete_time`.",
     },
     Entry {
+        id: "song.add_section",
+        action: Action::Apply("add_section"),
+        label: "Add Section",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Adds a section to the arranger track: a `section` with a new ID, a \
+            `start` in ticks, a `length` in ticks, a `name` and a `colour` (a swatch from 0 \
+            to 69). A section with no name is named \"Section\" and the next whole number. \
+            Sections never overlap, and one that would is refused. It moves nothing on the \
+            tracks. One undo step, `Add Section`. To make one as a person does, use \
+            `arranger.add_section`.",
+    },
+    Entry {
+        id: "song.remove_section",
+        action: Action::Apply("remove_section"),
+        label: "Remove Section",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Removes a section from the arranger track and nothing else: the clips, \
+            automation, tempo, time signatures and locators stay as they are. One undo step, \
+            `Remove Section`. To delete a section with its time, use `arranger.delete_section`.",
+    },
+    Entry {
+        id: "song.edit_section",
+        action: Action::Apply("edit_section"),
+        label: "Edit Section",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Changes a section's `name`, `colour` (a swatch from 0 to 69), `start` or \
+            `length`, leaving what is left out as it was. It moves nothing on the tracks, and \
+            a span that would overlap another section is refused. One undo step, `Edit \
+            Section`. To move a section with its time, use `arranger.move_section`.",
+    },
+    Entry {
+        id: "song.set_arranger_track",
+        action: Action::Apply("set_arranger_track"),
+        label: "Arranger Track",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Shows or hides the arranger track above the Arrangement's tracks \
+            (`shown`). It is hidden in a new set. Whether it shows is saved with the set and \
+            is no undo step.",
+    },
+    Entry {
         id: "groove.add",
         action: Action::Apply("add_groove"),
         label: "Add Groove",

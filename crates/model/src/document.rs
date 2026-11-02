@@ -114,6 +114,16 @@ pub struct Settings {
     /// a set with none doesn't write them, so its saved form is unchanged.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub locators: Vec<Locator>,
+    /// The song's sections: the spans of the arranger track (WP-6.45). A set
+    /// saved before them loads with none, and a set with none doesn't write
+    /// them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sections: Vec<crate::SongSection>,
+    /// Whether the arranger track shows above the Arrangement's tracks
+    /// (WP-6.45). Off in a new set and in a set saved before it, and not
+    /// written when off. Showing it is no undo step.
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub arranger_track: bool,
     /// Where the song starts: a locator or the loop brace's start (WP-6.24).
     /// A set saved before the song start time has none and loads with none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -178,6 +188,8 @@ impl Default for Settings {
             reduced_latency_monitoring: false,
             lock_envelopes: false,
             locators: Vec::new(),
+            sections: Vec::new(),
+            arranger_track: false,
             song_start: None,
             grooves: GroovePool::default(),
             scale: Scale::default(),
@@ -922,6 +934,7 @@ impl Document {
                 .locators
                 .iter()
                 .any(|locator| locator.id.0 == id)
+            || self.settings.sections.iter().any(|section| section.id.0 == id)
             || self
                 .settings
                 .grooves
@@ -945,6 +958,7 @@ impl Document {
             .iter()
             .map(|locator| locator.id.0)
             .max();
+        let section = self.settings.sections.iter().map(|section| section.id.0).max();
         let groove = self
             .settings
             .grooves
@@ -952,7 +966,7 @@ impl Document {
             .iter()
             .map(|groove| groove.id.0)
             .max();
-        [track, clip, lane, device, chain, scene, locator, groove]
+        [track, clip, lane, device, chain, scene, locator, section, groove]
             .into_iter()
             .flatten()
             .max()

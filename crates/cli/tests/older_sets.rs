@@ -1233,6 +1233,43 @@ fn the_locators_and_the_song_start_time_are_saved_and_load_again() {
     assert_eq!(loaded.document.song_start_ticks(), Some(Ticks::WHOLE * 2));
 }
 
+/// A set saved before the arranger track loads with no sections and the
+/// lane hidden, and the sections and the lane's state are saved with the set
+/// and load again (the arranger track spec, R1 and R3).
+#[test]
+fn sections_and_the_arranger_track_are_saved_and_an_older_set_has_none() {
+    let mut editor = Editor::new();
+    let older = encode_json(&project_of(&editor), 1).unwrap();
+    let value: Value = serde_json::from_slice(&older).unwrap();
+    assert!(value["document"]["settings"].get("sections").is_none());
+    assert!(value["document"]["settings"].get("arranger_track").is_none());
+    let (loaded, _) = decode_json(&older, &LoadOptions::default()).unwrap();
+    assert!(loaded.document.sections().is_empty());
+    assert!(!loaded.document.settings().arranger_track);
+    let section = editor.new_id();
+    editor
+        .apply(Command::AddSection {
+            section: bl_model::SongSection {
+                id: section,
+                start: Ticks::WHOLE * 2,
+                length: Ticks::WHOLE,
+                name: "Verse".to_owned(),
+                colour: 4,
+            },
+        })
+        .unwrap();
+    editor
+        .apply(Command::SetArrangerTrack { shown: true })
+        .unwrap();
+    let saved = encode_json(&project_of(&editor), 1).unwrap();
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert_eq!(loaded.document.sections().len(), 1);
+    assert_eq!(loaded.document.sections()[0].name, "Verse");
+    assert_eq!(loaded.document.sections()[0].colour, 4);
+    assert!(loaded.document.settings().arranger_track);
+    loaded.document.check_invariants().unwrap();
+}
+
 /// A project holding `editor`'s document.
 fn project_of(editor: &Editor) -> Project {
     Project {

@@ -54,6 +54,9 @@ pub const LIST: &str = "plugin.list";
 /// `plugin.export_list`: write the set's plug-in list to a text file (IMP-29,
 /// WP-6.41).
 pub const EXPORT_LIST: &str = "plugin.export_list";
+/// `plugin.hide`: hide plug-ins from the browser, or show them again
+/// (WP-6.33, IMP-07).
+pub const HIDE: &str = "plugin.hide";
 /// `plugin.settings`: hidden plug-ins and the format preference (WP-2.9,
 /// IMP-07).
 pub const SETTINGS: &str = "plugin.settings";
@@ -79,6 +82,7 @@ pub const IDS: &[&str] = &[
     RESCAN,
     LIST,
     EXPORT_LIST,
+    HIDE,
     SETTINGS,
     ARA_STATE,
 ];
@@ -587,6 +591,24 @@ pub struct PluginListState {
     pub only_missing: bool,
 }
 
+/// Reads a field that may be given as `null`, which is different from leaving
+/// it out: `null` is `Some(None)`.
+fn given<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<Option<T>>, D::Error> {
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
+/// Arguments of `plugin.hide`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HidePluginsArgs {
+    /// The plug-ins, as `format/plugin_id` keys.
+    pub keys: Vec<String>,
+    /// Whether to hide them (`true`) or show them again (`false`).
+    pub hidden: bool,
+}
+
 /// Arguments of `plugin.settings`: the fields to change; none to read them.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -598,9 +620,14 @@ pub struct PluginSettingsArgs {
     /// Whether the browser shows hidden plug-ins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub show_hidden: Option<bool>,
-    /// The format to prefer when a plug-in exists in several.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub format_preference: Option<PluginFormat>,
+    /// The format to prefer when a plug-in exists in several, or `null` for
+    /// none (spec: browser-tags R44). Left out, it stays as it is.
+    #[serde(
+        default,
+        deserialize_with = "given",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub format_preference: Option<Option<PluginFormat>>,
     /// Use Audio Units v2 (Settings ▸ Plug-Ins): scan and list Audio Units
     /// on macOS. Turning it on scans them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -893,12 +920,27 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .result::<ExportedList>(),
     )?;
     registry.register(
+        CommandSpec::new(HIDE, "Hide Plug-Ins")
+            .description(
+                "Hides plug-ins from the browser, or shows them again (`hidden` false): `keys` \
+                 are `format/plugin_id` keys, as `plugin.settings` lists them in `hidden`. A \
+                 hidden plug-in leaves the Plug-Ins label, search, collections, saved labels, \
+                 the Filter View's tags and hot-swap, unless `show_hidden` is on; a set that \
+                 uses one still loads it. An edit to the preferences, not to the set. Returns \
+                 the settings.",
+            )
+            .permission(Permission::Edit)
+            .context(Global)
+            .args::<HidePluginsArgs>()
+            .result::<PluginSettings>(),
+    )?;
+    registry.register(
         CommandSpec::new(SETTINGS, "Plug-In Settings")
             .description(
                 "Reads or changes how the browser shows plug-ins (IMP-07): `hidden` is the \
                  plug-ins to hide, as `format/plugin_id` keys; `show_hidden` whether hidden \
                  plug-ins still show; and `format_preference` the format to prefer when a \
-                 plug-in exists in several. Also the Plug-In Sources switches of Settings ▸ \
+                 plug-in exists in several (same name and vendor), `null` for none. Also the Plug-In Sources switches of Settings ▸ \
                  Plug-Ins: `use_audio_units_v2`, `use_audio_units_v3` and \
                  `vst3_system_folders`, all off in a new install; the browser lists a format's \
                  plug-ins only while its switch is on (CLAP has none and is always listed), \

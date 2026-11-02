@@ -21,7 +21,8 @@ impl Shell {
         // Spec: plugin-scanning R12. A format is listed only while its
         // Plug-In Sources switch is on, as in Live.
         plugins.retain(|p| formats.contains(&p.format));
-        self.browser_view.set_plugins(plugins);
+        self.browser_view
+            .set_plugins(plugins, self.prefs.hidden_plugins.clone());
     }
 
     /// Starts scanning plug-ins by itself, as Live does at launch (WP-2.9b;

@@ -17,7 +17,7 @@ pub(super) mod linked;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use bl_core::time::Ticks;
+use bl_core::time::{Ticks, TimeSignatureMap};
 use bl_model::{
     AutomationTarget, Breakpoint, Change, ChangeSet, Clip, ClipData, ClipId, Command, Document,
     Editor, EnvelopeKind, TakeLaneId, TrackId, TrackKind,
@@ -25,14 +25,16 @@ use bl_model::{
 use bl_shell_spec::arrangement::{Lane, TimeRange};
 use bl_shell_spec::editing::{
     self as ids, ClipboardState, DeleteFadesArgs, Direction, Edge, EditResult, InsertMidiClipArgs,
-    LoopSelectionArgs, MoveClipsArgs, NudgeArgs, PasteArgs, Position, ResizeClipsArgs,
-    SelectClipsArgs, SelectMode, SplitArgs, TargetArgs,
+    LoopBraceEnd, LoopBraceMove, LoopSelectionArgs, MoveClipsArgs, NudgeArgs, NudgeLoopBraceArgs,
+    PasteArgs, Position, ResizeClipsArgs, SelectClipsArgs, SelectMode, SetLoopBraceArgs, SplitArgs,
+    TargetArgs,
 };
 use serde::Serialize;
 use serde_json::Value;
 
 use super::automation;
 use super::fades;
+use super::grid::{self, Step};
 use super::placing::{clear_on, clear_spans, piece, split_off};
 use super::{ArrangementView, parse};
 
@@ -1193,6 +1195,7 @@ impl ArrangementView {
     pub(crate) fn select_span_on(&mut self, lanes: Vec<Lane>, start: Ticks, end: Ticks) {
         self.selected_clips.clear();
         self.selected_take_lanes.clear();
+        self.loop_brace = false;
         let mut tracks: Vec<TrackId> = Vec::new();
         for track in lanes.iter().map(Lane::track) {
             if !tracks.contains(&track) {
@@ -1225,6 +1228,7 @@ impl ArrangementView {
         self.selected_lane = from.selected_lane;
         self.selected_breakpoint = from.selected_breakpoint;
         self.selected_signature = from.selected_signature;
+        self.loop_brace = from.loop_brace;
     }
 
     /// Drops selected clips the document no longer has.
@@ -1477,7 +1481,13 @@ pub fn can_run(
     let given = |key: &str| args.get(key).is_some();
     let headers = !view.selected_take_lanes.is_empty();
     match id {
-        ids::SELECT_CLIPS | ids::SELECT_ALL | ids::LOOP_SELECTION | ids::SELECT_LOOP => true,
+        ids::SELECT_CLIPS
+        | ids::SELECT_ALL
+        | ids::LOOP_SELECTION
+        | ids::SELECT_LOOP
+        | ids::SELECT_LOOP_BRACE
+        | ids::SET_LOOP_BRACE => true,
+        ids::NUDGE_LOOP_BRACE => view.loop_brace_selected(doc),
         ids::MOVE_CLIPS | ids::RESIZE_CLIPS => given("clips") || !view.selected_clips.is_empty(),
         ids::NUDGE => true,
         ids::SPLIT => {
@@ -2304,6 +2314,28 @@ pub fn run(
             view.select_span(lanes(doc), brace.start, brace.start + brace.length);
             Ok(to_value(&view.state(doc)))
         }
+        ids::SELECT_LOOP_BRACE => {
+            parse::<bl_commands::NoArgs>(args)?;
+            select_loop_brace(doc, view, LoopBraceEnd::Start);
+            Ok(to_value(&view.state(doc)))
+        }
+        ids::NUDGE_LOOP_BRACE => {
+            let NudgeLoopBraceArgs { by } = parse(args)?;
+            if !view.loop_brace_selected(doc) {
+                return Err(unavailable("the loop brace isn't selected"));
+            }
+            let (start, length, at) = nudged_brace(doc, view, by);
+            move_loop_brace(editor, view, start, length, at)
+        }
+        ids::SET_LOOP_BRACE => {
+            let SetLoopBraceArgs {
+                start,
+                length,
+                insert_marker,
+            } = parse(args)?;
+            let at = insert_marker.unwrap_or(LoopBraceEnd::Start);
+            move_loop_brace(editor, view, start, length, at)
+        }
         ids::INSERT_SILENCE
         | ids::CUT_TIME
         | ids::COPY_TIME
@@ -2316,6 +2348,94 @@ pub fn run(
         }
         other => Err(invalid(format!("`{other}` isn't an editing command"))),
     }
+}
+
+/// Selects the loop brace, as a click on its bar does (the transport spec,
+/// R32): its span is the time selection on every track, returns and Main
+/// included, and the insert marker goes to its `at` end.
+fn select_loop_brace(doc: &Document, view: &mut ArrangementView, at: LoopBraceEnd) {
+    let brace = doc.settings().arrangement_loop;
+    let end = brace.start + brace.length;
+    view.select_span(doc.track_order(), brace.start, end);
+    view.loop_brace = true;
+    if at == LoopBraceEnd::End {
+        view.insert_marker = end;
+    }
+}
+
+/// Puts the loop brace at `start` for `length` with no undo step, and selects
+/// it with the insert marker at its `at` end.
+fn move_loop_brace(
+    editor: &mut Editor,
+    view: &mut ArrangementView,
+    start: Ticks,
+    length: Ticks,
+    at: LoopBraceEnd,
+) -> Result<Value, EditFailure> {
+    if start.is_negative() || length <= Ticks::ZERO {
+        return Err(invalid(
+            "the loop must start at 1.1.1 or later and be longer than zero",
+        ));
+    }
+    editor.move_loop_brace(start, length);
+    select_loop_brace(editor.document(), view, at);
+    Ok(to_value(&view.state(editor.document())))
+}
+
+/// What a key does to the selected loop brace: its new start and length, and
+/// the end of it the insert marker goes to (the transport spec, R33).
+fn nudged_brace(
+    doc: &Document,
+    view: &ArrangementView,
+    by: LoopBraceMove,
+) -> (Ticks, Ticks, LoopBraceEnd) {
+    let brace = doc.settings().arrangement_loop;
+    let (start, length) = (brace.start, brace.length);
+    let step = view.grid_step(doc);
+    let signatures = &doc.settings().time_signatures;
+    let shorter = |length: Ticks| length.max(Ticks::SIXTEENTH);
+    match by {
+        LoopBraceMove::Left => (
+            grid_line(signatures, step, start, false),
+            length,
+            LoopBraceEnd::Start,
+        ),
+        LoopBraceMove::Right => (
+            grid_line(signatures, step, start, true),
+            length,
+            LoopBraceEnd::Start,
+        ),
+        LoopBraceMove::Earlier => (
+            (start - length).max(Ticks::ZERO),
+            length,
+            LoopBraceEnd::Start,
+        ),
+        LoopBraceMove::Later => (start + length, length, LoopBraceEnd::Start),
+        LoopBraceMove::Halve => (start, shorter(Ticks(length.get() / 2)), LoopBraceEnd::End),
+        LoopBraceMove::Double => (start, length + length, LoopBraceEnd::End),
+        LoopBraceMove::Shorten => (start, shorter(length - step.ticks), LoopBraceEnd::End),
+        LoopBraceMove::Lengthen => (start, length + step.ticks, LoopBraceEnd::End),
+    }
+}
+
+/// The grid line next before or after `at`: `at` itself when there is none
+/// (before 1.1.1).
+fn grid_line(signatures: &TimeSignatureMap, step: Step, at: Ticks, later: bool) -> Ticks {
+    let bar = signatures.signature_at(at).bar_length();
+    let span = step.bars.map_or(step.ticks, |bars| Ticks(bar.get() * bars));
+    let reach = span + bar;
+    let (from, to) = if later {
+        (at, at + reach)
+    } else {
+        ((at - reach).max(Ticks::ZERO), at)
+    };
+    let mut found = at;
+    grid::lines(signatures, step, from, to, 4096, |line, _| {
+        if (later && found == at && line > at) || (!later && line < at) {
+            found = line;
+        }
+    });
+    found
 }
 
 /// Where pasted material lands: each destination lane with its clips

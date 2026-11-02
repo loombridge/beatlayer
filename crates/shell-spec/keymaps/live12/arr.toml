@@ -159,8 +159,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Left", "Cmd+Right"]
 win = ["Ctrl+Left", "Ctrl+Right"]
-status = "pending"
-package = "WP-6.73"
+status = "widget"
+handler = "as S-LOOP-010 (`arrangement.nudge_loop_brace`)"
 
 [[shortcut]]
 id = "S-ARR-013"

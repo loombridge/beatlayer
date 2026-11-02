@@ -99,6 +99,11 @@ impl Shell {
                             {
                                 contexts.push(Context::Envelope);
                             }
+                            // Spec: transport R32. A selected loop brace's keys
+                            // come ahead of the Arrangement's.
+                            if self.arrangement.loop_brace_selected(self.editor.document()) {
+                                contexts.push(Context::LoopBrace);
+                            }
                             contexts.push(Context::Arrangement);
                         }
                         MainView::Session => contexts.push(Context::Session),

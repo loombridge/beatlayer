@@ -405,6 +405,11 @@ fn the_views_gestures_are_marked_and_the_waiting_shortcuts_name_their_packages()
         "S-TRACK-012",
         "S-SES-015",
         "S-SES-016",
+        "S-LOOP-007",
+        "S-LOOP-008",
+        "S-LOOP-009",
+        "S-LOOP-010",
+        "S-ARR-012",
     ] {
         let entry = keymap.entry_for(shortcut).expect(shortcut);
         assert!(
@@ -414,11 +419,6 @@ fn the_views_gestures_are_marked_and_the_waiting_shortcuts_name_their_packages()
         );
     }
     for (shortcut, milestone, package) in [
-        ("S-ARR-012", "M6", "WP-6.73"),
-        ("S-LOOP-007", "M6", "WP-6.73"),
-        ("S-LOOP-008", "M6", "WP-6.73"),
-        ("S-LOOP-009", "M6", "WP-6.73"),
-        ("S-LOOP-010", "M6", "WP-6.73"),
         ("S-TRANS-003", "M6", "WP-6.74"),
         ("S-TRANS-004", "M6", "WP-6.74"),
         ("S-DEV-010", "M6", "WP-6.75"),

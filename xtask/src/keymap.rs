@@ -273,6 +273,32 @@ const WIDGET: &[(&str, &str)] = &[
         "the automation lane and the Envelope Editor: Left and Right move the selected \
          breakpoint one grid step in time (`envelope.move_selected`)",
     ),
+    // WP-6.73: the loop brace's keys, which the Arrangement reads itself
+    // while the brace is selected.
+    (
+        "S-LOOP-007",
+        "the Arrangement View, with the loop brace selected: Left and Right move it to the \
+         previous or next grid line (`arrangement.nudge_loop_brace`)",
+    ),
+    (
+        "S-LOOP-008",
+        "the Arrangement View, with the loop brace selected: Down and Up move it earlier or \
+         later by its own length (`arrangement.nudge_loop_brace`)",
+    ),
+    (
+        "S-LOOP-009",
+        "the Arrangement View, with the loop brace selected: Cmd-Down and Cmd-Up (Ctrl) halve \
+         and double its length (`arrangement.nudge_loop_brace`)",
+    ),
+    (
+        "S-LOOP-010",
+        "the Arrangement View, with the loop brace selected: Cmd-Left and Cmd-Right (Ctrl) \
+         shorten and lengthen it by a grid step (`arrangement.nudge_loop_brace`)",
+    ),
+    (
+        "S-ARR-012",
+        "as S-LOOP-010 (`arrangement.nudge_loop_brace`)",
+    ),
     // WP-6.70: gestures and keys the views read themselves that earlier
     // packages built and left marked pending.
     (
@@ -706,11 +732,6 @@ const OWNERS: &[(&str, &str)] = &[
     // Bound by the package that builds the thing the key acts on.
     ("S-FOCUS-009", "WP-6.72"),
     // Moved to M6 by WP-6.70, which gives the reason in the reference's notes.
-    ("S-ARR-012", "WP-6.73"),
-    ("S-LOOP-007", "WP-6.73"),
-    ("S-LOOP-008", "WP-6.73"),
-    ("S-LOOP-009", "WP-6.73"),
-    ("S-LOOP-010", "WP-6.73"),
     ("S-TRANS-003", "WP-6.74"),
     ("S-TRANS-004", "WP-6.74"),
     ("S-DEV-010", "WP-6.75"),

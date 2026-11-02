@@ -1045,6 +1045,40 @@ impl ClipGestures {
             return;
         }
 
+        // Spec: transport R33. While the loop brace is selected, the arrow
+        // keys move it, and with Cmd (Ctrl) held resize it.
+        if view.loop_brace_selected(doc) {
+            let by = [
+                (Key::ArrowLeft, false, "left"),
+                (Key::ArrowRight, false, "right"),
+                (Key::ArrowDown, false, "earlier"),
+                (Key::ArrowUp, false, "later"),
+                (Key::ArrowDown, true, "halve"),
+                (Key::ArrowUp, true, "double"),
+                (Key::ArrowLeft, true, "shorten"),
+                (Key::ArrowRight, true, "lengthen"),
+            ];
+            let mut moved = false;
+            for (key, command, by) in by {
+                let key_pressed = input.events.iter().any(|event| {
+                    matches!(
+                        event,
+                        egui::Event::Key { key: k, pressed: true, modifiers, .. }
+                            if *k == key
+                                && modifiers.command == command
+                                && !modifiers.shift
+                                && !modifiers.alt
+                    )
+                });
+                if key_pressed {
+                    invoke(events, ids::NUDGE_LOOP_BRACE, json!({ "by": by }));
+                    moved = true;
+                }
+            }
+            if moved {
+                return;
+            }
+        }
         // Spec: time-editing R7. While locators are selected, Left and
         // Right move them one grid step.
         let locators = lanes.view.selected_locators().to_vec();

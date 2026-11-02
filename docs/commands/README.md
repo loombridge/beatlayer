@@ -1074,6 +1074,7 @@ What the Arrangement View shows: every view command returns it.
 | `show_volume` | boolean | yes | Whether the track headers show their volume, pan, and sends. |
 | `show_return_tracks` | boolean | yes | Whether the return tracks' rows show in the lanes. |
 | `automation_lanes` | array of [`AutomationLane`](#automationlane) | no | Each track's automation lanes, for the tracks whose lanes aren't as a new track's (the main lane showing its volume, and no lanes of its own): the choosers' choices, the lanes of their own and whether they show (the automation spec, R32). |
+| `loop_brace_selected` | boolean | no | Whether the loop brace is selected (WP-6.73): its keys then move and resize it. It is while the time selection is the brace's span, after a click on the brace's bar. |
 | `selected_breakpoint` | [`SelectedBreakpoint`](#selectedbreakpoint) or null | no | The breakpoint selected in that lane (WP-6.26), if any: `automation.select_breakpoint` sets it. |
 | `selected_fade` | [`FadeHandleState`](#fadehandlestate) or null | no | The selected fade handle (WP-6.51), if any: Delete deletes its fade. |
 | `selected_lane` | [`Lane`](#lane) or null | no | The automation lane that has the keyboard (WP-6.26): the one the last click, or Up and Down, selected, while Automation Mode is on. The keys of the automation editing spec's R20 to R26 act on its envelope. |
@@ -1125,6 +1126,10 @@ What the Arrangement View shows: every view command returns it.
     "insert_marker": {
       "$ref": "#/$defs/Ticks",
       "description": "Where the insert marker is."
+    },
+    "loop_brace_selected": {
+      "description": "Whether the loop brace is selected (WP-6.73): its keys then move and resize it. It is while the time selection is the brace's span, after a click on the brace's bar.",
+      "type": "boolean"
     },
     "optimize_height": {
       "description": "Whether Optimize Height is on: every track fits in the lanes.",
@@ -19106,6 +19111,104 @@ One of:
     {
       "const": "arming",
       "description": "By arming a MIDI track whose instrument the device is.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `LoopBraceEnd`
+
+The end of the loop brace the insert marker goes to.
+
+One of:
+
+- `"start"`: The brace's start.
+- `"end"`: The brace's end.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The end of the loop brace the insert marker goes to.",
+  "oneOf": [
+    {
+      "const": "start",
+      "description": "The brace's start.",
+      "type": "string"
+    },
+    {
+      "const": "end",
+      "description": "The brace's end.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `LoopBraceMove`
+
+`left` or `right`: to the previous or next grid line. `earlier` or `later`: by the brace's own length. `halve` or `double`: its length, from its start. `shorten` or `lengthen`: its length by a grid step.
+
+One of:
+
+- `"left"`: To the previous grid line.
+- `"right"`: To the next grid line.
+- `"earlier"`: Earlier by its length, stopping at 1.1.1.
+- `"later"`: Later by its length.
+- `"halve"`: Half as long, from its start.
+- `"double"`: Twice as long, from its start.
+- `"shorten"`: Shorter by a grid step.
+- `"lengthen"`: Longer by a grid step.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "`left` or `right`: to the previous or next grid line. `earlier` or `later`: by the brace's own length. `halve` or `double`: its length, from its start. `shorten` or `lengthen`: its length by a grid step.",
+  "oneOf": [
+    {
+      "const": "left",
+      "description": "To the previous grid line.",
+      "type": "string"
+    },
+    {
+      "const": "right",
+      "description": "To the next grid line.",
+      "type": "string"
+    },
+    {
+      "const": "earlier",
+      "description": "Earlier by its length, stopping at 1.1.1.",
+      "type": "string"
+    },
+    {
+      "const": "later",
+      "description": "Later by its length.",
+      "type": "string"
+    },
+    {
+      "const": "halve",
+      "description": "Half as long, from its start.",
+      "type": "string"
+    },
+    {
+      "const": "double",
+      "description": "Twice as long, from its start.",
+      "type": "string"
+    },
+    {
+      "const": "shorten",
+      "description": "Shorter by a grid step.",
+      "type": "string"
+    },
+    {
+      "const": "lengthen",
+      "description": "Longer by a grid step.",
       "type": "string"
     }
   ]

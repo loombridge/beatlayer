@@ -53,6 +53,7 @@ mod launch_panel;
 mod layout;
 mod link;
 mod locator;
+mod loop_brace;
 mod macros;
 mod main_properties;
 mod main_window;

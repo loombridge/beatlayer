@@ -5,6 +5,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeSet, VecDeque};
 
 use bl_core::id::{Id, IdAllocator};
+use bl_core::time::Ticks;
 
 use crate::changes::ChangeSet;
 use crate::command::Command;
@@ -83,6 +84,11 @@ struct Step {
     /// a step that didn't change the tempo leaves it as it is (the Link
     /// spec, R3).
     tempo: Option<bl_core::time::TempoMap>,
+    /// The loop brace's start and length the step set, when the step changed
+    /// them: redoing brings them back. Dragging or nudging the brace is no
+    /// undo step, so a step that didn't change the brace leaves it as it is
+    /// (the transport spec, R16, R31).
+    brace: Option<(Ticks, Ticks)>,
 }
 
 /// Who made a step in the history: the person, an agent by the name the
@@ -403,6 +409,26 @@ impl Editor {
         ChangeSet::between(&before, &self.document)
     }
 
+    /// Moves the Arrangement loop brace to `start` and `length`, as dragging
+    /// or nudging it does: that is no undo step (the transport spec, R31),
+    /// though the set is marked as changed. The caller has checked the brace
+    /// starts at 1.1.1 or later and is longer than zero.
+    ///
+    /// It isn't a command, as [`Editor::follow_tempo`] isn't: it's a
+    /// gesture's result, and Loop Selection and the Control Bar's fields,
+    /// which are undo steps, stay `transport.set_loop`.
+    pub fn move_loop_brace(&mut self, start: Ticks, length: Ticks) -> ChangeSet {
+        let before = self.document.clone();
+        let brace = &mut self.document.settings.arrangement_loop;
+        (brace.start, brace.length) = (start, length);
+        // As in [`Editor::follow_scale`].
+        for open in &mut self.open {
+            let brace = &mut open.start.settings.arrangement_loop;
+            (brace.start, brace.length) = (start, length);
+        }
+        ChangeSet::between(&before, &self.document)
+    }
+
     /// Replaces the whole document with another version of it, inside the
     /// open transaction or as an undo step of its own labelled `label`, and
     /// returns what that changed. The agent API restores a checkpoint this
@@ -576,6 +602,7 @@ impl Editor {
             document,
             scale,
             tempo,
+            brace,
         } = self.undo.pop_back().ok_or(EditError::NothingToUndo)?;
         let mut document = *document;
         // Cue mode is no undo step, so undoing keeps it as it is.
@@ -592,6 +619,10 @@ impl Editor {
         if tempo.is_none() {
             document.settings.tempo = self.document.settings.tempo.clone();
         }
+        // The brace moved by hand is no undo step either.
+        if brace.is_none() {
+            keep_brace(&mut document, &self.document);
+        }
         let after = std::mem::replace(&mut self.document, document);
         self.redo.push(Step {
             label,
@@ -599,6 +630,7 @@ impl Editor {
             document: Box::new(after),
             scale,
             tempo,
+            brace,
         });
         Ok(())
     }
@@ -628,6 +660,7 @@ impl Editor {
             document,
             scale,
             tempo,
+            brace,
         } = self.redo.pop().ok_or(EditError::NothingToRedo)?;
         let mut document = *document;
         document.settings.cue_mode = self.document.settings.cue_mode;
@@ -641,6 +674,13 @@ impl Editor {
         document.settings.tempo = tempo
             .clone()
             .unwrap_or_else(|| self.document.settings.tempo.clone());
+        match brace {
+            Some((start, length)) => {
+                document.settings.arrangement_loop.start = start;
+                document.settings.arrangement_loop.length = length;
+            }
+            None => keep_brace(&mut document, &self.document),
+        }
         let before = std::mem::replace(&mut self.document, document);
         self.undo.push_back(Step {
             label,
@@ -648,6 +688,7 @@ impl Editor {
             document: Box::new(before),
             scale,
             tempo,
+            brace,
         });
         Ok(())
     }
@@ -773,12 +814,19 @@ impl Editor {
             .then_some(self.document.settings.scale);
         let tempo = (before.settings.tempo != self.document.settings.tempo)
             .then(|| self.document.settings.tempo.clone());
+        let (was, now) = (
+            before.settings.arrangement_loop,
+            self.document.settings.arrangement_loop,
+        );
+        let brace =
+            ((was.start, was.length) != (now.start, now.length)).then_some((now.start, now.length));
         self.undo.push_back(Step {
             label,
             maker,
             document: Box::new(before),
             scale,
             tempo,
+            brace,
         });
         self.trim();
     }
@@ -790,6 +838,13 @@ impl Editor {
             }
         }
     }
+}
+
+/// Gives `document` the loop brace `current` has.
+fn keep_brace(document: &mut Document, current: &Document) {
+    let brace = current.settings.arrangement_loop;
+    document.settings.arrangement_loop.start = brace.start;
+    document.settings.arrangement_loop.length = brace.length;
 }
 
 impl Default for Editor {
@@ -1356,6 +1411,45 @@ mod tests {
         assert_eq!(bpm(&editor), 130.0);
         editor.redo().unwrap();
         assert_eq!(bpm(&editor), 130.0);
+    }
+
+    fn brace(editor: &Editor) -> (Ticks, Ticks) {
+        let brace = editor.document().settings().arrangement_loop;
+        (brace.start, brace.length)
+    }
+
+    #[test]
+    fn moving_the_loop_brace_is_no_undo_step_and_survives_undo_of_an_earlier_step() {
+        // Spec: transport R31
+        let mut editor = Editor::new();
+        midi_track(&mut editor);
+        let steps = editor.undo_history().len();
+        let changes = editor.move_loop_brace(Ticks(1000), Ticks(500));
+        assert!(!changes.is_empty());
+        assert_eq!(editor.undo_history().len(), steps);
+        assert_eq!(brace(&editor), (Ticks(1000), Ticks(500)));
+        editor.undo().unwrap();
+        assert_eq!(brace(&editor), (Ticks(1000), Ticks(500)));
+        editor.redo().unwrap();
+        assert_eq!(brace(&editor), (Ticks(1000), Ticks(500)));
+    }
+
+    #[test]
+    fn a_step_that_set_the_loop_brace_brings_it_back_on_redo_past_a_later_move() {
+        // Spec: transport R16, R31
+        let mut editor = Editor::new();
+        let first = brace(&editor);
+        editor
+            .apply(Command::SetLoop {
+                start: Ticks(100),
+                length: Ticks(200),
+            })
+            .unwrap();
+        editor.move_loop_brace(Ticks(300), Ticks(400));
+        editor.undo().unwrap();
+        assert_eq!(brace(&editor), first);
+        editor.redo().unwrap();
+        assert_eq!(brace(&editor), (Ticks(100), Ticks(200)));
     }
 
     #[test]

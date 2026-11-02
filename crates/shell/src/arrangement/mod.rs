@@ -187,6 +187,9 @@ pub struct ArrangementView {
     /// The position of the selected time-signature marker (WP-6.61): see
     /// [`locator`].
     selected_signature: Option<Ticks>,
+    /// Whether the loop brace was selected by a click on its bar (WP-6.73):
+    /// see [`ArrangementView::loop_brace_selected`].
+    loop_brace: bool,
     /// The take lanes whose headers are selected (the comping spec, R26): see
     /// [`take_lanes`].
     selected_take_lanes: Vec<TakeLaneId>,
@@ -278,6 +281,7 @@ impl ArrangementView {
             selected_clips: Vec::new(),
             selected_locators: Vec::new(),
             selected_signature: None,
+            loop_brace: false,
             selected_take_lanes: Vec::new(),
             shown_take_lanes: BTreeSet::new(),
             take_heights: BTreeMap::new(),
@@ -606,6 +610,15 @@ impl ArrangementView {
         {
             self.selected_signature = None;
         }
+    }
+
+    /// Whether the loop brace is selected (WP-6.73): clicked on its bar, and
+    /// the time selection still its span, so any other selection or click
+    /// deselects it.
+    #[must_use]
+    pub fn loop_brace_selected(&self, doc: &Document) -> bool {
+        let brace = doc.settings().arrangement_loop;
+        self.loop_brace && self.time_selection == Some((brace.start, brace.start + brace.length))
     }
 
     /// The position of the selected time-signature marker (WP-6.61).
@@ -1505,6 +1518,7 @@ impl ArrangementView {
             selected_take_lanes: self.selected_take_lanes.clone(),
             shown_take_lanes: self.shown_take_lanes.iter().copied().collect(),
             selected_fade: self.selected_fade,
+            loop_brace_selected: self.loop_brace_selected(doc),
             time_selection: self
                 .time_selection
                 .map(|(start, end)| TimeRange { start, end }),

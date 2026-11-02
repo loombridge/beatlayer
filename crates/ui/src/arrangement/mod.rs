@@ -39,6 +39,7 @@ use bl_shell::arrangement::snapping::Dragged;
 use bl_shell::arrangement::{ArrangementView, Horizontal};
 use bl_shell::arrangement_commands::{self as ids, Lane};
 use bl_shell::clip_drag::{ClipDragEvent, DragSource, DropSpot};
+use bl_shell::editing_commands as edit_ids;
 use bl_shell::locator_commands as locator_ids;
 use bl_shell::{GesturePhase, InfoTarget, Invocation, Shell};
 use egui::accesskit::Role;
@@ -179,6 +180,66 @@ enum Drag {
     /// Dragging a breakpoint or curving a segment on an automation lane
     /// (WP-2.12).
     Automation,
+    /// Dragging the loop brace's ends or bar (WP-6.73), from the brace it
+    /// began on and the position it grabbed.
+    Brace {
+        part: BracePart,
+        start: Ticks,
+        length: Ticks,
+        grab: Ticks,
+    },
+}
+
+/// The part of the loop brace a press lands on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum BracePart {
+    Start,
+    End,
+    Bar,
+}
+
+/// How far from the brace's ends, in points, a press grabs the end.
+const BRACE_END_GRAB: f32 = 4.0;
+
+/// The part of the brace `rect` a press at `x` lands on.
+fn brace_part(rect: Rect, x: f32) -> BracePart {
+    if x < rect.left() + BRACE_END_GRAB {
+        BracePart::Start
+    } else if x > rect.right() - BRACE_END_GRAB {
+        BracePart::End
+    } else {
+        BracePart::Bar
+    }
+}
+
+/// Where dragging the brace's `part` to `at` puts it, snapped to the grid
+/// while snapping is on, and where the insert marker goes (the transport
+/// spec, R34). An end can't pass the other: the brace stays a sixteenth long.
+fn dragged_brace(
+    view: &ArrangementView,
+    doc: &Document,
+    drag: (BracePart, Ticks, Ticks, Ticks),
+    at: Ticks,
+) -> (Ticks, Ticks, &'static str) {
+    let (part, start, length, grab) = drag;
+    let end = start + length;
+    match part {
+        BracePart::Start => {
+            let to = view
+                .snap(doc, at)
+                .min(end - Ticks::SIXTEENTH)
+                .max(Ticks::ZERO);
+            (to, end - to, "start")
+        }
+        BracePart::End => {
+            let to = view.snap(doc, at).max(start + Ticks::SIXTEENTH);
+            (start, to - start, "end")
+        }
+        BracePart::Bar => {
+            let to = view.snap(doc, start + (at - grab)).max(Ticks::ZERO);
+            (to, length, "start")
+        }
+    }
 }
 
 /// The Arrangement View's state between frames: caches and gestures, never
@@ -1931,9 +1992,56 @@ impl ArrangementUi {
         if !on_locator {
             scrub.context_menu(|ui| self.menus.show(ui, theme, shell, events));
         }
-        // The loop brace's menu (C-TIME-023).
-        let brace = brace_rect(layout.beat_ruler, horizontal, &view.transport());
-        let brace = ui.interact(brace, brace_id(), Sense::click());
+        // The loop brace: a click on its bar selects it, and dragging its ends
+        // or bar moves it, with no undo step (the transport spec, R32, R34).
+        // Its menu is C-TIME-023.
+        let transport = view.transport();
+        let rect = brace_rect(layout.beat_ruler, horizontal, &transport);
+        let brace = ui.interact(
+            rect.expand2(egui::vec2(BRACE_END_GRAB, 0.0)),
+            brace_id(),
+            Sense::click_and_drag(),
+        );
+        let brace_at = |pos: Pos2| horizontal.at(f64::from(pos.x - layout.beat_ruler.left()));
+        // The drag starts a few points after the press: the part it grabbed is
+        // where the press was.
+        if brace.drag_started()
+            && let Some(pos) = ui.input(|i| i.pointer.press_origin())
+        {
+            invoke(events, edit_ids::SELECT_LOOP_BRACE, json!({}));
+            self.drag = Some(Drag::Brace {
+                part: brace_part(rect, pos.x),
+                start: transport.loop_start,
+                length: transport.loop_length,
+                grab: brace_at(pos),
+            });
+        }
+        if brace.dragged()
+            && let Some(Drag::Brace {
+                part,
+                start,
+                length,
+                grab,
+            }) = self.drag
+            && let Some(pos) = brace.interact_pointer_pos()
+        {
+            let (to, long, marker) =
+                dragged_brace(view, doc, (part, start, length, grab), brace_at(pos));
+            if (to, long) != (transport.loop_start, transport.loop_length) {
+                invoke(
+                    events,
+                    edit_ids::SET_LOOP_BRACE,
+                    json!({ "start": to, "length": long, "insert_marker": marker }),
+                );
+            }
+        }
+        if brace.drag_stopped() && matches!(self.drag, Some(Drag::Brace { .. })) {
+            self.drag = None;
+        }
+        if brace.clicked() {
+            invoke(events, edit_ids::SELECT_LOOP_BRACE, json!({}));
+        }
+        brace.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Loop Brace"));
         if brace.secondary_clicked() {
             self.menus.open_brace();
         }

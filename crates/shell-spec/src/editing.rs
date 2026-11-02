@@ -84,6 +84,15 @@ pub const LOOP_SELECTION: &str = "arrangement.loop_selection";
 /// `arrangement.select_loop`: select the time inside the loop brace
 /// (Cmd-Shift-L).
 pub const SELECT_LOOP: &str = "arrangement.select_loop";
+/// `arrangement.select_loop_brace`: select the loop brace itself (a click on
+/// its bar).
+pub const SELECT_LOOP_BRACE: &str = "arrangement.select_loop_brace";
+/// `arrangement.nudge_loop_brace`: move or resize the selected loop brace
+/// (its arrow keys).
+pub const NUDGE_LOOP_BRACE: &str = "arrangement.nudge_loop_brace";
+/// `arrangement.set_loop_brace`: put the loop brace where a drag of its ends
+/// or bar has taken it.
+pub const SET_LOOP_BRACE: &str = "arrangement.set_loop_brace";
 
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
@@ -101,6 +110,9 @@ pub const IDS: &[&str] = &[
     NUDGE,
     LOOP_SELECTION,
     SELECT_LOOP,
+    SELECT_LOOP_BRACE,
+    NUDGE_LOOP_BRACE,
+    SET_LOOP_BRACE,
     CREATE_FADE,
     DELETE_FADES,
     INSERT_EMPTY_MIDI_CLIP,
@@ -498,6 +510,64 @@ pub struct LoopSelectionArgs {
     pub end: Option<Position>,
 }
 
+/// How `arrangement.nudge_loop_brace` changes the loop brace.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(
+    description = "`left` or `right`: to the previous or next grid line. `earlier` or `later`: \
+                   by the brace's own length. `halve` or `double`: its length, from its start. \
+                   `shorten` or `lengthen`: its length by a grid step."
+)]
+pub enum LoopBraceMove {
+    /// To the previous grid line.
+    Left,
+    /// To the next grid line.
+    Right,
+    /// Earlier by its length, stopping at 1.1.1.
+    Earlier,
+    /// Later by its length.
+    Later,
+    /// Half as long, from its start.
+    Halve,
+    /// Twice as long, from its start.
+    Double,
+    /// Shorter by a grid step.
+    Shorten,
+    /// Longer by a grid step.
+    Lengthen,
+}
+
+/// Arguments of `arrangement.nudge_loop_brace`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NudgeLoopBraceArgs {
+    /// What to do to the brace.
+    pub by: LoopBraceMove,
+}
+
+/// The end of the loop brace the insert marker goes to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LoopBraceEnd {
+    /// The brace's start.
+    Start,
+    /// The brace's end.
+    End,
+}
+
+/// Arguments of `arrangement.set_loop_brace`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetLoopBraceArgs {
+    /// Where the brace starts, in ticks: 0 (1.1.1) or later.
+    pub start: Ticks,
+    /// How long it is, in ticks: more than 0.
+    pub length: Ticks,
+    /// Where the insert marker goes. Left out, the start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub insert_marker: Option<LoopBraceEnd>,
+}
+
 /// What an edit did, and what's selected afterwards.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct EditResult {
@@ -892,6 +962,48 @@ fn specs() -> Vec<CommandSpec> {
         )
         .binding("S-ARR-009")
         .args::<DeleteFadesArgs>(),
+        CommandSpec::new(SELECT_LOOP_BRACE, "Select Loop Brace")
+            .description(
+                "Selects the Arrangement's loop brace, as clicking its bar does: the brace's \
+                 span becomes the time selection on every track, the returns and Main \
+                 included, the insert marker goes to the brace's start, and the brace's keys \
+                 (`arrangement.nudge_loop_brace`) apply. The Loop switch stays as it is. \
+                 Changes nothing in the set.",
+            )
+            .permission(Permission::Read)
+            .contexts([Arrangement])
+            .args::<NoArgs>()
+            .result::<ArrangementState>(),
+        edit(
+            NUDGE_LOOP_BRACE,
+            "Nudge Loop Brace",
+            Permission::Edit,
+            "Moves or resizes the selected loop brace (`arrangement.select_loop_brace`), as its \
+             keys do. `left` and `right` move it to the previous or next line of the editing \
+             grid; `earlier` and `later` move it by its own length, `earlier` stopping at \
+             1.1.1; `halve` and `double` change its length from its start; `shorten` and \
+             `lengthen` change it by one grid step. After a move the insert marker is at the \
+             brace's start, after a length change at its end, and the time selection follows \
+             the brace. Read the brace back with `transport.state` (`loop_start`, \
+             `loop_length`). The Loop switch stays as it is, and none of it is an undo step.",
+        )
+        .contexts([Arrangement, LoopBrace])
+        .args::<NudgeLoopBraceArgs>()
+        .result::<ArrangementState>(),
+        edit(
+            SET_LOOP_BRACE,
+            "Set Loop Brace",
+            Permission::Edit,
+            "Puts the Arrangement's loop brace at `start` for `length` ticks, as dragging its \
+             ends or its bar does, and selects it: the span becomes the time selection on \
+             every track, and the insert marker goes to the brace's start or, with \
+             `insert_marker` `end`, its end. The Loop switch stays as it is, and unlike \
+             `transport.set_loop` it is no undo step. The start must be 0 (1.1.1) or later and \
+             the length more than 0. Read the brace back with `transport.state` (`loop_start`, \
+             `loop_length`).",
+        )
+        .args::<SetLoopBraceArgs>()
+        .result::<ArrangementState>(),
         CommandSpec::new(SELECT_LOOP, "Select Loop")
             .description(
                 "Selects the time inside the Arrangement's loop brace on every track, as \

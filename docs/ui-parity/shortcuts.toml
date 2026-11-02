@@ -1174,8 +1174,8 @@ win = ["Left", "Right"]
 kind = "key"
 trigger = "press"
 milestone = "M6"
-source = "manual 42.8"
-notes = "Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it."
+source = "manual 42.8; observed in 12.4.16 (macOS), 1 November 2026"
+notes = "Moved to M6 by WP-6.70, when the loop brace couldn't be selected. WP-6.73 builds it: the key acts while the brace is selected."
 
 [[shortcut]]
 id = "S-LOOP-008"
@@ -1186,8 +1186,8 @@ win = ["Down", "Up"]
 kind = "key"
 trigger = "press"
 milestone = "M6"
-source = "manual 42.8"
-notes = "Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it."
+source = "manual 42.8; observed in 12.4.16 (macOS), 1 November 2026"
+notes = "Moved to M6 by WP-6.70, when the loop brace couldn't be selected. WP-6.73 builds it: the key acts while the brace is selected."
 
 [[shortcut]]
 id = "S-LOOP-009"
@@ -1198,8 +1198,8 @@ win = ["Ctrl+Down", "Ctrl+Up"]
 kind = "key"
 trigger = "press"
 milestone = "M6"
-source = "manual 42.8"
-notes = "Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it."
+source = "manual 42.8; observed in 12.4.16 (macOS), 1 November 2026"
+notes = "Moved to M6 by WP-6.70, when the loop brace couldn't be selected. WP-6.73 builds it: the key acts while the brace is selected."
 
 [[shortcut]]
 id = "S-LOOP-010"
@@ -1210,8 +1210,8 @@ win = ["Ctrl+Left", "Ctrl+Right"]
 kind = "key"
 trigger = "press"
 milestone = "M6"
-source = "manual 42.8"
-notes = "Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it."
+source = "manual 42.8; observed in 12.4.16 (macOS), 1 November 2026"
+notes = "Moved to M6 by WP-6.70, when the loop brace couldn't be selected. WP-6.73 builds it: the key acts while the brace is selected."
 
 [[shortcut]]
 id = "S-LOOP-011"
@@ -2533,9 +2533,9 @@ win = ["Ctrl+Left", "Ctrl+Right"]
 kind = "key"
 trigger = "press"
 milestone = "M6"
-source = "manual 42.16"
+source = "manual 42.16; observed in 12.4.16 (macOS), 1 November 2026"
 same_as = "S-LOOP-010"
-notes = "Placed in the loop-brace context because 42.8 says the brace must be selected. Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it."
+notes = "Placed in the loop-brace context because 42.8 says the brace must be selected. Moved to M6 by WP-6.70, when the loop brace couldn't be selected. WP-6.73 builds it: the key acts while the brace is selected."
 
 [[shortcut]]
 id = "S-ARR-013"

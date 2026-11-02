@@ -404,6 +404,11 @@ pub struct ArrangementState {
     /// The selected fade handle (WP-6.51), if any: Delete deletes its fade.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_fade: Option<FadeHandleState>,
+    /// Whether the loop brace is selected (WP-6.73): its keys then move and
+    /// resize it. It is while the time selection is the brace's span, after
+    /// a click on the brace's bar.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub loop_brace_selected: bool,
     /// The selected span of time on the selected tracks, if any.
     pub time_selection: Option<TimeRange>,
     /// The lanes the time selection covers: each a track's own lane, a take

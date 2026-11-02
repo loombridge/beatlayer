@@ -260,7 +260,10 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ),
         (
             "rack.set_macro_style",
-            Exception(Equivalent("Macro Style on a macro's context menu")),
+            Exception(AgentOnly(
+                "a macro's style; Live's macro menu has no Macro Style item, so a person reaches \
+                 it through the agent API",
+            )),
         ),
         (
             "rack.set_mapped_value",

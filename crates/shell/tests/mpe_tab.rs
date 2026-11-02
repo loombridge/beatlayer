@@ -501,6 +501,16 @@ fn clear_all_envelopes_and_the_zoom() {
         "the unselected note keeps its envelopes"
     );
     song.refused(ids::CLEAR_EXPRESSIONS, json!({ "notes": [5] }));
+    // Clear Envelope clears the one envelope and leaves the others.
+    let mut song = self::song(vec![shaped()]);
+    song.view(ids::SELECT_NOTES, json!({ "notes": [0] }));
+    song.one_step(
+        ids::CLEAR_EXPRESSIONS,
+        json!({ "envelope": "pitch" }),
+        "Clear All Envelopes",
+    );
+    let note = &song.notes()[0];
+    assert!(note.pitch.is_empty() && !note.slide.is_empty());
     // Z: the rows the Pitch envelopes reach inside the time selection.
     let mut song = self::song(vec![shaped()]);
     song.view(ids::SELECT_NOTES, json!({ "notes": [0] }));

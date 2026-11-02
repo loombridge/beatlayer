@@ -1563,9 +1563,8 @@ fn the_header_toggle_and_the_title_bar_keys_show_and_hide_the_lanes() {
     assert!(!s.lanes().lanes_hidden);
 }
 
-// Spec: automation R27. The device chooser's last entry, and the lane
-// header's menu, switch the lane's choosers to list only automated
-// parameters.
+// Spec: automation R27. The device chooser's last entry switches the
+// lane's choosers to list only automated parameters.
 #[test]
 fn show_automated_parameters_only_filters_the_choosers() {
     let mut s = set();
@@ -1587,10 +1586,14 @@ fn show_automated_parameters_only_filters_the_choosers() {
     s.h.key(Key::Escape, Modifiers::NONE);
     s.h.settle();
 
-    // The lane header's menu has the filter first, ticked once on.
+    // The device chooser's last entry is the filter (the lane header's menu
+    // is Live's, without it).
     let at = first_centre(&nodes, "Automation Device");
-    let output = right_click(&mut s.h, at);
-    let menu = Harness::nodes(&output);
+    click(&mut s.h, at, Modifiers::NONE);
+    for _ in 0..12 {
+        s.h.frame(vec![]);
+    }
+    let menu = Harness::nodes(&s.h.frame(vec![]));
     click(
         &mut s.h,
         first_centre(&menu, "Show Automated Parameters Only"),
@@ -1619,15 +1622,19 @@ fn the_lane_header_menu_clears_envelopes_in_one_undo_step() {
     let at = s.button("Automation Device");
     let output = right_click(&mut s.h, at);
     let menu = Harness::nodes(&output);
-    for label in [
-        "Show Automated Parameters Only",
-        "Show All Lanes",
-        "Hide All Lanes",
-        "Clear All Envelopes",
-        "Clear Envelopes of Track Mixer",
-    ] {
-        assert!(menu.iter().any(|n| n.label == label), "no {label:?}");
-    }
+    // C-ALANE, in Live's order: the main lane can't be removed.
+    use common::MenuRow::{Dim, Item, Sep};
+    common::assert_menu(
+        &menu,
+        &[
+            Dim("Remove Automation Lane"),
+            Item("Add Lane for Each Automated Envelope"),
+            Sep,
+            Item("Clear Envelope"),
+            Item("Clear All Envelopes of Mixer"),
+            Item("Clear All Envelopes"),
+        ],
+    );
     let steps = s.steps();
     click(
         &mut s.h,
@@ -1664,7 +1671,7 @@ fn clear_envelopes_clears_the_device_the_lane_shows() {
     let menu = Harness::nodes(&output);
     click(
         &mut s.h,
-        first_centre(&menu, "Clear Envelopes of Track Mixer"),
+        first_centre(&menu, "Clear All Envelopes of Mixer"),
         Modifiers::NONE,
     );
     let commands = s.commands();
@@ -1691,23 +1698,27 @@ fn a_mixer_controls_menu_has_the_automation_items() {
     let pan_control = s.button("Track Pan");
     let output = right_click(&mut s.h, pan_control);
     let menu = Harness::nodes(&output);
-    for label in [
-        "Stereo Pan Mode",
-        "Split Stereo Pan Mode",
-        "Delete Automation",
-        "Re-Enable Automation",
-        "Show Automation",
-        "Show Automation In New Lane",
-    ] {
-        assert!(menu.iter().any(|n| n.label == label), "no {label:?}");
-    }
-    assert!(
-        !Harness::node(&menu, "Delete Automation").disabled,
-        "pan has an envelope"
-    );
-    assert!(
-        Harness::node(&menu, "Re-Enable Automation").disabled,
-        "it isn't overridden"
+    // C-PAN then C-PARAM, in Live's order: the mode to switch to, Delete
+    // Automation while the control has an envelope (Re-Enable Automation only
+    // while it is overridden), the automation items, the modulation source
+    // and the maps.
+    use common::MenuRow::{Dim, Item, Sep};
+    common::assert_menu(
+        &menu,
+        &[
+            Item("Select Split Stereo Pan Mode"),
+            Sep,
+            Item("Delete Automation"),
+            Item("Show Automation"),
+            Item("Show Automation In New Lane"),
+            Sep,
+            Dim("Show Modulation Source 1: Clip Envelope"),
+            Sep,
+            Item("Edit MIDI Map"),
+            Item("Edit Key Map"),
+            Sep,
+            Dim("Copy Max for Live Path"),
+        ],
     );
     click(
         &mut s.h,

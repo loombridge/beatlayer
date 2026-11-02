@@ -776,9 +776,21 @@ fn a_chains_menu_renames_and_colours() {
     let (rack, chains) = rack(&mut h, &["Pad", "Lead"]);
     let name = row(&layout_of(&mut h, rack), 0).name.center();
     let nodes = Harness::nodes(&right_click(&mut h, name));
-    assert!(!item(&nodes, "Rename").disabled);
-    // Spec: info-view R10. Edit Info Text works since WP-6.58.
-    assert!(!item(&nodes, "Edit Info Text").disabled);
+    // C-CHAIN, in Live's order, before the palette. Color Automatically waits
+    // for a package. Spec: info-view R10. Edit Info Text works since WP-6.58.
+    use common::MenuRow::{Dim, Item, Sep};
+    common::assert_menu(
+        &nodes,
+        &[
+            Item("Duplicate"),
+            Sep,
+            Item("Rename"),
+            Item("Edit Info Text"),
+            Item("Create Chain"),
+            Sep,
+            Dim("Color Automatically"),
+        ],
+    );
     assert!(
         nodes.iter().any(|n| n.label == "Row 5, colour 14"),
         "the palette's 5 rows of 14"

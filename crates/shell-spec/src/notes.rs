@@ -617,6 +617,10 @@ pub struct ClearExpressionsArgs {
     /// selected notes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<Vec<u32>>,
+    /// The one envelope to clear, as Clear Envelope in the MPE tab's menu
+    /// does. Left out, all three.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub envelope: Option<Expression>,
 }
 
 /// Arguments of `clip_view.select_expression_breakpoints`.
@@ -2178,8 +2182,9 @@ fn specs() -> Vec<CommandSpec> {
             "Clear All Envelopes",
             Permission::Edit,
             "Clears the Pitch, Slide and Pressure envelopes of notes (`notes`, or the \
-             selected notes), as Clear All Envelopes in the MPE tab's context menus does. One \
-             undo step, Clear All Envelopes. The clip query's notes read the envelopes back.",
+             selected notes), as Clear All MPE Envelopes in the MPE tab's context menu does, or \
+             only `envelope`'s, as Clear Envelope does. One undo step, Clear All Envelopes. The \
+             clip query's notes read the envelopes back.",
         )
         .args::<ClearExpressionsArgs>(),
         CommandSpec::new(SELECT_EXPRESSION_BREAKPOINTS, "Select Expression Breakpoints")

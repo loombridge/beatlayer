@@ -216,7 +216,7 @@ The View menu is taller than the screen at 1600 × 1000 and scrolls.
 | M-VIEW-013 | Expand Clip View | ⌥⌘E | S-NOTE-030 | disabled | Beatlayer enables it while the Clip View shows and ticks it while expanded (its own; [detail views](../specs/detail-views.md) R11) |
 | M-VIEW-014 | Hide Device View | ⌥⌘L | S-VIEW-022 | | Label read with the Device View shown; hides the detail area. Beatlayer's labels in other states: Hide Clip View, Hide Clip and Device View, and Show Device View, Show Clip View or Show Clip and Device View for what it would bring back (its own words; [detail views](../specs/detail-views.md) R6) |
 | | — | | | | |
-| M-VIEW-015 | Arrange Clip View Panels Automatically | | | ticked | One of three choices (015 to 017). Live from WP-6.72 ([detail views](../specs/detail-views.md) R20); the same three items are in the Clip View title bar's menu (C-CLIPTITLE-005 to 007) |
+| M-VIEW-015 | Arrange Clip View Panels Automatically | | | ticked | One of three choices (015 to 017). Live from WP-6.72 ([detail views](../specs/detail-views.md) R20); only Arrange Clip View Panels Automatically is in the Clip View title bar's menu (C-CLIPTITLE-003) |
 | M-VIEW-016 | Arrange Clip View Panels Horizontally | | | | As M-VIEW-015 |
 | M-VIEW-017 | Arrange Clip View Panels Vertically | | | | As M-VIEW-015 |
 | | — | | | | |
@@ -441,7 +441,7 @@ Context menus open on right-click (or Ctrl-click on macOS) and from the keyboard
 
 **Live draws its context menus itself** rather than using the system's menus. They take Live's theme, write keys their own way (Del for the Delete key, Enter for Return, where the Edit menu shows ⌫ and ↩), lay some choices out as grids (the Arrangement's grid settings), and the track header, scene, and Session clip menus end with a colour palette of 5 rows of 14 swatches. Beatlayer draws its context menus the same way, with its own colours.
 
-Each menu below, up to the crossfader's, was opened once in a new set on 10 October 2026 (the crossfader's on 15 October 2026), on the object named; its rows are in Live's order, with separators, keys shown, and state as in the menu-bar tables. **Other states** lists commands the manual places in the same menu for other objects or selections (audio clips, group tracks, automation lanes); their source is the manual. The menus after the crossfader's weren't opened in Live: each says where its items and their order come from, and those listed as commands give each item's source, and its shortcut's ID where it has one, in place of the keys and state Live shows.
+Each menu below, up to the crossfader's, was opened once in a new set on 10 October 2026 (the crossfader's on 15 October 2026), on the object named; its rows are in Live's order, with separators, keys shown, and state as in the menu-bar tables. **Other states** lists commands the manual places in the same menu for other objects or selections (audio clips, group tracks, automation lanes); their source is the manual. The menus after the crossfader's that name Live 12.4.16 and 2 November 2026 were opened then, in a new set: their rows are in Live's order with its separators, headings ("Adaptive Grid:" and the like, dim text that is no item), keys shown and dim states, and the Source column says `obs`. Beatlayer's menus match them; an item Live names that Beatlayer has no feature for is shown dim, and an item Beatlayer had that Live's menu hasn't is not in the menu (its command and key stay). The menus that follow and say they weren't opened in Live give their source and keep Beatlayer's own order.
 
 ### Session clip slot, empty (C-SLOT)
 
@@ -766,99 +766,355 @@ Opened on the crossfader in the Main track's strip (shown by View > Mixer Contro
 
 ### Pan control (C-PAN)
 
-Opened on a track's pan control (the strip's or the Arrangement header's). Source: manual 18.1; the item order wasn't observed. The two are one choice per track, whichever mode is in force ticked.
+Opened on a track's pan control (the strip's or the Arrangement header's). Opened in Live 12.4.16 (macOS) on 2 November 2026. On an audio track in the Session mixer, in the stereo pan mode: the menu offers only the mode to switch to, not the one in force, and goes on with the items every automatable control has (C-PARAM). It is the volume fader's menu with its own item first.
 
-| ID | Item | Keys shown | Shortcut | In a new set | Notes |
-|---|---|---|---|---|---|
-| C-PAN-001 | Stereo Pan Mode | | | ticked | One control balances both channels; the default ([mixer](../specs/mixer.md) R29) |
-| C-PAN-002 | Split Stereo Pan Mode | | | | A control places each input channel on its own ([mixer](../specs/mixer.md) R29) |
+| ID | Item | Keys shown | State | Source |
+|---|---|---|---|---|
+| C-PAN-001 | Select Split Stereo Pan Mode |  |  | obs; in the split mode Beatlayer reads Select Stereo Pan Mode, the other mode's name in the same words, which wasn't opened in Live |
+| | — | | | |
+| C-PARAM-003 | Show Automation |  |  | obs |
+| C-PARAM-004 | Show Automation In New Lane |  |  | obs |
+| | — | | | |
+| C-PARAM-005 | Show Modulation Source 1: Clip Envelope |  | dim | obs |
+| | — | | | |
+| C-PARAM-006 | Edit MIDI Map | ⌘M |  | obs |
+| C-PARAM-007 | Edit Key Map | ⌘K |  | obs |
+| | — | | | |
+| C-PARAM-010 | Copy Max for Live Path |  | dim | obs; Beatlayer has no Max for Live |
 
-### Mixer control or device parameter (C-PARAM)
+Other states: an automated control's menu begins with Delete Automation, and with Re-Enable Automation while its envelope is overridden (manual 25.3, 25.4; not opened with an envelope drawn). Beatlayer shows both only while they apply, before Show Automation, with no separator.
 
-Opened on a track's mixer control or a device's parameter. These items come after any of the control's own (C-PAN, C-XFADE): the crossfader's menu shows the last two (C-XFADE-008, C-XFADE-009), and the order of the first two is Beatlayer's own ([automation](../specs/automation.md) R29).
+### Mixer control (C-PARAM)
 
-| ID | Command | Source |
-|---|---|---|
-| C-PARAM-001 | Delete Automation, enabled while the parameter has an envelope | manual 25.3 |
-| C-PARAM-002 | Re-Enable Automation, enabled while its envelope is overridden | manual 25.4 |
-| C-PARAM-003 | Show Automation | manual 25.5; release notes 12.2; observed (C-XFADE-008) |
-| C-PARAM-004 | Show Automation In New Lane | manual 25.5; observed (C-XFADE-009) |
+Opened on a track's mixer control that has no menu of its own, such as the volume fader. Opened in Live 12.4.16 (macOS) on 2 November 2026. The crossfader's menu shows the last two items before this one's rest (C-XFADE-008, C-XFADE-009).
+
+| ID | Item | Keys shown | State | Source |
+|---|---|---|---|---|
+| = C-PARAM-003 | Show Automation |  |  | obs |
+| = C-PARAM-004 | Show Automation In New Lane |  |  | obs |
+| | — | | | |
+| = C-PARAM-005 | Show Modulation Source 1: Clip Envelope |  | dim | obs |
+| | — | | | |
+| = C-PARAM-006 | Edit MIDI Map | ⌘M |  | obs |
+| = C-PARAM-007 | Edit Key Map | ⌘K |  | obs |
+| | — | | | |
+| = C-PARAM-010 | Copy Max for Live Path |  | dim | obs; Beatlayer has no Max for Live |
+
+Other states: Delete Automation and Re-Enable Automation, as in C-PAN. A device parameter (C-PARAM rack, below) adds Copy Parameter Name after Copy Max for Live Path. Show Modulation Source 1 and Copy Max for Live Path are shown dim: Beatlayer has no clip envelope as a modulation source of its controls' menus yet, and no Max for Live.
+
+### Device parameter inside a rack (C-PARAM rack)
+
+Opened on Utility's Gain in an Audio Effect Rack. Opened in Live 12.4.16 (macOS) on 2 November 2026. Outside a rack the macro items are absent, as the mixer controls' menus show; Copy Parameter Name shows for a device parameter.
+
+| ID | Item | Keys shown | State | Source |
+|---|---|---|---|---|
+| = C-PARAM-003 | Show Automation |  |  | obs |
+| = C-PARAM-004 | Show Automation In New Lane |  |  | obs |
+| | — | | | |
+| = C-PARAM-005 | Show Modulation Source 1: Clip Envelope |  | dim | obs |
+| | — | | | |
+| = C-PARAM-006 | Edit MIDI Map | ⌘M |  | obs |
+| = C-PARAM-007 | Edit Key Map | ⌘K |  | obs |
+| C-PARAM-008 | Edit Macro Map |  |  | obs |
+| | — | | | |
+| C-PARAM-009a | Map to Macro 1 |  |  | obs |
+| C-PARAM-009b | Map to Macro 2 |  |  | obs |
+| C-PARAM-009c | Map to Macro 3 |  |  | obs |
+| C-PARAM-009d | Map to Macro 4 |  |  | obs |
+| C-PARAM-009e | Map to Macro 5 |  |  | obs |
+| C-PARAM-009f | Map to Macro 6 |  |  | obs |
+| C-PARAM-009g | Map to Macro 7 |  |  | obs |
+| C-PARAM-009h | Map to Macro 8 |  |  | obs |
+| C-PARAM-009i | Map to Macro 9 |  |  | obs |
+| C-PARAM-009j | Map to Macro 10 |  |  | obs |
+| C-PARAM-009k | Map to Macro 11 |  |  | obs |
+| C-PARAM-009l | Map to Macro 12 |  |  | obs |
+| C-PARAM-009m | Map to Macro 13 |  |  | obs |
+| C-PARAM-009n | Map to Macro 14 |  |  | obs |
+| C-PARAM-009o | Map to Macro 15 |  |  | obs |
+| C-PARAM-009p | Map to Macro 16 |  |  | obs |
+| | — | | | |
+| = C-PARAM-010 | Copy Max for Live Path |  | dim | obs; Beatlayer has no Max for Live |
+| C-PARAM-011 | Copy Parameter Name |  | dim | obs; Beatlayer has no command to copy it yet |
+
+Other states: Map to Macro rows beyond the rack's macro count are shown dim (Live showed sixteen rows in a rack of eight macros; whether it enables the rest wasn't observed). Copy Parameter Name is shown dim: no registered command copies a name yet.
+
+### Macro knob (C-MACRO)
+
+Opened on Macro 1 of an Audio Effect Rack. Opened in Live 12.4.16 (macOS) on 2 November 2026. The rack's title bar shows Rand and Map buttons while the macros show; a new rack shows 8 macros in 2 rows of 4, with + and − down the view column to change the count, and a Macro Variations panel with New left of the macros.
+
+| ID | Item | Keys shown | State | Source |
+|---|---|---|---|---|
+| C-MACRO-001 | Show Automation |  |  | obs |
+| C-MACRO-002 | Show Automation In New Lane |  |  | obs |
+| | — | | | |
+| C-MACRO-003 | Show Modulation Source 1: Clip Envelope |  | dim | obs |
+| | — | | | |
+| C-MACRO-004 | Edit MIDI Map | ⌘M |  | obs |
+| C-MACRO-005 | Edit Key Map | ⌘K |  | obs |
+| | — | | | |
+| C-MACRO-006 | Copy Max for Live Path |  | dim | obs |
+| C-MACRO-007 | Copy Parameter Name |  | dim | obs |
+| | — | | | |
+| C-MACRO-008 | Show Generic 0-127 Value |  | dim | obs |
+| C-MACRO-009 | Rename | ⌘R |  | obs |
+| C-MACRO-010 | Edit Info Text |  |  | obs |
+| C-MACRO-011 | Exclude Macro from Randomization |  | ticked while excluded | obs |
+| C-MACRO-012 | Exclude Macro From Variations |  | ticked while excluded | obs |
+| | — | | | |
+| C-MACRO-013 | No Color |  |  | obs |
+| C-MACRO-014 | Colour palette |  |  | obs; 5 rows of 14 swatches |
+
+Beatlayer's macro menu had a Macro Style submenu and Include in Randomization and Include in Variations items of its own; Live's menu has none of them, so they are gone from it (`rack.set_macro_style` and the commands that set the exclusions stay). Show Generic 0-127 Value is dim: no such display is built.
+
+### Rack chain (C-CHAIN)
+
+Opened on a chain in an Audio Effect Rack's chain list. Opened in Live 12.4.16 (macOS) on 2 November 2026. The chain list's header shows a small icon button at its left and Chain, Hide (lit) at its right; a chain row shows its name in its colour, volume 0.0 dB (blue), pan C, a speaker (lit), S, and a hot-swap icon.
+
+| ID | Item | Keys shown | State | Source |
+|---|---|---|---|---|
+| C-CHAIN-001 | Duplicate | ⌘D |  | obs |
+| | — | | | |
+| C-CHAIN-002 | Rename | ⌘R |  | obs |
+| C-CHAIN-003 | Edit Info Text |  |  | obs |
+| C-CHAIN-004 | Create Chain |  |  | obs |
+| | — | | | |
+| C-CHAIN-005 | Color Automatically |  | ticked in Live; dim here | obs |
+| C-CHAIN-006 | Colour palette |  |  | obs; 5 rows of 14 swatches |
+
+Color Automatically is dim: chains take the colour of the palette only. Beatlayer's own Cut, Copy and Delete are not in this menu; their keys still work.
+
+### Main track header (C-MAIN)
+
+Opened on the Main track's header in the Session View. Opened in Live 12.4.16 (macOS) on 2 November 2026. No rename, delete, freeze, group or Color Automatically items.
+
+| ID | Item | Keys shown | State | Source |
+|---|---|---|---|---|
+| C-MAIN-001 | Edit Info Text |  |  | obs |
+| | — | | | |
+| C-MAIN-002 | Insert Audio Track | ⌘T |  | obs |
+| C-MAIN-003 | Insert MIDI Track | ⇧⌘T |  | obs |
+| C-MAIN-004 | Insert Return Track | ⌥⌘T |  | obs |
+| | — | | | |
+| C-MAIN-005 | Select Track Content |  | dim | obs |
+| | — | | | |
+| C-MAIN-006 | Colour palette |  |  | obs; 5 rows of 14 swatches, the Main track's colour (red) framed |
+
+### CPU meter (C-CPU)
+
+Opened by a click on the Control Bar's CPU meter, which is a box with ▼; the arrow beside it opens the same menu (L-CTRL-024). Opened in Live 12.4.16 (macOS) on 2 November 2026.
+
+| ID | Item | Keys shown | State | Source |
+|---|---|---|---|---|
+| C-CPU-001 | Enable CPU Meter |  | ticked; dim here | obs |
+| | — | | | |
+| C-CPU-002 | Average |  | ticked; its reading at the right (1 %) | obs |
+| C-CPU-003 | Current |  | its reading at the right (---) | obs |
+| | — | | | |
+| C-CPU-004 | Meter Text Shows: |  | heading | obs |
+| C-CPU-005 | Average, Current |  | one row of two choices, Average ticked | obs |
+| | — | | | |
+| C-CPU-006 | Warn on Current CPU Overload |  |  | obs |
+| | — | | | |
+| C-CPU-007 | Audio Engine On | ⌥⇧⌘E | ticked | obs |
+| C-CPU-008 | Configure Audio… |  |  | obs |
+
+In Beatlayer the meter measures one load, which is the Current reading; Enable CPU Meter, Average, the choice of meter text and Warn on Current CPU Overload have nothing behind them yet and are shown dim, with the readings of Average as ---.
 
 ### Automation lane header (C-ALANE)
 
-Opened on an automation lane's header in the Arrangement. The items are the manual's; their names and order are Beatlayer's own ([automation](../specs/automation.md) R28).
+Opened on an automation lane's header in the Arrangement, here Track Volume in its own lane with nothing drawn. Opened in Live 12.4.16 (macOS) on 2 November 2026. The lane header reads Mixer / Track Volume with a round − (remove) button at its right; the track's header grows a ▼ (show or hide lanes) button.
 
-| ID | Command | Source |
-|---|---|---|
-| C-ALANE-001 | Show Automated Parameters Only, ticked while on | manual 25.5 |
-| C-ALANE-002 | Show All Lanes | manual 25.5 |
-| C-ALANE-003 | Hide All Lanes | manual 25.5 |
-| C-ALANE-004 | Clear All Envelopes (every envelope of the track) | manual 25.5 |
-| C-ALANE-005 | Clear Envelopes (those of the device the lane shows) | manual 25.5 |
+| ID | Item | Keys shown | State | Source |
+|---|---|---|---|---|
+| C-ALANE-001 | Remove Automation Lane |  |  | obs |
+| C-ALANE-002 | Add Lane for Each Automated Envelope |  | dim with nothing automated | obs |
+| | — | | | |
+| C-ALANE-003 | Clear Envelope | ⌘Del | dim with nothing automated | obs |
+| C-ALANE-004 | Clear All Envelopes of Mixer |  | dim with nothing automated | obs |
+| C-ALANE-005 | Clear All Envelopes |  | dim with nothing automated | obs |
+
+The second item of the third group names the device the lane shows (Mixer, here). In Beatlayer Show Automated Parameters Only, Show All Lanes and Hide All Lanes are no longer in this menu; the track header's ▼ button and the commands keep them ([automation](../specs/automation.md) R28).
 
 ### Take lane header (C-TAKE)
 
-Opened on a take lane's header in the Arrangement, which it selects first ([comping](../specs/comping.md) R29). The items are the manual's and the release notes'; Live's order and separators weren't recorded, and the rows follow the manual.
+Opened on a take lane's header in the Arrangement ([comping](../specs/comping.md) R29), which it selects first. Opened in Live 12.4.16 (macOS) on 2 November 2026. On an empty take lane inserted on an audio track (Insert Take Lane from the track header's menu): the header is pale blue, named Lane, with a speaker (audition) button at its right.
 
-| ID | Command | Source |
-|---|---|---|
-| C-TAKE-001 | Copy Selection to Main Lane | manual 21.6 |
-| C-TAKE-002 | Insert Take Lane (S-COMP-004) | manual 21.2 |
-| C-TAKE-003 | Duplicate (S-COMP-005) | manual 21.2 |
-| C-TAKE-004 | Rename (S-EDIT-008) | manual 21.2 |
-| C-TAKE-005 | Delete | manual 21.2 |
-| C-TAKE-006 | Delete All Take Lanes | manual 21.2 |
-| C-TAKE-007 | Delete All Unused Take Lanes | manual 21.2; release notes 12.2 |
-| C-TAKE-008 | Paste Bounced Audio (S-BOUNCE-002) | release notes 12.3 |
+| ID | Item | Keys shown | State | Source |
+|---|---|---|---|---|
+| C-TAKE-001 | Duplicate | ⌘D |  | obs |
+| C-TAKE-002 | Delete | Del |  | obs |
+| | — | | | |
+| C-TAKE-003 | Rename | ⌘R |  | obs |
+| C-TAKE-004 | Edit Info Text |  | dim here | obs |
+| | — | | | |
+| C-TAKE-005 | Insert Take Lane | ⌥⇧T |  | obs |
+| C-TAKE-006 | Show Take Lanes | ⌥⌘U | ticked | obs |
+| C-TAKE-007 | Delete All Take Lanes |  |  | obs |
+| C-TAKE-008 | Delete Unused Take Lanes |  |  | obs |
+
+Copy Selection to Main Lane and Paste Bounced Audio are not in Live's menu and are not in Beatlayer's; their keys (S-COMP-002, S-BOUNCE-002) still run them. Edit Info Text is dim: a take lane has no info text yet.
+
+### Drum Rack pad (C-PAD)
+
+Opened on a pad that holds a device (DS Kick dropped on C1). Opened in Live 12.4.16 (macOS) on 2 November 2026. An empty pad opens no menu: a right-click only selects it.
+
+| ID | Item | Keys shown | State | Source |
+|---|---|---|---|---|
+| C-PAD-001 | Rename | ⌘R |  | obs |
+| C-PAD-002 | Delete | Del |  | obs |
+| | — | | | |
+| C-PAD-003 | Save as Default Pad |  |  | obs |
+| | — | | | |
+| C-PAD-005 | Next Similar | ⌘→ | dim for a pad holding an instrument | obs |
+| C-PAD-006 | Previous Similar | ⌘← | dim for a pad holding an instrument | obs |
+| C-PAD-007 | Save as Similarity Reference | ⌘↑ | dim for a pad holding an instrument | obs |
+| C-PAD-008 | Return to Reference | ⌘↓ | dim for a pad holding an instrument | obs |
+
+The similar items are dim for a pad holding an instrument rather than a sample ([sound similarity](../specs/sound-similarity.md) R21).
 
 ### Clip View title bar (C-CLIPTITLE)
 
-Opened on the Clip View's title bar (L-CLIP-002); it acts on the clips the Clip View shows. The items are the manual's; Live's order wasn't recorded, and the order and separators below are Beatlayer's own ([session context menus](../specs/session-context-menus.md) R4).
+Opened on the Clip View's title bar (L-CLIP-002); it acts on the clips the Clip View shows ([session context menus](../specs/session-context-menus.md) R4). Opened in Live 12.4.16 (macOS) on 2 November 2026. On a Session MIDI clip. Nothing else is in it.
 
-| ID | Command | Source |
-|---|---|---|
-| C-CLIPTITLE-001 | Rename (S-EDIT-008) | manual 8.1.1.2 |
-| C-CLIPTITLE-002 | Edit Info Text | manual 8.1.1.2 |
-| | — | |
-| C-CLIPTITLE-003 | Colour palette | manual 8.1.1.3 |
-| | — | |
-| C-CLIPTITLE-004 | Fold, as double-clicking the title bar does (I-CLICK-008) | manual 8.1.2 |
-| | — | |
-| C-CLIPTITLE-005 | Arrange Clip View Panels Automatically, as M-VIEW-015; the one in use of 005 to 007 ticked | manual 8.1.2 |
-| C-CLIPTITLE-006 | Arrange Clip View Panels Horizontally, as M-VIEW-016 | manual 8.1.2 |
-| C-CLIPTITLE-007 | Arrange Clip View Panels Vertically, as M-VIEW-017 | manual 8.1.2 |
+| ID | Item | Keys shown | State | Source |
+|---|---|---|---|---|
+| C-CLIPTITLE-001 | Rename | ⌘R |  | obs |
+| | — | | | |
+| C-CLIPTITLE-002 | Colour palette |  |  | obs; 5 rows of 14 swatches, the clip's colour framed |
+| | — | | | |
+| C-CLIPTITLE-003 | Arrange Clip View Panels Automatically |  | ticked | obs |
+| C-CLIPTITLE-004 | Fold |  |  | obs |
 
-### MIDI Note Editor (C-NOTE)
+Beatlayer's Edit Info Text, Arrange Clip View Panels Horizontally and Arrange Clip View Panels Vertically are not in this menu any more; the Edit menu (M-EDIT-025) and the View menu (M-VIEW-016, M-VIEW-017) have them.
 
-Opened on a note, which it selects alone first if it isn't selected, or on empty grid in the MIDI Note Editor ([piano roll](../specs/piano-roll.md) R30). The items are the manual's and the release notes'; Live's order and separators weren't recorded.
+### Clip envelope editor (C-ENV)
 
-| ID | Command | Source |
-|---|---|---|
-| C-NOTE-001 | Cut (S-EDIT-001) | manual 10.7.2 |
-| C-NOTE-002 | Copy (S-EDIT-002) | manual 10.7.2 |
-| C-NOTE-003 | Paste (S-EDIT-003) | manual 10.7.2 |
-| C-NOTE-004 | Duplicate (S-EDIT-004) | manual 10.7.2 |
-| C-NOTE-005 | Delete (S-EDIT-005) | manual 10.7.2 |
-| C-NOTE-006 | Invert Selection (S-NOTE-034) | manual 10.5.2 |
-| C-NOTE-007 | Deactivate Note(s) (S-NOTE-041) | manual 10.5.7 |
-| C-NOTE-008 | Group Notes (S-NOTE-031) | manual 10.5.13.1 |
-| C-NOTE-009 | Ungroup Notes (S-NOTE-032) | manual 10.5.13.1 |
-| C-NOTE-010 | Split Note(s) (S-NOTE-003), only where a note would split | manual 10.5.8.1 |
-| C-NOTE-011 | Chop Note(s) on Grid (S-NOTE-003) | manual 10.5.8.2 |
-| C-NOTE-012 | Join Notes (S-NOTE-007) | manual 10.5.8.3 |
-| C-NOTE-013 | Fit to Time Range (S-NOTE-008) | manual 10.5.5 |
-| C-NOTE-014 | Clip Markers ▸, as M-EDIT-013 | release notes 12.0 |
-| C-NOTE-015 | Split Clip (S-NOTE-036), on an Arrangement clip | release notes 12.1 |
-| C-NOTE-016 | Highlight Scales (S-NOTE-035) | manual 10.6 |
+Opened on the Envelopes tab of a MIDI clip's Clip View, with no envelope drawn. Opened in Live 12.4.16 (macOS) on 2 November 2026. With nothing drawn there are no Clear items.
+
+| ID | Item | Keys shown | State | Source |
+|---|---|---|---|---|
+| C-ENV-001 | Snap to Grid | ⌘4 | ticked; dim here | obs; the key's command works in the note editor only |
+| C-ENV-002 | Adaptive Grid: |  | heading | obs |
+| C-ENV-003 | Adaptive Grid: Widest, Wide, Medium / Narrow, Narrowest |  | three a row | obs |
+| C-ENV-004 | Fixed Grid: |  | heading | obs |
+| C-ENV-005 | Fixed Grid: 8 Bars, 4 Bars, 2 Bars, 1 Bar, 1/2 / 1/4, 1/8, 1/16, 1/32 |  | five a row, 1/16 ticked | obs |
+| | — | | | |
+| C-ENV-006 | Narrow Grid | ⌘1 | dim here | obs; likewise |
+| C-ENV-007 | Widen Grid | ⌘2 | dim here | obs; likewise |
+| | — | | | |
+| C-ENV-008 | Triplet Grid | ⌘3 | dim here | obs; likewise |
+| | — | | | |
+| C-ENV-009 | Draw Mode | B |  | obs |
+| | — | | | |
+| C-ENV-010 | Insert Shape: |  | heading | obs |
+| C-ENV-011 | Waveforms: sine, triangle, saw down, saw up, square |  | five shape icons | obs |
+| C-ENV-012 | Ramps and ADSR: five ramps and curves |  | five shape icons | obs |
+
+Beatlayer's right-click menus on a breakpoint (Edit Value), on the line (Add Value) and on a time selection (the shapes, Simplify Envelope) were not opened in Live and stay as they were ([clip envelopes](../specs/clip-envelopes.md) R13).
+
+### MIDI Note Editor, on a note (C-NOTE)
+
+Opened on a note in the Session MIDI clip's note editor, which selects the note alone first if it isn't selected ([piano roll](../specs/piano-roll.md) R30). Opened in Live 12.4.16 (macOS) on 2 November 2026. Three notes, one other selected before. There is no Cut, Copy, Paste or Delete: those run from their keys. "Deactivate Note" is singular for one note, while Chop Note(s) and Extract Groove(s) keep the (s).
+
+| ID | Item | Keys shown | State | Source |
+|---|---|---|---|---|
+| C-NOTE-001 | Invert Selection | ⇧⌘A |  | obs |
+| C-NOTE-002 | Duplicate | ⌘D |  | obs |
+| | — | | | |
+| C-NOTE-003 | Quantize | ⌘U |  | obs |
+| C-NOTE-004 | Quantize Settings... | ⇧⌘U |  | obs |
+| C-NOTE-005 | Deactivate Note | 0 | singular for one note | obs |
+| C-NOTE-006 | Extract Groove(s) |  |  | obs |
+| | — | | | |
+| C-NOTE-007 | Chop Note(s) on Grid | ⌘E |  | obs |
+| C-NOTE-008 | Join Notes | ⌘J | dim with one note | obs |
+| C-NOTE-009 | Fit to Time Range | ⌥⌘J |  | obs |
+| | — | | | |
+| C-NOTE-010 | Crop Clip to Time Selection | ⇧⌘J |  | obs |
+| | — | | | |
+| C-NOTE-012 | Loop Selection | ⌘L |  | obs |
+| C-NOTE-013 | Set Start Marker | ⌘F9 |  | obs |
+| C-NOTE-014 | Set Loop Start | ⌘F10 |  | obs |
+| C-NOTE-015 | Set Loop End | ⌘F11 |  | obs |
+| C-NOTE-016 | Set End Marker | ⌘F12 |  | obs |
+| | — | | | |
+| C-NOTE-017 | Zoom to Clip Selection | Z |  | obs |
+| C-NOTE-018 | Zoom Out Clip Completely | X |  | obs |
+| C-NOTE-019 | Fit Content To View Width | W |  | obs |
+| C-NOTE-020 | Fit Content To View Height | H |  | obs |
+| | — | | | |
+| C-NOTE-029 | Draw Mode (Pitch Lock Off) | B |  | obs |
+| | — | | | |
+| C-NOTE-030 | Highlight Scales | K |  | obs |
+
+Other states: with several notes selected Deactivate Note reads Deactivate Note(s), and Activate Note(s) when every one is deactivated (Beatlayer's wording; one note reads Activate Note). Beatlayer's Cut, Copy, Paste, Delete, Group Notes, Ungroup Notes, Split Note(s) and Split Clip were in this menu and aren't now; their keys and commands stay. Loop Selection, Crop Clip to Time Selection and Set 1.1.1 Here are dim where Beatlayer has no command for the note editor.
+
+### MIDI Note Editor, on empty grid (C-NOTE grid)
+
+Opened on empty grid in the note editor, with one note still selected. Opened in Live 12.4.16 (macOS) on 2 November 2026. It is the menu on a note with two more groups: Set 1.1.1 Here after Crop Clip to Time Selection, and the grid's settings after Fit Content To View Height. The grid items don't show on a note. The grid is the Arrangement's ([view options](../specs/view-options.md)).
+
+| ID | Item | Keys shown | State | Source |
+|---|---|---|---|---|
+| = C-NOTE-001 | Invert Selection | ⇧⌘A |  | obs |
+| = C-NOTE-002 | Duplicate | ⌘D |  | obs |
+| | — | | | |
+| = C-NOTE-003 | Quantize | ⌘U |  | obs |
+| = C-NOTE-004 | Quantize Settings... | ⇧⌘U |  | obs |
+| = C-NOTE-005 | Deactivate Note | 0 | singular for one note | obs |
+| = C-NOTE-006 | Extract Groove(s) |  |  | obs |
+| | — | | | |
+| = C-NOTE-007 | Chop Note(s) on Grid | ⌘E |  | obs |
+| = C-NOTE-008 | Join Notes | ⌘J | dim with one note | obs |
+| = C-NOTE-009 | Fit to Time Range | ⌥⌘J |  | obs |
+| | — | | | |
+| = C-NOTE-010 | Crop Clip to Time Selection | ⇧⌘J |  | obs |
+| | — | | | |
+| C-NOTE-011 | Set 1.1.1 Here |  | dim here | obs |
+| | — | | | |
+| = C-NOTE-012 | Loop Selection | ⌘L |  | obs |
+| = C-NOTE-013 | Set Start Marker | ⌘F9 |  | obs |
+| = C-NOTE-014 | Set Loop Start | ⌘F10 |  | obs |
+| = C-NOTE-015 | Set Loop End | ⌘F11 |  | obs |
+| = C-NOTE-016 | Set End Marker | ⌘F12 |  | obs |
+| | — | | | |
+| = C-NOTE-017 | Zoom to Clip Selection | Z |  | obs |
+| = C-NOTE-018 | Zoom Out Clip Completely | X |  | obs |
+| = C-NOTE-019 | Fit Content To View Width | W |  | obs |
+| = C-NOTE-020 | Fit Content To View Height | H |  | obs |
+| | — | | | |
+| C-NOTE-021 | Snap to Grid | ⌘4 | ticked | obs |
+| C-NOTE-022 | Adaptive Grid: |  | heading | obs |
+| C-NOTE-023 | Adaptive Grid: Widest, Wide, Medium / Narrow, Narrowest |  | three a row | obs |
+| C-NOTE-024 | Fixed Grid: |  | heading | obs |
+| C-NOTE-025 | Fixed Grid: 8 Bars, 4 Bars, 2 Bars, 1 Bar, 1/2 / 1/4, 1/8, 1/16, 1/32 |  | five a row, 1/16 ticked | obs |
+| | — | | | |
+| C-NOTE-026 | Narrow Grid | ⌘1 |  | obs |
+| C-NOTE-027 | Widen Grid | ⌘2 |  | obs |
+| | — | | | |
+| C-NOTE-028 | Triplet Grid | ⌘3 |  | obs |
+| | — | | | |
+| = C-NOTE-029 | Draw Mode (Pitch Lock Off) | B |  | obs |
+| | — | | | |
+| = C-NOTE-030 | Highlight Scales | K |  | obs |
 
 ### Piano ruler (C-KEYS)
 
-Opened on the MIDI Note Editor's piano ruler (L-CLIP-012). Live's labels and order weren't recorded.
+Opened on the MIDI Note Editor's piano ruler (L-CLIP-012). Opened in Live 12.4.16 (macOS) on 2 November 2026. Auto: Sharps (♯) was ticked, and its label names the spelling Auto gives for the clip's scale.
 
-| ID | Command | Source |
-|---|---|---|
-| C-KEYS-001 | Deactivate Note(s) (S-NOTE-041) | manual 10.5.7 |
-| C-KEYS-002 | Note spelling: Sharps, Flats, Sharps and Flats, Auto, MIDI Note Numbers, the one in use ticked (the labels are Beatlayer's own; [scales](../specs/scales.md) R24) | manual 10.6 |
+| ID | Item | Keys shown | State | Source |
+|---|---|---|---|---|
+| C-KEYS-001 | Deactivate Note | 0 |  | obs |
+| | — | | | |
+| C-KEYS-002 | Accidentals |  | heading | obs |
+| C-KEYS-003 | Auto: Sharps (♯) |  | ticked | obs |
+| C-KEYS-004 | Sharps (♯) |  |  | obs |
+| C-KEYS-005 | Flats (♭) |  |  | obs |
+| C-KEYS-006 | Sharps and Flats (♯/♭) |  |  | obs |
+| | — | | | |
+| C-KEYS-007 | MIDI Note Number |  |  | obs |
+
+Beatlayer's Sharps, Flats, Sharps and Flats, Auto and MIDI Note Numbers labels are Live's now ([scales](../specs/scales.md) R24); the choice is the same.
 
 ### Probability group marker (C-PGROUP)
 
@@ -872,11 +1128,18 @@ Opened on a probability group's marker in the Chance lane ([note editing](../spe
 
 ### Expression lane header (C-LANE)
 
-Opened on the header of an expression lane under the note area (L-CLIP-014; [note editing](../specs/note-editing.md) R2). The MPE tab's lane headers have the same item ([MPE](../specs/mpe.md) R23).
+Opened on the header of an expression lane under the note area (L-CLIP-014; [note editing](../specs/note-editing.md) R2), here the Velocity lane's header (its icon and 127/64/1 scale; the header lights blue while the menu shows). Opened in Live 12.4.16 (macOS) on 2 November 2026. A right-click on the lane's foot row (Velocity, Randomize, Ramp, Deviation) opens nothing. The MPE tab's lane headers have the same menu ([MPE](../specs/mpe.md) R23).
 
-| ID | Command | Source |
-|---|---|---|
-| C-LANE-001 | Swap Lane: shows a hidden lane in this one's place | manual 10.1; release notes 12.0 |
+| ID | Item | Keys shown | State | Source |
+|---|---|---|---|---|
+| C-LANE-001 | Swap Lane: |  | heading | obs |
+| C-LANE-002 | Velocity |  | ticked, dim: the lane shown | obs |
+| C-LANE-003 | Release Velocity |  |  | obs |
+| C-LANE-004 | Chance |  |  | obs |
+| | — | | | |
+| C-LANE-005 | Hide Lane |  |  | obs |
+
+The lane shown is the ticked, dim row; choosing another swaps it in. The rows are the lanes the editor has.
 
 ### Multi-clip loop bar (C-LOOPBAR)
 
@@ -888,37 +1151,98 @@ Opened on a loop bar above the note editor while it shows several clips (L-CLIP-
 
 ### MPE tab (C-MPE)
 
-Opened in the Clip View's MPE tab ([MPE](../specs/mpe.md) R26, R31). Live's order wasn't recorded.
+Opened on the note editor's grid in the Clip View's MPE tab with a note selected ([MPE](../specs/mpe.md) R26, R31). Opened in Live 12.4.16 (macOS) on 2 November 2026. It is the empty-grid menu with two changes: a group after Duplicate that clears envelopes (dim while there is no envelope), and Pitch Bend Range Settings... before Highlight Scales. In this tab Snap to Grid wasn't ticked and no grid size was ticked.
 
-| ID | Command | Source |
-|---|---|---|
-| C-MPE-001 | Clear All Envelopes, in the note area's and each lane's menu | manual 12.2 |
-| C-MPE-002 | Edit Value, on a breakpoint | manual 12.2 |
-| C-MPE-003 | Add Value, on the preview breakpoint at the pointer | manual 12.2 |
+| ID | Item | Keys shown | State | Source |
+|---|---|---|---|---|
+| = C-NOTE-001 | Invert Selection | ⇧⌘A |  | obs |
+| = C-NOTE-002 | Duplicate | ⌘D |  | obs |
+| | — | | | |
+| C-MPE-001 | Clear Envelope (Pitch Bend) | ⌘Del | dim with no envelope | obs |
+| C-MPE-002 | Clear All MPE Envelopes |  | dim with no envelope | obs |
+| | — | | | |
+| = C-NOTE-003 | Quantize | ⌘U |  | obs |
+| = C-NOTE-004 | Quantize Settings... | ⇧⌘U |  | obs |
+| = C-NOTE-005 | Deactivate Note | 0 | singular for one note | obs |
+| = C-NOTE-006 | Extract Groove(s) |  |  | obs |
+| | — | | | |
+| = C-NOTE-007 | Chop Note(s) on Grid | ⌘E |  | obs |
+| = C-NOTE-008 | Join Notes | ⌘J | dim with one note | obs |
+| = C-NOTE-009 | Fit to Time Range | ⌥⌘J |  | obs |
+| | — | | | |
+| = C-NOTE-010 | Crop Clip to Time Selection | ⇧⌘J |  | obs |
+| | — | | | |
+| = C-NOTE-011 | Set 1.1.1 Here |  | dim here | obs |
+| | — | | | |
+| = C-NOTE-012 | Loop Selection | ⌘L |  | obs |
+| = C-NOTE-013 | Set Start Marker | ⌘F9 |  | obs |
+| = C-NOTE-014 | Set Loop Start | ⌘F10 |  | obs |
+| = C-NOTE-015 | Set Loop End | ⌘F11 |  | obs |
+| = C-NOTE-016 | Set End Marker | ⌘F12 |  | obs |
+| | — | | | |
+| = C-NOTE-017 | Zoom to Clip Selection | Z |  | obs |
+| = C-NOTE-018 | Zoom Out Clip Completely | X |  | obs |
+| = C-NOTE-019 | Fit Content To View Width | W |  | obs |
+| = C-NOTE-020 | Fit Content To View Height | H |  | obs |
+| | — | | | |
+| = C-NOTE-021 | Snap to Grid | ⌘4 | ticked | obs |
+| = C-NOTE-022 | Adaptive Grid: |  | heading | obs |
+| = C-NOTE-023 | Adaptive Grid: Widest, Wide, Medium / Narrow, Narrowest |  | three a row | obs |
+| = C-NOTE-024 | Fixed Grid: |  | heading | obs |
+| = C-NOTE-025 | Fixed Grid: 8 Bars, 4 Bars, 2 Bars, 1 Bar, 1/2 / 1/4, 1/8, 1/16, 1/32 |  | five a row, 1/16 ticked | obs |
+| | — | | | |
+| = C-NOTE-026 | Narrow Grid | ⌘1 |  | obs |
+| = C-NOTE-027 | Widen Grid | ⌘2 |  | obs |
+| | — | | | |
+| = C-NOTE-028 | Triplet Grid | ⌘3 |  | obs |
+| | — | | | |
+| = C-NOTE-029 | Draw Mode (Pitch Lock Off) | B |  | obs |
+| | — | | | |
+| C-MPE-003 | Pitch Bend Range Settings... |  | dim here | obs |
+| | — | | | |
+| = C-NOTE-030 | Highlight Scales | K |  | obs |
+
+Other states (not opened in Live): Edit Value on a breakpoint and Add Value on the preview breakpoint at the pointer, which Beatlayer puts at the top of the menu ([MPE](../specs/mpe.md) R26). Clear Envelope names the envelope that has the keyboard (Pitch Bend, Slide, Pressure).
 
 ### Filter View Menu (C-FILTER)
 
-Opened by the menu button beside the Filter View toggle on the browser's top row (L-BRW-001). The items are the manual's and the release notes'; their order, the separator, and the name Show All Filter Groups are Beatlayer's own ([browser tags](../specs/browser-tags.md) R21).
+Opened by the ▼ beside the Filter View toggle on the browser's top row (L-BRW-001; [browser tags](../specs/browser-tags.md) R21), with the Audio Effects label shown. Opened in Live 12.4.16 (macOS) on 2 November 2026.
 
-| ID | Command | Source |
-|---|---|---|
-| C-FILTER-001 | One item for each filter group the chosen label can show, ticked while it shows | manual 4.4.1 |
-| C-FILTER-002 | Show All Filter Groups | manual 4.4.1 |
-| C-FILTER-003 | Reset Filter Groups to Default | manual 4.4.1 |
-| | — | |
-| C-FILTER-004 | Include Auto Tags, on by default and ticked while on ([browser tags](../specs/browser-tags.md) R55); the online manual's 4.4.2 calls it Enable Auto Tags | release notes 12.2 |
-| C-FILTER-005 | Tag Editor (S-BRW-014), ticked while it shows | release notes 12.2 |
-| C-FILTER-006 | Show Quick Tags, ticked while Quick Tags shows | release notes 12.2 |
+| ID | Item | Keys shown | State | Source |
+|---|---|---|---|---|
+| C-FILTER-001 | Open Tag Editor |  |  | obs |
+| C-FILTER-002 | Open Quick Tags |  | ticked | obs |
+| C-FILTER-003 | Enable Auto Tags |  | ticked | obs |
+| | — | | | |
+| C-FILTER-004 | Show All Filter Groups |  |  | obs |
+| C-FILTER-005 | Hide All Filter Groups |  |  | obs |
+| C-FILTER-006 | Reset Filter Groups to Default |  | dim | obs |
+| | — | | | |
+| C-FILTER-007 | Content |  |  | obs |
+| C-FILTER-008 | Devices |  | ticked | obs |
+| C-FILTER-009 | Function |  |  | obs |
+| C-FILTER-010 | Format |  |  | obs |
+| C-FILTER-011 | Creator |  |  | obs |
+
+The last group is one item for each filter group the chosen label can show, ticked while it shows (manual 4.4.1). Beatlayer's Tag Editor and Show Quick Tags toggles are Open Tag Editor and Open Quick Tags now, ticked while they show.
 
 ### Content Options (C-CONTENT)
 
-Opened by the menu button at the right of the browser's column header row, or on a column's name (L-BRW-009; [browser tags](../specs/browser-tags.md) R27, R43). The columns' names are Beatlayer's own.
+Opened by the ⋯ at the right of the browser's Name header, or on a column's name (L-BRW-009; [browser tags](../specs/browser-tags.md) R27, R43). Opened in Live 12.4.16 (macOS) on 2 November 2026. None of the columns is ticked in a new install; Show File Extensions is.
 
-| ID | Command | Source |
-|---|---|---|
-| C-CONTENT-001 | One item for each optional column (Date Modified, Size, Kind, and for audio files Length, Sample Rate and Channels), ticked while it shows | manual 4.1 |
-| C-CONTENT-002 | Show File Extensions | release notes 12.2 |
-| C-CONTENT-003 | Show Hidden Plug-Ins, under the Plug-Ins label (Beatlayer's own, IMP-07) | Beatlayer |
+| ID | Item | Keys shown | State | Source |
+|---|---|---|---|---|
+| C-CONTENT-001 | Date Modified |  |  | obs |
+| C-CONTENT-002 | Size |  |  | obs |
+| C-CONTENT-003 | Type |  |  | obs |
+| C-CONTENT-004 | Rank |  | dim here | obs |
+| C-CONTENT-005 | Place |  | dim here | obs |
+| | — | | | |
+| C-CONTENT-006 | Hide All Extra Columns |  | dim while none shows | obs |
+| | — | | | |
+| C-CONTENT-007 | Show File Extensions |  | ticked | obs |
+
+Beatlayer's Kind column is Type now. Length, Sample Rate and Channels are not in this menu; `browser.set_columns` still shows them. Rank and Place are dim: Beatlayer has no such columns. Under the Plug-Ins label Beatlayer adds Show Hidden Plug-Ins after Show File Extensions (IMP-07).
 
 ### Tag Editor (C-TAG)
 
@@ -933,11 +1257,13 @@ Opened on a person's own tag or group, or on the list's background, in the Tag E
 
 ### Quick Tags tag (C-QTAG)
 
-Opened on a tag in Quick Tags (L-BRW-012; [browser tags](../specs/browser-tags.md) R13).
+Opened on a tag in the Tags bar under the browser's item list (L-BRW-012; [browser tags](../specs/browser-tags.md) R13), with Utility selected: "Tags: Utility Add…", above "1 item selected". Opened in Live 12.4.16 (macOS) on 2 November 2026. Add… is dim text after the tags.
 
-| ID | Command | Source |
-|---|---|---|
-| C-QTAG-001 | Show Tag in Tag Editor | release notes 12.3 |
+| ID | Item | Keys shown | State | Source |
+|---|---|---|---|---|
+| C-QTAG-001 | Show "Utility" tag in Editor |  |  | obs |
+
+The item names the tag it was opened on.
 
 ### Automation Arm button (IMP-23)
 
@@ -949,15 +1275,18 @@ Beatlayer's addition, opened on the Control Bar's Automation Arm button (L-CTRL-
 
 ### Link menu (C-LINK)
 
-Opened from the arrow beside the Control Bar's Link toggle (L-CTRL-002; [Link](../specs/link.md)). The order is the manual's reading.
+Opened from the ▼ beside the Control Bar's Link toggle (L-CTRL-002; [Link](../specs/link.md)). Opened in Live 12.4.16 (macOS) on 2 November 2026. With Link off. There is no Link item: the toggle is that.
 
-| ID | Command | Source |
-|---|---|---|
-| C-LINK-001 | Link, ticked while on | manual 37.1.1 |
-| C-LINK-002 | Start Stop Sync, ticked while on | manual 37.1.1 |
-| C-LINK-003 | Link Audio, ticked while on | manual 37.1.1 |
-| C-LINK-004 | The Link Audio peers, by name (not clickable) | manual 37.1.1 |
-| C-LINK-005 | Configure Link…: opens Settings ▸ Link (L-SET-013) | manual 37.1.1 |
+| ID | Item | Keys shown | State | Source |
+|---|---|---|---|---|
+| C-LINK-001 | Link Start Stop Sync |  | ticked while on | obs |
+| C-LINK-002 | Link Audio |  | ticked while on | obs |
+| | — | | | |
+| C-LINK-003 | No Link Audio peers available. |  | dim note, not an item | obs |
+| | — | | | |
+| C-LINK-004 | Configure Link… |  |  | obs |
+
+With Link Audio peers the note gives way to their names, not clickable (manual 37.1.1; not opened in Live).
 
 ### Mapping Browser row (C-MAP)
 

@@ -2401,6 +2401,24 @@ pub fn would_split(doc: &Document, view: &ClipView, arrangement: &ArrangementVie
     })
 }
 
+/// Whether Join Notes would join anything: two or more of the selected notes
+/// share a pitch (note-editing R39). The editor's menu draws the item dim
+/// otherwise.
+#[must_use]
+pub fn would_join(doc: &Document, view: &ClipView, arrangement: &ArrangementView) -> bool {
+    let Ok((clip, midi)) = clip_and_data(doc, view, arrangement, None) else {
+        return false;
+    };
+    let ordered = notes_in_order(&midi);
+    let mut keys = std::collections::BTreeMap::<u8, u32>::new();
+    for place in view.selection_of(clip) {
+        if let Some(note) = ordered.get(*place as usize) {
+            *keys.entry(note.key).or_default() += 1;
+        }
+    }
+    keys.values().any(|count| *count > 1)
+}
+
 /// What Split Clip runs (note-editing R41): the `arrangement.split`
 /// arguments that cut the Arrangement clip the editor shows at the time
 /// selection's edges that fall strictly inside it, and the clip's span

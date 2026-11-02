@@ -6,7 +6,9 @@
 //! Audio To. Every gesture runs a registered command (`pad.*`, `chain.*`).
 
 use bl_model::{DeviceId, Receive};
+use bl_shell::context_menus;
 use bl_shell::device_commands::{ChainRow, DeviceFrame, RackFrame};
+use bl_shell::menus::Action;
 use bl_shell::pad_commands::{
     PAD_GAP, PAD_HEIGHT, PAD_OVERVIEW_WIDTH, PAD_WIDTH, PADS_PER_ROW, PADS_SHOWN, PadFrame,
     PadKind, PadState, PadSwitch,
@@ -20,6 +22,7 @@ use egui::{
 use serde_json::{Value, json};
 
 use crate::device_view::{DeviceDrag, DeviceViewUi};
+use crate::keymap::{Keymap, Platform};
 use crate::main_window::UiEvent;
 use crate::rack_view::{ChainListRects, ChainRowRects, volume_at, volume_text};
 use crate::theme::Theme;
@@ -256,7 +259,17 @@ impl DeviceViewUi {
         let swapping =
             ui.input(|i| i.modifiers.alt) && pointer.is_some_and(|p| layout.area.contains(p));
         for (pad, rects) in pads.pads.iter().zip(&layout.pads) {
-            self.pad(ui, theme, frame, pads, pad, rects, drag.as_deref(), events);
+            self.pad(
+                ui,
+                shell,
+                theme,
+                frame,
+                pads,
+                pad,
+                rects,
+                drag.as_deref(),
+                events,
+            );
             if swapping && pad.kind != PadKind::Empty {
                 crate::sample_swap::pad_arrows(
                     ui,
@@ -408,6 +421,7 @@ impl DeviceViewUi {
     fn pad(
         &mut self,
         ui: &mut Ui,
+        shell: &Shell,
         theme: &Theme,
         frame: &DeviceFrame,
         pads: &PadFrame,
@@ -423,7 +437,12 @@ impl DeviceViewUi {
         if response.clicked() || response.drag_started() {
             response.request_focus();
         }
-        if response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))) {
+        // A right-click selects the pad, which an empty one does and nothing
+        // more (C-PAD).
+        if response.clicked()
+            || response.secondary_clicked()
+            || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)))
+        {
             invoke(
                 events,
                 "pad.select",
@@ -502,7 +521,7 @@ impl DeviceViewUi {
             );
         }
         if pad.kind != PadKind::Empty {
-            response.context_menu(|ui| self.pad_menu(ui, frame, pad, events));
+            response.context_menu(|ui| self.pad_menu(ui, shell, frame, pad, events));
             // Shift-F10 (S-CTX-002) opens the same menu from the keyboard.
             if response.has_focus() && crate::menus::context_menu_keys(ui) {
                 invoke(
@@ -517,7 +536,7 @@ impl DeviceViewUi {
                 );
             }
             crate::menus::keyboard_context_menu(&response, |ui| {
-                self.pad_menu(ui, frame, pad, events);
+                self.pad_menu(ui, shell, frame, pad, events);
             });
         }
         if response.has_focus() && crate::focus::outlined(ui.ctx()) {
@@ -589,44 +608,83 @@ impl DeviceViewUi {
         }
     }
 
-    /// A pad's context menu: Rename and Save as Default Pad for a pad of one
-    /// chain, and Delete (drum racks spec, R12, R17).
+    /// A pad's context menu (C-PAD; drum racks spec, R12, R17, R30), in
+    /// Live's order: Rename and Delete, Save as Default Pad, and the four
+    /// similar-sample items, which are dim for a pad that holds no sampler.
     fn pad_menu(
         &mut self,
         ui: &mut Ui,
+        shell: &Shell,
         frame: &DeviceFrame,
         pad: &PadState,
         events: &mut Vec<UiEvent>,
     ) {
+        let keymap = Keymap::from_data(shell.keymap().clone());
+        let platform = Platform::current();
         let single = pad.kind == PadKind::Single;
-        if ui
-            .add_enabled(single, egui::Button::new("Rename"))
-            .clicked()
-        {
-            if let Some(chain) = pad.chains.first() {
-                self.start_chain_rename(*chain, &pad.label);
+        let target = json!({ "rack": frame.id, "note": pad.note });
+        let similar = shell.pad_similar_state(frame.id, pad.note);
+        for item in bl_shell::menus::shown(&context_menus::drum_pad()) {
+            if item.is_separator() {
+                ui.separator();
+                continue;
             }
-            ui.close();
-        }
-        if ui.add_enabled(true, egui::Button::new("Delete")).clicked() {
-            invoke(
-                events,
-                "pad.delete",
-                json!({ "rack": frame.id, "note": pad.note }),
-            );
-            ui.close();
-        }
-        ui.separator();
-        if ui
-            .add_enabled(single, egui::Button::new("Save as Default Pad"))
-            .clicked()
-        {
-            invoke(
-                events,
-                "pad.save_default",
-                json!({ "rack": frame.id, "note": pad.note }),
-            );
-            ui.close();
+            let chord = match item.action {
+                Action::Shortcut(keys) => keymap.chord_for_shortcut(keys[0], platform),
+                _ => None,
+            };
+            let (enabled, invocation) = match item.row {
+                context_menus::PAD_RENAME_ROW => (single, None),
+                "C-PAD-002" => (true, Some(Invocation::new("pad.delete", target.clone()))),
+                "C-PAD-003" => (
+                    single,
+                    Some(Invocation::new("pad.save_default", target.clone())),
+                ),
+                "C-PAD-005" | "C-PAD-006" => {
+                    let next = item.row == "C-PAD-005";
+                    let mut args = target.clone();
+                    args["direction"] = json!(if next { "next" } else { "previous" });
+                    (
+                        similar
+                            .as_ref()
+                            .is_some_and(|s| if next { s.can_next } else { s.can_previous }),
+                        Some(Invocation::new("device.swap_similar", args)),
+                    )
+                }
+                "C-PAD-007" => (
+                    similar
+                        .as_ref()
+                        .is_some_and(|s| s.sample.is_some() && s.sample != s.reference),
+                    similar.as_ref().map(|s| {
+                        Invocation::new(
+                            "device.set_similarity_reference",
+                            json!({ "device": s.device }),
+                        )
+                    }),
+                ),
+                _ => (
+                    similar.as_ref().is_some_and(|s| s.can_return),
+                    Some(Invocation::new(
+                        "device.return_to_reference",
+                        target.clone(),
+                    )),
+                ),
+            };
+            let state = crate::menus::ItemState {
+                label: item.label.to_owned(),
+                enabled,
+                checked: None,
+                chord: chord.cloned(),
+                invocation,
+            };
+            let response = crate::menus::draw_item(ui, state, platform, events);
+            if item.row == context_menus::PAD_RENAME_ROW && response.clicked() {
+                if let Some(chain) = pad.chains.first() {
+                    self.start_chain_rename(*chain, &pad.label);
+                }
+                ui.close();
+            }
+            crate::menus::take_focus_first(ui, &response);
         }
     }
 

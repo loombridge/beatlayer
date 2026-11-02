@@ -773,20 +773,24 @@ fn a_take_lane_headers_menu_lists_its_items() {
             .unwrap_or_else(|| panic!("no menu item {label:?}"))
             .clone()
     };
-    for label in [
-        "Insert Take Lane",
-        "Duplicate",
-        "Rename",
-        "Delete",
-        "Delete All Take Lanes",
-        "Delete All Unused Take Lanes",
-    ] {
-        assert!(!item(label).disabled, "{label} works");
-    }
-    // Copy Selection to Main Lane needs time on the lane; Paste Bounced Audio
-    // a copied source.
-    assert!(item("Copy Selection to Main Lane").disabled);
-    assert!(item("Paste Bounced Audio").disabled);
+    // C-TAKE, in Live's order; Edit Info Text waits for a package, and
+    // Copy Selection to Main Lane and Paste Bounced Audio are not in it.
+    use common::MenuRow::{Dim, Item, Sep, Tick};
+    common::assert_menu(
+        &nodes,
+        &[
+            Item("Duplicate"),
+            Item("Delete"),
+            Sep,
+            Item("Rename"),
+            Dim("Edit Info Text"),
+            Sep,
+            Item("Insert Take Lane"),
+            Tick("Show Take Lanes"),
+            Item("Delete All Take Lanes"),
+            Item("Delete Unused Take Lanes"),
+        ],
+    );
     // They show their keys.
     assert!(item("Duplicate").label.len() > "Duplicate".len());
     assert!(item("Insert Take Lane").label.contains('⇧') || cfg!(not(target_os = "macos")));

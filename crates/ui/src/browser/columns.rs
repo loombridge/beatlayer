@@ -321,12 +321,14 @@ impl BrowserUi {
             .count()
     }
 
-    /// The Content Options menu (C-CONTENT; spec: browser-tags R27): the
-    /// optional columns, ticked while shown, and Show File Extensions.
+    /// The Content Options menu (C-CONTENT; spec: browser-tags R27), in
+    /// Live's order: Date Modified, Size, Type, Rank and Place, ticked while
+    /// they show; Hide All Extra Columns; Show File Extensions. Rank and
+    /// Place are dim: Beatlayer has no such columns.
     pub(super) fn content_options(&self, ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
         let state = shell.browser_view().columns().clone();
         let mut first = true;
-        for column in Column::OPTIONAL {
+        for column in [Column::DateModified, Column::Size, Column::Kind] {
             let on = state.shown.contains(&column);
             let mark = if on { "\u{2714} " } else { "" };
             let response = ui.button(format!("{mark}{}", column.title()));
@@ -345,6 +347,20 @@ impl BrowserUi {
                 invoke(events, ids::SET_COLUMNS, json!({ "shown": shown }));
                 ui.close();
             }
+        }
+        for dim in ["Rank", "Place"] {
+            let response = ui.add_enabled(false, egui::Button::new(dim));
+            crate::menus::register_item(ui.ctx(), &response);
+        }
+        ui.separator();
+        let response = ui.add_enabled(
+            !state.shown.is_empty(),
+            egui::Button::new("Hide All Extra Columns"),
+        );
+        crate::menus::register_item(ui.ctx(), &response);
+        if response.clicked() {
+            invoke(events, ids::SET_COLUMNS, json!({ "shown": [] }));
+            ui.close();
         }
         ui.separator();
         let mark = if state.file_extensions {

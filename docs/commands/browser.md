@@ -662,7 +662,7 @@ Result: [`BrowserState`](#browserstate).
 
 **Set Filter Groups**. Permission: `edit`. Contexts: `global`, `browser`.
 
-Chooses which filter groups a label shows in the Filter View (`label`, or the chosen one): `group` with `shown` true (the default) or false shows or hides that group; `show_all` shows every group; `reset` puts the label's groups back to the default ones. Give one of `group`, `show_all` and `reset`. Kept for the next start.
+Chooses which filter groups a label shows in the Filter View (`label`, or the chosen one): `group` with `shown` true (the default) or false shows or hides that group; `show_all` shows every group; `hide_all` hides every group; `reset` puts the label's groups back to the default ones. Give one of `group`, `show_all`, `hide_all` and `reset`. Kept for the next start.
 
 Default keys: none.
 
@@ -671,6 +671,7 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `group` | string or null | no | The group to show or hide, by its name. |
+| `hide_all` | boolean | no | Hide every group. |
 | `label` | [`Label`](README.md#label) or null | no | The label whose groups change. Left out, the chosen label. |
 | `reset` | boolean | no | Put the label's groups back to its default ones. |
 | `show_all` | boolean | no | Show every group. |

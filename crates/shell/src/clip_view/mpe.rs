@@ -367,7 +367,11 @@ pub(super) fn run(
             )
         }
         ids::CLEAR_EXPRESSIONS => {
-            let ClearExpressionsArgs { clip, notes } = parse(args)?;
+            let ClearExpressionsArgs {
+                clip,
+                notes,
+                envelope,
+            } = parse(args)?;
             let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
             let ordered = notes_in_order(&midi);
             let places = places_or_selected(view, clip, notes, ordered.len())?;
@@ -382,8 +386,10 @@ pub(super) fn run(
                 id,
                 |edited| {
                     for place in &places {
-                        for envelope in Expression::ALL {
-                            edited[*place as usize].envelope_mut(envelope).clear();
+                        for each in Expression::ALL {
+                            if envelope.is_none_or(|only| only == each) {
+                                edited[*place as usize].envelope_mut(each).clear();
+                            }
                         }
                     }
                     Ok(())

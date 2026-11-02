@@ -254,34 +254,11 @@ impl ContextMenus {
             MenuKind::Breakpoint | MenuKind::Line => return,
         };
         let menu = &menu;
-        let grid = shell.arrangement().grid();
         for item in shown(menu) {
             if item.is_separator() {
                 ui.separator();
-            } else if ADAPTIVE_GRID_ROWS.contains(&item.row) {
-                // Five choices in three columns (C-CLIP-ARR-020).
-                choices(ui, item.row, 3, AdaptiveGrid::ALL.len(), |ui, i| {
-                    let choice = AdaptiveGrid::ALL[i];
-                    let on = !grid.fixed_on && grid.adaptive == choice;
-                    let response = ui.selectable_label(on, choice.label());
-                    crate::menus::register_item(ui.ctx(), &response);
-                    if response.clicked() {
-                        invoke(events, view_ids::SET_GRID, json!({ "adaptive": choice }));
-                        ui.close();
-                    }
-                });
-            } else if FIXED_GRID_ROWS.contains(&item.row) {
-                // Nine choices in five columns (C-CLIP-ARR-021).
-                choices(ui, item.row, 5, FixedGrid::ALL.len(), |ui, i| {
-                    let choice = FixedGrid::ALL[i];
-                    let on = grid.fixed_on && grid.fixed == choice;
-                    let response = ui.selectable_label(on, choice.label());
-                    crate::menus::register_item(ui.ctx(), &response);
-                    if response.clicked() {
-                        invoke(events, view_ids::SET_GRID, json!({ "fixed": choice }));
-                        ui.close();
-                    }
-                });
+            } else if grid_row(ui, shell, item.row, events) {
+                // The grid's choices, laid out in rows.
             } else if item.row == CLIP_COLOUR_ROW {
                 // Spec: themes R16. The palette colours the selected clips.
                 let doc = shell.editor().document();
@@ -522,6 +499,40 @@ fn audio_selected(shell: &Shell) -> bool {
             doc.clip(*clip)
                 .is_some_and(|c| matches!(c.data, bl_model::ClipData::Audio(_)))
         })
+}
+
+/// Draws `row` if it is one of the grid's two rows of choices: five
+/// Adaptive Grid settings three a row, nine Fixed Grid spacings five a row
+/// (C-CLIP-ARR-020, C-CLIP-ARR-021, and the note editor's and the clip
+/// envelope editor's). Returns whether it was one.
+pub(crate) fn grid_row(ui: &mut Ui, shell: &Shell, row: &str, events: &mut Vec<UiEvent>) -> bool {
+    let grid = shell.arrangement().grid();
+    if ADAPTIVE_GRID_ROWS.contains(&row) {
+        choices(ui, row, 3, AdaptiveGrid::ALL.len(), |ui, i| {
+            let choice = AdaptiveGrid::ALL[i];
+            let on = !grid.fixed_on && grid.adaptive == choice;
+            let response = ui.selectable_label(on, choice.label());
+            crate::menus::register_item(ui.ctx(), &response);
+            if response.clicked() {
+                invoke(events, view_ids::SET_GRID, json!({ "adaptive": choice }));
+                ui.close();
+            }
+        });
+    } else if FIXED_GRID_ROWS.contains(&row) {
+        choices(ui, row, 5, FixedGrid::ALL.len(), |ui, i| {
+            let choice = FixedGrid::ALL[i];
+            let on = grid.fixed_on && grid.fixed == choice;
+            let response = ui.selectable_label(on, choice.label());
+            crate::menus::register_item(ui.ctx(), &response);
+            if response.clicked() {
+                invoke(events, view_ids::SET_GRID, json!({ "fixed": choice }));
+                ui.close();
+            }
+        });
+    } else {
+        return false;
+    }
+    true
 }
 
 /// Lays out `count` choices in `columns` columns.

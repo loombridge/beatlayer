@@ -784,8 +784,8 @@ fn the_keys_open_the_selected_clips_menu_and_the_selected_scenes() {
 }
 
 // Spec: session-context-menus R4, R9, R13, R14. The Clip View's title bar
-// opens its menu: Rename, Edit Info Text, the palette, Fold and the three
-// Arrange Clip View Panels items, the ones that wait naming their package.
+// opens its menu: Rename, the palette, Arrange Clip View Panels
+// Automatically and Fold.
 #[test]
 fn the_clip_views_title_bar_opens_its_menu_and_rename_types_in_it() {
     let mut h = harness();
@@ -808,23 +808,20 @@ fn the_clip_views_title_bar_opens_its_menu_and_rename_types_in_it() {
         .expect("the Clip View shows");
     let title = pos2(detail.left() + 60.0, detail.top() + 7.0);
     let output = right_click(&mut h, title);
-    for row in [
-        "Rename",
-        "Edit Info Text",
-        "Fold",
-        "Arrange Clip View Panels Automatically",
-        "Arrange Clip View Panels Horizontally",
-        "Arrange Clip View Panels Vertically",
-    ] {
+    // C-CLIPTITLE: Rename, the palette, the automatic arrangement ticked and
+    // Fold; the other two arrangements are in the View menu only.
+    for row in ["Rename", "Fold", "Arrange Clip View Panels Automatically"] {
         assert!(has(&output, row), "{row}");
     }
-    // Spec: detail-views R20, R23. The panels' items are live since WP-6.72.
     for row in [
-        "Fold",
-        "Arrange Clip View Panels Automatically",
+        "Edit Info Text",
         "Arrange Clip View Panels Horizontally",
         "Arrange Clip View Panels Vertically",
     ] {
+        assert!(!has(&output, row), "{row} isn't in Live's menu");
+    }
+    // Spec: detail-views R20, R23. The panels' items are live since WP-6.72.
+    for row in ["Fold", "Arrange Clip View Panels Automatically"] {
         assert!(!item(&output, row).disabled, "{row}");
     }
     assert!(

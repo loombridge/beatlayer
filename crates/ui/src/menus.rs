@@ -119,7 +119,7 @@ pub fn item_state_in(
             enabled: shell.can_open_submenu(item.row),
             ..inert(None)
         },
-        Action::System(_) | Action::Omitted(_) | Action::Separator => inert(None),
+        Action::System(_) | Action::Omitted(_) | Action::Separator | Action::Heading => inert(None),
     }
 }
 
@@ -428,6 +428,12 @@ pub(crate) fn item_in_with_args(
         state.enabled = shell.can_invoke_in(&invocation.id, &invocation.args, contexts);
     }
     draw_item(ui, state, platform, events)
+}
+
+/// Draws a heading in a menu, such as "Adaptive Grid:": dim text that heads
+/// the items after it. It is no item, so the arrow keys pass it by.
+pub(crate) fn heading(ui: &mut Ui, text: &str) -> egui::Response {
+    ui.add_enabled(false, egui::Button::new(text))
 }
 
 /// Draws a menu item whose [`ItemState`] the caller has settled, as a

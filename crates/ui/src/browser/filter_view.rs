@@ -469,10 +469,11 @@ impl BrowserUi {
         }
     }
 
-    /// The Filter View Menu (C-FILTER; spec: browser-tags R21): the groups
-    /// the chosen label can show, ticked while they show, Show All Filter
-    /// Groups, Reset Filter Groups to Default, Include Auto Tags, the Tag
-    /// Editor and Show Quick Tags.
+    /// The Filter View Menu (C-FILTER; spec: browser-tags R21), in Live's
+    /// order: Open Tag Editor, Open Quick Tags and Enable Auto Tags, ticked
+    /// while they are on; Show All, Hide All and Reset Filter Groups to
+    /// Default; then the groups the chosen label can show, ticked while they
+    /// show.
     pub(super) fn filter_view_menu(
         &mut self,
         ui: &mut Ui,
@@ -482,8 +483,9 @@ impl BrowserUi {
         let view = shell.browser_view();
         let state = view.filter_view();
         let mut first = true;
-        let mut item = |ui: &mut Ui, text: String, enabled: bool| -> egui::Response {
-            let response = ui.add_enabled(enabled, egui::Button::new(text));
+        let mut item = |ui: &mut Ui, text: &str, ticked: bool, enabled: bool| -> egui::Response {
+            let mark = if ticked { "\u{2714} " } else { "" };
+            let response = ui.add_enabled(enabled, egui::Button::new(format!("{mark}{text}")));
             crate::menus::register_item(ui.ctx(), &response);
             if first && enabled {
                 crate::menus::take_focus_first(ui, &response);
@@ -491,32 +493,20 @@ impl BrowserUi {
             }
             response
         };
-        for group in &state.menu {
-            let mark = if group.shown { "\u{2714} " } else { "" };
-            if item(ui, format!("{mark}{}", group.name), true).clicked() {
-                invoke(
-                    events,
-                    ids::SET_FILTER_GROUPS,
-                    json!({ "group": group.name, "shown": !group.shown }),
-                );
-                ui.close();
-            }
-        }
-        ui.separator();
-        if item(ui, "Show All Filter Groups".to_owned(), true).clicked() {
-            invoke(events, ids::SET_FILTER_GROUPS, json!({ "show_all": true }));
+        let tag_editor = view.tag_editor();
+        if item(ui, "Open Tag Editor", tag_editor, true).clicked() {
+            invoke(events, ids::SHOW_TAG_EDITOR, json!({ "show": !tag_editor }));
             ui.close();
         }
-        if item(ui, "Reset Filter Groups to Default".to_owned(), true).clicked() {
-            invoke(events, ids::SET_FILTER_GROUPS, json!({ "reset": true }));
+        let quick = view.quick_tags_shown();
+        if item(ui, "Open Quick Tags", quick, true).clicked() {
+            invoke(events, ids::SHOW_QUICK_TAGS, json!({ "show": !quick }));
             ui.close();
         }
-        ui.separator();
         // Spec: browser-tags R55. Ticked while automatic tags show, filter
         // and answer `#` search.
         let include = state.include_auto_tags;
-        let mark = if include { "\u{2714} " } else { "" };
-        if item(ui, format!("{mark}Include Auto Tags"), true).clicked() {
+        if item(ui, "Enable Auto Tags", include, true).clicked() {
             invoke(
                 events,
                 ids::SET_INCLUDE_AUTO_TAGS,
@@ -524,17 +514,36 @@ impl BrowserUi {
             );
             ui.close();
         }
-        let tag_editor = view.tag_editor();
-        let mark = if tag_editor { "\u{2714} " } else { "" };
-        if item(ui, format!("{mark}Tag Editor"), true).clicked() {
-            invoke(events, ids::SHOW_TAG_EDITOR, json!({ "show": !tag_editor }));
+        ui.separator();
+        if item(ui, "Show All Filter Groups", false, true).clicked() {
+            invoke(events, ids::SET_FILTER_GROUPS, json!({ "show_all": true }));
             ui.close();
         }
-        let quick = view.quick_tags_shown();
-        let mark = if quick { "\u{2714} " } else { "" };
-        if item(ui, format!("{mark}Show Quick Tags"), true).clicked() {
-            invoke(events, ids::SHOW_QUICK_TAGS, json!({ "show": !quick }));
+        if item(ui, "Hide All Filter Groups", false, true).clicked() {
+            invoke(events, ids::SET_FILTER_GROUPS, json!({ "hide_all": true }));
             ui.close();
+        }
+        if item(
+            ui,
+            "Reset Filter Groups to Default",
+            false,
+            state.customized,
+        )
+        .clicked()
+        {
+            invoke(events, ids::SET_FILTER_GROUPS, json!({ "reset": true }));
+            ui.close();
+        }
+        ui.separator();
+        for group in &state.menu {
+            if item(ui, &group.name, group.shown, true).clicked() {
+                invoke(
+                    events,
+                    ids::SET_FILTER_GROUPS,
+                    json!({ "group": group.name, "shown": !group.shown }),
+                );
+                ui.close();
+            }
         }
     }
 }

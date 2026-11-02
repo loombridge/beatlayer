@@ -2008,9 +2008,9 @@ impl BrowserUi {
                     json!({ "query": format!("#{}", tag.full_name) }),
                 );
             }
-            // The context menu: Show Tag in Tag Editor (C-QTAG-001).
+            // The context menu: Show "<tag>" tag in Editor (C-QTAG-001).
             let menu = |ui: &mut Ui, events: &mut Vec<UiEvent>| {
-                let response = ui.button("Show Tag in Tag Editor");
+                let response = ui.button(format!("Show \"{}\" tag in Editor", tag.name));
                 crate::menus::register_item(ui.ctx(), &response);
                 crate::menus::take_focus_first(ui, &response);
                 if response.clicked() {

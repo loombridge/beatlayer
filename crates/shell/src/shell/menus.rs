@@ -447,18 +447,23 @@ impl Shell {
                 Some(format!("{} {names}", if hiding { "Hide" } else { "Show" }))
             }
             // Spec: note-editing R18. The item reads Activate Note(s) when
-            // every selected note is deactivated already.
-            note_ids::DEACTIVATE => Some(
-                if self
+            // every selected note is deactivated already, and drops the
+            // (s) while one note is selected, as Live's does.
+            note_ids::DEACTIVATE => {
+                let off = self
                     .clip_view
-                    .selection_deactivated(self.editor.document(), &self.arrangement)
-                {
-                    "Activate Note(s)"
-                } else {
-                    "Deactivate Note(s)"
-                }
-                .to_owned(),
-            ),
+                    .selection_deactivated(self.editor.document(), &self.arrangement);
+                let one = self
+                    .clip_view
+                    .selected_notes(self.editor.document(), &self.arrangement)
+                    .len()
+                    == 1;
+                Some(format!(
+                    "{} Note{}",
+                    if off { "Activate" } else { "Deactivate" },
+                    if one { "" } else { "(s)" }
+                ))
+            }
             // Spec: note-editing R22. M-EDIT-014 and M-EDIT-015 read Group
             // Notes and Ungroup Notes with notes selected.
             note_ids::GROUP => Some("Group Notes".to_owned()),

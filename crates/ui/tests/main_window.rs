@@ -433,3 +433,37 @@ fn without_a_drawn_title_bar_the_layout_starts_below_the_system_s() {
         "Tap Tempo",
     );
 }
+
+#[test]
+fn the_cpu_meter_and_its_arrow_open_one_menu_of_lives_rows() {
+    // Menus.md C-CPU. The meter's box and its arrow open the same menu; the
+    // choices Beatlayer has nothing behind are dim.
+    let mut h = Harness::new(Window::Main);
+    h.settle();
+    let layout = ShellLayout::compute(REFERENCE, true, true);
+    use common::MenuRow::{Dim, DimTick, Item, Sep, Tick};
+    for element in [Element::CpuMenu, Element::Cpu] {
+        h.click(layout.rect(element).center());
+        let nodes = Harness::nodes(&h.settle());
+        common::assert_menu(
+            &nodes,
+            &[
+                DimTick("Enable CPU Meter"),
+                Sep,
+                DimTick("Average ---"),
+                Dim("Current 0 %"),
+                Sep,
+                Dim("Meter Text Shows:"),
+                DimTick("Average"),
+                Dim("Current"),
+                Sep,
+                Dim("Warn on Current CPU Overload"),
+                Sep,
+                Tick("Audio Engine On"),
+                Item("Configure Audio…"),
+            ],
+        );
+        h.key(Key::Escape, Modifiers::NONE);
+        h.settle();
+    }
+}

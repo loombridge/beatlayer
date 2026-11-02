@@ -167,6 +167,7 @@ impl Shell {
                 permanent_scrub_areas: self.permanent_scrub_areas(),
                 use_tab_key_to_move_focus: self.tab_navigation(),
                 wrap_tab_navigation: self.wrap_navigation(),
+                wheel_adjusts_values: self.prefs.wheel_adjusts_values,
             },
             theme_colors: ThemeColorsSettings {
                 look: self.prefs.look.clone(),

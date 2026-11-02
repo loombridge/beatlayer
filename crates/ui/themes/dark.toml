@@ -86,6 +86,14 @@ search = "#f5d142"
 # The keys of a clip's scale on the piano ruler and the rows Highlight Scales
 # shades (WP-6.7b).
 scale = "#5b8ce0"
+# The twelve hues of the note colours By Pitch Class and By Scale Degree, C to
+# B or the root up the scale, and the grey of a note outside the clip's scale
+# (WP-6.49).
+pitch_hues = [
+  "#e66357", "#e6aa57", "#dae657", "#92e657", "#57e663", "#57e6aa", "#57dae6",
+  "#5792e6", "#6357e6", "#aa57e6", "#e657da", "#e65792",
+]
+out_of_scale = "#7d848d"
 # Beatlayer's own track colours, given to new tracks in turn.
 track_palette = [
   "#e0675a", "#e8945a", "#e6c35c", "#a8c95a", "#5fbf6e", "#4fbfa3", "#4fb0d6",

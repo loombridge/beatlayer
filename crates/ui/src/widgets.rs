@@ -44,6 +44,30 @@ fn led(painter: &Painter, rect: Rect, colour: Color32) {
     painter.circle_filled(rect.left_top() + vec2(3.5, 3.5), 1.75, colour);
 }
 
+/// Draws the hollow ring that marks an empty track at the right end of the
+/// row `row` of its title bar, in `ink`, the title bar's text colour, and
+/// returns the left edge of the space it takes, so the title's other parts
+/// stop short of it (the view options spec, R8). Its size follows the row's
+/// height, and the interface zoom scales both (R16).
+pub fn paint_empty_mark(painter: &Painter, row: Rect, ink: Color32) -> f32 {
+    let radius = (row.height() * 0.2).clamp(2.5, 4.0);
+    let centre = pos2(row.right() - 3.0 - radius, row.center().y);
+    painter.circle_stroke(centre, radius, Stroke::new(1.0, ink));
+    centre.x - radius - 2.0
+}
+
+/// Adds "empty" to what assistive technology reads of the title bar `id`
+/// (the view options spec, R9).
+pub fn describe_empty(ctx: &egui::Context, id: Id) {
+    ctx.accesskit_node_builder(id, |node| {
+        let text = match node.description() {
+            Some(text) => format!("{text}, empty"),
+            None => "empty".to_owned(),
+        };
+        node.set_description(text);
+    });
+}
+
 /// Draws an element of the Control Bar or Status Bar at `rect` and returns
 /// its response. A pending element (one a later package brings to life) is
 /// drawn quieter, can't be clicked or focused, and tells assistive
@@ -812,6 +836,11 @@ pub fn number_box(
         steps += whole as i32;
     } else if response.drag_stopped() {
         ui.data_mut(|d| d.remove::<f32>(id));
+    }
+    // Spec: view-options R11 to R13. The run's gesture is the wheel's: the
+    // callers run the command each step makes, as they do for a drag's.
+    if let Some(turn) = crate::wheel::input(&response, || format!("Change \"{name}\"")) {
+        steps += turn.steps;
     }
     let changed = (steps != 0)
         .then(|| step(value, steps).clamp(range.0, range.1))

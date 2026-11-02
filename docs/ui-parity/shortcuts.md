@@ -350,14 +350,14 @@ A loop brace or a clip start or end marker is selected, or a multi-clip loop bar
 |---|---|---|---|---|---|---|---|
 | S-LOOP-005 | Move the start marker to the clicked position | Cmd+click | Ctrl+click | mouse | press | M2 | manual 42.8 |
 | S-LOOP-006 | Move the end marker to the clicked position | Cmd+Shift+click | Ctrl+Shift+click | mouse | press | M2 | manual 42.8 |
-| S-LOOP-007 | Nudge the loop brace left or right by the grid | `Left` or `Right` | `Left` or `Right` | key | press | M6 | manual 42.8 |
-| S-LOOP-008 | Move the loop by its own length | `Down` or `Up` | `Down` or `Up` | key | press | M6 | manual 42.8 |
-| S-LOOP-009 | Halve or double the loop length | `Cmd+Down` or `Cmd+Up` | `Ctrl+Down` or `Ctrl+Up` | key | press | M6 | manual 42.8 |
-| S-LOOP-010 | Shorten or lengthen the loop by the grid | `Cmd+Left` or `Cmd+Right` | `Ctrl+Left` or `Ctrl+Right` | key | press | M6 | manual 42.8 |
+| S-LOOP-007 | Nudge the loop brace left or right by the grid | `Left` or `Right` | `Left` or `Right` | key | press | M6 | manual 42.8; observed in 12.4.16 (macOS), 1 November 2026 |
+| S-LOOP-008 | Move the loop by its own length | `Down` or `Up` | `Down` or `Up` | key | press | M6 | manual 42.8; observed in 12.4.16 (macOS), 1 November 2026 |
+| S-LOOP-009 | Halve or double the loop length | `Cmd+Down` or `Cmd+Up` | `Ctrl+Down` or `Ctrl+Up` | key | press | M6 | manual 42.8; observed in 12.4.16 (macOS), 1 November 2026 |
+| S-LOOP-010 | Shorten or lengthen the loop by the grid | `Cmd+Left` or `Cmd+Right` | `Ctrl+Left` or `Ctrl+Right` | key | press | M6 | manual 42.8; observed in 12.4.16 (macOS), 1 November 2026 |
 | S-LOOP-011 | Select the material inside the loop | `Cmd+Shift+L` | `Ctrl+Shift+L` | key | press | M1 | manual 42.8 |
 | S-SAMPLE-006 | Move the clip region with the start marker | `Shift+Left` or `Shift+Right` | `Shift+Left` or `Shift+Right` | key | press | M2 | manual 42.11 |
 | S-NOTE-022 | Move the clip region with the start marker | `Shift+Left` or `Shift+Right` | `Shift+Left` or `Shift+Right` | key | press | M2 | manual 42.12 |
-| S-ARR-012 | Shorten or lengthen the loop brace | `Cmd+Left` or `Cmd+Right` | `Ctrl+Left` or `Ctrl+Right` | key | press | M6 | manual 42.16 |
+| S-ARR-012 | Shorten or lengthen the loop brace | `Cmd+Left` or `Cmd+Right` | `Ctrl+Left` or `Ctrl+Right` | key | press | M6 | manual 42.16; observed in 12.4.16 (macOS), 1 November 2026 |
 | S-LOOP-012 | Duplicate Loop: double the loop and copy its notes into the new half | `Cmd+D` | `Ctrl+D` | key | press | M6 | manual 10.7.3, 10.8 |
 
 ## envelope
@@ -629,10 +629,10 @@ The Settings window has focus.
 | S-LOOP-002 | note | The 12.0 release notes say these set the markers to the time selection. |
 | S-LOOP-003 | note | The 12.0 release notes say these set the markers to the time selection. |
 | S-LOOP-004 | note | The 12.0 release notes say these set the markers to the time selection. |
-| S-LOOP-007 | note | Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it. |
-| S-LOOP-008 | note | Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it. |
-| S-LOOP-009 | note | Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it. |
-| S-LOOP-010 | note | Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it. |
+| S-LOOP-007 | note | Moved to M6 by WP-6.70, when the loop brace couldn't be selected. WP-6.73 builds it: the key acts while the brace is selected. |
+| S-LOOP-008 | note | Moved to M6 by WP-6.70, when the loop brace couldn't be selected. WP-6.73 builds it: the key acts while the brace is selected. |
+| S-LOOP-009 | note | Moved to M6 by WP-6.70, when the loop brace couldn't be selected. WP-6.73 builds it: the key acts while the brace is selected. |
+| S-LOOP-010 | note | Moved to M6 by WP-6.70, when the loop brace couldn't be selected. WP-6.73 builds it: the key acts while the brace is selected. |
 | S-ZOOM-003 | note | Manual 41.4.1.3 describes the same keys as widening and narrowing the Arrangement grid; the adaptive grid follows the zoom. |
 | S-ZOOM-005 | unconfirmed | Sections 42.11, 42.12 and 42.16 give Ctrl+Shift+F on Windows for the same command. |
 | S-CLIPMODE-001 | unconfirmed | Manual 8.1.3 gives Alt+Tab on Windows. |
@@ -656,7 +656,7 @@ The Settings window has focus.
 | S-SES-022 | same command as S-SES-021 | The same key as the previous row: a second press moves from the last track to the scene. |
 | S-ARR-005 | unconfirmed | Manual 6.7 gives Ctrl+Shift on Windows. |
 | S-ARR-010 | same command as S-ENV-004 |  |
-| S-ARR-012 | same command as S-LOOP-010 | Placed in the loop-brace context because 42.8 says the brace must be selected. Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it. |
+| S-ARR-012 | same command as S-LOOP-010 | Placed in the loop-brace context because 42.8 says the brace must be selected. Moved to M6 by WP-6.70, when the loop brace couldn't be selected. WP-6.73 builds it: the key acts while the brace is selected. |
 | S-ARR-020 | note | Live 12.4.3's View menu shows U beside Show Selected Grouped Track. |
 | S-ARR-021 | note | Live 12.4.3's View menu shows these keys beside Show Grouped Tracks. |
 | S-ARR-022 | note | It makes selected take lanes taller or shorter too (manual 21.2). |

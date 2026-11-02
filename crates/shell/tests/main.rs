@@ -89,6 +89,7 @@ mod link;
 mod linked_clips;
 mod linked_tracks;
 mod locator;
+mod loop_brace;
 mod macros;
 mod mapping_targets;
 mod meld;

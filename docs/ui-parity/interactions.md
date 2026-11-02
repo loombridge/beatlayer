@@ -26,7 +26,7 @@ Source: `obs` means observed in Live 12.4.3 on macOS on 10 October 2026, unless 
 | I-CLICK-014 | Arrangement scrub area or beat-time ruler | Shift-click | Scrubs even when Permanent Scrub Areas is off | man 6.3 |
 | I-CLICK-015 | Overview | Double-click inside the outline | Zooms out to the whole Arrangement | man 6.1 |
 | I-CLICK-016 | Beat-time ruler | Double-click | Zooms to the selection, or out to the whole Arrangement if nothing is selected | man 6.1 |
-| I-CLICK-017 | Loop brace | Click | Selects everything inside the loop | man 6.9 |
+| I-CLICK-017 | Loop brace's bar | Click | Selects the brace and the time inside it on every track, and puts the insert marker at its start | man 6.9; observed in 12.4.16 (macOS), 1 November 2026 |
 | I-CLICK-018 | Locator | Click; double-click while stopped | Jumps to it; double-click also selects it and starts playback | man 6.4 |
 | I-CLICK-019 | Fold button beside a track name | Click; Option/Alt-click | Folds or unfolds the track; with the modifier, all tracks | man 6.9 |
 | I-CLICK-020 | Pan control | Double-click, or click the triangle above it | Resets the pan to centre | man 18.1 |
@@ -85,7 +85,7 @@ Source: `obs` means observed in Live 12.4.3 on macOS on 10 October 2026, unless 
 | I-DRAG-016 | Clip's title bar | Shift+Option-drag / Shift+Alt-drag | Selects time inside the clip (S-ARR-007) | man 42.16 |
 | I-DRAG-017 | Fade handles (shown on hover) | Drag a fade handle; drag the curve handle; drag past the neighbour's edge | Sets the fade length; shapes the curve; creates a crossfade | man 6.8 |
 | I-DRAG-018 | Track's lower edge (split line) | Drag; Option/Alt-drag | Sets the track's height; with the modifier, every track's | man 6.9 |
-| I-DRAG-019 | Loop brace | Drag an edge; drag the bar | Moves that end; moves the whole loop | man 6.6 |
+| I-DRAG-019 | Loop brace | Drag an edge; drag the bar | Moves that end; moves the whole loop, keeping its length; on the grid, and not an undo step | man 6.6; observed in 12.4.16 (macOS), 1 November 2026 |
 | I-DRAG-020 | Locator, time-signature marker | Drag | Moves it | man 6.4, 6.5 |
 | I-DRAG-021 | Any drag on a grid | Hold Cmd (macOS) / Alt (Windows) | Ignores snapping; if the grid is off, snaps instead (S-EDIT-013) | man 6.10 |
 | I-DRAG-022 | Value controls | Drag up or down; Shift-drag | Changes the value; in finer steps (S-VAL-003) | man 42.6 |

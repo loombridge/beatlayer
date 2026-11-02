@@ -825,6 +825,27 @@ pub(crate) fn midi_tools_shown(h: &mut Harness) {
         .unwrap();
 }
 
+/// A MIDI clip in the first Session slot with a note, selected, in a major
+/// scale, shown in the Clip View with the Pitch and Time Utilities showing
+/// (WP-6.16).
+pub(crate) fn utilities_shown(h: &mut Harness) {
+    midi_tools_shown(h);
+    for (id, args) in [
+        ("clip_view.show_panel", json!({ "panel": "utilities" })),
+        (
+            "note.add",
+            json!({ "key": 60, "start": 0, "length": 705_600 }),
+        ),
+        ("clip_view.select_notes", json!({ "notes": [0] })),
+        (
+            "clip.set_scale",
+            json!({ "enabled": true, "root": 0, "name": "major" }),
+        ),
+    ] {
+        h.shell.run(id, args).unwrap();
+    }
+}
+
 /// A MIDI clip in the first Session slot, shown in the Clip View on its MPE
 /// tab (WP-6.18).
 pub(crate) fn mpe_tab_shown(h: &mut Harness) {

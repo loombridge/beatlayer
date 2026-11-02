@@ -8,9 +8,8 @@
 //! (`midi_tool.choose`, `midi_tool.set`, `midi_tool.set_auto`,
 //! `midi_tool.apply`, `midi_tool.reset`), and a drag on a value is a gesture
 //! of `midi_tool.set`: one undo step named after the tool, and Esc puts the
-//! notes back. The Pitch and Time Utilities panel comes with its own
-//! package (WP-6.16) and is drawn empty. The rules are in the MIDI Tools
-//! spec.
+//! notes back. The Pitch and Time Utilities panel is [`crate::utilities_panel`].
+//! The rules are in the MIDI Tools spec.
 
 use bl_midi_tools::{
     DIVISION_NAMES, ParamKind, ParamSpec, ParamValue, ToolDescriptor, ToolKind, parse_key,
@@ -150,12 +149,17 @@ fn info_id() -> Id {
 
 /// Says what the pointer is over, for the Info View.
 pub(crate) fn control_info(ui: &Ui, spec: &ParamSpec) {
+    info(ui, &spec.name, &spec.description);
+}
+
+/// Says that the pointer is over a control with this name and description.
+pub(crate) fn info(ui: &Ui, title: &str, body: &str) {
     ui.ctx().data_mut(|d| {
         d.insert_temp(
             info_id(),
             InfoViewContent {
-                title: spec.name.clone(),
-                body: spec.description.clone(),
+                title: title.to_owned(),
+                body: body.to_owned(),
                 shortcut: None,
             },
         );
@@ -205,8 +209,7 @@ pub fn show(
     );
     let body = Rect::from_min_max(pos2(rect.left(), rect.top() + SELECTOR + 4.0), rect.max);
     match shown {
-        // Pitch and Time Utilities come with WP-6.16.
-        Panel::Utilities => {}
+        Panel::Utilities => crate::utilities_panel::show(ui, shell, theme, body, events),
         Panel::Transform => tools(
             ui,
             shell,
@@ -925,11 +928,17 @@ enum Typed {
     Escape,
 }
 
-/// The note name or number being typed into the pitch control `id` while it
-/// has the keyboard: typed text builds it, Backspace takes a character off,
-/// Enter hands the key it reads as to `commit`, and Esc drops it. Returns the
-/// entry so far.
-fn typing(ui: &Ui, entry: Id, focused: bool, commit: &mut dyn FnMut(u8)) -> Option<String> {
+/// The text being typed into the control `entry` while it has the keyboard
+/// (a note name or number for a pitch control): typed text builds it,
+/// Backspace takes a character off, Enter hands what `parse` reads it as to
+/// `commit`, and Esc drops it. Returns the entry so far.
+pub(crate) fn typing<T>(
+    ui: &Ui,
+    entry: Id,
+    focused: bool,
+    parse: fn(&str) -> Option<T>,
+    commit: &mut dyn FnMut(T),
+) -> Option<String> {
     let mut text = ui.data(|d| d.get_temp::<String>(entry));
     if !focused {
         if text.is_some() {
@@ -981,8 +990,8 @@ fn typing(ui: &Ui, entry: Id, focused: bool, commit: &mut dyn FnMut(u8)) -> Opti
                 }
             }
             Typed::Enter => {
-                if let Some(key) = text.take().and_then(|text| parse_key(&text)) {
-                    commit(key);
+                if let Some(value) = text.take().and_then(|text| parse(&text)) {
+                    commit(value);
                 }
             }
             Typed::Escape => text = None,
@@ -1384,9 +1393,15 @@ pub(crate) fn value_control(
     // R3); the keys then go to it, not to shortcuts.
     let typed = bind.pitch.then(|| {
         ui.data_mut(|d| d.insert_temp(id.with("typed-field"), true));
-        typing(ui, id.with("typing"), response.has_focus(), &mut |key| {
-            events.push(UiEvent::Invoke(invoke(f64::from(key))));
-        })
+        typing(
+            ui,
+            id.with("typing"),
+            response.has_focus(),
+            parse_key,
+            &mut |key| {
+                events.push(UiEvent::Invoke(invoke(f64::from(key))));
+            },
+        )
     });
     let typed = typed.flatten();
     let delete = response.has_focus()

@@ -1221,6 +1221,123 @@ fn an_agent_quantises_and_transposes_notes_by_command() {
 }
 
 #[test]
+fn an_agent_runs_the_pitch_and_time_utilities_by_id_and_reads_the_notes_back() {
+    // Spec: pitch-and-time-utilities R15. Each utility is a registered
+    // command run by its ID, one undo step labelled with the agent's name, and
+    // the query tool's clip shows the notes and, for a stretch, the loop.
+    let mut client = headless(false);
+    let created = call(
+        &mut client,
+        "run",
+        json!({ "label": "A clip of notes", "commands": [
+            { "command": "track.create",
+              "args": { "id": {"$new": "notes"}, "kind": "midi", "name": "Notes",
+                        "index": 0 } },
+            { "command": "clip.create",
+              "args": { "track": {"$ref": "notes"},
+                        "clip": { "id": {"$new": "clip"}, "name": "Notes", "start": 0,
+                                  "length": 2_822_400, "mute": false,
+                                  "data": { "midi": { "looping": true,
+                                      "loop_end": 1_411_200, "notes": [
+                                      { "key": 60, "velocity": 100, "start": 0,
+                                        "length": 705_600 },
+                                      { "key": 64, "velocity": 100, "start": 705_600,
+                                        "length": 705_600 }
+                                  ] } } } } },
+        ] }),
+    );
+    let clip = created["ids"]["clip"].as_u64().unwrap();
+    let keys = |client: &mut Client<InProcess>| -> Vec<u64> {
+        let read = call(client, "query", json!({ "id": clip, "detail": "full" }));
+        read["content"]["notes"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|note| note["key"].as_u64().unwrap())
+            .collect()
+    };
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| -> Value {
+        let mut args = args.as_object().cloned().unwrap_or_default();
+        args.insert("clip".to_owned(), json!(clip));
+        let result = call(
+            client,
+            "run",
+            json!({ "label": command, "commands": [{ "command": command, "args": args }] }),
+        );
+        assert_eq!(
+            result["undo_step"],
+            format!("test-agent: {command}"),
+            "{command}"
+        );
+        result
+    };
+    run(
+        &mut client,
+        "note.transpose",
+        json!({ "notes": [0, 1], "by": 12, "in": "semitones" }),
+    );
+    assert_eq!(keys(&mut client), [72, 76]);
+    run(&mut client, "note.invert", json!({}));
+    assert_eq!(keys(&mut client), [76, 72]);
+    run(
+        &mut client,
+        "note.add_interval",
+        json!({ "by": 7, "in": "semitones" }),
+    );
+    assert_eq!(keys(&mut client), [76, 83, 72, 79]);
+    run(&mut client, "note.reverse", json!({}));
+    // The notes already reach each other and the loop's end: no step.
+    let legato = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "note.legato", "args": { "clip": clip } }] }),
+    );
+    assert!(legato["undo_step"].is_null(), "{legato}");
+    run(&mut client, "note.set_length", json!({ "length": 352_800 }));
+    run(
+        &mut client,
+        "note.humanize",
+        json!({ "seed": 3, "amount": 100 }),
+    );
+    // Fit to Scale is refused while Scale Mode is off, and says why.
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "note.fit_to_scale", "args": { "clip": clip } }] }),
+        )
+        .unwrap();
+    assert!(
+        refused.is_error && refused.text.contains("Scale Mode"),
+        "{}",
+        refused.text
+    );
+    // Add Interval left its copies selected, which the utilities then act on;
+    // with nothing selected, a stretch with markers doubles the loop too, and
+    // the query tool's clip reads it back.
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "clip_view.select_notes", "args": { "clip": clip, "notes": [] } },
+        ] }),
+    );
+    run(
+        &mut client,
+        "note.stretch",
+        json!({ "factor": 2.0, "markers": true }),
+    );
+    let read = call(
+        &mut client,
+        "query",
+        json!({ "id": clip, "detail": "full" }),
+    );
+    assert_eq!(
+        read["saved"]["data"]["midi"]["loop_end"], 2_822_400,
+        "{read}"
+    );
+}
+
+#[test]
 fn an_agent_copies_pastes_and_duplicates_notes_by_command() {
     // Spec: piano-roll R28, R29, R31. The note clipboard's commands run by
     // ID through the agent API, and the query tool reads the notes back.

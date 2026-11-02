@@ -10660,7 +10660,8 @@ What `device_view.state` returns.
 | `track` | [`TrackId`](#trackid) or null | yes | The track whose chain shows: the selected track, or `null` with no track selected. |
 | `track_kind` | [`TrackKind`](#trackkind) or null | yes | That track's kind. |
 | `devices` | array of [`DeviceFrame`](#deviceframe) | yes | Its devices, in signal order. |
-| `selected` | [`DeviceId`](#deviceid) or null | yes | The selected device, if it's in this chain. |
+| `selected` | [`DeviceId`](#deviceid) or null | yes | The first selected device, if it's in this chain. |
+| `selection` | array of [`DeviceId`](#deviceid) | yes | Every selected device in this chain, in order: one run of neighbouring devices (device chains R47). |
 | `hot_swap` | [`HotSwap`](#hotswap) or null | yes | The device being hot-swapped, on any track, and what the browser's bar says ("Swapping Audio Effect"). |
 | `can_paste` | boolean | yes | Whether the clipboard holds a device to paste. |
 | `can_paste_chain` | boolean | yes | Whether the chain clipboard holds chains to paste. |
@@ -10756,7 +10757,15 @@ What `device_view.state` returns.
           "type": "null"
         }
       ],
-      "description": "The selected device, if it's in this chain."
+      "description": "The first selected device, if it's in this chain."
+    },
+    "selection": {
+      "default": [],
+      "description": "Every selected device in this chain, in order: one run of neighbouring devices (device chains R47).",
+      "items": {
+        "$ref": "#/$defs/DeviceId"
+      },
+      "type": "array"
     },
     "track": {
       "anyOf": [
@@ -10786,6 +10795,7 @@ What `device_view.state` returns.
     "track_kind",
     "devices",
     "selected",
+    "selection",
     "hot_swap",
     "can_paste",
     "can_paste_chain",
@@ -16377,6 +16387,7 @@ One row of the content pane.
 | `format` | [`PluginFormat`](#pluginformat) or null | no | For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11). |
 | `hidden` | boolean | no | For a plug-in, whether it is hidden, which the row draws dimmed while Show Hidden Plug-Ins is on (spec: browser-tags R43); left out otherwise. |
 | `nested` | array of integer, at least 0 | no | The collections of the person's own it is in, by their numbers (8 and up); left out while it is in none (spec: browser-tags R46, R48). |
+| `presets` | boolean | no | For a plug-in, whether it has presets listed under its row, which its fold triangle opens (the plug-in scanning spec, R15); `open` says whether they are listed. Left out otherwise. |
 
 <details><summary>JSON Schema</summary>
 
@@ -16470,6 +16481,10 @@ One row of the content pane.
     "path": {
       "description": "Its path on disk; in the Plug-Ins label, the row's key instead: a vendor folder's is `plug-ins:/` and the vendor, a plug-in's is its file, `#`, and its identifier (the plug-in scanning spec, R11).",
       "type": "string"
+    },
+    "presets": {
+      "description": "For a plug-in, whether it has presets listed under its row, which its fold triangle opens (the plug-in scanning spec, R15); `open` says whether they are listed. Left out otherwise.",
+      "type": "boolean"
     }
   },
   "required": [

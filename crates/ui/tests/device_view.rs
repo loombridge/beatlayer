@@ -372,6 +372,132 @@ fn a_rename_ends_when_its_device_goes() {
     assert!(!h.main.is_typing(), "the keys are back");
 }
 
+/// A click on `at` with `modifiers` held.
+fn click_with(h: &mut Harness, at: Pos2, modifiers: Modifiers) {
+    // Long enough after any earlier click that egui doesn't pair them.
+    h.time += 1.0;
+    let held = Event::ModifiersChanged(modifiers);
+    h.frame(vec![held.clone(), Event::PointerMoved(at)]);
+    for pressed in [true, false] {
+        h.frame(vec![
+            held.clone(),
+            Event::PointerButton {
+                pos: at,
+                button: PointerButton::Primary,
+                pressed,
+                modifiers,
+            },
+        ]);
+    }
+    h.frame(vec![Event::ModifiersChanged(Modifiers::NONE)]);
+    h.settle();
+}
+
+/// A click on a device's title bar with `modifiers` held.
+fn click_title(h: &mut Harness, device: DeviceId, modifiers: Modifiers) {
+    let at = title_rect(frame_of(h, device), false).center();
+    click_with(h, at, modifiers);
+}
+
+fn chain(h: &Harness) -> Vec<DeviceId> {
+    h.shell
+        .device_view_state()
+        .devices
+        .iter()
+        .map(|d| d.id)
+        .collect()
+}
+
+// Spec: device-chains R47 (S-DEV-004, S-A11Y-014)
+#[test]
+fn shift_click_and_shift_arrows_select_several_devices_and_the_keys_act_on_all() {
+    let mut h = harness();
+    let ids = [gain(), through(), gain(), through()].map(|device| add(&mut h, device));
+    let [a, b, c, d] = ids;
+    let selection = |h: &Harness| h.shell.device_view_state().selection;
+    let undo = |h: &mut Harness| {
+        h.shell.invoke("edit.undo", json!({})).unwrap();
+        h.settle();
+    };
+
+    click_title(&mut h, a, Modifiers::NONE);
+    click_title(&mut h, c, Modifiers::SHIFT);
+    assert_eq!(selection(&h), [a, b, c], "Shift-click selects the range");
+    click_title(&mut h, b, Modifiers::SHIFT);
+    assert_eq!(selection(&h), [a, b, c], "inside it, nothing changes");
+    click_title(&mut h, d, command());
+    assert_eq!(selection(&h), [d], "Cmd-click selects that device alone");
+
+    // Shift-Left grows by the neighbour; Left and Right select one, from the
+    // edge of the run.
+    h.shell.set_focused_area(Area::Detail);
+    h.settle();
+    h.key(Key::ArrowLeft, Modifiers::SHIFT);
+    h.settle();
+    h.key(Key::ArrowLeft, Modifiers::SHIFT);
+    h.settle();
+    assert_eq!(selection(&h), [b, c, d]);
+    h.key(Key::ArrowLeft, Modifiers::NONE);
+    h.settle();
+    assert_eq!(selection(&h), [a], "Left, from the first of the run");
+    h.key(Key::ArrowRight, Modifiers::SHIFT);
+    h.settle();
+    assert_eq!(selection(&h), [a, b]);
+    h.key(Key::ArrowRight, Modifiers::NONE);
+    h.settle();
+    assert_eq!(selection(&h), [c], "Right, from the last of the run");
+    h.key(Key::ArrowLeft, Modifiers::SHIFT);
+    h.settle();
+    assert_eq!(selection(&h), [b, c]);
+
+    // The keys act on both.
+    h.key(Key::D, command());
+    h.settle();
+    let now = chain(&h);
+    assert_eq!((now[..3].to_vec(), now[5]), ([a, b, c].to_vec(), d));
+    assert_eq!(selection(&h), now[3..5]);
+    assert_eq!(last_step(&h), "Duplicate Device");
+    undo(&mut h);
+    assert_eq!(chain(&h), ids);
+
+    click_title(&mut h, b, Modifiers::NONE);
+    click_title(&mut h, c, Modifiers::SHIFT);
+    h.key(Key::C, command());
+    h.settle();
+    click_title(&mut h, a, Modifiers::NONE);
+    h.key(Key::V, command());
+    h.settle();
+    let now = chain(&h);
+    assert_eq!(now[2..], ids);
+    assert_eq!(selection(&h), now[..2]);
+    assert_eq!(last_step(&h), "Copy Device");
+    undo(&mut h);
+
+    click_title(&mut h, b, Modifiers::NONE);
+    click_title(&mut h, c, Modifiers::SHIFT);
+    h.key(Key::X, command());
+    h.settle();
+    assert_eq!(chain(&h), [a, d]);
+    assert_eq!(last_step(&h), "Delete Device(s)");
+    undo(&mut h);
+
+    click_title(&mut h, b, Modifiers::NONE);
+    click_title(&mut h, c, Modifiers::SHIFT);
+    h.key(Key::Delete, Modifiers::NONE);
+    h.settle();
+    assert_eq!(chain(&h), [a, d]);
+    assert_eq!(selection(&h), [d]);
+    assert_eq!(last_step(&h), "Delete Device(s)");
+    undo(&mut h);
+
+    click_title(&mut h, b, Modifiers::NONE);
+    click_title(&mut h, c, Modifiers::SHIFT);
+    h.key(Key::G, command());
+    h.settle();
+    assert_eq!(chain(&h).len(), 3);
+    assert_eq!(last_step(&h), "Group Devices");
+}
+
 // Spec: device-chains R25 (dragging a title bar moves the device)
 #[test]
 fn dragging_a_title_bar_moves_the_device() {

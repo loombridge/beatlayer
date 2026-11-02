@@ -556,6 +556,11 @@ pub struct Item {
     /// Show Hidden Plug-Ins is on (spec: browser-tags R43); left out otherwise.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hidden: bool,
+    /// For a plug-in, whether it has presets listed under its row, which its
+    /// fold triangle opens (the plug-in scanning spec, R15); `open` says
+    /// whether they are listed. Left out otherwise.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub presets: bool,
 }
 
 /// What an item's optional columns show (spec: browser-tags R27); a value

@@ -515,7 +515,7 @@ fn group_and_ungroup_keep_every_device_and_its_settings() {
         song.doc().device(ids[2]).unwrap().params.get(&ParamId(1)),
         Some(&2.0)
     );
-    assert_eq!(song.editor.undo_history().next(), Some("Group"));
+    assert_eq!(song.editor.undo_history().next(), Some("Group Devices"));
 
     // Ungroup puts them back in the rack's place, and takes the chain with
     // it.

@@ -300,6 +300,77 @@ pub fn capture_states(
     }
 }
 
+/// Spec: plugin-scanning R16, R19. Gives `device`'s plug-in a state from a
+/// preset, with no undo step of its own (the preset's load is the step): a
+/// running plug-in takes it now, and the set keeps a copy either way. A
+/// plug-in that refuses it keeps what it had, and so does the set. Returns
+/// whether a running plug-in took it, as opposed to one the engine hasn't
+/// started yet.
+///
+/// # Errors
+///
+/// What the plug-in said, if it refused the state.
+pub fn apply_state(
+    plugins: &ClapHost,
+    au: &AuHost,
+    vst3: &Vst3Host,
+    lv2: &Lv2Host,
+    editor: &mut Editor,
+    device: DeviceId,
+    data: &[u8],
+) -> Result<bool, String> {
+    let Some(DeviceKind::Plugin { format, .. }) =
+        editor.document().device(device).map(|d| d.kind.clone())
+    else {
+        return Ok(true);
+    };
+    // Each host says apart a plug-in that isn't running and one that refused
+    // the state.
+    let refused = match format {
+        PluginFormat::Clap => plugins.load_state(device, data).err().map(|e| {
+            (
+                matches!(e, bl_plugin_host::clap::ClapError::NoInstance(_)),
+                e.to_string(),
+            )
+        }),
+        PluginFormat::AudioUnit => au.load_state(device, data).err().map(|e| {
+            (
+                matches!(e, bl_plugin_host::au::AuError::NoInstance(_)),
+                e.to_string(),
+            )
+        }),
+        PluginFormat::Vst3 => vst3.load_state(device, data).err().map(|e| {
+            (
+                matches!(e, bl_plugin_host::vst3::Vst3Error::NoInstance(_)),
+                e.to_string(),
+            )
+        }),
+        PluginFormat::Lv2 => lv2.load_state(device, data).err().map(|e| {
+            (
+                matches!(e, bl_plugin_host::lv2::Lv2Error::NoInstance(_)),
+                e.to_string(),
+            )
+        }),
+    };
+    if let Some((false, why)) = refused {
+        return Err(why);
+    }
+    let path = editor
+        .document()
+        .device(device)
+        .and_then(|d| d.plugin.as_ref())
+        .map(|p| p.path.clone())
+        .unwrap_or_default();
+    let _ = editor.amend_plugin_state(
+        device,
+        Some(bl_model::PluginState {
+            path,
+            data: data.to_vec(),
+        }),
+    );
+    Ok(refused.is_none())
+}
+
 /// Spec: clap-hosting R6. Applies the parameter changes plug-ins made
 /// themselves (CLAP plug-ins' and kit plug-ins'), each one an undo step
 /// named for its parameter, as a change from a device's control is.

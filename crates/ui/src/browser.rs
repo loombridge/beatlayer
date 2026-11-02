@@ -2336,6 +2336,14 @@ impl BrowserUi {
             | ItemKind::DawProject => {
                 glyph(&painter, mark, Glyph::Preset, ink);
             }
+            // Spec: plugin-scanning R15. A plug-in with presets has a fold
+            // triangle in place of its icon.
+            ItemKind::Plugin if item.presets => glyph(
+                &painter,
+                mark,
+                if item.open { Glyph::Down } else { Glyph::Right },
+                ink,
+            ),
             ItemKind::Plugin | ItemKind::Device | ItemKind::Devices => {
                 glyph(&painter, mark, Glyph::Plugin, ink);
             }
@@ -2492,7 +2500,7 @@ impl BrowserUi {
         }
         // Spec: browser R25, C-BROWSER-001 to 011. The item's context menu,
         // from a right-click or the keyboard's context-menu key.
-        if item_menu::has_menu(item.kind) {
+        if item_menu::has_menu(item.kind) && !is_plugin_preset(item) {
             if response.secondary_clicked() && !selected {
                 invoke(events, ids::SELECT, json!({ "paths": [item.path] }));
             }
@@ -2591,7 +2599,7 @@ impl BrowserUi {
                 ItemKind::Notice => {}
             }
         } else if response.clicked()
-            && openable(item.kind)
+            && openable(item)
             && item.kind != ItemKind::Folder
             && ui
                 .input(|i| i.pointer.interact_pos())
@@ -2637,7 +2645,7 @@ impl BrowserUi {
                         path: item.path.clone(),
                     },
                 );
-            } else if item.kind == ItemKind::Plugin {
+            } else if item.kind == ItemKind::Plugin || is_plugin_preset(item) {
                 DragAndDrop::set_payload(
                     ui.ctx(),
                     BrowserDrag {
@@ -3194,12 +3202,12 @@ impl BrowserUi {
         };
         if right {
             match item.kind {
-                kind if openable(kind) && !item.open => invoke(
+                _ if openable(&item) && !item.open => invoke(
                     events,
                     ids::OPEN_FOLDER,
                     json!({ "path": item.path, "open": true, "keep_others": cmd }),
                 ),
-                kind if openable(kind) => {
+                _ if openable(&item) => {
                     if let Some(child) = view.row(cursor + 1).filter(|c| c.depth > item.depth) {
                         self.anchor = Some(cursor + 1);
                         invoke(events, ids::SELECT, json!({ "paths": [child.path] }));
@@ -3212,7 +3220,7 @@ impl BrowserUi {
             }
         }
         if left {
-            if openable(item.kind) && item.open {
+            if openable(&item) && item.open {
                 invoke(
                     events,
                     ids::OPEN_FOLDER,
@@ -3428,7 +3436,7 @@ impl BrowserUi {
             if released {
                 DragAndDrop::clear_payload(&ctx);
                 if let Some(track) = track
-                    && shell.browser_view().plugin(Path::new(&key)).is_some()
+                    && shell.browser_view().plugin_of_row(&key).is_some()
                 {
                     invoke(events, ids::SELECT, json!({ "paths": [key] }));
                     invoke(
@@ -3618,17 +3626,25 @@ fn drop_chains(ui: &Ui, theme: &Theme, rect: Rect, folder: &str, events: &mut Ve
     }
 }
 
+/// Whether `item` is a plug-in's preset, which a drag carries as its plug-in
+/// (the plug-in scanning spec, R17).
+fn is_plugin_preset(item: &Item) -> bool {
+    item.kind == ItemKind::Preset && bl_shell::browser::plugin_presets::is_preset_key(&item.path)
+}
+
 /// Whether rows of this kind open to list what is inside them.
-fn openable(kind: ItemKind) -> bool {
-    matches!(
-        kind,
-        ItemKind::Folder
-            | ItemKind::Set
-            | ItemKind::Track
-            | ItemKind::Group
-            | ItemKind::Return
-            | ItemKind::Main
-    )
+fn openable(item: &Item) -> bool {
+    // Spec: plugin-scanning R15. A plug-in with presets opens to list them.
+    item.presets
+        || matches!(
+            item.kind,
+            ItemKind::Folder
+                | ItemKind::Set
+                | ItemKind::Track
+                | ItemKind::Group
+                | ItemKind::Return
+                | ItemKind::Main
+        )
 }
 
 /// What dragging `item` carries when it is a set or a row of one: the set,

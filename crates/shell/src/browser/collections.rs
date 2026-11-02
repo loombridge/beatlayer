@@ -577,6 +577,7 @@ impl BrowserView {
                 details: None,
                 collections: vec![self.collections.top_of(child)],
                 hidden: false,
+                presets: false,
                 nested: Vec::new(),
             });
             if open {
@@ -609,6 +610,7 @@ impl BrowserView {
                     details: None,
                     collections: Vec::new(),
                     hidden: self.hidden_plugins.contains(&plugin.key()),
+                    presets: false,
                     nested: Vec::new(),
                 });
             } else if let Some(device) = device_by_id(&key) {
@@ -624,6 +626,7 @@ impl BrowserView {
                     details: None,
                     collections: Vec::new(),
                     hidden: false,
+                    presets: false,
                     nested: Vec::new(),
                 });
             } else if let Some(entry) = Self::collected_entry(&key) {
@@ -646,6 +649,7 @@ impl BrowserView {
                 details: None,
                 collections: Vec::new(),
                 hidden: false,
+                presets: false,
                 nested: Vec::new(),
             }));
         } else {

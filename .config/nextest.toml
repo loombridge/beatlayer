@@ -42,6 +42,18 @@ filter = "package(bl-devices) & test(=instrument_filter::sixteen_voices_render_f
 threads-required = 4
 priority = 90
 
+# The sixteen-voice budgets of Operator, Meld and Poli are the same kind of
+# wall-clock result: on a CI runner, beside other tests, they played at two to
+# three times real time against a limit of four. They take the runner too.
+[[profile.default.overrides]]
+filter = """
+    (package(bl-devices) & test(=operator::sixteen_voices_of_four_operators_render_faster_than_the_device_budget))
+    | (package(bl-devices) & test(=meld::sixteen_voices_of_swarm_saw_on_both_engines_render_inside_the_device_budget))
+    | (package(bl-devices) & test(=polysynth::sixteen_voices_of_poli_render_faster_than_the_device_budget))
+"""
+threads-required = 4
+priority = 90
+
 # The slowest tests, at either BL_TEST_DEPTH, start next, so a run doesn't
 # end waiting for one that started late.
 [[profile.default.overrides]]

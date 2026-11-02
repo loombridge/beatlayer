@@ -155,13 +155,13 @@ pub(super) const VIEW: &[Row] = &[
     ),
     SEPARATOR,
     ("M-VIEW-034", "Overview", Key(&["S-VIEW-011"])),
-    // IMP-33's switch, straight after Overview, with no key.
-    (IMP_33, "Chord Lane", Cmd(VIEW_CHORD_LANE)),
     (
         IMP_22,
         "Arranger Track",
         Cmd(crate::arranger::ARRANGER_TRACK),
     ),
+    // IMP-33's switch, after the Arranger Track's, with no key.
+    (IMP_33, "Chord Lane", Cmd(VIEW_CHORD_LANE)),
     (
         "M-VIEW-035",
         "Scene Tempo and Time Signature",

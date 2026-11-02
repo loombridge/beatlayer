@@ -452,27 +452,24 @@ impl BrowserUi {
             node.set_value(text.clone());
             node.set_bounds(bounds(bar));
         });
-        // Clear (a text button) and Add Label (≡+), at the bar's right.
+        // Clear (a text button), then Add Label (≡+) at the bar's right edge.
         let height = bar.height() - 4.0;
         let clear_width = painter
             .layout_no_wrap("Clear".to_owned(), theme.small_font(), ink)
             .size()
             .x
             + 16.0;
-        let clear = Rect::from_min_size(
-            pos2(
-                bar.right() - 4.0 - clear_width,
-                bar.center().y - height / 2.0,
-            ),
-            vec2(clear_width, height),
-        );
         let add = Rect::from_min_size(
-            pos2(clear.left() - 4.0 - 26.0, clear.top()),
+            pos2(bar.right() - 4.0 - 26.0, bar.center().y - height / 2.0),
             vec2(26.0, height),
         );
+        let clear = Rect::from_min_size(
+            pos2(add.left() - 4.0 - clear_width, add.top()),
+            vec2(clear_width, height),
+        );
         for (rect, id, name) in [
-            (add, add_label_id(), "Add Label"),
             (clear, clear_filters_id(), "Clear"),
+            (add, add_label_id(), "Add Label"),
         ] {
             let response = ui.interact(rect, id, Sense::click());
             crate::focus::register(ui.ctx(), id, bl_shell::Area::Browser, None);

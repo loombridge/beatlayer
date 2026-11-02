@@ -523,11 +523,11 @@ fn the_results_bar_counts_two_tags_and_goes_after_clear() {
     click_with(&mut h, centre_of(&nodes, Role::Button, "Mine|B"), command());
     let nodes = look(&mut h);
     assert_eq!(Harness::node(&nodes, "Results").value, "2 Filters");
-    // Clear is a text button and Add Label sits left of it, both inside the bar.
+    // Clear is a text button and Add Label sits right of it, both inside the bar.
     let bar = Harness::node(&nodes, "Results").bounds.unwrap();
     let clear = Harness::node(&nodes, "Clear").bounds.unwrap();
     let add = Harness::node(&nodes, "Add Label").bounds.unwrap();
-    assert!(add.x1 <= clear.x0 && clear.x1 <= bar.x1);
+    assert!(clear.x1 <= add.x0 && add.x1 <= bar.x1);
     assert!(bar.y0 <= clear.y0 && clear.y1 <= bar.y1);
     assert!(
         clear.x1 - clear.x0 > clear.y1 - clear.y0,

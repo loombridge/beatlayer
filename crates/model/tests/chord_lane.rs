@@ -262,7 +262,15 @@ fn a_saved_lane_with_overlapping_regions_or_a_shared_id_does_not_load() {
     let mut overlapping = saved.clone();
     overlapping["settings"]["chord_lane"][1]["start"] = serde_json::json!(BAR.0 + 1);
     assert!(serde_json::from_value::<Document>(overlapping).is_err());
-    let mut shared = saved;
+    let mut shared = saved.clone();
     shared["settings"]["chord_lane"][1]["id"] = shared["settings"]["chord_lane"][0]["id"].clone();
     assert!(serde_json::from_value::<Document>(shared).is_err());
+    // A lane written out of order loads in order, which playback relies on.
+    let mut reversed = saved;
+    reversed["settings"]["chord_lane"]
+        .as_array_mut()
+        .unwrap()
+        .reverse();
+    let loaded = serde_json::from_value::<Document>(reversed).unwrap();
+    assert!(loaded.chord_lane()[0].start < loaded.chord_lane()[1].start);
 }

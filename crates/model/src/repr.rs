@@ -275,7 +275,7 @@ impl TryFrom<DocumentRepr> for Document {
 
     fn try_from(repr: DocumentRepr) -> Result<Self, ModelError> {
         let DocumentRepr {
-            settings,
+            mut settings,
             tracks,
             returns,
             main,
@@ -296,6 +296,8 @@ impl TryFrom<DocumentRepr> for Document {
         )?;
         check_locators(&settings.locators)?;
         crate::chord_lane::check_all(&settings.chord_lane)?;
+        // The engine looks a note's region up by its order.
+        settings.chord_lane.sort_by_key(|region| region.start);
         for region in &settings.chord_lane {
             loader.claim(region.id.0)?;
         }

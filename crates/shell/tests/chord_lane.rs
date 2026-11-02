@@ -112,6 +112,25 @@ fn selecting_a_region_is_no_undo_step_and_a_missing_region_is_refused() {
 }
 
 #[test]
+fn selecting_a_region_clears_the_time_selection_so_delete_deletes_only_it() {
+    // Spec: chord-lane R3. Edit > Delete shares the Delete key, so a time
+    // selection left beside the region would go with it.
+    let mut shell = Shell::headless();
+    let region = add(&mut shell, BAR, 2 * BAR);
+    shell
+        .run("arrangement.select_time", json!({ "start": 0, "end": BAR }))
+        .unwrap();
+    assert!(state(&mut shell).time_selection.is_some());
+    shell
+        .run("chord_lane.select_region", json!({ "region": region }))
+        .unwrap();
+    let state = state(&mut shell);
+    assert_eq!(state.selected_chord_region, Some(region));
+    assert!(state.time_selection.is_none());
+    assert!(state.selected_clips.is_empty());
+}
+
+#[test]
 fn drawing_is_one_undo_step_however_far_the_drag_goes_and_selects_the_region() {
     // Spec: chord-lane R3.
     let mut shell = Shell::headless();

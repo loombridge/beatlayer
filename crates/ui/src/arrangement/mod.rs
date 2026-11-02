@@ -3014,8 +3014,11 @@ impl ArrangementUi {
                 );
             }
         }
-        // Spec: chord-lane R3. The Delete key deletes the selected region.
+        // Spec: chord-lane R3. The Delete key deletes the selected region,
+        // unless clips or time chosen since are what Edit > Delete deletes.
         if let Some(region) = view.selected_chord_region()
+            && view.selected_clips().is_empty()
+            && view.time_selection().is_none()
             && ui.input(|i| i.key_pressed(Key::Delete))
         {
             invoke(

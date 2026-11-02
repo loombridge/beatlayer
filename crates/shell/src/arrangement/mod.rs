@@ -599,6 +599,7 @@ impl ArrangementView {
     pub fn select_locators(&mut self, locators: Vec<LocatorId>) {
         if !locators.is_empty() {
             self.selected_signature = None;
+            self.selected_chord_region = None;
         }
         self.selected_locators = locators;
     }
@@ -643,9 +644,16 @@ impl ArrangementView {
         self.selected_chord_region
     }
 
-    /// Selects a chord region, or none, as clicking one does.
+    /// Selects a chord region, or none, as clicking one does. Selecting one
+    /// clears the clips, the time selection, the locators and a marker, as
+    /// a marker's does, so Delete deletes only the region.
     pub fn select_chord_region(&mut self, region: Option<ChordRegionId>) {
         self.selected_chord_region = region;
+        if region.is_some() {
+            self.selected_signature = None;
+            self.selected_locators.clear();
+            self.clear_clip_selection();
+        }
     }
 
     /// The position of the selected time-signature marker (WP-6.61).
@@ -659,6 +667,7 @@ impl ArrangementView {
     pub fn select_signature(&mut self, at: Option<Ticks>) {
         self.selected_signature = at;
         if at.is_some() {
+            self.selected_chord_region = None;
             self.selected_locators.clear();
             self.clear_clip_selection();
         }

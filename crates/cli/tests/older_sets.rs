@@ -1282,7 +1282,6 @@ fn a_set_saved_before_the_chord_lane_loads_with_no_regions_and_no_track_followin
 }
 
 /// A project holding `editor`'s document.
-
 fn project_of(editor: &Editor) -> Project {
     Project {
         document: editor.document().clone(),

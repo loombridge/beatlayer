@@ -78,6 +78,7 @@ mod editor;
 mod error;
 mod external;
 pub mod fader;
+mod chord_lane;
 mod fades;
 mod follow;
 pub mod graph;
@@ -175,8 +176,8 @@ pub use groove::{
     GroovePlay, GroovePool, MovedTransients, clip_seed, noise,
 };
 pub use ids::{
-    ChainId, ClipId, ContentHash, DeviceId, GrooveId, LinkGroupId, LocatorId, ParamId,
-    ParseContentHashError, SceneId, TakeLaneId, TrackId,
+    ChainId, ChordRegionId, ClipId, ContentHash, DeviceId, GrooveId, LinkGroupId, LocatorId,
+    ParamId, ParseContentHashError, SceneId, TakeLaneId, TrackId,
 };
 /// The persistent collections the document's public types hold.
 pub use imbl::{OrdMap, Vector};
@@ -186,6 +187,7 @@ pub use layers::{
     LayerSettings, LayerSort, LayerZone, Layers, MultisamplerView, MultisamplerViews, ReleaseMode,
     SamplerTab, SustainMode, Zone, ZoneKind, snap_to_zero_crossing,
 };
+pub use chord_lane::{ChordRegion, MAX_TRANSPOSE};
 pub use locator::{Locator, SongStart};
 pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound};
 pub use pad_layout::{PadDirection, PadLayout, PadSpacing};

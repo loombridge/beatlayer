@@ -131,11 +131,15 @@ impl TrackScale {
     /// or while the Arrangement plays and the transport runs, the
     /// Arrangement clip under the playhead; the set's current scale where no
     /// clip plays. A Session clip's start and stop land on their frames, an
-    /// Arrangement clip's where the playhead enters and leaves it.
+    /// Arrangement clip's where the playhead enters and leaves it. While the
+    /// Arrangement plays, a chord lane region of `lane` that names a scale
+    /// takes the place of the clip's (the chord lane spec, R8); `lane` holds
+    /// those regions' spans, in order, with no scene.
     pub(crate) fn runs(
         &mut self,
         track: TrackId,
         spans: impl Iterator<Item = Span> + Clone,
+        lane: impl Iterator<Item = Span> + Clone,
         block: &Block<'_>,
     ) -> ScaleRuns {
         let set = block.set_scale();
@@ -188,16 +192,28 @@ impl TrackScale {
                     }
                 }
                 let near = &near[..count];
+                let mut regions = [Span::NONE; NEAR];
+                let mut held = 0;
+                for span in lane.filter(|span| span.start < until && span.end > from) {
+                    if held < NEAR {
+                        regions[held] = span;
+                        held += 1;
+                    }
+                }
+                let regions = &regions[..held];
                 let at = |frame: i64| {
-                    near.iter()
-                        .rfind(|span| span.start <= frame && frame < span.end)
-                        .map_or(set, |span| span.scale)
+                    let under = |span: &&Span| span.start <= frame && frame < span.end;
+                    regions.iter().find(under).map_or_else(
+                        || near.iter().rfind(under).map_or(set, |span| span.scale),
+                        |span| span.scale,
+                    )
                 };
                 let mut runs = ScaleRuns::of(at(from));
                 let mut seen = from;
                 for _ in 0..EDGES {
                     let next = near
                         .iter()
+                        .chain(regions.iter())
                         .flat_map(|span| [span.start, span.end])
                         .filter(|edge| *edge > seen && *edge < until)
                         .min();

@@ -133,8 +133,8 @@ Anywhere in a main window, unless a narrower context binds the same keys.
 | S-TRACK-011 | Show or hide the return tracks | `Cmd+Option+R` | `Ctrl+Alt+R` | key | press | M2 | manual 42.19; observed in 12.4.6 (macOS), 11 October 2026: View menu, Mixer Controls |
 | S-TRANS-001 | Play from the start marker, or stop | `Space` | `Space` | key | press | M1 | manual 42.20; observed in 12.4.3 (macOS), 10 October 2026: Playback menu |
 | S-TRANS-002 | Continue playing from where playback stopped | `Shift+Space` | `Shift+Space` | key | press | M1 | manual 42.20; observed in 12.4.3 (macOS), 10 October 2026: Playback menu |
-| S-TRANS-003 | Play and stop at the end of the selection | `Option+Space` | `Ctrl+Space` | key | press | M6 | manual 42.20 |
-| S-TRANS-004 | Play the Arrangement selection | `Space` | `Space` | key | press | M6 | manual 42.20 |
+| S-TRANS-003 | Play and stop at the end of the selection | `Option+Space` | `Ctrl+Space` | key | press | M6 | manual 42.20; observed in 12.4.16 (macOS), 1 November 2026 |
+| S-TRANS-004 | Play the Arrangement selection | `Space` | `Space` | key | press | M6 | manual 42.20; observed in 12.4.16 (macOS), 1 November 2026 |
 | S-TRANS-005 | Move the insert marker to the start | `Home` or `Fn+Left` | `Home` | key | press | M1 | manual 42.20 |
 | S-TRANS-006 | Record | `F9` | `F9` | key | press | M2 | manual 42.20; observed in 12.4.3 (macOS), 10 October 2026: Playback menu |
 | S-TRANS-007 | Arm recording in the Arrangement | `Shift+F9` | `Shift+F9` | key | press | M2 | manual 42.20; observed in 12.4.3 (macOS), 10 October 2026: Playback menu |
@@ -676,8 +676,8 @@ The Settings window has focus.
 | S-TRACK-010 | same command as S-ARR-020 |  |
 | S-TRACK-015 | same command as S-BRW-004 |  |
 | S-TRACK-016 | note | Live 12.4.3's Edit menu reads Deactivate Track with this key while an empty slot of the track is selected. |
-| S-TRANS-003 | note | Live 12.4.3's Playback menu shows these keys beside Play From Insert Marker (S-ARR-032), with the Session View focused. Moved to M6 by WP-6.70: The manual gives Option+Space (Ctrl+Space) two actions, this one and Play From Insert Marker (S-ARR-032), without saying when each applies; it needs an observation of Live. WP-6.74 builds it. |
-| S-TRANS-004 | same command as S-TRANS-001 | Same key as Play: with a time selection, playback starts from it. Moved to M6 by WP-6.70: It is the same key as Play, and the manual does not say what Play does with a time selection beyond starting from it; it needs an observation of Live. WP-6.74 builds it. |
+| S-TRANS-003 | note | Live 12.4.3's Playback menu shows these keys beside Play From Insert Marker (S-ARR-032), with the Session View focused. Moved to M6 by WP-6.70, when it wasn't known when each of the two actions applies. WP-6.74 builds it: with a time selection the key plays it and stops at its end, and with none it plays from the insert marker. |
+| S-TRANS-004 | same command as S-TRANS-001 | Same key as Play: with a time selection, playback starts from its start and goes on past its end. Moved to M6 by WP-6.70, when it wasn't known what Play does with a time selection. WP-6.74 builds it. |
 | S-TRANS-005 | note | Live 12.4.3's Playback menu shows no key beside Return Play Position to 1.1.1 (M-PLAY-004). |
 | S-TRANS-010 | note | The keys count group tracks by their number: with a group at position 3, F3 turned the group's activator on or off (pressed in 12.4.6 (macOS), 11 October 2026). |
 | S-BRW-002 | same command as S-VIEW-010 |  |

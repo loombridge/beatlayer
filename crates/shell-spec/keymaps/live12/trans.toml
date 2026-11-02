@@ -37,8 +37,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Option+Space"]
 win = ["Ctrl+Space"]
-status = "pending"
-package = "WP-6.74"
+status = "bound"
+commands = [
+  { id = "transport.play_from_insert_marker", contexts = ["global", "arrangement"] },
+]
 
 [[shortcut]]
 id = "S-TRANS-004"
@@ -49,8 +51,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Space"]
 win = ["Space"]
-status = "pending"
-package = "WP-6.74"
+status = "bound"
+commands = [
+  { id = "transport.play_stop", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-TRANS-005"

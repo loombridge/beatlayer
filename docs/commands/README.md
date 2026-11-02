@@ -39685,7 +39685,7 @@ What `transport.state` returns: the transport and the Control Bar's transport se
 | `arrangement_position` | string | yes | What the Control Bar's Arrangement Position fields show, as bar.beat.sixteenth by the song's time signatures: the play position while the song plays, and the insert marker while it's stopped. |
 | `loop_start` | [`Ticks`](#ticks) | yes | Where the Arrangement loop brace starts, in ticks. |
 | `loop_length` | [`Ticks`](#ticks) | yes | How long the loop brace is, in ticks. |
-| `loop_on` | boolean | yes | Whether the Arrangement Loop switch is on. |
+| `loop_on` | boolean | yes | Whether the Arrangement Loop switch is on. While a Play Selection that stops at the selection's end plays, it reads off (the transport spec, R35). |
 | `loop_start_position` | string | yes | The loop brace's start as the Loop Start fields show it, as bar.beat.sixteenth. |
 | `loop_length_bars` | string | yes | The brace's length as the Loop Length fields show it: bars, beats, and sixteenths counted from 0, such as `4.0.0` for four bars. |
 | `tempo` | number | yes | The tempo where the Arrangement Position fields are, in quarter notes per minute, as the Tempo field shows it. |
@@ -39790,7 +39790,7 @@ What `transport.state` returns: the transport and the Control Bar's transport se
       "type": "string"
     },
     "loop_on": {
-      "description": "Whether the Arrangement Loop switch is on.",
+      "description": "Whether the Arrangement Loop switch is on. While a Play Selection that stops at the selection's end plays, it reads off (the transport spec, R35).",
       "type": "boolean"
     },
     "loop_start": {

@@ -537,7 +537,7 @@ pub fn state(shell: &Shell, engine: EngineTransport) -> TransportState {
         arrangement_position: group_text(shell, Group::Position),
         loop_start: brace.start,
         loop_length: brace.length,
-        loop_on: brace.enabled,
+        loop_on: brace.enabled && !engine.loop_suspended,
         loop_start_position: group_text(shell, Group::LoopStart),
         loop_length_bars: group_text(shell, Group::LoopLength),
         tempo: tempo(shell),

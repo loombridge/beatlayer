@@ -402,9 +402,10 @@ impl BrowserUi {
         }
     }
 
-    /// The Results bar (L-BRW-008; spec: browser-tags R22): how many filter
-    /// tags are selected, Clear, which clears them and the search words,
-    /// and Add Label, which keeps what the browser shows as a saved label.
+    /// The Results bar (L-BRW-008; spec: browser-tags R22): a yellow bar
+    /// reading "Results", a box with how many filter tags are selected,
+    /// and at its right Clear, which clears them and the search words, and
+    /// Add Label, which keeps what the browser shows as a saved label.
     pub(super) fn results_bar(
         &mut self,
         ui: &mut Ui,
@@ -417,19 +418,33 @@ impl BrowserUi {
         let view = shell.browser_view();
         let count = view.filter_count();
         let painter = ui.painter_at(bar);
-        painter.rect_filled(bar, 0.0, theme.colors.ruler.0);
-        let text = match count {
-            0 => "No filters".to_owned(),
-            1 => "1 filter".to_owned(),
-            n => format!("{n} filters"),
-        };
-        painter.text(
+        let ink = theme.colors.accent_text.0;
+        painter.rect_filled(bar, 0.0, theme.colors.accent.0);
+        let label = painter.text(
             pos2(bar.left() + 6.0, bar.center().y),
             Align2::LEFT_CENTER,
-            &text,
+            "Results",
             theme.small_font(),
-            theme.colors.text_dim.0,
+            ink,
         );
+        // The count box: absent while only words are searched.
+        let text = match count {
+            0 => String::new(),
+            1 => "1 Filter".to_owned(),
+            n => format!("{n} Filters"),
+        };
+        if count > 0 {
+            let galley = painter.layout_no_wrap(text.clone(), theme.small_font(), ink);
+            let boxed = Rect::from_min_size(
+                pos2(
+                    label.right() + 6.0,
+                    bar.center().y - galley.size().y / 2.0 - 1.0,
+                ),
+                galley.size() + vec2(12.0, 2.0),
+            );
+            painter.rect_filled(boxed, theme.sizes.corner, ink.gamma_multiply(0.15));
+            painter.galley(boxed.min + vec2(6.0, 1.0), galley, ink);
+        }
         let _ = ui.interact(bar, results_bar_id(), Sense::hover());
         ui.ctx().accesskit_node_builder(results_bar_id(), |node| {
             node.set_role(Role::Group);
@@ -437,23 +452,47 @@ impl BrowserUi {
             node.set_value(text.clone());
             node.set_bounds(bounds(bar));
         });
-        // Add Label (a bookmark) and Clear (an X), at the bar's right.
-        let size = vec2(BROWSER_ROW, BROWSER_ROW);
+        // Clear (a text button) and Add Label (≡+), at the bar's right.
+        let height = bar.height() - 4.0;
+        let clear_width = painter
+            .layout_no_wrap("Clear".to_owned(), theme.small_font(), ink)
+            .size()
+            .x
+            + 16.0;
         let clear = Rect::from_min_size(
-            pos2(bar.right() - 4.0 - size.x, bar.center().y - size.y / 2.0),
-            size,
+            pos2(
+                bar.right() - 4.0 - clear_width,
+                bar.center().y - height / 2.0,
+            ),
+            vec2(clear_width, height),
         );
-        let add = clear.translate(vec2(-size.x - 2.0, 0.0));
-        for (rect, id, name, kind) in [
-            (add, add_label_id(), "Add Label", Glyph::Bookmark),
-            (clear, clear_filters_id(), "Clear", Glyph::Cross),
+        let add = Rect::from_min_size(
+            pos2(clear.left() - 4.0 - 26.0, clear.top()),
+            vec2(26.0, height),
+        );
+        for (rect, id, name) in [
+            (add, add_label_id(), "Add Label"),
+            (clear, clear_filters_id(), "Clear"),
         ] {
             let response = ui.interact(rect, id, Sense::click());
             crate::focus::register(ui.ctx(), id, bl_shell::Area::Browser, None);
-            if response.hovered() {
-                painter.rect_filled(rect, theme.sizes.corner, theme.colors.control_hover.0);
+            let fill = if response.hovered() {
+                theme.colors.control_hover.0
+            } else {
+                theme.colors.control.0
+            };
+            painter.rect_filled(rect, rect.height() / 2.0, fill);
+            if id == add_label_id() {
+                glyph(&painter, rect, Glyph::AddLabel, theme.colors.text.0);
+            } else {
+                painter.text(
+                    rect.center(),
+                    Align2::CENTER_CENTER,
+                    name,
+                    theme.small_font(),
+                    theme.colors.text.0,
+                );
             }
-            glyph(&painter, rect, kind, theme.colors.text.0);
             if response.clicked() {
                 if id == add_label_id() {
                     invoke(events, ids::ADD_LABEL, json!({}));

@@ -393,6 +393,11 @@ impl View<'_> {
         if let Some((scene, _)) = slot {
             value["scene"] = json!(scene);
         }
+        // Spec: linked-clips R14. The clip's link and the other clips in it.
+        value["link"] = clip.link.map_or(
+            Value::Null,
+            |link| json!({ "id": link, "others": self.document.linked_clip_ids(clip.id) }),
+        );
         if self.detail == Detail::Full {
             value["saved"] = self.saved(clip);
         }
@@ -516,6 +521,12 @@ impl View<'_> {
             .map(|(param, value)| json!({ "param": param, "value": value }))
             .collect();
         value["params"] = self.page.slice(params);
+        // Spec: plugin-scanning R20. The preset a plug-in device last loaded
+        // or was saved as, and how much state of its own the set holds for it.
+        if let Some(plugin) = &device.plugin {
+            value["preset"] = json!(device.preset_name);
+            value["state_bytes"] = json!(plugin.data.len());
+        }
         // Spec: cv-tools R4, R20. An external device's routing, the CV
         // choosers of a CV device among it, and a CV device's calibration:
         // the fit, each step's error, and whether one is held.

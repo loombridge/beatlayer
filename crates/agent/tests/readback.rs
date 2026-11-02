@@ -966,6 +966,22 @@ fn fixture() -> Project {
             start: Some(bl_model::SongStart::Locator(locator)),
         },
     );
+    // WP-6.45: a section and the arranger track, so the format writes
+    // `sections` and `arranger_track`.
+    let section: bl_model::SectionId = editor.new_id();
+    apply(
+        &mut editor,
+        Command::AddSection {
+            section: bl_model::SongSection {
+                id: section,
+                start: Ticks::WHOLE,
+                length: Ticks::WHOLE,
+                name: "Verse".to_owned(),
+                colour: 3,
+            },
+        },
+    );
+    apply(&mut editor, Command::SetArrangerTrack { shown: true });
     // WP-4.14: a frozen track, so the format writes `frozen`.
     apply(
         &mut editor,
@@ -1136,6 +1152,8 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "punch_out",
                 "midi_overdub",
                 "locators",
+                "sections.0.name",
+                "arranger_track",
                 "song_start",
                 "grooves.pool.0.name",
                 "grooves.global_amount",
@@ -1466,6 +1484,34 @@ fn saved_forms_come_a_page_at_a_time() {
     );
 }
 
+/// The fixture with a copy of its first MIDI clip, linked with it (the
+/// linked clips spec, R14): the set saves a link's contents once, so the
+/// tests that compare a clip's notes with the set's keep the plain fixture.
+fn with_linked_clips(mut project: Project) -> Project {
+    let mut editor = Editor::from_document(project.document.clone(), project.ids);
+    let (track, clip) = editor
+        .document()
+        .tracks()
+        .find_map(|track| {
+            let clip = track.clips().find(|clip| !clip.data.is_audio())?;
+            Some((track.id(), clip.clone()))
+        })
+        .expect("the fixture has a MIDI clip");
+    let twin = Clip {
+        id: editor.new_id(),
+        start: clip.end(),
+        ..clip.clone()
+    };
+    let linked = vec![clip.id, twin.id];
+    editor
+        .apply(Command::CreateClip { track, clip: twin })
+        .unwrap();
+    editor.apply(Command::LinkClips { clips: linked }).unwrap();
+    project.document = editor.document().clone();
+    project.ids = editor.ids();
+    project
+}
+
 /// Whether `field` (dotted names, `[]` after a list) is in `value`, looking
 /// through a page's `items`.
 fn present(value: &Value, field: &str) -> bool {
@@ -1496,7 +1542,7 @@ fn present(value: &Value, field: &str) -> bool {
 fn every_query_readback_the_command_table_names_is_in_a_real_full_result() {
     use bl_commands::readback::{Object, READBACK, Readback};
 
-    let project = fixture();
+    let project = with_linked_clips(fixture());
     let document = serde_json::to_value(&project.document).unwrap();
     let mut client = open(&project, "declared");
     let (tracks, clips, devices) = saved_parts(&document);
@@ -2040,4 +2086,54 @@ fn the_trim_and_loop_switch_readbacks_change_with_their_commands() {
         json!({ "clip": midi, "enabled": !looping.as_bool().unwrap() }),
     );
     assert_ne!(read(&mut client, &midi, field), before, "{field}");
+}
+
+// Spec: plugin-scanning R20. The query tool reads back the preset a plug-in
+// device holds and how much state of its own the set keeps for it.
+#[test]
+fn a_plug_in_devices_preset_and_state_read_back() {
+    let mut shell = Shell::headless();
+    let track = shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|t| t.kind() == TrackKind::Audio)
+        .map(bl_model::Track::id)
+        .unwrap();
+    let device = shell.edit(|editor| {
+        let id: DeviceId = editor.new_id();
+        let plugin = Device::new(
+            id,
+            "Test",
+            DeviceKind::Plugin {
+                format: bl_model::PluginFormat::Clap,
+                plugin_id: "com.example.test".to_owned(),
+            },
+        );
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device: plugin,
+            })
+            .unwrap();
+        editor
+            .amend_plugin_state(
+                id,
+                Some(bl_model::PluginState {
+                    path: String::new(),
+                    data: vec![1, 2, 3],
+                }),
+            )
+            .unwrap();
+        editor
+            .amend_device_preset_name(id, Some("Warm".to_owned()))
+            .unwrap();
+        id
+    });
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("test-agent").unwrap();
+    let got = query(&mut client, json!({ "id": device }));
+    assert_eq!(got["preset"], "Warm");
+    assert_eq!(got["state_bytes"], 3);
 }

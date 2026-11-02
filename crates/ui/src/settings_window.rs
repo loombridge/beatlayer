@@ -1065,6 +1065,21 @@ fn display_page(
     for row in &NAVIGATION {
         rows.pending(ui, row);
     }
+    // Spec: view-options R10. The last row of Navigation and Keyboard.
+    let rect = rows.row(ui, "Adjust Values with Mouse Wheel", SettingsLayout::SWITCH);
+    if let Some(on) = switch(
+        ui,
+        theme,
+        "adjust-values-with-mouse-wheel",
+        "Adjust Values with Mouse Wheel",
+        rect,
+        shell.wheel_adjusts_values(),
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            bl_shell::view_option_commands::SET_WHEEL_ADJUSTS_VALUES,
+            json!({ "on": on }),
+        )));
+    }
     // Spec: time-editing R26 (L-SET-010): Permanent Scrub Areas, the one
     // Mouse and Pen Input setting built so far.
     rows.heading(ui, "Mouse and Pen Input");

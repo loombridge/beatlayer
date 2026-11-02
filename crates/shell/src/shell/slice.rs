@@ -749,6 +749,7 @@ impl Shell {
             groove: None,
             colour: None,
             info_text: String::new(),
+            link: None,
         };
         self.editor.begin(step);
         let outcome = (|| -> Result<(), ShellError> {

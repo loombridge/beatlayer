@@ -7,7 +7,8 @@ use bl_core::time::Ticks;
 
 use crate::device::DeviceRole;
 use crate::ids::{
-    ChainId, ChordRegionId, ClipId, DeviceId, GrooveId, LocatorId, SceneId, TakeLaneId, TrackId,
+    ChainId, ChordRegionId, ClipId, DeviceId, GrooveId, LocatorId, SceneId, SectionId, TakeLaneId,
+    TrackId,
 };
 use crate::layers::LayerId;
 use crate::track::TrackKind;
@@ -38,6 +39,8 @@ pub enum ModelError {
     NoSuchScene(SceneId),
     /// No locator has this ID (WP-6.24).
     NoSuchLocator(LocatorId),
+    /// No section has this ID (WP-6.45).
+    NoSuchSection(SectionId),
     /// The chord lane holds no region with this ID (WP-6.48).
     NoSuchChordRegion(ChordRegionId),
     /// The Groove Pool holds no groove with this ID (WP-6.19).
@@ -367,6 +370,7 @@ impl fmt::Display for ModelError {
             ),
             Self::NoSuchScene(id) => write!(f, "no {id}"),
             Self::NoSuchLocator(id) => write!(f, "no {id}"),
+            Self::NoSuchSection(id) => write!(f, "no {id}"),
             Self::NoSuchChordRegion(id) => write!(f, "the chord lane holds no {id}"),
             Self::NoSuchGroove(id) => write!(f, "the Groove Pool holds no {id}"),
             Self::NoSuchLayer(id) => write!(f, "no layer {}", id.0),

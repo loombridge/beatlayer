@@ -32,6 +32,7 @@ The commands, by the part of their ID before its first dot:
 - [`app`](app.md)
 - [`ara`](ara.md)
 - [`arrangement`](arrangement.md)
+- [`arranger`](arranger.md)
 - [`articulation`](articulation.md)
 - [`assistant`](assistant.md)
 - [`audio`](audio.md)
@@ -1075,11 +1076,14 @@ What the Arrangement View shows: every view command returns it.
 | `show_in_out` | boolean | yes | Whether the track headers show their In/Out column. |
 | `show_volume` | boolean | yes | Whether the track headers show their volume, pan, and sends. |
 | `show_return_tracks` | boolean | yes | Whether the return tracks' rows show in the lanes. |
+| `arranger_track` | boolean | no | Whether the arranger track shows above the track lanes (WP-6.45). |
 | `automation_lanes` | array of [`AutomationLane`](#automationlane) | no | Each track's automation lanes, for the tracks whose lanes aren't as a new track's (the main lane showing its volume, and no lanes of its own): the choosers' choices, the lanes of their own and whether they show (the automation spec, R32). |
+| `loop_brace_selected` | boolean | no | Whether the loop brace is selected (WP-6.73): its keys then move and resize it. It is while the time selection is the brace's span, after a click on the brace's bar. |
 | `selected_breakpoint` | [`SelectedBreakpoint`](#selectedbreakpoint) or null | no | The breakpoint selected in that lane (WP-6.26), if any: `automation.select_breakpoint` sets it. |
 | `selected_chord_region` | [`ChordRegionId`](#chordregionid) or null | no | The selected chord region (WP-6.48), if any: Delete deletes it. |
 | `selected_fade` | [`FadeHandleState`](#fadehandlestate) or null | no | The selected fade handle (WP-6.51), if any: Delete deletes its fade. |
 | `selected_lane` | [`Lane`](#lane) or null | no | The automation lane that has the keyboard (WP-6.26): the one the last click, or Up and Down, selected, while Automation Mode is on. The keys of the automation editing spec's R20 to R26 act on its envelope. |
+| `selected_sections` | array of [`SectionId`](#sectionid) | no | The selected sections of the arranger track (WP-6.45), in the order they were selected. The arranger commands act on these. |
 | `selected_take_lanes` | array of [`TakeLaneId`](#takelaneid) | no | The take lanes whose headers are selected (the comping spec, R26), in the order they were selected. Their tracks are selected tracks too. |
 | `selected_time_signature` | [`Ticks`](#ticks) or null | no | The position of the selected time-signature marker (WP-6.61), if any: Delete deletes it and Cmd-R types its signature. |
 | `shown_take_lanes` | array of [`TrackId`](#trackid) | no | The tracks whose take lanes show (the comping spec, R24). |
@@ -1091,6 +1095,10 @@ What the Arrangement View shows: every view command returns it.
 {
   "description": "What the Arrangement View shows: every view command returns it.",
   "properties": {
+    "arranger_track": {
+      "description": "Whether the arranger track shows above the track lanes (WP-6.45).",
+      "type": "boolean"
+    },
     "automation_arm": {
       "description": "Whether Automation Arm is on: while Arrangement Record runs, moving a control writes its values into the parameter's envelope.",
       "type": "boolean"
@@ -1133,6 +1141,10 @@ What the Arrangement View shows: every view command returns it.
     "insert_marker": {
       "$ref": "#/$defs/Ticks",
       "description": "Where the insert marker is."
+    },
+    "loop_brace_selected": {
+      "description": "Whether the loop brace is selected (WP-6.73): its keys then move and resize it. It is while the time selection is the brace's span, after a click on the brace's bar.",
+      "type": "boolean"
     },
     "optimize_height": {
       "description": "Whether Optimize Height is on: every track fits in the lanes.",
@@ -1208,6 +1220,13 @@ What the Arrangement View shows: every view command returns it.
       "description": "The selected locators (WP-6.24), in the order they were selected. The locator commands act on these.",
       "items": {
         "$ref": "#/$defs/LocatorId"
+      },
+      "type": "array"
+    },
+    "selected_sections": {
+      "description": "The selected sections of the arranger track (WP-6.45), in the order they were selected. The arranger commands act on these.",
+      "items": {
+        "$ref": "#/$defs/SectionId"
       },
       "type": "array"
     },
@@ -1320,6 +1339,43 @@ What the Arrangement View shows: every view command returns it.
     "show_in_out",
     "show_volume",
     "show_return_tracks"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ArrangerResult`
+
+What an arranger command did: the sections selected afterwards, and whether it was recorded as an undo step.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `selected_sections` | array of [`SectionId`](#sectionid) | yes | The sections selected afterwards. |
+| `undo_step` | boolean | yes | Whether the edit was recorded as an undo step: false when it changed nothing. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What an arranger command did: the sections selected afterwards, and whether it was recorded as an undo step.",
+  "properties": {
+    "selected_sections": {
+      "description": "The sections selected afterwards.",
+      "items": {
+        "$ref": "#/$defs/SectionId"
+      },
+      "type": "array"
+    },
+    "undo_step": {
+      "description": "Whether the edit was recorded as an undo step: false when it changed nothing.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "selected_sections",
+    "undo_step"
   ],
   "type": "object"
 }
@@ -5707,6 +5763,7 @@ A clip on a track's arrangement lane.
 | `groove` | [`GrooveId`](#grooveid) or null | no | The clip's groove (WP-6.19): one of the set's Groove Pool, or none. It changes when the clip's notes play, or where its audio plays, and nothing in the clip itself until it is committed. |
 | `info_text` | string | no | The user's own info text (Edit Info Text), which the Info View shows while the pointer is over the clip; empty for none, and left out of the saved set then (the Info View spec, R9). |
 | `launch` | [`ClipLaunch`](#cliplaunch) | no | The clip's launch settings (WP-3.4), which only a Session clip's launching reads. The defaults for a clip saved without them. |
+| `link` | [`LinkId`](#linkid) or null | no | The link the clip belongs to (WP-6.44, the linked clips spec, R2): the clips of one link hold the same contents (R3), whatever edit reaches one of them (R4). `None` for an independent clip, which is what a set saved before linked clips holds. |
 | `offset` | [`Ticks`](#ticks) | no | How far into its contents a MIDI clip starts: its notes are placed from `start - offset`, and the part before the clip's start doesn't play. 0 (or left out) plays the contents from their beginning. Never negative. Splitting a MIDI clip or trimming its left edge changes it, so each part plays what it played before. An audio clip's is always 0: its Start marker moves instead, as Live's does. |
 | `scale` | [`Scale`](#scale) | no | The clip's scale (WP-6.7): its Scale Mode switch, its root and its scale name. It never changes what the clip plays; it tells the rest of the set which keys belong. A clip off at C, in Major, writes nothing, so a set saved before the scales loads unchanged. |
 
@@ -5764,6 +5821,17 @@ A clip on a track's arrangement lane.
     "length": {
       "$ref": "#/$defs/Ticks",
       "description": "How long the clip is. Always positive."
+    },
+    "link": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LinkId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The link the clip belongs to (WP-6.44, the linked clips spec, R2): the clips of one link hold the same contents (R3), whatever edit reaches one of them (R4). `None` for an independent clip, which is what a set saved before linked clips holds."
     },
     "mute": {
       "description": "Whether the clip is switched off, so it stays in place but doesn't play.",
@@ -10609,7 +10677,8 @@ What `device_view.state` returns.
 | `track` | [`TrackId`](#trackid) or null | yes | The track whose chain shows: the selected track, or `null` with no track selected. |
 | `track_kind` | [`TrackKind`](#trackkind) or null | yes | That track's kind. |
 | `devices` | array of [`DeviceFrame`](#deviceframe) | yes | Its devices, in signal order. |
-| `selected` | [`DeviceId`](#deviceid) or null | yes | The selected device, if it's in this chain. |
+| `selected` | [`DeviceId`](#deviceid) or null | yes | The first selected device, if it's in this chain. |
+| `selection` | array of [`DeviceId`](#deviceid) | yes | Every selected device in this chain, in order: one run of neighbouring devices (device chains R47). |
 | `hot_swap` | [`HotSwap`](#hotswap) or null | yes | The device being hot-swapped, on any track, and what the browser's bar says ("Swapping Audio Effect"). |
 | `can_paste` | boolean | yes | Whether the clipboard holds a device to paste. |
 | `can_paste_chain` | boolean | yes | Whether the chain clipboard holds chains to paste. |
@@ -10705,7 +10774,15 @@ What `device_view.state` returns.
           "type": "null"
         }
       ],
-      "description": "The selected device, if it's in this chain."
+      "description": "The first selected device, if it's in this chain."
+    },
+    "selection": {
+      "default": [],
+      "description": "Every selected device in this chain, in order: one run of neighbouring devices (device chains R47).",
+      "items": {
+        "$ref": "#/$defs/DeviceId"
+      },
+      "type": "array"
     },
     "track": {
       "anyOf": [
@@ -10735,6 +10812,7 @@ What `device_view.state` returns.
     "track_kind",
     "devices",
     "selected",
+    "selection",
     "hot_swap",
     "can_paste",
     "can_paste_chain",
@@ -11141,6 +11219,7 @@ The Display & Input page's settings.
 | `permanent_scrub_areas` | boolean | yes | Permanent Scrub Areas, as `settings.set_permanent_scrub_areas` sets it (the time editing spec, R26). |
 | `use_tab_key_to_move_focus` | boolean | yes | Use Tab Key to Move Focus, as `focus.toggle_tab_navigation` toggles it. |
 | `wrap_tab_navigation` | boolean | yes | Wrap Tab Navigation, as `focus.toggle_wrap_navigation` toggles it. |
+| `wheel_adjusts_values` | boolean | yes | Adjust Values with Mouse Wheel, as `settings.set_wheel_adjusts_values` sets it (the view options spec, R10). |
 | `second_window_zoom_percent` | integer or null | no | The second window's zoom in percent, as `view.set_zoom` takes it with `window` set to `second`: only while the second window is open, when the page shows Second Window Zoom (interface-zoom R12). |
 
 <details><summary>JSON Schema</summary>
@@ -11171,6 +11250,10 @@ The Display & Input page's settings.
       "description": "Use Tab Key to Move Focus, as `focus.toggle_tab_navigation` toggles it.",
       "type": "boolean"
     },
+    "wheel_adjusts_values": {
+      "description": "Adjust Values with Mouse Wheel, as `settings.set_wheel_adjusts_values` sets it (the view options spec, R10).",
+      "type": "boolean"
+    },
     "wrap_tab_navigation": {
       "description": "Wrap Tab Navigation, as `focus.toggle_wrap_navigation` toggles it.",
       "type": "boolean"
@@ -11188,7 +11271,8 @@ The Display & Input page's settings.
     "outline_view_in_focus",
     "permanent_scrub_areas",
     "use_tab_key_to_move_focus",
-    "wrap_tab_navigation"
+    "wrap_tab_navigation",
+    "wheel_adjusts_values"
   ],
   "type": "object"
 }
@@ -12160,6 +12244,37 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `EmptyTracks`
+
+What `track.list_empty` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array of [`TrackId`](#trackid) | yes | The empty tracks, in display order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `track.list_empty` returns.",
+  "properties": {
+    "tracks": {
+      "description": "The empty tracks, in display order.",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "tracks"
+  ],
+  "type": "object"
 }
 ```
 
@@ -16326,6 +16441,7 @@ One row of the content pane.
 | `format` | [`PluginFormat`](#pluginformat) or null | no | For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11). |
 | `hidden` | boolean | no | For a plug-in, whether it is hidden, which the row draws dimmed while Show Hidden Plug-Ins is on (spec: browser-tags R43); left out otherwise. |
 | `nested` | array of integer, at least 0 | no | The collections of the person's own it is in, by their numbers (8 and up); left out while it is in none (spec: browser-tags R46, R48). |
+| `presets` | boolean | no | For a plug-in, whether it has presets listed under its row, which its fold triangle opens (the plug-in scanning spec, R15); `open` says whether they are listed. Left out otherwise. |
 
 <details><summary>JSON Schema</summary>
 
@@ -16419,6 +16535,10 @@ One row of the content pane.
     "path": {
       "description": "Its path on disk; in the Plug-Ins label, the row's key instead: a vendor folder's is `plug-ins:/` and the vendor, a plug-in's is its file, `#`, and its identifier (the plug-in scanning spec, R11).",
       "type": "string"
+    },
+    "presets": {
+      "description": "For a plug-in, whether it has presets listed under its row, which its fold triangle opens (the plug-in scanning spec, R15); `open` says whether they are listed. Left out otherwise.",
+      "type": "boolean"
     }
   },
   "required": [
@@ -18928,6 +19048,25 @@ Type: integer, at least 1.
 
 </details>
 
+### `LinkId`
+
+The ID of a link: a positive integer, unique within the project and never reused.
+
+Type: integer, at least 1.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The ID of a link: a positive integer, unique within the project and never reused.",
+  "format": "uint64",
+  "minimum": 1,
+  "type": "integer"
+}
+```
+
+</details>
+
 ### `LinkState`
 
 What `link.state` returns.
@@ -19331,6 +19470,104 @@ One of:
     {
       "const": "arming",
       "description": "By arming a MIDI track whose instrument the device is.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `LoopBraceEnd`
+
+The end of the loop brace the insert marker goes to.
+
+One of:
+
+- `"start"`: The brace's start.
+- `"end"`: The brace's end.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The end of the loop brace the insert marker goes to.",
+  "oneOf": [
+    {
+      "const": "start",
+      "description": "The brace's start.",
+      "type": "string"
+    },
+    {
+      "const": "end",
+      "description": "The brace's end.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `LoopBraceMove`
+
+`left` or `right`: to the previous or next grid line. `earlier` or `later`: by the brace's own length. `halve` or `double`: its length, from its start. `shorten` or `lengthen`: its length by a grid step.
+
+One of:
+
+- `"left"`: To the previous grid line.
+- `"right"`: To the next grid line.
+- `"earlier"`: Earlier by its length, stopping at 1.1.1.
+- `"later"`: Later by its length.
+- `"halve"`: Half as long, from its start.
+- `"double"`: Twice as long, from its start.
+- `"shorten"`: Shorter by a grid step.
+- `"lengthen"`: Longer by a grid step.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "`left` or `right`: to the previous or next grid line. `earlier` or `later`: by the brace's own length. `halve` or `double`: its length, from its start. `shorten` or `lengthen`: its length by a grid step.",
+  "oneOf": [
+    {
+      "const": "left",
+      "description": "To the previous grid line.",
+      "type": "string"
+    },
+    {
+      "const": "right",
+      "description": "To the next grid line.",
+      "type": "string"
+    },
+    {
+      "const": "earlier",
+      "description": "Earlier by its length, stopping at 1.1.1.",
+      "type": "string"
+    },
+    {
+      "const": "later",
+      "description": "Later by its length.",
+      "type": "string"
+    },
+    {
+      "const": "halve",
+      "description": "Half as long, from its start.",
+      "type": "string"
+    },
+    {
+      "const": "double",
+      "description": "Twice as long, from its start.",
+      "type": "string"
+    },
+    {
+      "const": "shorten",
+      "description": "Shorter by a grid step.",
+      "type": "string"
+    },
+    {
+      "const": "lengthen",
+      "description": "Longer by a grid step.",
       "type": "string"
     }
   ]
@@ -22188,6 +22425,37 @@ A multisampler's views and selection, as `device_view.state` reports them (R30).
 
 </details>
 
+### `Neighbour`
+
+The section a Move Earlier or Move Later swaps with.
+
+One of:
+
+- `"earlier"`: The section before it.
+- `"later"`: The section after it.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The section a Move Earlier or Move Later swaps with.",
+  "oneOf": [
+    {
+      "const": "earlier",
+      "description": "The section before it.",
+      "type": "string"
+    },
+    {
+      "const": "later",
+      "description": "The section after it.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `NewDevice`
 
 The device `device.add` adds.
@@ -22506,6 +22774,71 @@ What the note clipboard holds, as `note.copy` reports it.
   "required": [
     "notes",
     "length"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `NoteColors`
+
+How the MIDI Note Editor colours notes (R2, R3).
+
+One of:
+
+- `"velocity"`: The clip's colour, paler the softer the note: Live's.
+- `"pitch_class"`: One hue for each pitch class, the same in every octave.
+- `"scale_degree"`: One hue for each degree of the clip's scale, grey outside it.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How the MIDI Note Editor colours notes (R2, R3).",
+  "oneOf": [
+    {
+      "const": "velocity",
+      "description": "The clip's colour, paler the softer the note: Live's.",
+      "type": "string"
+    },
+    {
+      "const": "pitch_class",
+      "description": "One hue for each pitch class, the same in every octave.",
+      "type": "string"
+    },
+    {
+      "const": "scale_degree",
+      "description": "One hue for each degree of the clip's scale, grey outside it.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `NoteColorsResult`
+
+What `view.set_note_colors` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `colors` | [`NoteColors`](#notecolors) | yes | The colouring in use afterwards. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `view.set_note_colors` returns.",
+  "properties": {
+    "colors": {
+      "$ref": "#/$defs/NoteColors",
+      "description": "The colouring in use afterwards."
+    }
+  },
+  "required": [
+    "colors"
   ],
   "type": "object"
 }
@@ -33689,6 +34022,25 @@ One of:
 
 </details>
 
+### `SectionId`
+
+The ID of a section: a positive integer, unique within the project and never reused.
+
+Type: integer, at least 1.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The ID of a section: a positive integer, unique within the project and never reused.",
+  "format": "uint64",
+  "minimum": 1,
+  "type": "integer"
+}
+```
+
+</details>
+
 ### `SelectEdge`
 
 Which edge of the current scene to select (S-SES-020 to S-SES-022).
@@ -35567,6 +35919,61 @@ One slot: a track's column and a scene's row.
   "required": [
     "track",
     "scene"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SongSection`
+
+A section of the song.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | [`SectionId`](#sectionid) | yes | The section's ID. |
+| `start` | [`Ticks`](#ticks) | yes | Where it starts: 0 (1.1.1) or later. |
+| `length` | [`Ticks`](#ticks) | yes | How long it is: more than 0. |
+| `name` | string | yes | Its name, which may be empty. |
+| `colour` | integer from 0 to 255 | yes | Its colour, a swatch from 0 to 69 (the themes spec, R14). |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A section of the song.",
+  "properties": {
+    "colour": {
+      "description": "Its colour, a swatch from 0 to 69 (the themes spec, R14).",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "id": {
+      "$ref": "#/$defs/SectionId",
+      "description": "The section's ID."
+    },
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "How long it is: more than 0."
+    },
+    "name": {
+      "description": "Its name, which may be empty.",
+      "type": "string"
+    },
+    "start": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it starts: 0 (1.1.1) or later."
+    }
+  },
+  "required": [
+    "id",
+    "start",
+    "length",
+    "name",
+    "colour"
   ],
   "type": "object"
 }
@@ -41519,6 +41926,8 @@ What `view.state` returns: what the view commands switch, without switching any 
 | `undo_history` | boolean | yes | Whether the Undo History panel shows. |
 | `save_history` | boolean | yes | Whether the Save History panel shows. |
 | `plug_in_windows` | boolean | yes | Whether floating devices' and plug-ins' windows are shown, as `view.toggle_plug_in_windows` sets it. |
+| `note_colors` | [`NoteColors`](#notecolors) | yes | How the MIDI Note Editor colours notes, as `view.set_note_colors` sets it (the view options spec, R2). |
+| `mark_empty_tracks` | boolean | yes | Whether empty tracks show a mark, as `view.set_mark_empty_tracks` sets it (the view options spec, R6). |
 
 <details><summary>JSON Schema</summary>
 
@@ -41541,6 +41950,14 @@ What `view.state` returns: what the view commands switch, without switching any 
     "focused_window": {
       "$ref": "#/$defs/WindowName",
       "description": "The window the commands that act on one window act on when they aren't told which: the one with the focus."
+    },
+    "mark_empty_tracks": {
+      "description": "Whether empty tracks show a mark, as `view.set_mark_empty_tracks` sets it (the view options spec, R6).",
+      "type": "boolean"
+    },
+    "note_colors": {
+      "$ref": "#/$defs/NoteColors",
+      "description": "How the MIDI Note Editor colours notes, as `view.set_note_colors` sets it (the view options spec, R2)."
     },
     "plug_in_windows": {
       "description": "Whether floating devices' and plug-ins' windows are shown, as `view.toggle_plug_in_windows` sets it.",
@@ -41577,7 +41994,9 @@ What `view.state` returns: what the view commands switch, without switching any 
     "assistant",
     "undo_history",
     "save_history",
-    "plug_in_windows"
+    "plug_in_windows",
+    "note_colors",
+    "mark_empty_tracks"
   ],
   "type": "object"
 }

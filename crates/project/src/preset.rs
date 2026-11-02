@@ -13,8 +13,10 @@
 //! `device` says which kind of device the preset is for, so it loads only
 //! into a device of that kind; `params` lists every parameter value the
 //! device's user had set (any other keeps its default when it loads). The
-//! preset's name is its file's name. Plug-ins' own state (WP-2.6) will be
-//! a new field, read as absent from schema 1 files.
+//! preset's name is its file's name. A plug-in device's own state is the
+//! optional `state` field, base64; a file without it loads values only, and
+//! a Beatlayer from before it ignores it, as it does the other optional
+//! fields.
 //!
 //! Rack and chain presets are schema 2 of the same format
 //! ([`crate::rack_preset`]).
@@ -74,6 +76,9 @@ pub struct Preset {
     /// from another sample (sound similarity R23); `None` for the sample the
     /// device holds, and for any other device.
     pub similarity_reference: Option<bl_model::ContentHash>,
+    /// A plug-in's own saved state, in its format (plugin scanning R16);
+    /// `None` for a preset saved without one, and for any other device.
+    pub state: Option<Vec<u8>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -94,6 +99,8 @@ struct File {
     mpe: Option<bl_model::PluginMpe>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     similarity_reference: Option<bl_model::ContentHash>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    state: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -163,6 +170,11 @@ impl Preset {
             routes: (!device.routes.is_empty()).then(|| device.routes.clone()),
             mpe: matches!(device.kind, DeviceKind::Plugin { .. }).then_some(device.mpe),
             similarity_reference: device.similarity_reference,
+            state: device
+                .plugin
+                .as_ref()
+                .map(|plugin| plugin.data.clone())
+                .filter(|data| !data.is_empty()),
         }
     }
 
@@ -206,6 +218,7 @@ impl Preset {
             routes: self.routes.clone().unwrap_or_default(),
             mpe: self.mpe,
             similarity_reference: self.similarity_reference,
+            state: self.state.as_deref().map(bl_model::base64::encode),
         };
         let mut bytes = serde_json::to_vec_pretty(&file).unwrap_or_default();
         bytes.push(b'\n');
@@ -264,6 +277,14 @@ impl Preset {
         {
             device_name = now.to_owned();
         }
+        let state = file
+            .state
+            .map(|text| {
+                bl_model::base64::decode(&text).ok_or_else(|| {
+                    PresetError::Invalid("its plug-in state isn't base64".to_owned())
+                })
+            })
+            .transpose()?;
         // Spec: articulation-map R20. A preset whose list breaks the rules
         // doesn't load.
         if !file.articulations.is_empty()
@@ -288,7 +309,32 @@ impl Preset {
                 _ => None,
             },
             similarity_reference: file.similarity_reference,
+            state,
         })
+    }
+
+    /// The plug-in the preset file at `path` is for, by format and
+    /// identifier, without reading the rest of it: how the browser lists a
+    /// plug-in's presets (plugin scanning R15). `None` for a file that isn't
+    /// a device preset of a plug-in.
+    #[must_use]
+    pub fn plugin_of(path: &Path) -> Option<(bl_model::PluginFormat, String)> {
+        #[derive(Deserialize)]
+        struct Head {
+            format: String,
+            device: DeviceInfo,
+        }
+        let file = fs::File::open(path).ok()?;
+        if file.metadata().ok()?.len() > MAX_PRESET_BYTES {
+            return None;
+        }
+        let head: Head = serde_json::from_reader(io::BufReader::new(file)).ok()?;
+        match head.device.kind {
+            DeviceKind::Plugin { format, plugin_id } if head.format == PRESET_FORMAT => {
+                Some((format, plugin_id))
+            }
+            _ => None,
+        }
     }
 
     /// Reads a preset file.
@@ -496,6 +542,55 @@ mod tests {
         file["mpe"] = serde_json::json!({ "on": true, "settings": { "channels": 16 } });
         let broken = Preset::decode(&serde_json::to_vec(&file).unwrap()).unwrap();
         assert_eq!(broken.mpe, None);
+    }
+
+    // Spec: plugin-scanning R15, R16. A plug-in device's preset holds the
+    // plug-in's state, a preset saved before holds none, and the browser
+    // finds a preset's plug-in without reading its state.
+    #[test]
+    fn a_plugin_presets_state_round_trips_and_names_its_plugin() {
+        let mut plugin = Device::new(
+            DeviceId(Id::new(9).unwrap()),
+            "Synth",
+            DeviceKind::Plugin {
+                format: bl_model::PluginFormat::Vst3,
+                plugin_id: "ABCD".to_owned(),
+            },
+        );
+        assert_eq!(Preset::of(&plugin).state, None, "no state saved yet");
+        plugin.plugin = Some(bl_model::PluginState {
+            path: "/somewhere/Synth.vst3".to_owned(),
+            data: vec![1, 2, 3, 250],
+        });
+        let preset = Preset::of(&plugin);
+        assert_eq!(preset.state, Some(vec![1, 2, 3, 250]));
+        assert_eq!(Preset::decode(&preset.encode()).unwrap(), preset);
+        let text = String::from_utf8(preset.encode()).unwrap();
+        assert!(
+            !text.contains("somewhere"),
+            "the file path stays out: {text}"
+        );
+        let mut file: serde_json::Value = serde_json::from_slice(&preset.encode()).unwrap();
+        file.as_object_mut().unwrap().remove("state");
+        let older = Preset::decode(&serde_json::to_vec(&file).unwrap()).unwrap();
+        assert_eq!(older.state, None);
+        file["state"] = serde_json::json!("not base64!");
+        assert!(matches!(
+            Preset::decode(&serde_json::to_vec(&file).unwrap()),
+            Err(PresetError::Invalid(_))
+        ));
+        let folder = scratch("plugin-of");
+        let path = folder.join("Synth.blpreset");
+        preset.save(&path).unwrap();
+        assert_eq!(
+            Preset::plugin_of(&path),
+            Some((bl_model::PluginFormat::Vst3, "ABCD".to_owned()))
+        );
+        let native = folder.join("Utility.blpreset");
+        Preset::of(&device()).save(&native).unwrap();
+        assert_eq!(Preset::plugin_of(&native), None);
+        assert_eq!(Preset::plugin_of(&folder.join("missing.blpreset")), None);
+        fs::remove_dir_all(&folder).ok();
     }
 
     // Spec: device-chains R16

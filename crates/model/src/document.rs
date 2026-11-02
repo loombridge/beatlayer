@@ -117,6 +117,16 @@ pub struct Settings {
     /// a set with none doesn't write them, so its saved form is unchanged.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub locators: Vec<Locator>,
+    /// The song's sections: the spans of the arranger track (WP-6.45). A set
+    /// saved before them loads with none, and a set with none doesn't write
+    /// them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sections: Vec<crate::SongSection>,
+    /// Whether the arranger track shows above the Arrangement's tracks
+    /// (WP-6.45). Off in a new set and in a set saved before it, and not
+    /// written when off. Showing it is no undo step.
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub arranger_track: bool,
     /// Where the song starts: a locator or the loop brace's start (WP-6.24).
     /// A set saved before the song start time has none and loads with none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -186,6 +196,8 @@ impl Default for Settings {
             reduced_latency_monitoring: false,
             lock_envelopes: false,
             locators: Vec::new(),
+            sections: Vec::new(),
+            arranger_track: false,
             song_start: None,
             grooves: GroovePool::default(),
             scale: Scale::default(),
@@ -775,6 +787,29 @@ impl Document {
             .filter_map(|id| self.track(id))
     }
 
+    /// Whether a track is empty (the view options spec, R7): it holds no
+    /// clip anywhere, on its lanes, take lanes or Session slots, and no
+    /// device; a group is empty when it has no device and every track in it
+    /// is empty. Main never is.
+    #[must_use]
+    pub fn is_track_empty(&self, id: TrackId) -> bool {
+        self.track(id).is_some_and(|track| {
+            track.kind() != TrackKind::Main
+                && track.devices().len() == 0
+                && track.all_clips().next().is_none()
+                && track.children().all(|child| self.is_track_empty(child))
+        })
+    }
+
+    /// The empty tracks (see [`Document::is_track_empty`]), in display order.
+    #[must_use]
+    pub fn empty_tracks(&self) -> Vec<TrackId> {
+        self.track_order()
+            .into_iter()
+            .filter(|&id| self.is_track_empty(id))
+            .collect()
+    }
+
     /// How many tracks there are, counting the returns and Main.
     #[must_use]
     pub fn track_count(&self) -> usize {
@@ -948,6 +983,11 @@ impl Document {
                 .any(|locator| locator.id.0 == id)
             || self
                 .settings
+                .sections
+                .iter()
+                .any(|section| section.id.0 == id)
+            || self
+                .settings
                 .chord_lane
                 .iter()
                 .any(|region| region.id.0 == id)
@@ -974,6 +1014,12 @@ impl Document {
             .iter()
             .map(|locator| locator.id.0)
             .max();
+        let section = self
+            .settings
+            .sections
+            .iter()
+            .map(|section| section.id.0)
+            .max();
         let groove = self
             .settings
             .grooves
@@ -988,7 +1034,7 @@ impl Document {
             .map(|region| region.id.0)
             .max();
         [
-            track, clip, lane, device, chain, scene, locator, groove, region,
+            track, clip, lane, device, chain, scene, locator, section, groove, region,
         ]
         .into_iter()
         .flatten()
@@ -1013,6 +1059,32 @@ impl Document {
         }
         if rebuilt.index != self.index {
             return Err("the derived lookups don't match the tree".to_owned());
+        }
+        self.check_links()
+    }
+
+    /// Spec: linked-clips R2, R3. Every link holds two or more clips of one
+    /// kind with the same contents.
+    fn check_links(&self) -> Result<(), String> {
+        let mut links: std::collections::BTreeMap<crate::LinkId, Vec<&Clip>> = Default::default();
+        for clip in self.tracks.values().flat_map(|track| track.all_clips()) {
+            if let Some(link) = clip.link {
+                links.entry(link).or_default().push(clip);
+            }
+        }
+        for (link, clips) in links {
+            if clips.len() < 2 {
+                return Err(format!("{link} holds only {}", clips[0].id));
+            }
+            if let Some(other) = clips.iter().find(|clip| {
+                clip.data.is_audio() != clips[0].data.is_audio()
+                    || !clip.shares_contents_with(clips[0])
+            }) {
+                return Err(format!(
+                    "{link}: {} doesn't hold {}'s contents",
+                    other.id, clips[0].id
+                ));
+            }
         }
         Ok(())
     }

@@ -51,8 +51,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Shift+click"]
 win = ["Shift+click"]
-status = "pending"
-package = "WP-6.76"
+status = "widget"
+handler = "the Device View: Shift-click on a device's title bar selects the range from the device clicked on its own, and never fewer devices (`device.select` with `range`, device chains R47)"
 
 [[shortcut]]
 id = "S-DEV-005"

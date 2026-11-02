@@ -103,6 +103,7 @@ impl Shell {
         // Auto-Hide Plug-In Windows, as the tracks' floating windows do.
         self.open_queued_plug_in_windows();
         self.apply_plug_in_windows();
+        changed |= self.apply_pending_states();
         if self.kit.idle() {
             changed = true;
         }

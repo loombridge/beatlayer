@@ -927,6 +927,8 @@ impl Walk<'_> {
             "SceneId" => first(&refs.scenes),
             "LocatorId" if new => Some(self.new_name("locator")),
             "LocatorId" => first(&refs.locators),
+            "SectionId" if new => Some(self.new_name("section")),
+            "ChordRegionId" if new => Some(self.new_name("chord region")),
             "ChainId" if new => Some(self.new_name("chain")),
             "ChainId" => {
                 if self.says(hint, &["drum", "pad"]) {

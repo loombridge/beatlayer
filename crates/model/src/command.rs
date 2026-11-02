@@ -30,7 +30,7 @@ use crate::follow::FollowPatch;
 use crate::groove::{GLOBAL_AMOUNT_MAX, Groove, GrooveBase, check_percent};
 use crate::ids::{
     ChainId, ChordRegionId, ClipId, ContentHash, DeviceId, GrooveId, LinkGroupId, LocatorId,
-    ParamId, SceneId, TakeLaneId, TrackId,
+    ParamId, SceneId, SectionId, TakeLaneId, TrackId,
 };
 use crate::launch::{ClipLaunch, LaunchMode, LaunchQuantization};
 use crate::layers::{
@@ -46,6 +46,7 @@ use crate::record_quantization::RecordQuantization;
 use crate::sample_edits::{SampleEdit, SampleRange, SampleRegion};
 use crate::scale::{Scale, ScaleName};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
+use crate::section::SongSection;
 use crate::shared::Shared;
 use crate::track::{
     Channel, CrossfadeAssign, Input, MidiTo, Mixer, Monitor, Output, PanMode, SendTap, Tap, Track,
@@ -350,6 +351,42 @@ pub enum Command {
         /// issues them.
         #[serde(default)]
         clips: Vec<ClipId>,
+    },
+    /// Adds a section to the arranger track (the arranger track spec, R3 and
+    /// R5). A section with no name of its own is named "Section" and the
+    /// next whole number.
+    AddSection {
+        /// The section, with a new ID.
+        section: SongSection,
+    },
+    /// Removes a section and nothing else: the tracks stay as they are (R11).
+    RemoveSection {
+        /// The section.
+        section: SectionId,
+    },
+    /// Changes a section's name, colour, start or length, leaving what is
+    /// left out as it was (R7). The tracks stay as they are.
+    EditSection {
+        /// The section.
+        section: SectionId,
+        /// The new name.
+        #[serde(default)]
+        name: Option<String>,
+        /// The new colour, a swatch from 0 to 69.
+        #[serde(default)]
+        colour: Option<u8>,
+        /// The new start: 0 (1.1.1) or later.
+        #[serde(default)]
+        start: Option<Ticks>,
+        /// The new length: more than 0. A span that would overlap another
+        /// section is refused.
+        #[serde(default)]
+        length: Option<Ticks>,
+    },
+    /// Shows or hides the arranger track (R1). It is no undo step.
+    SetArrangerTrack {
+        /// Whether the track shows.
+        shown: bool,
     },
     /// Switches Punch-In on or off: with it on, recording into the
     /// Arrangement starts at the loop brace's start, whether or not the Loop
@@ -1004,6 +1041,23 @@ pub enum Command {
         clips: Vec<ClipId>,
         /// The swatch, or a `#RRGGBB` colour.
         colour: Colour,
+    },
+    /// Links clips that hold the same contents (the linked clips spec, R2):
+    /// from then on an edit to one clip's contents reaches the others (R4).
+    /// The clips are all of one kind and already hold the same contents, so
+    /// nothing in them changes; clips that already belong to a link join it,
+    /// and they may belong to only one. `clip.duplicate_linked` makes its
+    /// copies this way.
+    LinkClips {
+        /// The clips, at least two, each listed once.
+        clips: Vec<ClipId>,
+    },
+    /// Takes clips out of their links (R8), keeping the contents they have.
+    /// A link left with one clip ends. A clip that is in no link is left as
+    /// it is.
+    UnlinkClips {
+        /// The clips, each listed once.
+        clips: Vec<ClipId>,
     },
     /// Changes a clip's length, keeping its start.
     SetClipLength {
@@ -3040,6 +3094,10 @@ impl Command {
             Self::SetSongStart { .. } => "Set Song Start Time",
             Self::InsertTime { .. } => "Insert Silence",
             Self::DeleteTime { .. } => "Delete Time",
+            Self::AddSection { .. } => "Add Section",
+            Self::RemoveSection { .. } => "Remove Section",
+            Self::EditSection { .. } => "Edit Section",
+            Self::SetArrangerTrack { .. } => "Arranger Track",
             Self::SetPunchIn { .. } => "Punch-In",
             Self::SetPunchOut { .. } => "Punch-Out",
             Self::SetMetronomeEnabled { .. } => "Metronome",
@@ -3063,6 +3121,8 @@ impl Command {
             Self::AssignColourToClips { .. } => "Assign Track Color to Clips",
             Self::AssignColourToGrouped { .. } => "Assign Track Color to Grouped Tracks and Clips",
             Self::SetClipColour { .. } => "Change Clip Color",
+            Self::LinkClips { .. } => "Link Clips",
+            Self::UnlinkClips { .. } => "Unlink Clip",
             Self::SetSceneColour { .. } => "Change Scene Color",
             Self::FreezeTracks { .. } => "Freeze tracks",
             Self::UnfreezeTracks { .. } => "Unfreeze tracks",
@@ -3314,7 +3374,7 @@ impl Command {
             // WP-5.1. Beatlayer's own names, after the device ones.
             Self::InsertChainDevice { .. } => "Insert Device",
             Self::MoveDeviceToChain { .. } => "Move Device",
-            Self::GroupDevices { .. } => "Group",
+            Self::GroupDevices { .. } => "Group Devices",
             Self::UngroupDevice { .. } => "Ungroup",
             Self::SetDeviceEnabledAll { .. } => "Change \"Device On\"",
             Self::AddChain { .. } => "Insert Chain",
@@ -3385,7 +3445,10 @@ impl Command {
     /// Nor is the pad layout a controller plays the scale in.
     #[must_use]
     pub fn records_undo(&self) -> bool {
-        !matches!(self, Self::SetCueMode { .. } | Self::SetPadLayout { .. })
+        !matches!(
+            self,
+            Self::SetCueMode { .. } | Self::SetPadLayout { .. } | Self::SetArrangerTrack { .. }
+        )
     }
 
     /// The undo step's name for this command run on `before`: the same as
@@ -3477,6 +3540,7 @@ impl Command {
             Self::GroupDevices { rack, .. } => rack.ids(),
             Self::CreateScene { id, .. } => vec![id.0],
             Self::AddLocator { locator } => vec![locator.id.0],
+            Self::AddSection { section } => vec![section.id.0],
             Self::AddChordRegion { region } => vec![region.id.0],
             Self::InsertTime { clips, .. } | Self::DeleteTime { clips, .. } => {
                 clips.iter().map(|clip| clip.0).collect()
@@ -3514,6 +3578,9 @@ impl Document {
         // The copy shares every node with `self` until it's edited.
         let mut next = self.clone();
         next.apply_in_place(command)?;
+        // Spec: linked-clips R4. An edit to a linked clip's contents reaches
+        // every clip of its link in the same step.
+        next.sync_links(self);
         // Spec: macros R18. A device or chain that left its rack takes its
         // mappings with it, in the same undo step.
         next.prune_macro_mappings();
@@ -3575,6 +3642,19 @@ impl Document {
             }
             Command::InsertTime { at, length, clips } => self.insert_time(*at, *length, clips),
             Command::DeleteTime { start, end, clips } => self.delete_time(*start, *end, clips),
+            Command::AddSection { section } => self.add_section(section.clone()),
+            Command::RemoveSection { section } => self.remove_section(*section),
+            Command::EditSection {
+                section,
+                name,
+                colour,
+                start,
+                length,
+            } => self.edit_section(*section, name.as_deref(), *colour, *start, *length),
+            Command::SetArrangerTrack { shown } => {
+                self.settings.arranger_track = *shown;
+                Ok(())
+            }
             Command::AddLocator { locator } => self.add_locator(locator.clone()),
             // Spec: chord-lane R2 to R5.
             Command::AddChordRegion { region } => self.add_chord_region(*region),
@@ -4267,9 +4347,12 @@ impl Document {
             Command::SetCueOut { channel } => {
                 self.set_main_channel(*channel, |routing| &mut routing.cue_out)
             }
-            Command::CreateClip { track, clip } => self.create_clip(*track, clip),
+            // Spec: linked-clips R7. A clip a command makes belongs to no link.
+            Command::CreateClip { track, clip } => self.create_clip(*track, &clip.unlinked()),
             Command::AddTakeLane { track, lane, index } => self.add_take_lane(*track, lane, *index),
-            Command::CreateTakeClip { lane, clip } => self.create_take_clip(*lane, clip),
+            Command::CreateTakeClip { lane, clip } => {
+                self.create_take_clip(*lane, &clip.unlinked())
+            }
             Command::RenameTakeLane { lane, name } => self.rename_take_lane(*lane, name),
             Command::DeleteTakeLanes { lanes } => self.remove_take_lanes(lanes),
             Command::DeleteAllTakeLanes { tracks } => self.delete_all_take_lanes(tracks),
@@ -4294,6 +4377,8 @@ impl Document {
                 }
                 Ok(())
             }
+            Command::LinkClips { clips } => self.link_clips(clips),
+            Command::UnlinkClips { clips } => self.unlink_clips(clips),
             Command::SetClipLength { clip, length } => {
                 let current = self.clip_ref(*clip)?;
                 check_extent(current.start, *length)?;
@@ -4511,27 +4596,33 @@ impl Document {
                 media,
                 seconds,
             } => {
-                let current = self.clip_ref(*clip)?.clone();
-                let ClipData::Audio(audio) = &current.data else {
-                    return Err(ModelError::NotAudioClip(*clip));
-                };
                 if !seconds.is_finite() || *seconds <= 0.0 {
                     return Err(ModelError::InvalidValue {
                         what: "the file's length",
                         value: *seconds,
                     });
                 }
-                let mut data = audio.reversed(*seconds, *media);
-                // The transient edits belong to the file they were made on
-                // (the warping spec, R27).
-                if data.media != audio.media {
-                    data.transient_edits = TransientEdits::default();
+                // Spec: linked-clips R4. Each clip of the link mirrors its
+                // own markers about the file.
+                let mut reversed = vec![*clip];
+                reversed.extend(self.linked_clip_ids(*clip));
+                for id in reversed {
+                    let current = self.clip_ref(id)?.clone();
+                    let ClipData::Audio(audio) = &current.data else {
+                        return Err(ModelError::NotAudioClip(id));
+                    };
+                    let mut data = audio.reversed(*seconds, *media);
+                    // The transient edits belong to the file they were made on
+                    // (the warping spec, R27).
+                    if data.media != audio.media {
+                        data.transient_edits = TransientEdits::default();
+                    }
+                    let mut next = current;
+                    next.data = ClipData::Audio(data);
+                    check_clip_data(&next.data)?;
+                    check_clip_fits(self.track_ref(self.clip_owner(id)?)?, &next.data)?;
+                    *self.clip_mut(id)? = next;
                 }
-                let mut next = current;
-                next.data = ClipData::Audio(data);
-                check_clip_data(&next.data)?;
-                check_clip_fits(self.track_ref(self.clip_owner(*clip)?)?, &next.data)?;
-                *self.clip_mut(*clip)? = next;
                 Ok(())
             }
             Command::SetClipData { clip, data } => {
@@ -4934,7 +5025,7 @@ impl Document {
                 self.set_scene_signature(*scene, *signature)
             }
             Command::CreateSlotClip { track, scene, clip } => {
-                self.create_slot_clip(*track, *scene, clip)
+                self.create_slot_clip(*track, *scene, &clip.unlinked())
             }
             Command::MoveSlotClip { clip, track, scene } => {
                 self.move_slot_clip(*clip, *track, *scene)
@@ -6943,9 +7034,11 @@ impl Document {
             .expect("just checked the scene exists")
             .clone();
         for (track, clip, source) in copies {
+            // Spec: linked-clips R7. A scene's copies are independent clips.
             let copied = Clip {
                 id: clip,
                 start: Ticks::ZERO,
+                link: None,
                 ..source
             };
             self.track_mut(track)?
@@ -7214,6 +7307,9 @@ impl Document {
     ) -> Result<(), ModelError> {
         let current = self.clip_ref(id)?.clone();
         let mut next = current.clone();
+        // Spec: linked-clips R5. A cropped clip leaves its link, so the
+        // others keep their contents.
+        next.link = None;
         match &current.data {
             ClipData::Audio(audio) => {
                 let Some(media) = media else {
@@ -9188,7 +9284,7 @@ impl Document {
         Ok(())
     }
 
-    fn check_fresh(&self, id: Id) -> Result<(), ModelError> {
+    pub(crate) fn check_fresh(&self, id: Id) -> Result<(), ModelError> {
         if self.contains(id) {
             Err(ModelError::IdInUse(id))
         } else {

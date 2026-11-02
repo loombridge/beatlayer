@@ -34,6 +34,9 @@
 //! - [`locator`]: the Arrangement's locators (WP-6.24): adding, deleting,
 //!   moving, renaming and describing them, looping to the next one, the
 //!   song start time, and the jumps between them.
+//! - [`arranger`]: the arranger track (WP-6.45): making, renaming,
+//!   colouring, resizing, moving, copying, duplicating, removing and
+//!   deleting sections, selecting them, and showing the lane.
 //! - [`notes`]: the Clip View's note-editing commands (WP-2.3): selecting
 //!   the MIDI Note Editor's notes, drawing, deleting, moving and resizing
 //!   them.
@@ -50,6 +53,7 @@
 //!   (WP-5.13): adding layers from files, Snap, Normalize, and its views.
 //! - [`pads`]: a drum rack's pad view and the commands on pads (WP-5.6).
 //! - [`tracks`]: Duplicate Track Without Clips (WP-2.19b, IMP-12).
+//! - [`linked_clips`]: Duplicate as Linked Clip (WP-6.44, IMP-21).
 //! - [`session_launch`]: the global launch quantisation and its enabled
 //!   switch (WP-3.2), which the Control Bar's Quantization Menu shows.
 //! - [`transport`]: what the Control Bar's transport section shows
@@ -103,6 +107,7 @@
 
 pub mod agent;
 pub mod arrangement;
+pub mod arranger;
 pub mod assistant;
 pub mod audio;
 pub mod audio_editing;
@@ -130,6 +135,7 @@ pub mod freeze;
 pub mod groove;
 pub mod keymap;
 pub mod link;
+pub mod linked_clips;
 pub mod locator;
 pub mod menus;
 pub mod midi_files;
@@ -163,6 +169,7 @@ pub mod tracks;
 pub mod transport;
 pub mod tunings;
 pub mod video;
+pub mod view_options;
 pub mod warping;
 
 use bl_commands::{RegisterError, Registry};
@@ -183,6 +190,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     clip_envelope_editing::register(registry)?;
     groove::register(registry)?;
     locator::register(registry)?;
+    arranger::register(registry)?;
     chord_lane::register(registry)?;
     notes::register(registry)?;
     transport::register(registry)?;
@@ -203,6 +211,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     autosampler::register(registry)?;
     cv::register(registry)?;
     tracks::register(registry)?;
+    linked_clips::register(registry)?;
     session_view::register(registry)?;
     session_launch::register(registry)?;
     session_record::register(registry)?;
@@ -229,6 +238,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     link::register(registry)?;
     sync::register(registry)?;
     tempo_follower::register(registry)?;
+    view_options::register(registry)?;
     search::register(registry)
 }
 

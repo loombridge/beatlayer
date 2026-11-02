@@ -27,6 +27,8 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("arrangement.duplicate_time", query(Track, "clips")),
     ("arrangement.loop_selection", read("transport.state", "loop_start")),
     ("arrangement.move_clips", query(Track, "clips")),
+    ("arrangement.nudge_loop_brace", read("transport.state", "loop_start")),
+    ("arrangement.set_loop_brace", read("transport.state", "loop_start")),
     ("arrangement.nudge", query(Track, "clips")),
     ("arrangement.paste", query(Track, "clips")),
     ("arrangement.paste_time", query(Track, "clips")),

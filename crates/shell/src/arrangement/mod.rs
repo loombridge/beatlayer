@@ -193,6 +193,9 @@ pub struct ArrangementView {
     /// The position of the selected time-signature marker (WP-6.61): see
     /// [`locator`].
     selected_signature: Option<Ticks>,
+    /// Whether the loop brace was selected by a click on its bar (WP-6.73):
+    /// see [`ArrangementView::loop_brace_selected`].
+    loop_brace: bool,
     /// Whether the chord lane shows (WP-6.48; the chord lane spec, R1), and
     /// its selected region (R3).
     chord_lane: bool,
@@ -290,6 +293,7 @@ impl ArrangementView {
             selected_sections: Vec::new(),
             sections_span: None,
             selected_signature: None,
+            loop_brace: false,
             chord_lane: false,
             selected_chord_region: None,
             selected_take_lanes: Vec::new(),
@@ -551,6 +555,12 @@ impl ArrangementView {
         grid::snap(&doc.settings().time_signatures, self.grid_step(doc), at)
     }
 
+    /// One screen point at the current zoom, in ticks: what the loop brace's
+    /// keys step by while snapping is off.
+    pub(crate) fn point_ticks(&self, doc: &Document) -> Ticks {
+        Ticks((self.horizontal(doc).ticks_per_point.round() as i64).max(1))
+    }
+
     fn signature_at_left(&self, doc: &Document, horizontal: Horizontal) -> TimeSignature {
         doc.settings()
             .time_signatures
@@ -677,6 +687,15 @@ impl ArrangementView {
         {
             self.selected_signature = None;
         }
+    }
+
+    /// Whether the loop brace is selected (WP-6.73): clicked on its bar, and
+    /// the time selection still its span, so any other selection or click
+    /// deselects it.
+    #[must_use]
+    pub fn loop_brace_selected(&self, doc: &Document) -> bool {
+        let brace = doc.settings().arrangement_loop;
+        self.loop_brace && self.time_selection == Some((brace.start, brace.start + brace.length))
     }
 
     /// Whether the chord lane shows (WP-6.48).
@@ -1614,6 +1633,7 @@ impl ArrangementView {
             selected_take_lanes: self.selected_take_lanes.clone(),
             shown_take_lanes: self.shown_take_lanes.iter().copied().collect(),
             selected_fade: self.selected_fade,
+            loop_brace_selected: self.loop_brace_selected(doc),
             time_selection: self
                 .time_selection
                 .map(|(start, end)| TimeRange { start, end }),

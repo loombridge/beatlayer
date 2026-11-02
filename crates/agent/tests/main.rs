@@ -44,6 +44,7 @@ mod save_history;
 mod stdio;
 mod stems;
 mod tempo_follower;
+mod tension;
 mod tools;
 mod tunings;
 mod undo_history;

@@ -1351,3 +1351,145 @@ fn a_tap_moved_to_an_end_never_reads_ahead_of_the_ring() {
         assert!(left.iter().chain(&right).all(|v| v.is_finite()));
     }
 }
+
+// ---- the damper's port and the termination (Tension) ----
+
+/// An impulse through a string set to `params` and `fittings`, `frames` long.
+fn fitted(params: &WaveguideParams, fittings: &Fittings, rate: f32, frames: usize) -> Vec<f32> {
+    let mut bank = WaveguideBank::new(rate, 1, Kind::String, 20.0);
+    bank.reset_voice_with(0, params, fittings);
+    let mut excitation = vec![0.0; frames];
+    excitation[0] = 1.0;
+    guide_render(&mut bank, &excitation).0
+}
+
+// Spec: physical-models R11
+#[test]
+fn a_terminating_end_takes_the_high_harmonics_and_leaves_the_note() {
+    for rate in [48_000.0_f32, 96_000.0] {
+        // Higher strings lose their fifth harmonic to silence at any end.
+        for key in [36, 48, 60] {
+            let hz = key_hz(key);
+            let rate_f = f64::from(rate);
+            let level = |end: f32| {
+                let out = fitted(
+                    &ringing(hz),
+                    &Fittings {
+                        end,
+                        ..Fittings::default()
+                    },
+                    rate,
+                    rate as usize * 2,
+                );
+                let window = &out[rate as usize / 2..rate as usize * 3 / 2];
+                let heard = peak(window, rate_f, f64::from(hz), 0.01);
+                (
+                    cents(heard, f64::from(hz)),
+                    dft(window, rate_f, f64::from(hz) * 5.0) / dft(window, rate_f, f64::from(hz)),
+                )
+            };
+            let (open, open_top) = level(1.0);
+            for end in [0.75, 0.4, 0.0] {
+                let (detune, top) = level(end);
+                assert!(
+                    (detune - open).abs() < 1.0,
+                    "key {key} at {rate}, end {end}: {detune} against {open} cents"
+                );
+                assert!(
+                    top < open_top,
+                    "key {key}, end {end}: {top} against {open_top}"
+                );
+            }
+            // A low string makes fewer passes in the window, so the end has less to do.
+            if key == 60 {
+                assert!(level(0.0).1 < open_top * 0.5, "key {key}");
+            }
+        }
+    }
+}
+
+/// A damper that loses 30 % of the guide's velocity where it rests.
+struct Pad;
+
+impl Interaction for Pad {
+    const DAMPED: bool = true;
+
+    fn force(&mut self, _voice: usize, _velocity: f32) -> f32 {
+        0.0
+    }
+
+    fn damp(&mut self, _voice: usize, velocity: f32) -> f32 {
+        -0.3 * velocity
+    }
+}
+
+// Spec: physical-models R11
+#[test]
+fn a_damper_takes_what_moves_where_it_rests_and_spares_a_node() {
+    let hz = 220.0_f32;
+    let after = |position: f32, harmonic: f64| {
+        let mut bank = WaveguideBank::new(RATE, 1, Kind::String, 20.0);
+        bank.reset_voice_with(
+            0,
+            &ringing(hz),
+            &Fittings {
+                damper: position,
+                ..Fittings::default()
+            },
+        );
+        let mut excitation = vec![0.0; 48_000];
+        excitation[0] = 1.0;
+        let stride = bank.stride();
+        let mut input = vec![0.0; excitation.len() * stride];
+        input[0] = 1.0;
+        let mut out = vec![0.0; input.len() * 2];
+        bank.process_with(&input, &mut out, &mut Pad);
+        let left: Vec<f32> = (0..48_000).map(|f| out[f * 2 * stride]).collect();
+        dft(&left[24_000..], f64::from(RATE), f64::from(hz) * harmonic)
+    };
+    let free = |harmonic: f64| {
+        let out = fitted(&ringing(hz), &Fittings::default(), RATE, 48_000);
+        dft(&out[24_000..], f64::from(RATE), f64::from(hz) * harmonic)
+    };
+    // At the middle a damper takes the odd harmonics and leaves the second;
+    // near the end it takes both.
+    assert!(after(0.5, 1.0) < free(1.0) * 0.5);
+    assert!(
+        after(0.5, 2.0) > free(2.0) * 0.9,
+        "{} {}",
+        after(0.5, 2.0),
+        free(2.0)
+    );
+    assert!(after(0.1, 2.0) < free(2.0) * 0.6);
+}
+
+// Spec: physical-models R12
+#[test]
+fn a_bank_runs_only_its_active_voices() {
+    let params = ringing(220.0);
+    let render = |active: usize| {
+        let mut bank = WaveguideBank::new(RATE, 32, Kind::String, 20.0);
+        for voice in 0..32 {
+            bank.reset_voice(voice, &params);
+        }
+        bank.set_active(active);
+        let stride = bank.stride();
+        let mut input = vec![0.0; 2048 * stride];
+        input[..32].fill(1.0);
+        let mut out = vec![0.0; input.len() * 2];
+        bank.process(&input, &mut out);
+        (stride, out)
+    };
+    let (stride, all) = render(32);
+    let (_, some) = render(16);
+    for frame in 0..2048 {
+        for voice in 0..32 {
+            let at = frame * 2 * stride + voice;
+            if voice < 16 {
+                assert_eq!(all[at], some[at], "voice {voice} frame {frame}");
+            } else {
+                assert_eq!(some[at], 0.0, "voice {voice} gives nothing");
+            }
+        }
+    }
+}

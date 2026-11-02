@@ -177,7 +177,7 @@ pub const MODES: [&str; 10] = [
     "Formant12",
     "Formant24",
 ];
-const FIRST_FORMANT: usize = 8;
+pub(crate) const FIRST_FORMANT: usize = 8;
 
 /// Drive (R11).
 pub const DRIVES: [&str; 7] = [
@@ -245,7 +245,7 @@ const VOWELS: [(f32, f32); 5] = [
 ];
 
 /// The resonance of a formant's band-pass resonator.
-const FORMANT_RESONANCE: f32 = 0.9;
+pub(crate) const FORMANT_RESONANCE: f32 = 0.9;
 
 /// Spec: analog R11. The drive stage's gain into the curve, in decibels, for
 /// each of the three strengths, and the asymmetric modes' bias.
@@ -1057,9 +1057,24 @@ fn drive(mode: usize, x: f32, dc: &mut [f32; 2], pole: f32) -> f32 {
     out
 }
 
+/// Spec: analog R7, R8. The kit's filter type that plays `mode` (a place in
+/// [`MODES`]): a formant mode is two band-passes of the same order.
+pub(crate) fn kit_type(mode: usize) -> FilterType {
+    match mode {
+        0 => FilterType::Lp12,
+        1 => FilterType::Lp24,
+        2 | 8 => FilterType::Bp12,
+        3 | 9 => FilterType::Bp24,
+        4 => FilterType::Notch12,
+        5 => FilterType::Notch24,
+        6 => FilterType::Hp12,
+        _ => FilterType::Hp24,
+    }
+}
+
 /// Spec: analog R8. The first two formants of Reso `reso` (0 to 1), in
 /// hertz, with Freq `freq` transposing both: 1 kHz leaves them at the table.
-fn formants(reso: f32, freq: f32) -> (f32, f32) {
+pub(crate) fn formants(reso: f32, freq: f32) -> (f32, f32) {
     let position = reso.clamp(0.0, 1.0) * (VOWELS.len() - 1) as f32;
     let from = (position as usize).min(VOWELS.len() - 2);
     let t = position - from as f32;
@@ -1563,16 +1578,7 @@ impl Instrument for Synth {
             let formant = mode >= FIRST_FORMANT;
             if mode != self.mode_of[k] {
                 self.mode_of[k] = mode;
-                let kind = match mode {
-                    0 => FilterType::Lp12,
-                    1 => FilterType::Lp24,
-                    2 | 8 => FilterType::Bp12,
-                    3 | 9 => FilterType::Bp24,
-                    4 => FilterType::Notch12,
-                    5 => FilterType::Notch24,
-                    6 => FilterType::Hp12,
-                    _ => FilterType::Hp24,
-                };
+                let kind = kit_type(mode);
                 self.filters[k].set_type(kind);
                 self.seconds[k].set_type(kind);
             }

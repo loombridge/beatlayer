@@ -729,7 +729,7 @@ trigger = "press"
 milestone = "M6"
 source = "manual 42.4; observed in Live 12 (macOS), 12 October 2026: Info View text of the plug-in device's window button"
 confirmed = true
-notes = "Moved to M6 by WP-6.70: Plug-in windows do not yet close the others when one opens, which is what the key undoes, and the Multiple Plug-In Windows setting is not built. WP-6.75 builds it."
+notes = "Moved to M6 by WP-6.70, built by WP-6.75: with Multiple Plug-In Windows off, opening a plug-in's window closes the others, and this click keeps them (clap-hosting R27)."
 
 [[shortcut]]
 id = "S-DEV-011"

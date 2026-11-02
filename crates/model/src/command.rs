@@ -21,6 +21,7 @@ use crate::clip::{
     TakeLane, clip_entry, crossfades,
 };
 use crate::clip_param::ClipParam;
+use crate::colour::Colour;
 use crate::device::{Device, DeviceKind, DeviceRole, WavetableChoice};
 use crate::document::Document;
 use crate::error::ModelError;
@@ -470,8 +471,8 @@ pub enum Command {
     SetTrackColour {
         /// The tracks, each listed once.
         tracks: Vec<TrackId>,
-        /// The swatch.
-        colour: u8,
+        /// The swatch, or a `#RRGGBB` colour.
+        colour: Colour,
     },
     /// Gives every clip of each track its track's colour: in the
     /// Arrangement, in its Session slots and in its take lanes. Tracks that
@@ -1038,8 +1039,8 @@ pub enum Command {
     SetClipColour {
         /// The clips, each listed once.
         clips: Vec<ClipId>,
-        /// The swatch.
-        colour: u8,
+        /// The swatch, or a `#RRGGBB` colour.
+        colour: Colour,
     },
     /// Changes a clip's length, keeping its start.
     SetClipLength {
@@ -1789,7 +1790,7 @@ pub enum Command {
         /// The scenes, each listed once.
         scenes: Vec<SceneId>,
         /// The swatch, or `null` for none.
-        colour: Option<u8>,
+        colour: Option<Colour>,
     },
 
     /// Puts a clip in a track's Session slot at `scene`: what Insert Empty
@@ -2582,8 +2583,8 @@ pub enum Command {
     SetChainColour {
         /// The chain.
         chain: ChainId,
-        /// The swatch, or `null` for none.
-        colour: Option<u8>,
+        /// The swatch, or a `#RRGGBB` colour, or `null` for none.
+        colour: Option<Colour>,
     },
     /// Gives a drum rack's chain the swatch Push 2 shows for its pad, from
     /// 0 to 69, or `null` to show the track's colour again.
@@ -2742,7 +2743,7 @@ pub enum Command {
         /// The macro, numbered from 1.
         macro_number: u8,
         /// The swatch, or `null` for none.
-        colour: Option<u8>,
+        colour: Option<Colour>,
     },
     /// Sets a macro's info text (macros spec, R14). Empty clears it.
     SetMacroInfo {
@@ -3767,7 +3768,7 @@ impl Document {
                 Ok(())
             }
             Command::SetTrackColour { tracks, colour } => {
-                crate::colour::check_swatch("track colour", *colour)?;
+                colour.check("track colour")?;
                 for track in each_once(tracks, |t| t.0)? {
                     self.track_ref(track)?;
                     self.colour_track(track, *colour)?;
@@ -4343,7 +4344,7 @@ impl Document {
             } => self.move_clip_to_lane(*clip, *track, *lane, *start),
             Command::MoveClips { clips, by } => self.move_clips(clips, *by),
             Command::SetClipColour { clips, colour } => {
-                crate::colour::check_swatch("clip colour", *colour)?;
+                colour.check("clip colour")?;
                 for clip in each_once(clips, |c| c.0)? {
                     if self.clip_ref(clip)?.colour != Some(*colour) {
                         self.clip_mut(clip)?.colour = Some(*colour);
@@ -4960,7 +4961,7 @@ impl Document {
             }
             Command::SetSceneColour { scenes, colour } => {
                 if let Some(colour) = colour {
-                    crate::colour::check_swatch("scene colour", *colour)?;
+                    colour.check("scene colour")?;
                 }
                 for id in each_once(scenes, |s| s.0)? {
                     let position = self.scene_position(id).ok_or(ModelError::NoSuchScene(id))?;
@@ -5624,7 +5625,7 @@ impl Document {
             }
             Command::SetChainColour { chain, colour } => {
                 if let Some(colour) = colour {
-                    check_value("chain colour", f64::from(*colour), *colour < CHAIN_COLOURS)?;
+                    colour.check("chain colour")?;
                 }
                 if self.chain_ref(*chain)?.colour != *colour {
                     self.chain_mut(*chain)?.colour = *colour;
@@ -5788,7 +5789,7 @@ impl Document {
                 colour,
             } => {
                 if let Some(colour) = colour {
-                    check_value("macro colour", f64::from(*colour), *colour < CHAIN_COLOURS)?;
+                    colour.check("macro colour")?;
                 }
                 self.edit_macro(*rack, *macro_number, |m| m.colour = *colour)
             }
@@ -9026,7 +9027,7 @@ impl Document {
             .ok_or(ModelError::NoSuchClip(id))
     }
 
-    fn colour_track(&mut self, id: TrackId, colour: u8) -> Result<(), ModelError> {
+    fn colour_track(&mut self, id: TrackId, colour: Colour) -> Result<(), ModelError> {
         if self.track_ref(id)?.colour != colour {
             self.track_mut(id)?.colour = colour;
         }
@@ -9035,7 +9036,7 @@ impl Document {
 
     /// Colours every clip a track holds: its Arrangement lane, its Session
     /// slots and its take lanes.
-    fn colour_clips_of(&mut self, id: TrackId, colour: u8) -> Result<(), ModelError> {
+    fn colour_clips_of(&mut self, id: TrackId, colour: Colour) -> Result<(), ModelError> {
         let clips: Vec<ClipId> = self
             .track_ref(id)?
             .all_clips()
@@ -9690,7 +9691,7 @@ pub(crate) fn check_marker_order(audio: &AudioData) -> Result<(), ModelError> {
 /// playing (the audio clips spec, R16).
 pub(crate) fn check_clip(clip: &Clip) -> Result<(), ModelError> {
     if let Some(colour) = clip.colour {
-        crate::colour::check_swatch("clip colour", colour)?;
+        colour.check("clip colour")?;
     }
     check_offset(clip.offset)?;
     if clip.data.is_audio() && clip.offset != Ticks::ZERO {

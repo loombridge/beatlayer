@@ -382,7 +382,7 @@ pub struct ChainStrip {
     /// The chain's colour, a swatch of the palette of 5 rows of 14, if it
     /// has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub colour: Option<u8>,
+    pub colour: Option<bl_model::Colour>,
     /// The rack inside this chain, if it has one whose chains fold out too
     /// (racks spec, R27): a fold button on this strip shows its chains.
     #[serde(default, skip_serializing_if = "Option::is_none")]

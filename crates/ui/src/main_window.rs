@@ -820,6 +820,9 @@ impl MainWindowUi {
             // window while there are sets a crash left to offer.
             crate::recovery_dialog::show(ctx, shell, theme, &mut events);
         }
+        // Spec: themes R28. The colour picker Custom Color… opens sits over
+        // the window it was opened in.
+        crate::palette::picker(ctx, theme, &mut events);
         self.mixer_typing = crate::mixer::is_typing(ctx)
             || crate::track_menu::is_renaming(ctx)
             || crate::session_menus::is_renaming(ctx)
@@ -828,6 +831,7 @@ impl MainWindowUi {
             || crate::envelope_keys::is_typing(ctx);
         // An open menu, or a dialog, keeps the keys.
         self.menu_open = egui::Popup::is_any_open(ctx)
+            || crate::palette::picker_is_open(ctx)
             || (!second
                 && (shell.stems_dialog().is_some()
                     || shell.dawproject_report_window().is_some()
@@ -1167,8 +1171,13 @@ impl MainWindowUi {
         }) else {
             return;
         };
-        // A click in the search field isn't a click in the pane under it.
-        if self.search_field.contains(pos) {
+        // A click in the search field, or in a menu or dialog over a pane,
+        // isn't a click in the pane under it.
+        if self.search_field.contains(pos)
+            || ctx
+                .layer_id_at(pos)
+                .is_some_and(|layer| layer.order != egui::Order::Background)
+        {
             return;
         }
         let areas = [

@@ -290,14 +290,15 @@ impl ContextMenus {
                     .first()
                     .and_then(|clip| doc.clip(*clip))
                     .and_then(|clip| clip.colour);
-                if let Some(colour) = crate::palette::show(ui, theme, "clip-colour", current) {
-                    invoke(
-                        events,
-                        "clip.set_colour",
-                        json!({ "clips": selected, "colour": colour }),
-                    );
-                    ui.close();
-                }
+                crate::palette::show(
+                    ui,
+                    theme,
+                    shell,
+                    "clip-colour",
+                    current,
+                    crate::palette::Target::new("clip.set_colour", json!({ "clips": selected })),
+                    events,
+                );
             } else if item.row == context_menus::SECTION_COLOUR_ROW {
                 // Spec: arranger-track R7. The palette colours the section.
                 let doc = shell.editor().document();
@@ -307,7 +308,9 @@ impl ContextMenus {
                     .first()
                     .and_then(|section| doc.section(*section))
                     .map(|section| section.colour);
-                if let Some(colour) = crate::palette::show(ui, theme, "section-colour", current) {
+                if let Some(colour) =
+                    crate::palette::show_swatches(ui, theme, "section-colour", current)
+                {
                     invoke(
                         events,
                         bl_shell::arranger_commands::SET_SECTION_COLOUR,

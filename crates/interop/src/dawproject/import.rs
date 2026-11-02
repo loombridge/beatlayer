@@ -60,10 +60,10 @@ pub struct Context<'a> {
 /// The swatches a track and a clip made without a colour take (R23).
 pub trait NewColours: Sync {
     /// The swatch a new track takes.
-    fn track(&self, id: TrackId) -> u8;
+    fn track(&self, id: TrackId) -> bl_model::Colour;
 
     /// The swatch a new clip takes, or `None` for its track's.
-    fn clip(&self, id: bl_model::ClipId) -> Option<u8>;
+    fn clip(&self, id: bl_model::ClipId) -> Option<bl_model::Colour>;
 }
 
 /// The colours a new set gives: a track `id mod 14` in the top row, a clip
@@ -71,11 +71,11 @@ pub trait NewColours: Sync {
 pub struct DefaultColours;
 
 impl NewColours for DefaultColours {
-    fn track(&self, id: TrackId) -> u8 {
-        bl_model::id_swatch(id.0)
+    fn track(&self, id: TrackId) -> bl_model::Colour {
+        bl_model::id_swatch(id.0).into()
     }
 
-    fn clip(&self, _id: bl_model::ClipId) -> Option<u8> {
+    fn clip(&self, _id: bl_model::ClipId) -> Option<bl_model::Colour> {
         None
     }
 }

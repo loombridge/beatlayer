@@ -228,7 +228,7 @@ pub(crate) fn title_bar(
     // Spec: themes R18. The name stands on the clip's colour; with several
     // clips selected, on stripes of theirs.
     let selected = shell.arrangement().selected_clips();
-    let swatches: Vec<u8> = if selected.len() > 1 && selected.contains(&clip) {
+    let swatches: Vec<bl_model::Colour> = if selected.len() > 1 && selected.contains(&clip) {
         selected
             .iter()
             .filter_map(|id| doc.clip(*id).and_then(|held| held.colour))
@@ -243,7 +243,7 @@ pub(crate) fn title_bar(
         ui.painter().rect_filled(
             Rect::from_min_max(pos2(x, rect.top()), pos2(x + stripe, rect.bottom())),
             0.0,
-            theme.swatch(*swatch),
+            theme.colour(*swatch),
         );
     }
     // Spec: session-context-menus R4, R9, R14. A right-click on the title
@@ -2166,7 +2166,7 @@ impl ClipViewUi {
         let face = doc
             .clip(clip)
             .and_then(|held| held.colour)
-            .map_or(theme.colors.accent.0, |swatch| theme.swatch(swatch));
+            .map_or(theme.colors.accent.0, |swatch| theme.colour(swatch));
         let hovered = Self::hovered_note(ui, &layout, &rows, &notes, axis, span_len);
         tuning_readout(ui, shell, clip, &layout, &rows, &notes, hovered);
         let frame = note_lanes::Frame {

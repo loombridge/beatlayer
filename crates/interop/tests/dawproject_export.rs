@@ -388,11 +388,11 @@ fn build(spec: &Spec, folder: &Path) -> (Document, Files) {
     let (a, b, c, d) = spec.swatches;
     set.apply(Command::SetTrackColour {
         tracks: vec![keys],
-        colour: a,
+        colour: bl_model::Colour::Swatch(a),
     });
     set.apply(Command::SetTrackColour {
         tracks: vec![drums],
-        colour: b,
+        colour: bl_model::Colour::Swatch(b),
     });
 
     // MIDI: notes of every kind of expression, a controller envelope, and a
@@ -439,7 +439,7 @@ fn build(spec: &Spec, folder: &Path) -> (Document, Files) {
             (q.get() * 4, 20.0, 0.0),
         ]),
     });
-    clip.colour = Some(c);
+    clip.colour = Some(bl_model::Colour::Swatch(c));
     set.clip(
         keys,
         Ticks::ZERO,
@@ -737,7 +737,7 @@ fn build(spec: &Spec, folder: &Path) -> (Document, Files) {
     });
     set.apply(Command::SetSceneColour {
         scenes: vec![scenes[1]],
-        colour: Some(d),
+        colour: Some(bl_model::Colour::Swatch(d)),
     });
     let slot_clip = {
         let id = set.editor.new_id();
@@ -902,7 +902,7 @@ fn differences(original: &Document, imported: &Document) -> Vec<String> {
         ));
     }
     let palette = bl_model::DEFAULT_TRACK_PALETTE;
-    let rgb = |swatch: u8| bl_model::swatch_rgb(&palette, swatch);
+    let rgb = |colour: bl_model::Colour| colour.rgb(&palette);
     for (name, a) in &left {
         let b = right[name];
         let at = |what: &str| format!("{name}: {what}");
@@ -1030,7 +1030,7 @@ fn clips_differ(
     name: &str,
 ) {
     let palette = bl_model::DEFAULT_TRACK_PALETTE;
-    let rgb = |swatch: u8| bl_model::swatch_rgb(&palette, swatch);
+    let rgb = |colour: bl_model::Colour| colour.rgb(&palette);
     let mut left: Vec<&Clip> = a.clips().collect();
     let mut right: Vec<&Clip> = b.clips().collect();
     left.sort_by_key(|c| c.start);

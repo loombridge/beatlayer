@@ -838,7 +838,7 @@ impl Content for DeviceMode {
         }
         let colour = shown_track(model)
             .and_then(|t| doc.track(t))
-            .map_or(WHITE, |t| bl_model::swatch_rgb(paint.colours, t.colour()));
+            .map_or(WHITE, |t| t.colour().rgb(paint.colours));
 
         let mut state = State {
             empty: slots.is_empty(),
@@ -977,9 +977,7 @@ impl Content for DeviceMode {
         {
             let selected = model.devices.chains.get(&held.device);
             for (n, chain) in rack.chains.iter().take(CHAINS_SHOWN).enumerate() {
-                let ink = chain
-                    .colour
-                    .map_or(colour, |c| bl_model::swatch_rgb(paint.colours, c));
+                let ink = chain.colour.map_or(colour, |c| c.rgb(paint.colours));
                 let is_selected = selected == Some(&chain.id);
                 paint.screen.lower[n] = Label::new(chain.name.clone(), ink, is_selected);
                 state.chains.push(ChainState {

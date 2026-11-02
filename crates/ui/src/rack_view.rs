@@ -1810,7 +1810,7 @@ impl DeviceViewUi {
             f32::from(zone.high) + 1.0 - f32::from(zone.fade_high),
         );
         let (top, bottom) = (row.top() + 2.0, row.bottom() - 1.0);
-        let colour = chain.colour.map_or(c.control_hover.0, |n| theme.swatch(n));
+        let colour = chain.colour.map_or(c.control_hover.0, |n| theme.colour(n));
         painter.add(Shape::convex_polygon(
             vec![
                 pos2(left, bottom),
@@ -2117,7 +2117,7 @@ impl DeviceViewUi {
         let steps = info.map_or(bl_model::MACRO_STEPS_DEFAULT, |m| m.steps);
         let colour = info
             .and_then(|m| m.colour)
-            .map_or(c.accent.0, |index| theme.swatch(index));
+            .map_or(c.accent.0, |index| theme.colour(index));
         let response = if style == bl_model::MacroStyle::RadioButtons {
             // Spec: macros R23. A radio-button macro draws its steps as
             // buttons in the knob's place.
@@ -2263,23 +2263,21 @@ impl DeviceViewUi {
                     .document()
                     .device(frame.id)
                     .and_then(|rack| rack.macros.setting(item.number).colour);
-                if let Some(colour) = crate::palette::show(
+                crate::palette::show(
                     ui,
                     theme,
+                    shell,
                     ("macro-colour", frame.id, item.number),
                     current,
-                ) {
-                    invoke(
-                        events,
+                    crate::palette::Target::new(
                         "rack.set_macro_colour",
                         json!({
                             "rack": frame.id,
                             "macro_number": item.number,
-                            "colour": colour,
                         }),
-                    );
-                    ui.close();
-                }
+                    ),
+                    events,
+                );
             });
             if ui.button("None").clicked() {
                 invoke(
@@ -2798,7 +2796,7 @@ impl DeviceViewUi {
         painter.rect_filled(rects.row, theme.sizes.corner, face);
         if let Some(colour) = row.colour {
             let stripe = Rect::from_min_size(rects.row.min, vec2(3.0, rects.row.height()));
-            painter.rect_filled(stripe, 0.0, theme.swatch(colour));
+            painter.rect_filled(stripe, 0.0, theme.colour(colour));
         }
         let entered = response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter));
         if response.clicked() || response.secondary_clicked() || entered {
@@ -3392,7 +3390,7 @@ impl DeviceViewUi {
             }
             if item.row == CHAIN_COLOUR_ROW {
                 ui.label("Colour");
-                self.chain_palette(ui, theme, row, events);
+                self.chain_palette(ui, theme, shell, row, events);
                 continue;
             }
             let response =
@@ -3412,16 +3410,23 @@ impl DeviceViewUi {
     }
 
     /// The colour palette: 5 rows of 14 swatches, the chain's ticked.
-    fn chain_palette(&self, ui: &mut Ui, theme: &Theme, row: &ChainRow, events: &mut Vec<UiEvent>) {
-        if let Some(colour) = crate::palette::show(ui, theme, ("chain-colour", row.id), row.colour)
-        {
-            invoke(
-                events,
-                "chain.set_colour",
-                json!({ "chain": row.id, "colour": colour }),
-            );
-            ui.close();
-        }
+    fn chain_palette(
+        &self,
+        ui: &mut Ui,
+        theme: &Theme,
+        shell: &Shell,
+        row: &ChainRow,
+        events: &mut Vec<UiEvent>,
+    ) {
+        crate::palette::show(
+            ui,
+            theme,
+            shell,
+            ("chain-colour", row.id),
+            row.colour,
+            crate::palette::Target::new("chain.set_colour", json!({ "chain": row.id })),
+            events,
+        );
     }
 }
 

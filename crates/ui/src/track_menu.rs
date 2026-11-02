@@ -126,13 +126,18 @@ impl TrackMenus {
             // Spec: themes R16, R26. The palette colours the selected tracks.
             if item.row == "C-TRACK-015" {
                 let current = doc.track(track).map(bl_model::Track::colour);
-                if let Some(colour) = crate::palette::show(ui, theme, "track-colour", current) {
-                    events.push(UiEvent::Invoke(Invocation::new(
+                crate::palette::show(
+                    ui,
+                    theme,
+                    shell,
+                    "track-colour",
+                    current,
+                    crate::palette::Target::new(
                         "track.set_colour",
-                        json!({ "tracks": view.selected_tracks(), "colour": colour }),
-                    )));
-                    ui.close();
-                }
+                        json!({ "tracks": view.selected_tracks() }),
+                    ),
+                    events,
+                );
                 continue;
             }
             // Spec: chord-lane R5. The switch is ticked while the track follows

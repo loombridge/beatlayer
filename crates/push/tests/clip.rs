@@ -38,7 +38,7 @@ fn clip(rig: &mut Rig, data: ClipData) -> ClipId {
     let (track, scene) = (rig.tracks[0], scene(rig));
     let id: ClipId = rig.editor.new_id();
     let mut clip = Clip::new(id, Ticks::ZERO, Ticks::WHOLE, data);
-    clip.colour = Some(SWATCH);
+    clip.colour = Some(bl_model::Colour::Swatch(SWATCH));
     clip.name = "Riff".to_owned();
     rig.apply(Command::CreateSlotClip { track, scene, clip });
     id
@@ -160,7 +160,7 @@ fn an_audio_clip_shows_its_waveform() {
         Ticks::WHOLE,
         ClipData::Audio(AudioData::new(ContentHash([7; 32]))),
     );
-    audio.colour = Some(SWATCH);
+    audio.colour = Some(bl_model::Colour::Swatch(SWATCH));
     rig.apply(Command::CreateSlotClip {
         track,
         scene,

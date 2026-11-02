@@ -550,7 +550,7 @@ impl GridUi {
         let painter = ui.painter_at(cell.expand(1.0));
         let fill = match clip {
             Some(held) => theme
-                .swatch(held.colour.unwrap_or_default())
+                .colour(held.colour.unwrap_or_default())
                 .gamma_multiply(0.75),
             None => theme.colors.lane.0,
         };
@@ -1118,7 +1118,7 @@ impl GridUi {
             .document()
             .scene(scene)
             .and_then(|held| held.colour)
-            .map_or(theme.colors.lane.0, |swatch| theme.swatch(swatch));
+            .map_or(theme.colors.lane.0, |swatch| theme.colour(swatch));
         painter.rect_filled(row.name.shrink(1.0), 0.0, fill);
         // Spec: session-view R21. View > Scene Tempo and Time Signature
         // puts the scene's fields where the name was (L-SES-007); they're

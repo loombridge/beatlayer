@@ -345,7 +345,7 @@ Result: [`MpeSettingsDialog`](README.md#mpesettingsdialog).
 
 **Show Plug-In Window**. Permission: `read`. Contexts: `device-view`.
 
-Opens or closes a plug-in device's editor, as the device's title bar button does; switches unless `shown` says which. On Windows and Linux the editor opens in a window Beatlayer owns, with the plug-in's own view embedded into it; on macOS, and for a plug-in that won't embed, in a floating window of the plug-in's own. An open window follows View ▸ Plug-In Windows and Auto-Hide Plug-In Windows, which hide and show it without closing it. It changes only the view: it isn't an undo step. Returns `plugin.info`'s report.
+Opens or closes a plug-in device's editor, as the device's title bar button does; switches unless `shown` says which. On Windows and Linux the editor opens in a window Beatlayer owns, with the plug-in's own view embedded into it; on macOS, and for a plug-in that won't embed, in a floating window of the plug-in's own. An open window follows View ▸ Plug-In Windows and Auto-Hide Plug-In Windows, which hide and show it without closing it. While Multiple Plug-In Windows is off, opening a window closes the other plug-in windows unless `keep_others` is true. It changes only the view: it isn't an undo step. Returns `plugin.info`'s report.
 
 Default keys: none.
 
@@ -354,6 +354,7 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `device` | [`DeviceId`](README.md#deviceid) or null | no | The device; the selected one if left out. |
+| `keep_others` | boolean | no | Keep the other plug-in windows open while this one opens, as a Cmd-click (Ctrl-click) on the window button does. Without it, a window opened while Multiple Plug-In Windows is off closes the others. |
 | `shown` | boolean or null | no | Open (true) or close (false) the window; switches if left out. |
 
 Result: [`PluginInfo`](#plugininfo).

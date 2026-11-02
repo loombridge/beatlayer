@@ -19,7 +19,7 @@ use bl_core::midi::MidiMessage;
 use bl_core::time::{TICKS_PER_QUARTER, Ticks};
 use bl_engine::SlotState;
 use bl_model::{
-    ClipData, DEFAULT_TRACK_PALETTE, Document, RemoteMode, SceneId, TrackId, TrackKind, swatch_rgb,
+    ClipData, Colour, DEFAULT_TRACK_PALETTE, Document, RemoteMode, SceneId, TrackId, TrackKind,
 };
 use serde_json::json;
 
@@ -621,14 +621,16 @@ impl Grid {
     // Colours ------------------------------------------------------------
 
     pub(crate) fn track_colour(doc: &Document, track: TrackId) -> [u8; 3] {
-        let swatch = doc.track(track).map_or(0, bl_model::Track::colour);
-        swatch_rgb(&DEFAULT_TRACK_PALETTE, swatch)
+        let colour = doc
+            .track(track)
+            .map_or_else(Colour::default, bl_model::Track::colour);
+        colour.rgb(&DEFAULT_TRACK_PALETTE)
     }
 
     /// The colour of the clip in a slot, or of its track.
     fn clip_rgb(doc: &Document, track: TrackId, scene: SceneId) -> [u8; 3] {
         match doc.slot(track, scene).and_then(|clip| clip.colour) {
-            Some(swatch) => swatch_rgb(&DEFAULT_TRACK_PALETTE, swatch),
+            Some(colour) => colour.rgb(&DEFAULT_TRACK_PALETTE),
             None => Self::track_colour(doc, track),
         }
     }

@@ -112,6 +112,7 @@ mod operator;
 mod packages;
 mod packs;
 mod pedal;
+mod pitch_time_utilities;
 mod plugin_list;
 mod plugin_scanning;
 mod plugins;

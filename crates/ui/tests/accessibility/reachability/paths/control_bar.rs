@@ -48,6 +48,13 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ("transport.set_metronome_sound", Exception(METRONOME_MENU)),
         ("transport.set_metronome_rhythm", Exception(METRONOME_MENU)),
         (
+            "transport.play_selection",
+            Exception(Equivalent(
+                "an agent's explicit form of Space and Option-Space with a time selection, \
+                 which the keys run from the selection (transport R35, R36)",
+            )),
+        ),
+        (
             "transport.phase_nudge",
             Exception(Live(
                 "Live binds no key to Phase Nudge Down or Up, which nudge while the mouse holds \

@@ -673,6 +673,12 @@ fn every_transport_command_runs_by_id() {
     run(&mut rig, "transport.stop_recording", json!({}));
     // Spec: transport R23
     run(&mut rig, "transport.scrub", json!({ "position": 0 }));
+    // Spec: transport R35, R36
+    run(
+        &mut rig,
+        "transport.play_selection",
+        json!({ "start": 0, "end": 705_600 }),
+    );
     // Spec: transport R28
     for held in [true, false] {
         run(
@@ -724,15 +730,21 @@ fn the_bindings_follow_the_spec() {
         bindings("transport.set_recording"),
         ["S-TRANS-006 toggles recording"]
     );
-    // Spec: transport R5, R6, R8, R9, R10
-    assert_eq!(bindings("transport.play_stop"), ["S-TRANS-001"]);
+    // Spec: transport R5, R6, R8, R9, R10, R35
+    assert_eq!(
+        bindings("transport.play_stop"),
+        ["S-TRANS-001", "S-TRANS-004"]
+    );
     assert_eq!(bindings("transport.continue"), ["S-TRANS-002"]);
     assert_eq!(bindings("transport.locate"), ["S-TRANS-005 position=0"]);
     assert_eq!(
         bindings("transport.insert_marker_to_playhead"),
         ["S-ARR-033"]
     );
-    assert_eq!(bindings("transport.play_from_insert_marker"), ["S-ARR-032"]);
+    assert_eq!(
+        bindings("transport.play_from_insert_marker"),
+        ["S-ARR-032", "S-TRANS-003"]
+    );
     assert_eq!(
         bindings("transport.set_metronome_enabled"),
         ["S-TRANS-011 toggles enabled"]
@@ -1126,4 +1138,148 @@ fn a_locate_to_an_absurd_position_is_clamped_instead_of_overflowing() {
         "{:?}",
         state.position
     );
+}
+
+fn end_of_selection_run(loop_on: bool, block: usize) {
+    let tempo = TempoMap::default();
+    // The selection is bars 4 to 5 (one bar); with the loop on it holds
+    // bars 3 to 4, so the selection's end lies past the loop's.
+    let (start, end) = (BAR * 3, BAR * 4);
+    let (first, last) = (frames(&tempo, start), frames(&tempo, end));
+    let mut rig = rig(4096, None);
+    if loop_on {
+        set_loop(&mut rig, BAR * 2, BAR * 2);
+    }
+    rig.sender.transport(TransportCommand::PlaySelection {
+        start,
+        end: Some(end),
+    });
+    // Part of the way: playing, the loop switched off for the run.
+    let out = rig.render(1_000 - 1_000 % block, block);
+    let state = rig.monitor.state();
+    assert!(state.playing);
+    assert_eq!(state.loop_region, None);
+    assert!(state.loop_suspended);
+    let played = (last - first) as usize;
+    let mut out = out;
+    out.extend(rig.render(played + 5_000 - out.len(), block));
+    // Spec: transport R35. It plays from the selection's start and stops on
+    // the end's exact frame, at any block size.
+    plays_from(&out, 0..played, first);
+    stopped(&out, played..played + 5_000);
+    let state = rig.monitor.state();
+    assert!(!state.playing);
+    assert_eq!(state.position, Frames(last));
+    assert_eq!(state.insert_marker, Ticks::ZERO);
+    // The loop is back, on if it was on.
+    assert!(!state.loop_suspended);
+    assert_eq!(
+        state.loop_region,
+        loop_on.then_some(LoopRegion {
+            start: BAR * 2,
+            end: BAR * 4
+        })
+    );
+}
+
+// Spec: transport R35
+#[test]
+fn play_selection_to_its_end_stops_on_the_exact_frame_with_the_loop_off() {
+    for block in [64, 512] {
+        end_of_selection_run(false, block);
+    }
+}
+
+// Spec: transport R35
+#[test]
+fn play_selection_to_its_end_plays_through_the_loop_and_gives_it_back() {
+    for block in [64, 512] {
+        end_of_selection_run(true, block);
+    }
+}
+
+// Spec: transport R35
+#[test]
+fn a_stop_or_a_new_play_ends_the_run_and_gives_the_loop_back() {
+    let mut rig = rig(512, None);
+    set_loop(&mut rig, BAR * 2, BAR * 2);
+    let run = TransportCommand::PlaySelection {
+        start: BAR * 5,
+        end: Some(BAR * 6),
+    };
+    for command in [
+        TransportCommand::Stop,
+        TransportCommand::PlayStop,
+        TransportCommand::Play,
+    ] {
+        rig.sender.transport(run);
+        rig.render(512, 512);
+        assert!(rig.monitor.state().loop_suspended);
+        rig.sender.transport(command);
+        rig.render(512, 512);
+        let state = rig.monitor.state();
+        assert!(!state.loop_suspended, "{command:?}");
+        assert!(state.loop_region.is_some(), "{command:?}");
+        rig.sender.transport(TransportCommand::Stop);
+        rig.render(512, 512);
+    }
+}
+
+// Spec: transport R36
+#[test]
+fn play_selection_without_an_end_plays_on_past_it_and_loops_as_usual() {
+    let tempo = TempoMap::default();
+    let (start, end) = (BAR * 3, BAR * 4);
+    let (first, last) = (frames(&tempo, start), frames(&tempo, end));
+    for block in [64, 512] {
+        // Loop off: past the end, the insert marker untouched.
+        let mut rig = rig(4096, None);
+        rig.sender
+            .transport(TransportCommand::PlaySelection { start, end: None });
+        let total = (last - first) as usize + 20_000;
+        let out = rig.render(total, block);
+        plays_from(&out, 0..total, first);
+        let state = rig.monitor.state();
+        assert!(state.playing && !state.loop_suspended);
+        assert_eq!(state.insert_marker, Ticks::ZERO);
+
+        // Loop on, bars 3 to 5: from bar 4 it loops at bar 5 back to bar 3.
+        let mut rig = rig_with_loop(BAR * 2, BAR * 2);
+        rig.sender
+            .transport(TransportCommand::PlaySelection { start, end: None });
+        let (loop_start, loop_end) = (frames(&tempo, BAR * 2), frames(&tempo, BAR * 4));
+        let total = (loop_end - first) as usize + 20_000;
+        let out = rig.render(total, block);
+        plays_from(&out, 0..(loop_end - first) as usize, first);
+        plays_from(&out, (loop_end - first) as usize..total, loop_start);
+        assert!(rig.monitor.state().loop_region.is_some());
+    }
+}
+
+fn rig_with_loop(start: Ticks, length: Ticks) -> Rig {
+    let mut rig = rig(4096, None);
+    set_loop(&mut rig, start, length);
+    rig
+}
+
+// Spec: transport R36, R21
+#[test]
+fn play_selection_without_an_end_starts_from_the_song_start_time_when_there_is_one() {
+    let tempo = TempoMap::default();
+    let mut rig = rig(512, None);
+    rig.sender
+        .transport(TransportCommand::SetSongStart(Some(BAR)));
+    rig.sender.transport(TransportCommand::PlaySelection {
+        start: BAR * 3,
+        end: None,
+    });
+    let out = rig.render(2_000, 512);
+    plays_from(&out, 0..2_000, frames(&tempo, BAR));
+    // With an end, the selection's start is where it plays from.
+    rig.sender.transport(TransportCommand::PlaySelection {
+        start: BAR * 3,
+        end: Some(BAR * 4),
+    });
+    let out = rig.render(2_000, 512);
+    plays_from(&out, 0..2_000, frames(&tempo, BAR * 3));
 }

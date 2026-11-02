@@ -453,7 +453,7 @@ fn collections_names_and_hiding_survive_a_restart() {
         ids::SET_COLLECTION,
         json!({ "collection": 5, "items": [pad], "member": true }),
     );
-    let shown = |state: &BrowserState, number: u8| {
+    let shown = |state: &BrowserState, number: u32| {
         state
             .labels
             .iter()
@@ -480,7 +480,7 @@ fn collections_names_and_hiding_survive_a_restart() {
     again.set_user_library(Some(lib.clone()));
     assert!(again.wait_for_browser_index(Duration::from_secs(20)));
     let restarted = state(&mut again);
-    let label = |number: u8| {
+    let label = |number: u32| {
         restarted
             .labels
             .iter()
@@ -622,4 +622,240 @@ fn the_new_commands_are_registered_with_their_classes() {
     assert_eq!(class(ids::SET_COLLECTION), Permission::Edit);
     assert_eq!(class(ids::CLEAR_COLLECTIONS), Permission::Edit);
     assert_eq!(class(ids::REVEAL), Permission::External);
+}
+
+/// The numbers of the collections nested directly under `parent`, in the
+/// sidebar's order.
+fn nested_under(state: &BrowserState, parent: u32) -> Vec<u32> {
+    state
+        .labels
+        .iter()
+        .filter(|l| l.parent == Some(Label::Collection(parent)))
+        .filter_map(|l| match l.label {
+            Label::Collection(n) => Some(n),
+            _ => None,
+        })
+        .collect()
+}
+
+fn name_of(state: &BrowserState, number: u32) -> String {
+    state
+        .labels
+        .iter()
+        .find(|l| l.label == Label::Collection(number))
+        .unwrap()
+        .name
+        .clone()
+}
+
+// Spec: browser-tags R45, R46, R47, R48. A collection holds collections of
+// the person's own, to any depth; items go into them and show the top
+// collection's colour; choosing a collection lists the nested ones first as
+// folders that open in place, and a search covers them; they move and
+// delete, asking first when they hold items, and no file is touched.
+#[test]
+fn nested_collections_hold_items_move_and_delete_without_touching_a_file() {
+    let scratch = Scratch::new("nested");
+    let (mut shell, _, lib) = library(&scratch);
+    let pad = text(&lib.join("Pad.wav"));
+    let snare = text(&lib.join("Snare.wav"));
+
+    // R45: New Collection makes one inside Orange (2), named, numbered when
+    // taken, with its name ready to edit; one more inside that.
+    let made: BrowserState = run(&mut shell, ids::ADD_COLLECTION, json!({ "parent": 2 }));
+    assert_eq!(nested_under(&made, 2), [8]);
+    assert_eq!(name_of(&made, 8), "New Collection");
+    assert_eq!(made.renaming_label, Some(Label::Collection(8)));
+    let made: BrowserState = run(&mut shell, ids::ADD_COLLECTION, json!({ "parent": 2 }));
+    assert_eq!(nested_under(&made, 2), [8, 9]);
+    assert_eq!(name_of(&made, 9), "New Collection 2");
+    run::<BrowserState>(
+        &mut shell,
+        ids::RENAME_LABEL,
+        json!({ "label": { "collection": 8 }, "name": "Kicks" }),
+    );
+    let made: BrowserState = run(
+        &mut shell,
+        ids::ADD_COLLECTION,
+        json!({ "parent": 8, "name": "Deep" }),
+    );
+    assert_eq!(nested_under(&made, 8), [10], "to any depth");
+    assert_eq!(name_of(&made, 8), "Kicks");
+    assert!(shell.can_invoke(ids::ADD_COLLECTION, &json!({ "parent": 3 })));
+    assert!(
+        shell
+            .run(ids::ADD_COLLECTION, json!({ "parent": 99 }))
+            .is_err()
+    );
+
+    // R46: items go in by `browser.set_collection`; a row shows the colour of
+    // the collection at the top, and names the nested one it is in.
+    let put: BrowserState = run(
+        &mut shell,
+        ids::SET_COLLECTION,
+        json!({ "collection": 10, "items": [pad], "member": true }),
+    );
+    assert_eq!(
+        collections_of(&put, "Pad.wav"),
+        Vec::<u8>::new(),
+        "not listed under All"
+    );
+    let orange = open_collection(&mut shell, 2);
+    // R47: the nested collections first, as folders, then nothing is in
+    // Orange itself.
+    // New Collection opened the collection it was made in, so Deep shows.
+    assert_eq!(names(&orange), ["Kicks", "Deep", "New Collection 2"]);
+    assert!(orange.rows.iter().all(|r| r.kind == ItemKind::Folder));
+    assert_eq!(orange.rows[0].path, "collection:8");
+    // Folders open in place, through `browser.open_folder`.
+    let opened: BrowserState = run(
+        &mut shell,
+        ids::OPEN_FOLDER,
+        json!({ "path": "collection:10", "open": true }),
+    );
+    assert_eq!(
+        names(&opened),
+        ["Kicks", "Deep", "Pad.wav", "New Collection 2"]
+    );
+    assert_eq!(opened.rows[2].depth, 2);
+    assert_eq!(
+        opened.rows[2].collections,
+        [2],
+        "the top collection's colour"
+    );
+    assert_eq!(opened.rows[2].nested, [10]);
+    // A search under Orange covers the nested collections.
+    let found: BrowserState = run(&mut shell, ids::SEARCH, json!({ "query": "pad" }));
+    assert_eq!(names(&found), ["Pad.wav"]);
+    run::<BrowserState>(&mut shell, ids::SEARCH, json!({ "query": "" }));
+    // The keys 1 to 7 stay the seven's own: a nested one isn't a key.
+    assert!(
+        shell
+            .run(
+                ids::SET_COLLECTION,
+                json!({ "collection": 0, "items": [snare] })
+            )
+            .is_err()
+    );
+
+    // R45, R48: move Deep (10) to Orange's end, then Kicks into Yellow (3),
+    // and refuse a move into itself or one of its own.
+    run::<BrowserState>(&mut shell, ids::OPEN_PLACE, json!({ "label": "all" }));
+    let moved: BrowserState = run(
+        &mut shell,
+        ids::MOVE_COLLECTION,
+        json!({ "collection": 10, "parent": 2, "index": 0 }),
+    );
+    assert_eq!(nested_under(&moved, 2), [10, 8, 9]);
+    assert!(nested_under(&moved, 8).is_empty());
+    let moved: BrowserState = run(
+        &mut shell,
+        ids::MOVE_COLLECTION,
+        json!({ "collection": 8, "parent": 3 }),
+    );
+    assert_eq!(nested_under(&moved, 3), [8]);
+    assert!(
+        shell
+            .run(
+                ids::MOVE_COLLECTION,
+                json!({ "collection": 8, "parent": 8 })
+            )
+            .is_err()
+    );
+    run::<BrowserState>(
+        &mut shell,
+        ids::MOVE_COLLECTION,
+        json!({ "collection": 9, "parent": 8 }),
+    );
+    assert!(
+        shell
+            .run(
+                ids::MOVE_COLLECTION,
+                json!({ "collection": 8, "parent": 9 })
+            )
+            .is_err()
+    );
+    assert!(
+        shell
+            .run(
+                ids::MOVE_COLLECTION,
+                json!({ "collection": 3, "parent": 2 })
+            )
+            .is_err()
+    );
+
+    // R47: Delete refuses while the collections hold items, then removes
+    // the collection and the ones in it, leaving the file where it is.
+    assert!(
+        shell
+            .run(ids::DELETE_COLLECTION, json!({ "collection": 10 }))
+            .is_err()
+    );
+    let deleted: BrowserState = run(
+        &mut shell,
+        ids::DELETE_COLLECTION,
+        json!({ "collection": 10, "confirm": true }),
+    );
+    assert!(nested_under(&deleted, 2).is_empty());
+    assert!(Path::new(&pad).is_file(), "the file stays");
+    let kicks_gone: BrowserState = run(
+        &mut shell,
+        ids::DELETE_COLLECTION,
+        json!({ "collection": 8 }),
+    );
+    assert!(
+        nested_under(&kicks_gone, 3).is_empty(),
+        "empty ones go without asking"
+    );
+    assert!(
+        shell
+            .run(ids::DELETE_COLLECTION, json!({ "collection": 3 }))
+            .is_err()
+    );
+    assert!(
+        shell
+            .run(ids::DELETE_COLLECTION, json!({ "collection": 8 }))
+            .is_err()
+    );
+}
+
+// Spec: browser-tags R45, R46, R5. Nested collections and what is in them
+// are kept between launches, names included.
+#[test]
+fn nested_collections_survive_a_restart() {
+    let scratch = Scratch::new("nested-restart");
+    let (mut shell, config, lib) = library(&scratch);
+    let pad = text(&lib.join("Pad.wav"));
+    run::<BrowserState>(
+        &mut shell,
+        ids::ADD_COLLECTION,
+        json!({ "parent": 5, "name": "Layers" }),
+    );
+    run::<BrowserState>(
+        &mut shell,
+        ids::ADD_COLLECTION,
+        json!({ "parent": 8, "name": "Top" }),
+    );
+    run::<BrowserState>(
+        &mut shell,
+        ids::SET_COLLECTION,
+        json!({ "collection": 9, "items": [pad], "member": true }),
+    );
+    shell.browser_view().flush_database();
+
+    let mut again = shell_on(&config);
+    again.set_user_library(Some(lib));
+    assert!(again.wait_for_browser_index(Duration::from_secs(20)));
+    let restarted = state(&mut again);
+    assert_eq!(nested_under(&restarted, 5), [8]);
+    assert_eq!(nested_under(&restarted, 8), [9]);
+    assert_eq!(name_of(&restarted, 9), "Top");
+    let blue = open_collection(&mut again, 5);
+    assert_eq!(names(&blue), ["Layers"]);
+    assert_eq!(
+        run::<BrowserState>(&mut again, ids::SEARCH, json!({ "query": "pad" }))
+            .rows
+            .len(),
+        1
+    );
 }

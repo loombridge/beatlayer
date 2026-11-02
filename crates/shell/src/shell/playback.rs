@@ -284,12 +284,13 @@ impl Shell {
             self.clip_view.note_follow(false);
         }
         let brace = self.editor.document().settings().arrangement_loop;
+        self.loop_suspended = engine.loop_suspended;
         self.set_transport(TransportView {
             playing: engine.playing,
             position: engine.position,
             loop_start: brace.start,
             loop_length: brace.length,
-            loop_on: brace.enabled,
+            loop_on: brace.enabled && !engine.loop_suspended,
         });
         // Spec: control-bar-transport R15. A move of the engine's insert
         // marker (the position fields, Home, a second Stop, an agent)
@@ -513,6 +514,14 @@ impl Shell {
             })
     }
 
+    /// Whether a Play Selection to the selection's end plays, so the Loop
+    /// switch shows off while the set's loop stays on (the transport spec,
+    /// R35).
+    #[must_use]
+    pub fn loop_suspended(&self) -> bool {
+        self.loop_suspended
+    }
+
     /// Whether the transport is currently playing.
     #[must_use]
     pub fn is_playing(&mut self) -> bool {
@@ -523,6 +532,29 @@ impl Shell {
     #[must_use]
     pub fn time_selection(&self) -> Option<(bl_core::time::Ticks, bl_core::time::Ticks)> {
         self.arrangement.time_selection()
+    }
+
+    /// What the engine is sent for `command` while the Arrangement has a time
+    /// selection: Play, and Play/Stop while stopped, start from the
+    /// selection's start, and Play From Insert Marker (Option-Space) plays
+    /// the selection and stops at its end (the transport spec, R35).
+    fn over_time_selection(
+        &mut self,
+        command: bl_engine::TransportCommand,
+    ) -> bl_engine::TransportCommand {
+        use bl_engine::TransportCommand::{Play, PlayFromInsertMarker, PlaySelection, PlayStop};
+        let Some((start, end)) = self.time_selection() else {
+            return command;
+        };
+        match command {
+            Play => PlaySelection { start, end: None },
+            PlayStop if !self.is_playing() => PlaySelection { start, end: None },
+            PlayFromInsertMarker => PlaySelection {
+                start,
+                end: Some(end),
+            },
+            _ => command,
+        }
     }
 
     /// Runs the commands that reach the engine's transport.
@@ -540,6 +572,7 @@ impl Shell {
                     message: error.to_string(),
                 }
             })?;
+        let command = self.over_time_selection(command);
         self.send_transport(command)
             .map_err(|reason| ShellError::Unavailable {
                 command: id.to_owned(),

@@ -238,6 +238,17 @@ pub(crate) const LABELS: Reason = Equivalent(
          Label Order item, and dragging a label (the browser tags spec, R24 to R26)",
 );
 
+pub(crate) const NESTED_COLLECTIONS: Reason = Equivalent(
+    "the browser's sidebar: a collection's context menu (New Collection) and a nested \
+         collection's (Rename, New Collection, Delete, which asks first when it holds items), \
+         its fold triangle, and dragging its label (the browser tags spec, R45 to R47)",
+);
+
+pub(crate) const HIDE_PLUG_IN: Reason = Equivalent(
+    "a plug-in row's context menu in the browser, which ends with Hide Plug-In or Show \
+         Plug-In (the browser tags spec, R41)",
+);
+
 pub(crate) const COLUMNS: Reason = Equivalent(
     "the content pane's header row: the Content Options menu, a column's name sorting by it, \
          and dragging a column's name (the browser tags spec, R27 and R28)",

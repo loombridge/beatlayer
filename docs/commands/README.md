@@ -16274,6 +16274,8 @@ One row of the content pane.
 | `details` | [`ItemDetails`](#itemdetails) or null | no | What the optional columns show for it, left out while none shows (spec: browser-tags R27). |
 | `folder` | string or null | no | In search results, the folder it's in, relative to its place. |
 | `format` | [`PluginFormat`](#pluginformat) or null | no | For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11). |
+| `hidden` | boolean | no | For a plug-in, whether it is hidden, which the row draws dimmed while Show Hidden Plug-Ins is on (spec: browser-tags R43); left out otherwise. |
+| `nested` | array of integer, at least 0 | no | The collections of the person's own it is in, by their numbers (8 and up); left out while it is in none (spec: browser-tags R46, R48). |
 
 <details><summary>JSON Schema</summary>
 
@@ -16338,6 +16340,10 @@ One row of the content pane.
       ],
       "description": "For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11)."
     },
+    "hidden": {
+      "description": "For a plug-in, whether it is hidden, which the row draws dimmed while Show Hidden Plug-Ins is on (spec: browser-tags R43); left out otherwise.",
+      "type": "boolean"
+    },
     "kind": {
       "$ref": "#/$defs/ItemKind",
       "description": "What it is."
@@ -16345,6 +16351,15 @@ One row of the content pane.
     "name": {
       "description": "Its name, as the Name column shows it.",
       "type": "string"
+    },
+    "nested": {
+      "description": "The collections of the person's own it is in, by their numbers (8 and up); left out while it is in none (spec: browser-tags R46, R48).",
+      "items": {
+        "format": "uint32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
     },
     "open": {
       "default": false,
@@ -16995,7 +17010,7 @@ One of:
 
 ### `Label`
 
-A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{"folder": "/its/path"}`, or a saved label, as `{"saved": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{"collection": 3}`.
+A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{"folder": "/its/path"}`, or a saved label, as `{"saved": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{"collection": 3}`, or a collection of the person's own inside one, numbered from 8.
 
 One of:
 
@@ -17016,13 +17031,13 @@ One of:
 - `"current_project"`: The open set's project folder.
 - an object with `folder` (string): A folder the person added to Places, by its path.
 - an object with `saved` (integer): A saved label, by its ID (spec: browser-tags R24).
-- an object with `collection` (integer from 0 to 255): A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34).
+- an object with `collection` (integer, at least 0): A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34); a collection inside another is numbered from 8 (R45).
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{\"folder\": \"/its/path\"}`, or a saved label, as `{\"saved\": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{\"collection\": 3}`.",
+  "description": "A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{\"folder\": \"/its/path\"}`, or a saved label, as `{\"saved\": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{\"collection\": 3}`, or a collection of the person's own inside one, numbered from 8.",
   "oneOf": [
     {
       "const": "all",
@@ -17128,11 +17143,10 @@ One of:
     },
     {
       "additionalProperties": false,
-      "description": "A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34).",
+      "description": "A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34); a collection inside another is numbered from 8 (R45).",
       "properties": {
         "collection": {
-          "format": "uint8",
-          "maximum": 255,
+          "format": "uint32",
           "minimum": 0,
           "type": "integer"
         }
@@ -17160,6 +17174,8 @@ A label as the sidebar lists it.
 | `available` | boolean | yes | Whether its folder can be read now (a place) or it has content (a Library label). A missing folder is listed greyed, as in Live. |
 | `shown` | boolean | yes | Whether the sidebar shows it: the person can hide Library labels and saved labels (spec: browser-tags R26). |
 | `icon` | string or null | no | The icon the person gave it, from [`LABEL_ICONS`] (spec: browser-tags R25). |
+| `open` | boolean | no | For a collection that holds others, whether its list is open in the sidebar. |
+| `parent` | [`Label`](#label) or null | no | For a collection inside another, the one it is in (spec: browser-tags R45, R48). |
 | `path` | string or null | no | For a place, its folder; `null` for Current Project while the set has never been saved. |
 
 <details><summary>JSON Schema</summary>
@@ -17186,6 +17202,21 @@ A label as the sidebar lists it.
     "name": {
       "description": "Its name.",
       "type": "string"
+    },
+    "open": {
+      "description": "For a collection that holds others, whether its list is open in the sidebar.",
+      "type": "boolean"
+    },
+    "parent": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Label"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "For a collection inside another, the one it is in (spec: browser-tags R45, R48)."
     },
     "path": {
       "description": "For a place, its folder; `null` for Current Project while the set has never been saved.",
@@ -24920,6 +24951,37 @@ The Pitch filter: pitch classes C to B.
     "classes"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `PitchUnit`
+
+What a step of a pitch utility is (Spec: pitch-and-time-utilities R2).
+
+One of:
+
+- `"steps"`: A step of the clip's scale in Scale Mode, a semitone otherwise, and a Drum Rack's key on a Drum Rack track.
+- `"semitones"`: A semitone.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a step of a pitch utility is (Spec: pitch-and-time-utilities R2).",
+  "oneOf": [
+    {
+      "const": "steps",
+      "description": "A step of the clip's scale in Scale Mode, a semitone otherwise, and a Drum Rack's key on a Drum Rack track.",
+      "type": "string"
+    },
+    {
+      "const": "semitones",
+      "description": "A semitone.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -39934,7 +39996,7 @@ What `transport.state` returns: the transport and the Control Bar's transport se
 | `arrangement_position` | string | yes | What the Control Bar's Arrangement Position fields show, as bar.beat.sixteenth by the song's time signatures: the play position while the song plays, and the insert marker while it's stopped. |
 | `loop_start` | [`Ticks`](#ticks) | yes | Where the Arrangement loop brace starts, in ticks. |
 | `loop_length` | [`Ticks`](#ticks) | yes | How long the loop brace is, in ticks. |
-| `loop_on` | boolean | yes | Whether the Arrangement Loop switch is on. |
+| `loop_on` | boolean | yes | Whether the Arrangement Loop switch is on. While a Play Selection that stops at the selection's end plays, it reads off (the transport spec, R35). |
 | `loop_start_position` | string | yes | The loop brace's start as the Loop Start fields show it, as bar.beat.sixteenth. |
 | `loop_length_bars` | string | yes | The brace's length as the Loop Length fields show it: bars, beats, and sixteenths counted from 0, such as `4.0.0` for four bars. |
 | `tempo` | number | yes | The tempo where the Arrangement Position fields are, in quarter notes per minute, as the Tempo field shows it. |
@@ -40039,7 +40101,7 @@ What `transport.state` returns: the transport and the Control Bar's transport se
       "type": "string"
     },
     "loop_on": {
-      "description": "Whether the Arrangement Loop switch is on.",
+      "description": "Whether the Arrangement Loop switch is on. While a Play Selection that stops at the selection's end plays, it reads off (the transport spec, R35).",
       "type": "boolean"
     },
     "loop_start": {
@@ -40885,6 +40947,127 @@ What `settings.set_user_library` returns: the User Library in use afterwards.
   },
   "required": [
     "path"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `UtilitiesState`
+
+The Pitch and Time Utilities panel's values and what it shows.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `interval` | integer | yes | Interval Size. |
+| `interval_range` | pair of integer and integer | yes | The least and the most Interval Size can be set to with the notes it would copy now: those that keep every copy on the keyboard. |
+| `stretch` | number | yes | The Stretch knob's position. |
+| `stretch_factor` | number | yes | The factor that position is, from 0.1 to 10. |
+| `duration` | string | yes | Duration. |
+| `humanize_amount` | integer from 0 to 255 | yes | Humanize Amount, in percent. |
+| `scale` | string or null | yes | The root and name of the clip's scale; `null` while Scale Mode is off. |
+| `fit_to_scale` | boolean | yes | Whether Fit to Scale is available: Scale Mode is on. |
+| `time_range` | boolean | yes | Whether Duration's Time Range is available: there is a time selection. |
+| `lowest` | integer or null | yes | The lowest key of the notes the utilities act on now. |
+| `highest` | integer or null | yes | The highest key of the notes the utilities act on now. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Pitch and Time Utilities panel's values and what it shows.",
+  "properties": {
+    "duration": {
+      "description": "Duration.",
+      "type": "string"
+    },
+    "fit_to_scale": {
+      "description": "Whether Fit to Scale is available: Scale Mode is on.",
+      "type": "boolean"
+    },
+    "highest": {
+      "description": "The highest key of the notes the utilities act on now.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "humanize_amount": {
+      "description": "Humanize Amount, in percent.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "interval": {
+      "description": "Interval Size.",
+      "format": "int32",
+      "type": "integer"
+    },
+    "interval_range": {
+      "description": "The least and the most Interval Size can be set to with the notes it would copy now: those that keep every copy on the keyboard.",
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "format": "int32",
+          "type": "integer"
+        },
+        {
+          "format": "int32",
+          "type": "integer"
+        }
+      ],
+      "type": "array"
+    },
+    "lowest": {
+      "description": "The lowest key of the notes the utilities act on now.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "scale": {
+      "description": "The root and name of the clip's scale; `null` while Scale Mode is off.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "stretch": {
+      "description": "The Stretch knob's position.",
+      "format": "double",
+      "type": "number"
+    },
+    "stretch_factor": {
+      "description": "The factor that position is, from 0.1 to 10.",
+      "format": "double",
+      "type": "number"
+    },
+    "time_range": {
+      "description": "Whether Duration's Time Range is available: there is a time selection.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "interval",
+    "interval_range",
+    "stretch",
+    "stretch_factor",
+    "duration",
+    "humanize_amount",
+    "scale",
+    "fit_to_scale",
+    "time_range",
+    "lowest",
+    "highest"
   ],
   "type": "object"
 }

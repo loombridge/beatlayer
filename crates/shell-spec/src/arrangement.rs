@@ -401,6 +401,12 @@ pub struct ArrangementState {
     /// any: Delete deletes it and Cmd-R types its signature.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_time_signature: Option<Ticks>,
+    /// Whether the chord lane shows (WP-6.48; the chord lane spec, R1).
+    #[serde(default)]
+    pub chord_lane: bool,
+    /// The selected chord region (WP-6.48), if any: Delete deletes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_chord_region: Option<bl_model::ChordRegionId>,
     /// The selected fade handle (WP-6.51), if any: Delete deletes its fade.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_fade: Option<FadeHandleState>,

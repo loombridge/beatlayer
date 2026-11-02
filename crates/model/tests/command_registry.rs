@@ -10,15 +10,15 @@ use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::registry::{self, RunError};
 use bl_model::{
     ArrangementLoop, AudioData, AutomationTarget, BeatsUpdate, Breakpoint, Chain, ChainId, Change,
-    ChangeSet, Channel, Clip, ClipData, ClipEdge, ClipId, ClipLaunch, Command, ComplexProUpdate,
-    ContentHash, CountIn, CrossfadeAssign, Device, DeviceId, DeviceKind, DeviceRole, EditError,
-    Editor, ExternalPort, FileBeats, FollowAction, FollowActions, FollowPatch, GrooveBase,
-    GrooveId, GrooveNote, HardwareLatency, Input, LaunchMode, LaunchQuantization, Locator,
-    LocatorId, MacroStyle, MacroTarget, MetronomeRhythm, MetronomeSound, MidiData, MidiTo,
-    MixerParam, ModelError, Monitor, NewTakeLane, Note, Output, PanMode, ParamId, PluginFormat,
-    Preserve, RackKind, RecordQuantization, SceneId, SendTap, SongStart, TakeClip, TakeClipData,
-    TakeLaneId, Tap, TonesUpdate, TrackDelay, TrackId, TrackKind, Tuning, TuningNote, WarpFrom,
-    WarpMode, WarpPoint,
+    ChangeSet, Channel, ChordRegion, ChordRegionId, Clip, ClipData, ClipEdge, ClipId, ClipLaunch,
+    Command, ComplexProUpdate, ContentHash, CountIn, CrossfadeAssign, Device, DeviceId, DeviceKind,
+    DeviceRole, EditError, Editor, ExternalPort, FileBeats, FollowAction, FollowActions,
+    FollowPatch, GrooveBase, GrooveId, GrooveNote, HardwareLatency, Input, LaunchMode,
+    LaunchQuantization, Locator, LocatorId, MacroStyle, MacroTarget, MetronomeRhythm,
+    MetronomeSound, MidiData, MidiTo, MixerParam, ModelError, Monitor, NewTakeLane, Note, Output,
+    PanMode, ParamId, PluginFormat, Preserve, RackKind, RecordQuantization, SceneId, SendTap,
+    SongStart, TakeClip, TakeClipData, TakeLaneId, Tap, TonesUpdate, TrackDelay, TrackId,
+    TrackKind, Tuning, TuningNote, WarpFrom, WarpMode, WarpPoint,
 };
 use serde_json::{Value, json};
 
@@ -70,7 +70,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        280,
+        285,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -110,7 +110,7 @@ fn every_document_command_is_registered() {
              set_global_groove_amount, set_auto_load_groove and set_clip_groove, WP-6.9 \
              five for tunings: set_tuning, remove_tuning, set_tuning_reference, \
              set_tuning_range and set_tuning_bypass, WP-6.9b the two for tunings on plug-ins and controllers: set_plugin_tuning and set_tuning_layout, WP-6.22 move_clip_to_lane, and WP-6.24b \
-             the two for time: insert_time and delete_time, and WP-6.23 set_track_links, and WP-6.30b the five for colours: set_track_colour, assign_colour_to_clips, assign_colour_to_grouped, set_clip_colour and set_scene_colour, and WP-6.57 the two for clearing envelopes: clear_track_automation and clear_device_automation, and WP-6.58 the four for info text: set_track_info_text, set_clip_info_text, set_scene_info_text and set_device_info_text, and WP-7.1 set_remote_mappings, and WP-7.32 set_record_quantization, and WP-7.33 set_device_region, and WP-7.17 set_cv_calibration, and WP-8.8 set_device_wavetable, and the copy fixes set_automation_enabled, and WP-7.21 set_chain_push_colour, and WP-7.22 set_pad_layout, and WP-8.4 the two for modulation routes: set_mod_route and clear_mod_route, and WP-9.10 set_similarity_reference"
+             the two for time: insert_time and delete_time, and WP-6.23 set_track_links, and WP-6.30b the five for colours: set_track_colour, assign_colour_to_clips, assign_colour_to_grouped, set_clip_colour and set_scene_colour, and WP-6.57 the two for clearing envelopes: clear_track_automation and clear_device_automation, and WP-6.58 the four for info text: set_track_info_text, set_clip_info_text, set_scene_info_text and set_device_info_text, and WP-7.1 set_remote_mappings, and WP-7.32 set_record_quantization, and WP-7.33 set_device_region, and WP-7.17 set_cv_calibration, and WP-8.8 set_device_wavetable, and the copy fixes set_automation_enabled, and WP-7.21 set_chain_push_colour, and WP-7.22 set_pad_layout, and WP-8.4 the two for modulation routes: set_mod_route and clear_mod_route, and WP-9.10 set_similarity_reference, and WP-6.48 the five for the chord lane: add_chord_region, move_chord_region, set_chord_region, delete_chord_region and set_follow_chord_lane"
     );
 
     for op in &ops {
@@ -2550,6 +2550,35 @@ fn every_command_runs_by_id() {
     );
     agent.run("song.delete_locator", json!({ "locator": chorus }));
 
+    // The chord lane (WP-6.48): a region drawn, moved, set, deleted, and a
+    // MIDI track's switch.
+    let verse: ChordRegionId = agent.new_id();
+    agent.run(
+        "chord_lane.add_region",
+        json!({ "region": { "id": verse, "start": bar, "end": bar * 2 } }),
+    );
+    agent.run(
+        "chord_lane.move_region",
+        json!({ "region": verse, "start": bar * 2, "end": bar * 4 }),
+    );
+    agent.run(
+        "chord_lane.set_region",
+        json!({ "region": verse, "enabled": true, "root": 2, "name": "dorian", "transpose": 2 }),
+    );
+    agent.run(
+        "track.set_follow_chord_lane",
+        json!({ "track": bass, "follow": true }),
+    );
+    assert!(
+        agent
+            .editor
+            .document()
+            .track(bass)
+            .unwrap()
+            .follow_chord_lane()
+    );
+    agent.run("chord_lane.delete_region", json!({ "region": verse }));
+
     // Time (WP-6.24b): opening a bar of silence on every track at 1.1.1, then
     // closing a quarter note after it.
     let before = agent.editor.document().clone();
@@ -2655,6 +2684,7 @@ fn schemas_match_what_commands_serialise() {
     let scene = SceneId(fresh());
     let scene_copy = SceneId(fresh());
     let locator = LocatorId(fresh());
+    let region = ChordRegionId(fresh());
     let groove = GrooveId(fresh());
     let notes = MidiData::new([Note::new(127, Ticks::ZERO, Ticks::QUARTER, 1)]);
     let mut plugin = Device::new(
@@ -2727,6 +2757,41 @@ fn schemas_match_what_commands_serialise() {
             "song.add_locator",
             Command::AddLocator {
                 locator: Locator::new(locator, Ticks::WHOLE, "Intro".to_owned()),
+            },
+        ),
+        (
+            "chord_lane.add_region",
+            Command::AddChordRegion {
+                region: ChordRegion::new(region, Ticks::WHOLE, Ticks::WHOLE * 2),
+            },
+        ),
+        (
+            "chord_lane.move_region",
+            Command::MoveChordRegion {
+                region,
+                start: Ticks::WHOLE * 2,
+                end: Ticks::WHOLE * 3,
+            },
+        ),
+        (
+            "chord_lane.set_region",
+            Command::SetChordRegion {
+                region,
+                enabled: Some(true),
+                root: Some(2),
+                name: Some("dorian".to_owned()),
+                transpose: Some(2),
+            },
+        ),
+        (
+            "chord_lane.delete_region",
+            Command::DeleteChordRegion { region },
+        ),
+        (
+            "track.set_follow_chord_lane",
+            Command::SetFollowChordLane {
+                track,
+                follow: true,
             },
         ),
         (

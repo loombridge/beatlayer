@@ -114,6 +114,15 @@ pub const IMP_12: &str = "IMP-12";
 /// menus.md's Live rows, though the reference names it IMP-01.
 pub const IMP_01: &str = "IMP-01";
 
+/// The row of Beatlayer's own Chord Lane (IMP-33), after Overview in the View
+/// menu: an improvement, so not one of menus.md's Live rows, though the
+/// reference names it IMP-33.
+pub const IMP_33: &str = "IMP-33";
+
+/// The row of Beatlayer's own Follow Chord Lane (IMP-33), in a MIDI track's
+/// menu after Save as Default MIDI Track: not one of menus.md's Live rows.
+pub const IMP_33_FOLLOW: &str = "IMP-33-follow";
+
 /// The row of Beatlayer's own Devices section switch (IMP-25), straight
 /// after Performance Impact in the Mixer Controls submenu: an improvement,
 /// so not one of menus.md's Live rows, though the reference names it

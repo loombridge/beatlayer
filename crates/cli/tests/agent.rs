@@ -1452,7 +1452,7 @@ fn with_result_format_toon_a_long_table_is_toon_and_anything_else_stays_compact_
     assert!(plain.text.starts_with("{\"tracks\":"), "{}", plain.text);
     assert!(
         long.text
-            .starts_with("tracks:\n  items[11]{clips,colour,delay.unit,delay.value,devices,frozen,group,id,keep_monitoring_latency,kind,mixer.arm,mixer.arm_by_selection,mixer.mute,mixer.pan,mixer.pan_mode,mixer.solo,mixer.split_left,mixer.split_right,mixer.volume,mixer.volume_db,name,tracks_inside,tuning_bypass,tuning_layout.layout}:"),
+            .starts_with("tracks:\n  items[11]{clips,colour,delay.unit,delay.value,devices,follow_chord_lane,frozen,group,id,keep_monitoring_latency,kind,mixer.arm,mixer.arm_by_selection,mixer.mute,mixer.pan,mixer.pan_mode,mixer.solo,mixer.split_left,mixer.split_right,mixer.volume,mixer.volume_db,name,tracks_inside,tuning_bypass,tuning_layout.layout}:"),
         "{}",
         long.text
     );

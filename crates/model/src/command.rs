@@ -30,7 +30,7 @@ use crate::follow::FollowPatch;
 use crate::groove::{GLOBAL_AMOUNT_MAX, Groove, GrooveBase, check_percent};
 use crate::ids::{
     ChainId, ChordRegionId, ClipId, ContentHash, DeviceId, GrooveId, LinkGroupId, LocatorId,
-    ParamId, SceneId, TakeLaneId, TrackId,
+    ParamId, SceneId, SectionId, TakeLaneId, TrackId,
 };
 use crate::launch::{ClipLaunch, LaunchMode, LaunchQuantization};
 use crate::layers::{
@@ -46,6 +46,7 @@ use crate::record_quantization::RecordQuantization;
 use crate::sample_edits::{SampleEdit, SampleRange, SampleRegion};
 use crate::scale::{Scale, ScaleName};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
+use crate::section::SongSection;
 use crate::shared::Shared;
 use crate::track::{
     Channel, CrossfadeAssign, Input, MidiTo, Mixer, Monitor, Output, PanMode, SendTap, Tap, Track,
@@ -350,6 +351,42 @@ pub enum Command {
         /// issues them.
         #[serde(default)]
         clips: Vec<ClipId>,
+    },
+    /// Adds a section to the arranger track (the arranger track spec, R3 and
+    /// R5). A section with no name of its own is named "Section" and the
+    /// next whole number.
+    AddSection {
+        /// The section, with a new ID.
+        section: SongSection,
+    },
+    /// Removes a section and nothing else: the tracks stay as they are (R11).
+    RemoveSection {
+        /// The section.
+        section: SectionId,
+    },
+    /// Changes a section's name, colour, start or length, leaving what is
+    /// left out as it was (R7). The tracks stay as they are.
+    EditSection {
+        /// The section.
+        section: SectionId,
+        /// The new name.
+        #[serde(default)]
+        name: Option<String>,
+        /// The new colour, a swatch from 0 to 69.
+        #[serde(default)]
+        colour: Option<u8>,
+        /// The new start: 0 (1.1.1) or later.
+        #[serde(default)]
+        start: Option<Ticks>,
+        /// The new length: more than 0. A span that would overlap another
+        /// section is refused.
+        #[serde(default)]
+        length: Option<Ticks>,
+    },
+    /// Shows or hides the arranger track (R1). It is no undo step.
+    SetArrangerTrack {
+        /// Whether the track shows.
+        shown: bool,
     },
     /// Switches Punch-In on or off: with it on, recording into the
     /// Arrangement starts at the loop brace's start, whether or not the Loop
@@ -3040,6 +3077,10 @@ impl Command {
             Self::SetSongStart { .. } => "Set Song Start Time",
             Self::InsertTime { .. } => "Insert Silence",
             Self::DeleteTime { .. } => "Delete Time",
+            Self::AddSection { .. } => "Add Section",
+            Self::RemoveSection { .. } => "Remove Section",
+            Self::EditSection { .. } => "Edit Section",
+            Self::SetArrangerTrack { .. } => "Arranger Track",
             Self::SetPunchIn { .. } => "Punch-In",
             Self::SetPunchOut { .. } => "Punch-Out",
             Self::SetMetronomeEnabled { .. } => "Metronome",
@@ -3385,7 +3426,10 @@ impl Command {
     /// Nor is the pad layout a controller plays the scale in.
     #[must_use]
     pub fn records_undo(&self) -> bool {
-        !matches!(self, Self::SetCueMode { .. } | Self::SetPadLayout { .. })
+        !matches!(
+            self,
+            Self::SetCueMode { .. } | Self::SetPadLayout { .. } | Self::SetArrangerTrack { .. }
+        )
     }
 
     /// The undo step's name for this command run on `before`: the same as
@@ -3477,6 +3521,7 @@ impl Command {
             Self::GroupDevices { rack, .. } => rack.ids(),
             Self::CreateScene { id, .. } => vec![id.0],
             Self::AddLocator { locator } => vec![locator.id.0],
+            Self::AddSection { section } => vec![section.id.0],
             Self::AddChordRegion { region } => vec![region.id.0],
             Self::InsertTime { clips, .. } | Self::DeleteTime { clips, .. } => {
                 clips.iter().map(|clip| clip.0).collect()
@@ -3575,6 +3620,19 @@ impl Document {
             }
             Command::InsertTime { at, length, clips } => self.insert_time(*at, *length, clips),
             Command::DeleteTime { start, end, clips } => self.delete_time(*start, *end, clips),
+            Command::AddSection { section } => self.add_section(section.clone()),
+            Command::RemoveSection { section } => self.remove_section(*section),
+            Command::EditSection {
+                section,
+                name,
+                colour,
+                start,
+                length,
+            } => self.edit_section(*section, name.as_deref(), *colour, *start, *length),
+            Command::SetArrangerTrack { shown } => {
+                self.settings.arranger_track = *shown;
+                Ok(())
+            }
             Command::AddLocator { locator } => self.add_locator(locator.clone()),
             // Spec: chord-lane R2 to R5.
             Command::AddChordRegion { region } => self.add_chord_region(*region),
@@ -9188,7 +9246,7 @@ impl Document {
         Ok(())
     }
 
-    fn check_fresh(&self, id: Id) -> Result<(), ModelError> {
+    pub(crate) fn check_fresh(&self, id: Id) -> Result<(), ModelError> {
         if self.contains(id) {
             Err(ModelError::IdInUse(id))
         } else {

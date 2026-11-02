@@ -614,6 +614,20 @@ impl Shell {
                     path: written.to_string_lossy().into_owned(),
                 }))
             }
+            plugin_ids::HIDE => {
+                // Spec: browser-tags R41.
+                let plugin_ids::HidePluginsArgs { keys, hidden } = Self::args(id, args)?;
+                for key in keys {
+                    if hidden {
+                        self.prefs.hidden_plugins.insert(key);
+                    } else {
+                        self.prefs.hidden_plugins.remove(&key);
+                    }
+                }
+                self.save_preferences();
+                self.publish_plugins();
+                Ok(to_value(&self.plugin_settings()))
+            }
             plugin_ids::SETTINGS => {
                 let plugin_ids::PluginSettingsArgs {
                     hidden,
@@ -653,7 +667,7 @@ impl Shell {
                     changed = true;
                 }
                 if let Some(format) = format_preference {
-                    self.prefs.plugin_format_preference = Some(format);
+                    self.prefs.plugin_format_preference = format;
                     changed = true;
                 }
                 if changed {

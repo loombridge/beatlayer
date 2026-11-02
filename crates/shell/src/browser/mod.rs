@@ -53,17 +53,18 @@ use bl_media::MediaStore;
 use bl_model::{Editor, TrackId};
 pub use bl_shell_spec::browser::Part;
 use bl_shell_spec::browser::{
-    self as ids, AddTagArgs, AddTagGroupArgs, AddToArrangementArgs, BrowserState,
-    ClearCollectionsArgs, ClearFiltersArgs, ClipFileKind, ColumnsState, DeleteTagArgs, FilterArgs,
-    FocusArgs, FolderArgs, IndexState, Item, ItemKind, ItemTag, Label, LabelInfo,
-    MAX_PREVIEW_VOLUME, MoveLabelArgs, MoveTagArgs, OpenFolderArgs, OpenPlaceArgs, PreviewArgs,
-    PreviewState, QuickTag, RemoveLabelArgs, RenameFileArgs, RenameLabelArgs, RenameTagArgs,
-    RevealArgs, SaveClipFileArgs, SaveClipFileResult, ScrubPreviewArgs, SearchArgs, Section,
-    SelectArgs, SetAnalysisPausedArgs, SetCollectionArgs, SetColumnsArgs, SetFilterGroupsArgs,
-    SetFilterViewArgs, SetIncludeAutoTagsArgs, SetLabelIconArgs, SetLabelShownArgs, SetPreviewArgs,
-    SetRawArgs, ShowFileArgs, ShowQuickTagsArgs, ShowSimilarArgs, ShowTagEditorArgs, SimilarArgs,
-    StateArgs, TagEditorRow, TagEditorRowKind, TagGroupInfo, TagInfo, TagItemsArgs, TagSource,
-    TagState, TaggedItem, TagsArgs, TagsState,
+    self as ids, AddCollectionArgs, AddTagArgs, AddTagGroupArgs, AddToArrangementArgs,
+    BrowserState, ClearCollectionsArgs, ClearFiltersArgs, ClipFileKind, ColumnsState,
+    DeleteCollectionArgs, DeleteTagArgs, FilterArgs, FocusArgs, FolderArgs, IndexState, Item,
+    ItemKind, ItemTag, Label, LabelInfo, MAX_PREVIEW_VOLUME, MoveCollectionArgs, MoveLabelArgs,
+    MoveTagArgs, OpenFolderArgs, OpenPlaceArgs, PreviewArgs, PreviewState, QuickTag,
+    RemoveLabelArgs, RenameFileArgs, RenameLabelArgs, RenameTagArgs, RevealArgs, SaveClipFileArgs,
+    SaveClipFileResult, ScrubPreviewArgs, SearchArgs, Section, SelectArgs, SetAnalysisPausedArgs,
+    SetCollectionArgs, SetColumnsArgs, SetFilterGroupsArgs, SetFilterViewArgs,
+    SetIncludeAutoTagsArgs, SetLabelIconArgs, SetLabelShownArgs, SetPreviewArgs, SetRawArgs,
+    ShowFileArgs, ShowQuickTagsArgs, ShowSimilarArgs, ShowTagEditorArgs, SimilarArgs, StateArgs,
+    TagEditorRow, TagEditorRowKind, TagGroupInfo, TagInfo, TagItemsArgs, TagSource, TagState,
+    TaggedItem, TagsArgs, TagsState,
 };
 use bl_shell_spec::commands::{BROWSER_WIDTH, clamp_browser_width};
 use bl_shell_spec::settings::CollectFiles;
@@ -318,6 +319,10 @@ pub struct BrowserView {
     /// The plug-ins the scanner found (WP-2.9), already filtered by the
     /// hidden and format preferences; the Plug-Ins label lists them.
     plugins: Vec<ScannedPlugin>,
+    /// The hidden plug-ins' keys (spec: browser-tags R41): in `plugins` only
+    /// while Show Hidden Plug-Ins is on, drawn dimmed; hot-swap never lists
+    /// them.
+    hidden_plugins: BTreeSet<String>,
     /// The tag groups, the tags in them, and the items that carry them
     /// (spec: browser-tags R6 to R9).
     tags: TagStore,
@@ -601,6 +606,7 @@ impl BrowserView {
             focus_requests: 0,
             waker,
             plugins: Vec::new(),
+            hidden_plugins: BTreeSet::new(),
             tags: TagStore::new(),
             db: None,
             saved_files: HashMap::new(),
@@ -650,9 +656,10 @@ impl BrowserView {
 
     /// Sets the plug-ins the Plug-Ins label lists (WP-2.9). The shell
     /// passes what the scanner found, already filtered by the hidden and
-    /// format preferences.
-    pub fn set_plugins(&mut self, plugins: Vec<ScannedPlugin>) {
+    /// format preferences, and the keys of the hidden ones.
+    pub fn set_plugins(&mut self, plugins: Vec<ScannedPlugin>, hidden: BTreeSet<String>) {
         self.plugins = plugins;
+        self.hidden_plugins = hidden;
         self.generation += 1;
         // Beatlayer gives each plug-in's vendor a tag in the Creator group
         // (spec: browser-tags R7).
@@ -679,7 +686,11 @@ impl BrowserView {
         // tags, each time the scanner reports it.
         ops.extend(self.give_plugin_auto_tags());
         self.save_tags(ops);
-        if self.label == Label::PlugIns {
+        // A collection or a saved label can list plug-ins too.
+        if matches!(
+            self.label,
+            Label::PlugIns | Label::Collection(_) | Label::Saved(_)
+        ) {
             self.rebuild();
         }
     }
@@ -745,7 +756,8 @@ impl BrowserView {
         // The saved labels the file holds (spec: browser-tags R24).
         self.saved = loaded.saved_labels.clone();
         // The collections the file holds (spec: browser-tags R35).
-        self.collections.load(loaded.item_collections);
+        self.collections
+            .load(loaded.item_collections, loaded.nested_collections);
         // The files that carried a tag keep their hash, so a file moved
         // outside Beatlayer finds them again (spec: browser-tags R5).
         for row in &loaded.tagged_files {
@@ -1570,6 +1582,10 @@ impl BrowserView {
                 .iter()
                 .find(|saved| saved.id == *id)
                 .map_or_else(|| label.name(), |saved| saved.name.clone()),
+            Label::Collection(number) if label.is_nested_collection() => self
+                .collections
+                .name_of(*number)
+                .map_or_else(|| label.name(), str::to_owned),
             other => self
                 .label_prefs
                 .name(other)
@@ -1583,20 +1599,10 @@ impl BrowserView {
     pub fn labels(&self) -> Vec<LabelInfo> {
         // Spec: browser-tags R34. The collections come first, as the
         // sidebar lists them.
-        let mut labels: Vec<LabelInfo> = (1..=7)
-            .map(|number| {
-                let label = Label::Collection(number);
-                LabelInfo {
-                    available: true,
-                    name: self.label_name(&label),
-                    section: Section::Collections,
-                    path: None,
-                    icon: None,
-                    shown: self.label_prefs.shown(&label),
-                    label,
-                }
-            })
-            .collect();
+        let mut labels: Vec<LabelInfo> = Vec::new();
+        for number in 1..=7 {
+            self.collection_labels(number, None, &mut labels);
+        }
         labels.extend(
             self.label_prefs
                 .ordered(&self.saved)
@@ -1609,6 +1615,8 @@ impl BrowserView {
                     icon: self.label_icon(&label),
                     shown: self.label_prefs.shown(&label),
                     label,
+                    parent: None,
+                    open: false,
                 }),
         );
         let mut places = vec![Label::UserLibrary, Label::CurrentProject];
@@ -1627,9 +1635,36 @@ impl BrowserView {
                 icon: self.label_icon(&label),
                 shown: true,
                 label,
+                parent: None,
+                open: false,
             });
         }
         labels
+    }
+
+    /// A collection's sidebar entry, then the entries of the collections
+    /// nested in it (spec: browser-tags R45, R48).
+    fn collection_labels(&self, number: u32, parent: Option<u32>, out: &mut Vec<LabelInfo>) {
+        let label = Label::Collection(number);
+        let children = self.collections.children(number);
+        out.push(LabelInfo {
+            available: true,
+            name: self.label_name(&label),
+            section: Section::Collections,
+            path: None,
+            icon: None,
+            shown: self.label_prefs.shown(&label),
+            open: !children.is_empty()
+                && self.open.contains(Path::new(&format!(
+                    "{}{number}",
+                    collections::FOLDER_PREFIX
+                ))),
+            parent: parent.map(Label::Collection),
+            label,
+        });
+        for child in children {
+            self.collection_labels(child, Some(number), out);
+        }
     }
 
     /// The icon a label has: a saved label's own, or the person's.
@@ -1736,6 +1771,8 @@ impl BrowserView {
                 clip_kind: entry.clip,
                 details: None,
                 collections: Vec::new(),
+                hidden: false,
+                nested: Vec::new(),
             });
             if open && entry.kind == ItemKind::Set {
                 self.set_rows(&entry.path, depth.saturating_add(1), out);
@@ -1767,6 +1804,8 @@ impl BrowserView {
             clip_kind: None,
             details: None,
             collections: Vec::new(),
+            hidden: false,
+            nested: Vec::new(),
         });
     }
 
@@ -1896,6 +1935,8 @@ impl BrowserView {
                     clip_kind: None,
                     details: None,
                     collections: Vec::new(),
+                    hidden: false,
+                    nested: Vec::new(),
                 })
                 .filter(|item| self.item_passes(&selection, &builtin, item))
                 .collect();
@@ -2043,6 +2084,8 @@ impl BrowserView {
                             clip_kind: None,
                             details: None,
                             collections: Vec::new(),
+                            hidden: false,
+                            nested: Vec::new(),
                         });
                         if open {
                             self.list_into(&path, 1, &mut items);
@@ -2135,6 +2178,8 @@ impl BrowserView {
             clip_kind: None,
             details: None,
             collections: Vec::new(),
+            hidden: false,
+            nested: Vec::new(),
         };
         let mut items: Vec<Item> = tunings::BUNDLED
             .iter()
@@ -2179,6 +2224,7 @@ impl BrowserView {
     /// each naming its vendor.
     fn plugin_rows(&mut self) -> Vec<Item> {
         let query = self.search.trim().to_lowercase();
+        let hidden = self.hidden_plugins.clone();
         let row = |p: &ScannedPlugin, depth: u16, folder: Option<String>| Item {
             path: plugin_key(p),
             name: p.name.clone(),
@@ -2190,6 +2236,8 @@ impl BrowserView {
             clip_kind: None,
             details: None,
             collections: Vec::new(),
+            hidden: hidden.contains(&p.key()),
+            nested: Vec::new(),
         };
         let mut items = Vec::new();
         if !query.is_empty() || !self.applied_selection().is_empty() {
@@ -2224,6 +2272,8 @@ impl BrowserView {
                 clip_kind: None,
                 details: None,
                 collections: Vec::new(),
+                hidden: false,
+                nested: Vec::new(),
             });
             if open {
                 items.extend(
@@ -2302,17 +2352,21 @@ impl BrowserView {
                     clip_kind: clip_kind_of(entry.kind, &snapshot.path(hit)),
                     details: None,
                     collections: Vec::new(),
+                    hidden: false,
+                    nested: Vec::new(),
                 }
             }
         };
         // Spec: browser-tags R27. What the shown columns say about it.
         item.details = self.details_for(&item);
         // Spec: browser-tags R37. The collections it is in.
-        item.collections = if item.kind == ItemKind::Plugin {
-            self.collections.of(&self.tag_key(&item.path))
+        let key = if item.kind == ItemKind::Plugin {
+            self.tag_key(&item.path)
         } else {
-            self.collections.of(&item.path)
+            item.path.clone()
         };
+        item.collections = self.collections.colours_of(&key);
+        item.nested = self.collections.nested_of(&key);
         Some(item)
     }
 
@@ -2335,6 +2389,24 @@ impl BrowserView {
     #[must_use]
     pub fn selected(&self) -> &[PathBuf] {
         &self.selected
+    }
+
+    /// The collection at the top of `number`'s chain: itself for one of the
+    /// seven, which gives a nested collection its colour (spec: browser-tags
+    /// R46).
+    #[must_use]
+    pub fn collection_top(&self, number: u32) -> u8 {
+        self.collections.top_of(number)
+    }
+
+    /// The keys, as `plugin.hide` takes them, of the selected plug-in rows.
+    #[must_use]
+    pub fn selected_plugin_keys(&self) -> Vec<String> {
+        self.selected
+            .iter()
+            .filter_map(|path| self.plugin(path))
+            .map(ScannedPlugin::key)
+            .collect()
     }
 
     /// Whether an item is selected.
@@ -3094,7 +3166,9 @@ impl BrowserView {
                     .get("label")
                     .and_then(|label| serde_json::from_value::<Label>(label.clone()).ok())
                     .unwrap_or_else(|| self.label.clone());
-                label.is_library() || label.is_collection()
+                label.is_library()
+                    || label.is_collection()
+                    || matches!(&label, Label::Collection(n) if self.collections.exists(*n))
             }
             ids::SET_COLLECTION | ids::CLEAR_COLLECTIONS => {
                 let items: Option<Vec<String>> = args
@@ -3224,7 +3298,26 @@ impl BrowserView {
                     open,
                     keep_others,
                 } = parse(args)?;
-                let path = if path.starts_with(PLUGIN_FOLDER) && self.is_plugin_row(&path) {
+                let path = if let Some(rest) = path.strip_prefix(collections::FOLDER_PREFIX) {
+                    // Spec: browser-tags R47. A nested collection opens in
+                    // place, and the sidebar's fold follows.
+                    let number = rest
+                        .parse::<u32>()
+                        .ok()
+                        .filter(|n| self.collections.exists(*n))
+                        .ok_or_else(|| {
+                            BrowserError::InvalidArgs(format!("{path} isn't a collection"))
+                        })?;
+                    let row = PathBuf::from(format!("{}{number}", collections::FOLDER_PREFIX));
+                    if open.unwrap_or(!self.open.contains(&row)) {
+                        self.open.insert(row);
+                    } else {
+                        self.open.remove(&row);
+                    }
+                    self.rebuild();
+                    outcome.value = state(self, ctx.audio);
+                    return Ok(outcome);
+                } else if path.starts_with(PLUGIN_FOLDER) && self.is_plugin_row(&path) {
                     PathBuf::from(path)
                 } else if self.is_set_row(&path) {
                     // Spec: set-exchange R1. A track of an opened set opens
@@ -3293,6 +3386,7 @@ impl BrowserView {
                             || is_bundled(p)
                             || self.is_plugin_row(p)
                             || self.is_set_row(p)
+                            || p.starts_with(collections::FOLDER_PREFIX)
                         {
                             Ok(PathBuf::from(p))
                         } else {
@@ -3307,6 +3401,7 @@ impl BrowserView {
                         && !is_bundled(&name)
                         && !self.is_plugin_row(&name)
                         && !self.is_set_row(&name)
+                        && !name.starts_with(collections::FOLDER_PREFIX)
                 }) {
                     return Err(BrowserError::InvalidArgs(format!(
                         "{} doesn't exist",
@@ -3968,6 +4063,21 @@ impl BrowserView {
                 outcome.prefs_changed = self.set_collection(args)?;
                 outcome.value = state(self, ctx.audio);
             }
+            ids::ADD_COLLECTION => {
+                let args: AddCollectionArgs = parse(args)?;
+                self.add_collection(args)?;
+                outcome.value = state(self, ctx.audio);
+            }
+            ids::MOVE_COLLECTION => {
+                let args: MoveCollectionArgs = parse(args)?;
+                self.move_collection(args)?;
+                outcome.value = state(self, ctx.audio);
+            }
+            ids::DELETE_COLLECTION => {
+                let args: DeleteCollectionArgs = parse(args)?;
+                self.delete_collection(args)?;
+                outcome.value = state(self, ctx.audio);
+            }
             ids::CLEAR_COLLECTIONS => {
                 let args: ClearCollectionsArgs = parse(args)?;
                 self.clear_collections(args)?;
@@ -4194,7 +4304,7 @@ impl BrowserView {
             }
             // Spec: browser-tags R5. Collections pass with the tags.
             if !collected.is_empty() {
-                let mut kept: BTreeSet<u8> = self.collections.of(path).into_iter().collect();
+                let mut kept: BTreeSet<u32> = self.collections.of(path).into_iter().collect();
                 kept.extend(collected);
                 let ops = [
                     self.collections.set(path, kept),
@@ -4356,12 +4466,8 @@ impl BrowserView {
     }
 
     fn check_label(&self, label: &Label) -> Result<(), BrowserError> {
-        if let Label::Collection(number) = label
-            && !label.is_collection()
-        {
-            return Err(BrowserError::InvalidArgs(format!(
-                "{number} isn't a collection: they are 1 (Favorites) to 7 (Gray)"
-            )));
+        if let Label::Collection(number) = label {
+            self.check_collection(*number)?;
         }
         if let Label::Saved(id) = label
             && !self.saved.iter().any(|saved| saved.id == *id)
@@ -4409,13 +4515,16 @@ mod tests {
     #[test]
     fn plug_ins_of_every_format_get_the_tags_their_categories_map_to() {
         let mut view = BrowserView::new(&BrowserPrefs::default(), Waker::default());
-        view.set_plugins(vec![
-            plugin(PluginFormat::Clap, "a", &["audio-effect", "reverb"]),
-            plugin(PluginFormat::Vst3, "b", &["Fx", "Dynamics"]),
-            plugin(PluginFormat::AudioUnit, "aufx/dely/appl", &["aufx", "dely"]),
-            plugin(PluginFormat::Lv2, "urn:d", &["FilterPlugin"]),
-            plugin(PluginFormat::Clap, "none", &["audio-effect", "glitch"]),
-        ]);
+        view.set_plugins(
+            vec![
+                plugin(PluginFormat::Clap, "a", &["audio-effect", "reverb"]),
+                plugin(PluginFormat::Vst3, "b", &["Fx", "Dynamics"]),
+                plugin(PluginFormat::AudioUnit, "aufx/dely/appl", &["aufx", "dely"]),
+                plugin(PluginFormat::Lv2, "urn:d", &["FilterPlugin"]),
+                plugin(PluginFormat::Clap, "none", &["audio-effect", "glitch"]),
+            ],
+            BTreeSet::new(),
+        );
         let function = |key: &str| -> Vec<String> {
             view.carried_tags(key)
                 .into_iter()
@@ -4428,5 +4537,21 @@ mod tests {
         assert_eq!(function("au/aufx/dely/appl"), ["Function|Delay"]);
         assert_eq!(function("lv2/urn:d"), ["Function|Filter"]);
         assert!(function("clap/none").is_empty());
+    }
+    // Spec: browser-tags R42. Hot-swap's lists never offer a hidden plug-in,
+    // even while Show Hidden Plug-Ins lists it in the browser.
+    #[test]
+    fn hot_swap_never_lists_a_hidden_plug_in() {
+        use bl_control::browse::Catalogue as _;
+        let mut view = BrowserView::new(&BrowserPrefs::default(), Waker::default());
+        let shown = plugin(PluginFormat::Clap, "a", &[]);
+        let hidden = plugin(PluginFormat::Clap, "b", &[]);
+        let keys = BTreeSet::from([hidden.key()]);
+        view.set_plugins(vec![shown, hidden], keys);
+        assert_eq!(view.plugin_rows().len(), 2, "the browser lists both");
+        let listed = view
+            .catalogue()
+            .children(Label::PlugIns.key().as_str(), None);
+        assert_eq!(listed.len(), 1, "{listed:?}");
     }
 }

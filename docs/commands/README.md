@@ -16130,6 +16130,8 @@ One row of the content pane.
 | `details` | [`ItemDetails`](#itemdetails) or null | no | What the optional columns show for it, left out while none shows (spec: browser-tags R27). |
 | `folder` | string or null | no | In search results, the folder it's in, relative to its place. |
 | `format` | [`PluginFormat`](#pluginformat) or null | no | For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11). |
+| `hidden` | boolean | no | For a plug-in, whether it is hidden, which the row draws dimmed while Show Hidden Plug-Ins is on (spec: browser-tags R43); left out otherwise. |
+| `nested` | array of integer, at least 0 | no | The collections of the person's own it is in, by their numbers (8 and up); left out while it is in none (spec: browser-tags R46, R48). |
 
 <details><summary>JSON Schema</summary>
 
@@ -16194,6 +16196,10 @@ One row of the content pane.
       ],
       "description": "For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11)."
     },
+    "hidden": {
+      "description": "For a plug-in, whether it is hidden, which the row draws dimmed while Show Hidden Plug-Ins is on (spec: browser-tags R43); left out otherwise.",
+      "type": "boolean"
+    },
     "kind": {
       "$ref": "#/$defs/ItemKind",
       "description": "What it is."
@@ -16201,6 +16207,15 @@ One row of the content pane.
     "name": {
       "description": "Its name, as the Name column shows it.",
       "type": "string"
+    },
+    "nested": {
+      "description": "The collections of the person's own it is in, by their numbers (8 and up); left out while it is in none (spec: browser-tags R46, R48).",
+      "items": {
+        "format": "uint32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
     },
     "open": {
       "default": false,
@@ -16851,7 +16866,7 @@ One of:
 
 ### `Label`
 
-A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{"folder": "/its/path"}`, or a saved label, as `{"saved": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{"collection": 3}`.
+A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{"folder": "/its/path"}`, or a saved label, as `{"saved": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{"collection": 3}`, or a collection of the person's own inside one, numbered from 8.
 
 One of:
 
@@ -16872,13 +16887,13 @@ One of:
 - `"current_project"`: The open set's project folder.
 - an object with `folder` (string): A folder the person added to Places, by its path.
 - an object with `saved` (integer): A saved label, by its ID (spec: browser-tags R24).
-- an object with `collection` (integer from 0 to 255): A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34).
+- an object with `collection` (integer, at least 0): A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34); a collection inside another is numbered from 8 (R45).
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{\"folder\": \"/its/path\"}`, or a saved label, as `{\"saved\": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{\"collection\": 3}`.",
+  "description": "A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{\"folder\": \"/its/path\"}`, or a saved label, as `{\"saved\": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{\"collection\": 3}`, or a collection of the person's own inside one, numbered from 8.",
   "oneOf": [
     {
       "const": "all",
@@ -16984,11 +16999,10 @@ One of:
     },
     {
       "additionalProperties": false,
-      "description": "A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34).",
+      "description": "A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34); a collection inside another is numbered from 8 (R45).",
       "properties": {
         "collection": {
-          "format": "uint8",
-          "maximum": 255,
+          "format": "uint32",
           "minimum": 0,
           "type": "integer"
         }
@@ -17016,6 +17030,8 @@ A label as the sidebar lists it.
 | `available` | boolean | yes | Whether its folder can be read now (a place) or it has content (a Library label). A missing folder is listed greyed, as in Live. |
 | `shown` | boolean | yes | Whether the sidebar shows it: the person can hide Library labels and saved labels (spec: browser-tags R26). |
 | `icon` | string or null | no | The icon the person gave it, from [`LABEL_ICONS`] (spec: browser-tags R25). |
+| `open` | boolean | no | For a collection that holds others, whether its list is open in the sidebar. |
+| `parent` | [`Label`](#label) or null | no | For a collection inside another, the one it is in (spec: browser-tags R45, R48). |
 | `path` | string or null | no | For a place, its folder; `null` for Current Project while the set has never been saved. |
 
 <details><summary>JSON Schema</summary>
@@ -17042,6 +17058,21 @@ A label as the sidebar lists it.
     "name": {
       "description": "Its name.",
       "type": "string"
+    },
+    "open": {
+      "description": "For a collection that holds others, whether its list is open in the sidebar.",
+      "type": "boolean"
+    },
+    "parent": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Label"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "For a collection inside another, the one it is in (spec: browser-tags R45, R48)."
     },
     "path": {
       "description": "For a place, its folder; `null` for Current Project while the set has never been saved.",

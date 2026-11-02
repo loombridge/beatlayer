@@ -109,6 +109,12 @@ pub const SET_COLUMNS: &str = "browser.set_columns";
 pub const SET_COLLECTION: &str = "browser.set_collection";
 /// `browser.clear_collections`: take items out of every collection.
 pub const CLEAR_COLLECTIONS: &str = "browser.clear_collections";
+/// `browser.add_collection`: make a collection inside a collection.
+pub const ADD_COLLECTION: &str = "browser.add_collection";
+/// `browser.move_collection`: move a nested collection into another.
+pub const MOVE_COLLECTION: &str = "browser.move_collection";
+/// `browser.delete_collection`: delete a nested collection and the ones in it.
+pub const DELETE_COLLECTION: &str = "browser.delete_collection";
 /// `browser.analysis_state`: how far sound analysis has got.
 pub const ANALYSIS_STATE: &str = "browser.analysis_state";
 /// `browser.set_analysis_paused`: pause or resume sound analysis.
@@ -172,6 +178,9 @@ pub const IDS: &[&str] = &[
     SET_COLUMNS,
     SET_COLLECTION,
     CLEAR_COLLECTIONS,
+    ADD_COLLECTION,
+    MOVE_COLLECTION,
+    DELETE_COLLECTION,
     ANALYSIS_STATE,
     SET_ANALYSIS_PAUSED,
     SIMILAR,
@@ -205,7 +214,8 @@ pub const MAX_PREVIEW_VOLUME: f64 = 1.995_262_314_968_879_5;
                    `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place \
                    (`user_library`, `current_project`), or a folder added to Places, as \
                    `{\"folder\": \"/its/path\"}`, or a saved label, as `{\"saved\": 3}`, or a \
-                   collection, 1 (Favorites) to 7 (Gray), as `{\"collection\": 3}`."
+                   collection, 1 (Favorites) to 7 (Gray), as `{\"collection\": 3}`, or a \
+                   collection of the person's own inside one, numbered from 8."
 )]
 pub enum Label {
     /// Everything: the places as folders, searched together.
@@ -243,8 +253,9 @@ pub enum Label {
     /// A saved label, by its ID (spec: browser-tags R24).
     Saved(i64),
     /// A collection, by its number: 1 is Favorites, 7 Gray (spec:
-    /// browser-tags R34).
-    Collection(u8),
+    /// browser-tags R34); a collection inside another is numbered from 8
+    /// (R45).
+    Collection(u32),
 }
 
 impl Label {
@@ -291,7 +302,7 @@ impl Label {
                 .map_or_else(|| path.clone(), |n| n.to_string_lossy().into_owned()),
             Self::Saved(_) => "Saved Label".to_owned(),
             Self::Collection(number) => COLLECTIONS
-                .get(usize::from(*number).wrapping_sub(1))
+                .get((*number as usize).wrapping_sub(1))
                 .map_or_else(|| "Collection".to_owned(), |name| (*name).to_owned()),
         }
     }
@@ -337,6 +348,12 @@ impl Label {
     #[must_use]
     pub const fn is_collection(&self) -> bool {
         matches!(self, Self::Collection(number) if *number >= 1 && *number <= 7)
+    }
+
+    /// Whether it's a collection inside another (spec: browser-tags R45).
+    #[must_use]
+    pub const fn is_nested_collection(&self) -> bool {
+        matches!(self, Self::Collection(number) if *number > 7)
     }
 
     /// For a Library label Beatlayer has no content for yet, what will fill
@@ -410,6 +427,14 @@ pub struct LabelInfo {
     /// saved labels (spec: browser-tags R26).
     #[serde(default = "shown_by_default")]
     pub shown: bool,
+    /// For a collection inside another, the one it is in (spec:
+    /// browser-tags R45, R48).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<Label>,
+    /// For a collection that holds others, whether its list is open in the
+    /// sidebar.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub open: bool,
 }
 
 fn shown_by_default() -> bool {
@@ -523,6 +548,14 @@ pub struct Item {
     /// order; left out while it is in none (spec: browser-tags R35, R40).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub collections: Vec<u8>,
+    /// The collections of the person's own it is in, by their numbers (8
+    /// and up); left out while it is in none (spec: browser-tags R46, R48).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nested: Vec<u32>,
+    /// For a plug-in, whether it is hidden, which the row draws dimmed while
+    /// Show Hidden Plug-Ins is on (spec: browser-tags R43); left out otherwise.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
 }
 
 /// What an item's optional columns show (spec: browser-tags R27); a value
@@ -1049,8 +1082,8 @@ pub struct TagItemsArgs {
 #[serde(deny_unknown_fields)]
 pub struct SetCollectionArgs {
     /// The collection: 1 is Favorites, 2 Orange, 3 Yellow, 4 Green, 5 Blue,
-    /// 6 Purple, 7 Gray.
-    pub collection: u8,
+    /// 6 Purple, 7 Gray, or the number of a nested collection (8 and up).
+    pub collection: u32,
     /// The items, by their keys as `browser.tag_items` names them. Left out,
     /// the selected items.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1060,6 +1093,45 @@ pub struct SetCollectionArgs {
     /// come out, otherwise they all go in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub member: Option<bool>,
+}
+
+/// Arguments of `browser.add_collection`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AddCollectionArgs {
+    /// The collection to make it in: 1 to 7, or a nested one.
+    pub parent: u32,
+    /// Its name. Left out, "New Collection", numbered when the name is
+    /// taken in that collection, with its name open for editing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// Arguments of `browser.move_collection`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MoveCollectionArgs {
+    /// The nested collection to move.
+    pub collection: u32,
+    /// The collection to move it into: 1 to 7, or a nested one that isn't
+    /// inside the one moved.
+    pub parent: u32,
+    /// Its place among the collections already there, from 0. Left out, at
+    /// the end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
+}
+
+/// Arguments of `browser.delete_collection`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteCollectionArgs {
+    /// The nested collection to delete, with the collections inside it.
+    pub collection: u32,
+    /// Delete although they hold items: they leave them out. Otherwise the
+    /// command is refused, naming how many (spec: browser-tags R47).
+    #[serde(default)]
+    pub confirm: bool,
 }
 
 /// Arguments of `browser.clear_collections`.
@@ -2080,7 +2152,8 @@ fn specs() -> Vec<CommandSpec> {
         CommandSpec::new(SET_COLLECTION, "Set Collection")
             .description(
                 "Puts items in one of the seven collections (`collection`: 1 Favorites, 2 \
-                 Orange, 3 Yellow, 4 Green, 5 Blue, 6 Purple, 7 Gray), or takes them out, as the \
+                 Orange, 3 Yellow, 4 Green, 5 Blue, 6 Purple, 7 Gray) or a nested one (8 and \
+                 up), or takes them out, as the \
                  keys 1 to 7 and the items of a browser item's context menu do. The items are \
                  named by their keys as `browser.tag_items` names them (`items`; left out, the \
                  selected items). With `member` true they go in, with false they come out; left \
@@ -2092,6 +2165,43 @@ fn specs() -> Vec<CommandSpec> {
             .permission(Permission::Edit)
             .contexts([Global, Browser])
             .args::<SetCollectionArgs>()
+            .result::<BrowserState>(),
+        CommandSpec::new(ADD_COLLECTION, "New Collection")
+            .description(
+                "Makes a collection of the person's own inside a collection (`parent`: 1 to 7, \
+                 or a nested one, to any depth), as New Collection in a collection's context \
+                 menu does. Its number is 8 or more and stays with it; `name` is \"New \
+                 Collection\" when left out, numbered when that name is taken in the parent, \
+                 and then its name opens for editing. A nested collection takes the colour of \
+                 the collection at its top. Kept in the browser's database. Returns the \
+                 browser's state, whose labels list it under its parent.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Browser, BrowserSidebar])
+            .args::<AddCollectionArgs>()
+            .result::<BrowserState>(),
+        CommandSpec::new(MOVE_COLLECTION, "Move Collection")
+            .description(
+                "Moves a nested collection, with the collections inside it, into another \
+                 collection (`parent`), at `index` among the ones there (the end if left out), \
+                 as dragging its label in the sidebar does. A collection can't go inside \
+                 itself or one of its own. The items in it stay in it. Returns the browser's \
+                 state.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Browser, BrowserSidebar])
+            .args::<MoveCollectionArgs>()
+            .result::<BrowserState>(),
+        CommandSpec::new(DELETE_COLLECTION, "Delete Collection")
+            .description(
+                "Deletes a nested collection and the collections inside it from the browser, \
+                 as Delete in its context menu does. It never touches a file: the items \
+                 simply leave them. When they hold items the command is refused unless \
+                 `confirm` is true. Returns the browser's state.",
+            )
+            .permission(Permission::Destructive)
+            .contexts([Global, Browser, BrowserSidebar])
+            .args::<DeleteCollectionArgs>()
             .result::<BrowserState>(),
         CommandSpec::new(CLEAR_COLLECTIONS, "Clear All Colors")
             .description(
@@ -2314,6 +2424,8 @@ mod tests {
             SET_COLUMNS,
             SET_COLLECTION,
             CLEAR_COLLECTIONS,
+            ADD_COLLECTION,
+            MOVE_COLLECTION,
         ] {
             assert_eq!(class(id), Permission::Edit, "{id}");
         }
@@ -2321,7 +2433,7 @@ mod tests {
         for id in [FILTER, CLEAR_FILTERS, BACK, FORWARD, SHOW_SIMILAR] {
             assert_eq!(class(id), Permission::External, "{id} lists files outside");
         }
-        for id in [DELETE_TAG, REMOVE_LABEL] {
+        for id in [DELETE_TAG, REMOVE_LABEL, DELETE_COLLECTION] {
             assert_eq!(class(id), Permission::Destructive, "{id}");
         }
         assert_eq!(class(TAGS), Permission::External);
@@ -2363,5 +2475,6 @@ mod tests {
         );
         assert!(Label::Collection(1).is_collection() && !Label::Collection(1).is_library());
         assert!(!Label::Collection(8).is_collection());
+        assert!(Label::Collection(8).is_nested_collection());
     }
 }

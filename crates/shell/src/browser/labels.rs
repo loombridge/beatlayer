@@ -217,7 +217,7 @@ impl BrowserView {
     /// Whether `label` is a label the sidebar lets the person rename and
     /// hide: a Library label, a saved label or a collection, that exists.
     fn check_shown_label(&self, label: &Label) -> Result<(), BrowserError> {
-        if label.is_collection() {
+        if label.is_collection() || label.is_nested_collection() {
             return self.check_label(label);
         }
         self.check_library_label(label)
@@ -279,7 +279,7 @@ impl BrowserView {
     pub(super) fn rename_label(&mut self, args: RenameLabelArgs) -> Result<bool, BrowserError> {
         let RenameLabelArgs { label, name } = args;
         let label = label.unwrap_or_else(|| self.label.clone());
-        if !label.is_library() && !label.is_collection() {
+        if !label.is_library() && !label.is_collection() && !label.is_nested_collection() {
             return Err(BrowserError::InvalidArgs(format!(
                 "{} takes its folder's name and isn't renamed",
                 self.label_name(&label)
@@ -309,6 +309,12 @@ impl BrowserView {
             }
             self.save_label(id);
             return Ok(false);
+        }
+        if let Label::Collection(number) = label
+            && label.is_nested_collection()
+        {
+            // Spec: browser-tags R47. A nested collection keeps its number.
+            return self.rename_nested(number, name).map(|()| false);
         }
         if name.is_empty() || name == label.name() {
             self.label_prefs.names.remove(&label.key());
@@ -372,6 +378,12 @@ impl BrowserView {
     pub(super) fn set_label_shown(&mut self, args: SetLabelShownArgs) -> Result<(), BrowserError> {
         let SetLabelShownArgs { label, shown } = args;
         self.check_shown_label(&label)?;
+        if label.is_nested_collection() {
+            return Err(BrowserError::InvalidArgs(format!(
+                "{} is shown with the collection it is in",
+                self.label_name(&label)
+            )));
+        }
         if label == Label::All && !shown {
             return Err(BrowserError::InvalidArgs("All can't be hidden".to_owned()));
         }

@@ -1,11 +1,12 @@
 //! A browser item's context menu (spec: browser R25, browser-tags R35;
 //! C-BROWSER-001 to C-BROWSER-011, C-BROWSER-014): Show in Places, Show in
-//! Finder, Show Similar Files, Clear All Colors and the seven collections.
+//! Finder, Show Similar Files, Clear All Colors, the seven collections, and
+//! Hide Plug-In.
 
 use std::path::Path;
 
 use bl_shell::Shell;
-use bl_shell::browser_commands::{self as ids, Item, ItemKind, Label, Section};
+use bl_shell::browser_commands::{self as ids, Item, ItemKind, Label, LabelInfo, Section};
 use egui::{Button, Response, Ui};
 use serde_json::json;
 
@@ -28,6 +29,55 @@ pub(super) const fn has_menu(kind: ItemKind) -> bool {
             | ItemKind::Device
             | ItemKind::Clip
     )
+}
+
+/// A collection's own entry, then the collections nested in it, each with a
+/// submenu of its own when it holds others (spec: browser-tags R46).
+fn collection_entries(
+    ui: &mut Ui,
+    all: &[LabelInfo],
+    info: &LabelInfo,
+    key: Option<u8>,
+    events: &mut Vec<UiEvent>,
+) {
+    let Label::Collection(number) = info.label else {
+        return;
+    };
+    let mut button = Button::new(&info.name);
+    if let Some(key) = key {
+        button = button.shortcut_text(key.to_string());
+    }
+    let response = ui.add(button);
+    crate::menus::register_item(ui.ctx(), &response);
+    if response.clicked() {
+        invoke(events, ids::SET_COLLECTION, json!({ "collection": number }));
+        ui.close();
+    }
+    for child in all
+        .iter()
+        .filter(|l| l.parent.as_ref() == Some(&info.label))
+    {
+        if all.iter().any(|l| l.parent.as_ref() == Some(&child.label)) {
+            let response = ui.menu_button(&child.name, |ui| {
+                collection_entries(ui, all, child, None, events);
+            });
+            crate::menus::register_item(ui.ctx(), &response.response);
+        } else {
+            let Label::Collection(child_number) = child.label else {
+                continue;
+            };
+            let response = ui.button(&child.name);
+            crate::menus::register_item(ui.ctx(), &response);
+            if response.clicked() {
+                invoke(
+                    events,
+                    ids::SET_COLLECTION,
+                    json!({ "collection": child_number }),
+                );
+                ui.close();
+            }
+        }
+    }
 }
 
 /// The menu for `item`. Its entries act on the selected items; a
@@ -117,19 +167,49 @@ pub(super) fn show(ui: &mut Ui, shell: &Shell, item: &Item, events: &mut Vec<UiE
         invoke(events, ids::CLEAR_COLLECTIONS, json!({}));
         ui.close();
     }
-    let collections = view
+    // Spec: browser-tags R46. A collection with nested ones has a submenu
+    // listing them, after its own entry.
+    let collections: Vec<LabelInfo> = view
         .labels()
         .into_iter()
-        .filter(|l| l.section == Section::Collections);
-    for (number, info) in (1u8..).zip(collections) {
-        if add(
+        .filter(|l| l.section == Section::Collections)
+        .collect();
+    let tops = collections.iter().filter(|l| l.parent.is_none());
+    for (number, info) in (1u8..).zip(tops) {
+        if collections
+            .iter()
+            .any(|l| l.parent.as_ref() == Some(&info.label))
+        {
+            let response = ui.menu_button(&info.name, |ui| {
+                collection_entries(ui, &collections, info, Some(number), events);
+            });
+            crate::menus::register_item(ui.ctx(), &response.response);
+        } else if add(
             ui,
-            Button::new(info.name).shortcut_text(number.to_string()),
+            Button::new(&info.name).shortcut_text(number.to_string()),
             true,
         )
         .clicked()
         {
             invoke(events, ids::SET_COLLECTION, json!({ "collection": number }));
+            ui.close();
+        }
+    }
+    // Spec: browser-tags R41. Hide Plug-In or Show Plug-In, at the end of a
+    // plug-in row's menu, after Gray (7) (Live 12.4.16).
+    if item.kind == ItemKind::Plugin {
+        ui.separator();
+        let label = if item.hidden {
+            "Show Plug-In"
+        } else {
+            "Hide Plug-In"
+        };
+        if add(ui, Button::new(label), true).clicked() {
+            invoke(
+                events,
+                bl_shell::plugin_commands::HIDE,
+                json!({ "keys": view.selected_plugin_keys(), "hidden": !item.hidden }),
+            );
             ui.close();
         }
     }

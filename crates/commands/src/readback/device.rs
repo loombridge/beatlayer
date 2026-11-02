@@ -148,6 +148,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("plugin.configure", read("device_view.state", "devices")),
     ("plugin.configure_param", read("device.parameters", "params")),
     ("plugin.export_list", nothing(FILE)),
+    ("plugin.hide", read("settings.state", "plug_ins")),
     ("plugin.load", query(Track, "devices")),
     ("plugin.load_au", query(Track, "devices")),
     ("plugin.move_configured_param", read("device.parameters", "params")),

@@ -361,7 +361,14 @@ fn the_colour_picker_colours_a_track_with_one_command() {
         }
     }
     // The track's own swatch blinks.
-    let current = rig.model.document.track(rig.tracks[1]).unwrap().colour();
+    let current = rig
+        .model
+        .document
+        .track(rig.tracks[1])
+        .unwrap()
+        .colour()
+        .swatch()
+        .unwrap();
     let (row, column) = ring(current);
     assert!(
         rig.sim

@@ -6,10 +6,13 @@ use imbl::{OrdMap, Vector};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::chord_lane::ChordRegion;
 use crate::clip::{Clip, ClipData};
 use crate::device::Device;
 use crate::groove::GroovePool;
-use crate::ids::{ChainId, ClipId, DeviceId, GrooveId, LocatorId, SceneId, TakeLaneId, TrackId};
+use crate::ids::{
+    ChainId, ChordRegionId, ClipId, DeviceId, GrooveId, LocatorId, SceneId, TakeLaneId, TrackId,
+};
 use crate::locator::{Locator, SongStart};
 use crate::metronome::MetronomeSettings;
 use crate::pad_layout::PadLayout;
@@ -114,6 +117,16 @@ pub struct Settings {
     /// a set with none doesn't write them, so its saved form is unchanged.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub locators: Vec<Locator>,
+    /// The song's sections: the spans of the arranger track (WP-6.45). A set
+    /// saved before them loads with none, and a set with none doesn't write
+    /// them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sections: Vec<crate::SongSection>,
+    /// Whether the arranger track shows above the Arrangement's tracks
+    /// (WP-6.45). Off in a new set and in a set saved before it, and not
+    /// written when off. Showing it is no undo step.
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub arranger_track: bool,
     /// Where the song starts: a locator or the loop brace's start (WP-6.24).
     /// A set saved before the song start time has none and loads with none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -135,6 +148,11 @@ pub struct Settings {
     /// off in a new set, and not written then. Changing it is no undo step.
     #[serde(default, skip_serializing_if = "PadLayout::is_default")]
     pub pad_layout: PadLayout,
+    /// The chord lane's regions, in time order and never overlapping
+    /// (WP-6.48; the chord lane spec, R2 and R10). A set saved before the lane
+    /// has none, and a set with none doesn't write them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chord_lane: Vec<ChordRegion>,
     /// The set's tuning system (WP-6.9; the tunings spec, R1 and R11), saved
     /// whole inside the set so it opens without the file it came from. None
     /// plays twelve equal steps, and a set saved before tunings has none.
@@ -178,10 +196,13 @@ impl Default for Settings {
             reduced_latency_monitoring: false,
             lock_envelopes: false,
             locators: Vec::new(),
+            sections: Vec::new(),
+            arranger_track: false,
             song_start: None,
             grooves: GroovePool::default(),
             scale: Scale::default(),
             pad_layout: PadLayout::default(),
+            chord_lane: Vec::new(),
             tuning: None,
             ara_archives: std::sync::Arc::default(),
             remote: Vec::new(),
@@ -628,6 +649,21 @@ impl Document {
             .find(|locator| locator.id == id)
     }
 
+    /// The chord lane's regions, in time order.
+    #[must_use]
+    pub fn chord_lane(&self) -> &[ChordRegion] {
+        &self.settings.chord_lane
+    }
+
+    /// The chord lane's region with this ID.
+    #[must_use]
+    pub fn chord_region(&self, id: ChordRegionId) -> Option<&ChordRegion> {
+        self.settings
+            .chord_lane
+            .iter()
+            .find(|region| region.id == id)
+    }
+
     /// Where the song starts, in ticks: its locator's position, or the loop
     /// brace's start. `None` when the song has no song start time, or when
     /// the locator it named is gone.
@@ -749,6 +785,29 @@ impl Document {
         self.track_order()
             .into_iter()
             .filter_map(|id| self.track(id))
+    }
+
+    /// Whether a track is empty (the view options spec, R7): it holds no
+    /// clip anywhere, on its lanes, take lanes or Session slots, and no
+    /// device; a group is empty when it has no device and every track in it
+    /// is empty. Main never is.
+    #[must_use]
+    pub fn is_track_empty(&self, id: TrackId) -> bool {
+        self.track(id).is_some_and(|track| {
+            track.kind() != TrackKind::Main
+                && track.devices().len() == 0
+                && track.all_clips().next().is_none()
+                && track.children().all(|child| self.is_track_empty(child))
+        })
+    }
+
+    /// The empty tracks (see [`Document::is_track_empty`]), in display order.
+    #[must_use]
+    pub fn empty_tracks(&self) -> Vec<TrackId> {
+        self.track_order()
+            .into_iter()
+            .filter(|&id| self.is_track_empty(id))
+            .collect()
     }
 
     /// How many tracks there are, counting the returns and Main.
@@ -924,6 +983,16 @@ impl Document {
                 .any(|locator| locator.id.0 == id)
             || self
                 .settings
+                .sections
+                .iter()
+                .any(|section| section.id.0 == id)
+            || self
+                .settings
+                .chord_lane
+                .iter()
+                .any(|region| region.id.0 == id)
+            || self
+                .settings
                 .grooves
                 .pool
                 .iter()
@@ -945,6 +1014,12 @@ impl Document {
             .iter()
             .map(|locator| locator.id.0)
             .max();
+        let section = self
+            .settings
+            .sections
+            .iter()
+            .map(|section| section.id.0)
+            .max();
         let groove = self
             .settings
             .grooves
@@ -952,11 +1027,19 @@ impl Document {
             .iter()
             .map(|groove| groove.id.0)
             .max();
-        [track, clip, lane, device, chain, scene, locator, groove]
-            .into_iter()
-            .flatten()
-            .max()
-            .unwrap_or(self.main.0)
+        let region = self
+            .settings
+            .chord_lane
+            .iter()
+            .map(|region| region.id.0)
+            .max();
+        [
+            track, clip, lane, device, chain, scene, locator, section, groove, region,
+        ]
+        .into_iter()
+        .flatten()
+        .max()
+        .unwrap_or(self.main.0)
     }
 
     /// Checks that the document's derived lookups match its tree and that the
@@ -976,6 +1059,32 @@ impl Document {
         }
         if rebuilt.index != self.index {
             return Err("the derived lookups don't match the tree".to_owned());
+        }
+        self.check_links()
+    }
+
+    /// Spec: linked-clips R2, R3. Every link holds two or more clips of one
+    /// kind with the same contents.
+    fn check_links(&self) -> Result<(), String> {
+        let mut links: std::collections::BTreeMap<crate::LinkId, Vec<&Clip>> = Default::default();
+        for clip in self.tracks.values().flat_map(|track| track.all_clips()) {
+            if let Some(link) = clip.link {
+                links.entry(link).or_default().push(clip);
+            }
+        }
+        for (link, clips) in links {
+            if clips.len() < 2 {
+                return Err(format!("{link} holds only {}", clips[0].id));
+            }
+            if let Some(other) = clips.iter().find(|clip| {
+                clip.data.is_audio() != clips[0].data.is_audio()
+                    || !clip.shares_contents_with(clips[0])
+            }) {
+                return Err(format!(
+                    "{link}: {} doesn't hold {}'s contents",
+                    other.id, clips[0].id
+                ));
+            }
         }
         Ok(())
     }

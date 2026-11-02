@@ -17,6 +17,8 @@ use bl_model::{
     ChangeSet, Clip, ClipId, Command, Document, Editor, EnvelopeKind, FollowActions, FollowPatch,
     Scene, SceneId, TrackId,
 };
+use bl_shell_spec::editing::EditResult;
+use bl_shell_spec::linked_clips::DUPLICATE_LINKED_STEP;
 use bl_shell_spec::session_view::{
     self as ids, ClipboardArgs, CopiedClips, CopyToArrangementArgs, CopyToSessionArgs,
     SessionClipboardState, SlotRef,
@@ -308,6 +310,86 @@ pub(crate) fn carried(doc: &Document, track: TrackId, clip: &Clip, in_slot: bool
         .groove
         .filter(|groove| doc.settings().grooves.get(*groove).is_some());
     carried
+}
+
+/// Duplicate as Linked Clip in the Session View (the linked clips spec, R1):
+/// each clip's copy goes in the first empty slot below it on its track, a
+/// scene being added at the end where there is none, and is linked to the
+/// clip, as one undo step. The copies' slots become the selection.
+///
+/// # Errors
+///
+/// [`EditFailure`] if no clip is given or selected, or one isn't in a slot.
+pub fn duplicate_linked(
+    editor: &mut Editor,
+    session: &mut SessionView,
+    clips: Option<Vec<ClipId>>,
+) -> Result<EditResult, EditFailure> {
+    let doc = editor.document().clone();
+    let tracks = lanes(&doc);
+    let clips = clips.unwrap_or_else(|| selected_clips(&doc, session));
+    if clips.is_empty() {
+        return Err(unavailable("no Session clip is selected"));
+    }
+    // Top to bottom, so a copy lands above the ones that follow it.
+    let mut found = Vec::with_capacity(clips.len());
+    for id in clips.iter().collect::<BTreeSet<_>>() {
+        let place = slot_of(&doc, &tracks, *id)
+            .ok_or_else(|| invalid(format!("clip {} isn't in a Session slot", id.0)))?;
+        found.push((place, *id));
+    }
+    found.sort_unstable();
+    let (made, recorded) = transaction(editor, DUPLICATE_LINKED_STEP, |editor| {
+        let mut made = Vec::with_capacity(found.len());
+        for ((column, row), origin) in &found {
+            let track = tracks[*column];
+            let source = editor
+                .document()
+                .clip(*origin)
+                .cloned()
+                .ok_or_else(|| invalid(format!("no clip has the ID {}", origin.0)))?;
+            let mut scenes: Vec<SceneId> =
+                editor.document().scenes().map(|scene| scene.id).collect();
+            let below = (row + 1..scenes.len())
+                .find(|at| editor.document().slot(track, scenes[*at]).is_none());
+            let scene = match below {
+                Some(at) => scenes[at],
+                None => {
+                    let id: SceneId = editor.new_id();
+                    apply(
+                        editor,
+                        Command::CreateScene {
+                            id,
+                            index: scenes.len(),
+                        },
+                    )?;
+                    scenes.push(id);
+                    id
+                }
+            };
+            let mut clip = carried(editor.document(), track, &source, true);
+            clip.id = editor.new_id();
+            clip.start = Ticks::ZERO;
+            let (copy, scale) = (clip.id, clip.scale);
+            apply(editor, Command::CreateSlotClip { track, scene, clip })?;
+            crate::tracks::keep_scale(editor, copy, scale)?;
+            apply(
+                editor,
+                Command::LinkClips {
+                    clips: vec![*origin, copy],
+                },
+            )?;
+            made.push((copy, SlotRef { track, scene }));
+        }
+        Ok(made)
+    })?;
+    session.select_slots(made.iter().map(|(_, slot)| *slot).collect());
+    Ok(EditResult {
+        created: made.iter().map(|(copy, _)| *copy).collect(),
+        changed: found.iter().map(|(_, origin)| *origin).collect(),
+        undo_step: recorded,
+        ..EditResult::default()
+    })
 }
 
 /// Copies Session clips into the Arrangement (second-window R20): `base` is

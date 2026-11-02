@@ -16,7 +16,7 @@ use bl_core::time::{Bpm, Ticks};
 use bl_engine::DeviceType;
 use bl_model::{
     AutomationTarget, ContentHash, Document, MixerParam, Output, ParamDescriptor, PluginFormat,
-    SendTap, Track, TrackId, TrackKind, swatch_rgb,
+    SendTap, Track, TrackId, TrackKind,
 };
 
 use super::container::{Data, Entry, Error, METADATA_PART, PROJECT_PART, write_container};
@@ -243,9 +243,10 @@ impl Exporter<'_> {
         }
     }
 
-    /// A swatch as the `#rrggbb` the theme in use draws it (R23).
-    fn colour(&self, swatch: u8) -> String {
-        let [r, g, b] = swatch_rgb(self.context.track_colours, swatch);
+    /// A colour as the `#rrggbb` the theme in use draws it (R23); a custom
+    /// colour as saved (the themes spec, R29).
+    fn colour(&self, colour: bl_model::Colour) -> String {
+        let [r, g, b] = colour.rgb(self.context.track_colours);
         format!("#{r:02x}{g:02x}{b:02x}")
     }
 

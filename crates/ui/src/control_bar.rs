@@ -300,7 +300,7 @@ impl TransportFields {
                 let on = match element {
                     Element::PunchIn => punch_in_on(shell),
                     Element::PunchOut => punch_out_on(shell),
-                    _ => loop_on(shell),
+                    _ => loop_on(shell) && !shell.loop_suspended(),
                 };
                 return Some(Look {
                     on,
@@ -634,6 +634,16 @@ impl TransportFields {
         });
         if requested != 0 {
             push(events, transport::step(shell, field, requested, false));
+        }
+        // Spec: view-options R11 to R13.
+        if let Some(turn) = crate::wheel::input(response, || {
+            field.group.gesture_label().map_or_else(
+                || format!("Change {}", group_name(field.group)),
+                str::to_owned,
+            )
+        }) {
+            self.entry = None;
+            push(events, transport::step(shell, field, turn.steps, turn.fine));
         }
         if response.has_focus() {
             self.keys(ui, shell, field, events);

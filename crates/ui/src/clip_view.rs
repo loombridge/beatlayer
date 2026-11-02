@@ -43,6 +43,7 @@ use bl_shell::context_menus;
 use bl_shell::menus::{Action, MenuItem, shown};
 use bl_shell::note_commands as ids;
 use bl_shell::note_commands::{BreakpointRef, ChopStep, ClipTab, NoteField};
+use bl_shell::view_option_commands::NoteColors;
 use bl_shell::{Area, GesturePhase, Invocation, Shell};
 use egui::{
     Align2, CursorIcon, Id, Key, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, WidgetInfo, WidgetType,
@@ -228,7 +229,7 @@ pub(crate) fn title_bar(
     // Spec: themes R18. The name stands on the clip's colour; with several
     // clips selected, on stripes of theirs.
     let selected = shell.arrangement().selected_clips();
-    let swatches: Vec<u8> = if selected.len() > 1 && selected.contains(&clip) {
+    let swatches: Vec<bl_model::Colour> = if selected.len() > 1 && selected.contains(&clip) {
         selected
             .iter()
             .filter_map(|id| doc.clip(*id).and_then(|held| held.colour))
@@ -243,7 +244,7 @@ pub(crate) fn title_bar(
         ui.painter().rect_filled(
             Rect::from_min_max(pos2(x, rect.top()), pos2(x + stripe, rect.bottom())),
             0.0,
-            theme.swatch(*swatch),
+            theme.colour(*swatch),
         );
     }
     // Spec: session-context-menus R4, R9, R14. A right-click on the title
@@ -280,13 +281,26 @@ pub(crate) fn title_bar(
         events,
     );
     if !renaming {
-        ui.painter().text(
+        let name = ui.painter().text(
             pos2(rect.left() + 6.0, rect.center().y),
             Align2::LEFT_CENTER,
             &value.name,
             theme.small_font(),
             c.text.0,
         );
+        // Spec: linked-clips R10. A linked clip shows its link mark beside
+        // its name, and clicking it selects the link's clips.
+        if value.link.is_some() {
+            let area = Rect::from_min_size(
+                pos2(name.right() + 4.0, rect.top()),
+                vec2(crate::link_mark::WIDTH, rect.height()),
+            );
+            let others = doc.linked_clip_ids(clip).len();
+            let id = Id::new("clip-title-link-mark");
+            if crate::link_mark::show(ui, id, area, c.text.0, others, events) {
+                crate::link_mark::select_link(doc, clip, events);
+            }
+        }
     }
     if !audio {
         return;
@@ -2166,7 +2180,7 @@ impl ClipViewUi {
         let face = doc
             .clip(clip)
             .and_then(|held| held.colour)
-            .map_or(theme.colors.accent.0, |swatch| theme.swatch(swatch));
+            .map_or(theme.colors.accent.0, |swatch| theme.colour(swatch));
         let hovered = Self::hovered_note(ui, &layout, &rows, &notes, axis, span_len);
         tuning_readout(ui, shell, clip, &layout, &rows, &notes, hovered);
         let frame = note_lanes::Frame {
@@ -2535,6 +2549,7 @@ impl ClipViewUi {
         }
         paint_row_lines(ui, theme, grid, rows, limit);
         let face = frame.face;
+        let note_colors = shell.note_colors();
         for (place, note) in notes.iter().enumerate() {
             if note.key > limit {
                 continue;
@@ -2547,12 +2562,14 @@ impl ClipViewUi {
                 continue;
             }
             let corner = theme.sizes.corner.min(2.0);
-            // Spec: piano-roll R43. The note is drawn in its clip's colour,
+            // Spec: piano-roll R43; view-options R3, R4. The note is drawn in
+            // its clip's colour, or the hue of its pitch class or degree,
             // paler the softer its velocity; a deactivated note is grey.
             let colour = if note.mute || (self.mpe_on && !frame.chosen(place)) {
                 colours.clip_muted.0
             } else {
-                crate::theme::note_colour(face, note.velocity)
+                let hue = theme.note_face(note_colors, face, note.key, &style.scale);
+                crate::theme::note_colour(hue, note.velocity)
             };
             painter.rect_filled(rect, corner, colour);
             // Spec: note-editing R4. A note that doesn't always play wears a
@@ -2579,6 +2596,30 @@ impl ClipViewUi {
                     StrokeKind::Inside,
                 );
             }
+            // Spec: view-options R5. Colour is never the only sign: the
+            // note's pitch and velocity, and with By Scale Degree its degree,
+            // reach assistive technology.
+            let id = Id::new(("clip-view-note", frame.clip, place));
+            ui.ctx().accesskit_node_builder(id, |node| {
+                node.set_role(egui::accesskit::Role::ListItem);
+                node.set_label(format!(
+                    "{} velocity {}",
+                    style.name(note.key),
+                    note.velocity
+                ));
+                if note_colors == NoteColors::ScaleDegree && style.scale.enabled {
+                    node.set_value(match style.scale.degree(note.key) {
+                        Some(degree) => format!("degree {}", degree + 1),
+                        None => "not in the scale".to_owned(),
+                    });
+                }
+                node.set_bounds(egui::accesskit::Rect {
+                    x0: rect.min.x.into(),
+                    y0: rect.min.y.into(),
+                    x1: rect.max.x.into(),
+                    y1: rect.max.y.into(),
+                });
+            });
         }
         if let Some((from, to)) = self.marquee {
             let marquee = Rect::from_two_pos(from, to).intersect(grid);

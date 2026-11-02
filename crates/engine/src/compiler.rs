@@ -526,6 +526,21 @@ impl Compiler {
             matches!((old.track(id), document.track(id)),
                 (Some(was), Some(now)) if was.audition() != now.audition())
         }));
+        // Spec: chord-lane R6, R8, R11. The lane reaches the players of the
+        // tracks that follow it as node data, sent again when it or a
+        // track's switch changes: no program is made.
+        let lane_changed = old.chord_lane() != document.chord_lane();
+        tracks.extend(
+            document
+                .tracks()
+                .filter(|track| {
+                    track.kind() == TrackKind::Midi
+                        && (track.follow_chord_lane()
+                            != old.track(track.id()).is_some_and(Track::follow_chord_lane)
+                            || (lane_changed && track.follow_chord_lane()))
+                })
+                .map(Track::id),
+        );
         // Spec: grooves R15. A groove's parameters, the Global Amount and the
         // pool reach the clips that use them as node data: their tracks'
         // lists are sent again, and no program is made.
@@ -1057,6 +1072,7 @@ impl Compiler {
                     &document.settings().tempo,
                     self.config.sample_rate,
                     &document.settings().grooves,
+                    document.chord_lane(),
                 );
                 update
                     .data
@@ -3977,15 +3993,15 @@ mod tests {
         for command in [
             Command::SetTrackColour {
                 tracks: vec![audio_track, f.group],
-                colour: 40,
+                colour: bl_model::Colour::Swatch(40),
             },
             Command::SetClipColour {
                 clips: vec![clip_id],
-                colour: 41,
+                colour: bl_model::Colour::Swatch(41),
             },
             Command::SetSceneColour {
                 scenes: vec![scene],
-                colour: Some(42),
+                colour: Some(bl_model::Colour::Swatch(42)),
             },
             Command::AssignColourToClips {
                 tracks: vec![audio_track],

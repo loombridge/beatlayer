@@ -967,8 +967,8 @@ pub struct ChainRow {
     pub id: ChainId,
     /// Its name.
     pub name: String,
-    /// Its colour, a swatch of the palette of 5 rows of 14, if it has one.
-    pub colour: Option<u8>,
+    /// Its colour, a swatch of the palette of 5 rows of 14 or a `#RRGGBB` colour, if it has one.
+    pub colour: Option<bl_model::Colour>,
     /// Its Chain Activator.
     pub enabled: bool,
     /// Whether it's soloed.
@@ -1214,8 +1214,12 @@ pub struct DeviceViewState {
     pub track_kind: Option<TrackKind>,
     /// Its devices, in signal order.
     pub devices: Vec<DeviceFrame>,
-    /// The selected device, if it's in this chain.
+    /// The first selected device, if it's in this chain.
     pub selected: Option<DeviceId>,
+    /// Every selected device in this chain, in order: one run of
+    /// neighbouring devices (device chains R47).
+    #[serde(default)]
+    pub selection: Vec<DeviceId>,
     /// The device being hot-swapped, on any track, and what the browser's
     /// bar says ("Swapping Audio Effect").
     pub hot_swap: Option<HotSwap>,
@@ -1425,11 +1429,20 @@ pub struct ScrollDeviceViewArgs {
 }
 
 /// Arguments of `device.select`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SelectDeviceArgs {
-    /// The device, or `null` to select none.
+    /// The device, or `null` to select none; left out with `devices`.
+    #[serde(default)]
     pub device: Option<DeviceId>,
+    /// Neighbouring devices of one chain to select together, as a range;
+    /// instead of `device`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub devices: Option<Vec<DeviceId>>,
+    /// Select the range from the device selected last on its own to
+    /// `device`, never fewer devices than before, as Shift-click does.
+    #[serde(default)]
+    pub range: bool,
 }
 
 /// Arguments of `device.expand`.
@@ -1821,8 +1834,8 @@ pub struct MacroInfo {
     /// Its name: Rename's, its one parameter's, or "Macro N" (macros spec,
     /// R10).
     pub name: String,
-    /// Its colour: a swatch of the palette of 5 rows of 14, or null.
-    pub colour: Option<u8>,
+    /// Its colour: a swatch of the palette of 5 rows of 14, a `#RRGGBB` colour, or null.
+    pub colour: Option<bl_model::Colour>,
     /// Its value, from 0 to 1.
     pub value: f64,
     /// How it reads: its parameter's value and unit, 0 to 127, or a shared
@@ -2325,10 +2338,13 @@ fn specs() -> Vec<CommandSpec> {
             .result::<DeviceAdded>(),
         CommandSpec::new(SELECT, "Select Device")
             .description(
-                "Selects a device, as clicking its title bar does, or none with `null`. The \
-                 Device View's keys (Delete, Cmd-C, Cmd-D, Cmd-R) act on it. A device that \
-                 floats in its own window also brings that window to the front. Selecting \
-                 changes nothing in the set.",
+                "Selects a device, as clicking its title bar does, or none with `null`; with \
+                 `devices` it selects that run of neighbouring devices of one chain, and with \
+                 `range` it grows the selection to `device`, as Shift-click does. The Device \
+                 View's keys (Delete, Cmd-C, Cmd-D, Cmd-G, Cmd-X) act on every selected device, \
+                 which `device_view.state` lists in `selection`. A device that floats in its \
+                 own window also brings that window to the front. Selecting changes nothing in \
+                 the set.",
             )
             .permission(Permission::Read)
             .context(DeviceView)
@@ -2362,8 +2378,9 @@ fn specs() -> Vec<CommandSpec> {
         CommandSpec::new(CUT, "Cut Device")
             .description(
                 "Copies a device to the clipboard, with its settings, and deletes it from its \
-                 chain: one undo step, named Delete Device(s). Because it removes the person's \
-                 work an agent asks first. `device.paste` puts it back, anywhere.",
+                 chain: one undo step, named Delete Device(s). With `device` left out it cuts \
+                 every selected device, and selects the device after them. Because it removes \
+                 the person's work an agent asks first. `device.paste` puts it back, anywhere.",
             )
             .permission(Permission::Destructive)
             .context(DeviceView)
@@ -2372,8 +2389,8 @@ fn specs() -> Vec<CommandSpec> {
             .result::<DeviceViewState>(),
         CommandSpec::new(COPY, "Copy Device")
             .description(
-                "Copies a device to the clipboard, with its settings, for `device.paste`. \
-                 Changes nothing in the set.",
+                "Copies a device to the clipboard, with its settings, for `device.paste`; with \
+                 `device` left out, every selected device. Changes nothing in the set.",
             )
             .permission(Permission::Read)
             .context(DeviceView)
@@ -2382,10 +2399,10 @@ fn specs() -> Vec<CommandSpec> {
             .result::<DeviceViewState>(),
         CommandSpec::new(PASTE, "Paste Device")
             .description(
-                "Pastes the clipboard's device, as a new device with its settings, before the \
-                 selected device (or `before`), or at the end of the chain with none selected, \
-                 on the selected track (or `track`), and selects it: one undo step, named Copy \
-                 Device. The chain keeps Live's order, so an audio effect can't go before an \
+                "Pastes the clipboard's devices, as new devices with their settings, before the \
+                 first selected device (or `before`), or at the end of the chain with none \
+                 selected, on the selected track (or `track`), and selects them: one undo step, \
+                 named Copy Device. The result names the first. The chain keeps Live's order, so an audio effect can't go before an \
                  instrument, and instruments and MIDI effects only go on MIDI tracks. With \
                  `chain` it pastes into that rack chain, or before a device that is in one.",
             )
@@ -2397,7 +2414,9 @@ fn specs() -> Vec<CommandSpec> {
         CommandSpec::new(DUPLICATE, "Duplicate Device")
             .description(
                 "Puts a copy of a device, with its settings, straight after it, and selects the \
-                 copy: one undo step, named Duplicate Device. A chain holds one instrument, so \
+                 copy: one undo step, named Duplicate Device. With `device` left out it copies \
+                 every selected device, in order, after the last of them; the result names the \
+                 first copy. A chain holds one instrument, so \
                  an instrument can't be duplicated; a rack is copied whole, with new IDs for \
                  its chains and devices.",
             )
@@ -2661,8 +2680,8 @@ fn specs() -> Vec<CommandSpec> {
                  rack for MIDI effects alone, and an instrument rack for any other mix. A \
                  selection that grouping would put out of the chain's order is refused. With \
                  `chains` (several chains of one rack) they become the chains of a new rack of \
-                 the same kind, inside a new chain in the first one's place. One undo step \
-                 (Group).",
+                 the same kind, inside a new chain in the first one's place. With neither it \
+                 groups every selected device. One undo step (Group Devices).",
             )
             .permission(Permission::Edit)
             .contexts([DeviceView, RackChains])

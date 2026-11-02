@@ -3,7 +3,7 @@
 //! drawn with egui's painter (arrangement-view R5, R13).
 
 use bl_core::time::{TempoMap, Ticks, TimeSignatureMap};
-use bl_model::{Locator, LocatorId, SongStart};
+use bl_model::{ChordRegion, ChordRegionId, Locator, LocatorId, SectionId, SongSection, SongStart};
 use bl_shell::arrangement::{Horizontal, TransportView};
 use egui::{Align2, Color32, Painter, Rect, Stroke, pos2};
 
@@ -213,6 +213,58 @@ pub fn signature_lane(
     );
 }
 
+/// Draws the chord lane (L-ARR-024): each region from its start to its end,
+/// named for its scale and its transposition, the selected one in the
+/// selection colour.
+pub fn chord_lane(
+    painter: &Painter,
+    rect: Rect,
+    horizontal: Horizontal,
+    regions: &[ChordRegion],
+    selected: Option<ChordRegionId>,
+    theme: &Theme,
+) {
+    let colors = &theme.colors;
+    painter.rect_filled(rect, 0.0, colors.bar.0);
+    painter.line_segment(
+        [rect.left_bottom(), rect.right_bottom()],
+        Stroke::new(1.0, colors.separator.0),
+    );
+    for region in regions {
+        let Some(block) = region_rect(rect, horizontal, region) else {
+            continue;
+        };
+        let chosen = selected == Some(region.id);
+        let fill = if chosen {
+            colors.accent.0
+        } else {
+            colors.accent.0.gamma_multiply(0.35)
+        };
+        painter.rect_filled(block.shrink2(egui::vec2(0.0, 2.0)), 2.0, fill);
+        painter.with_clip_rect(block).text(
+            pos2(block.left() + 4.0, block.center().y),
+            Align2::LEFT_CENTER,
+            region.name(),
+            theme.small_font(),
+            colors.text.0,
+        );
+    }
+}
+
+/// Where a region sits in the lane `lane`, cut to the lane's width; `None`
+/// when it is out of view.
+#[must_use]
+pub fn region_rect(lane: Rect, horizontal: Horizontal, region: &ChordRegion) -> Option<Rect> {
+    let x0 = lane.left() + horizontal.x(region.start) as f32;
+    let x1 = lane.left() + horizontal.x(region.end) as f32;
+    (x1 > lane.left() && x0 < lane.right()).then(|| {
+        Rect::from_min_max(
+            pos2(x0.max(lane.left()), lane.top()),
+            pos2(x1.min(lane.right()), lane.bottom()),
+        )
+    })
+}
+
 /// Draws the scrub area, with the locators in it (L-ARR-003): each at its
 /// position, with its name, a selected one in the selection colour, and the
 /// one that holds the song start time in the theme's song start colour.
@@ -254,6 +306,78 @@ pub fn scrub_area(
             colour,
         );
     }
+}
+
+/// Draws the arranger track (L-ARR-023): each section over its span in its
+/// colour with its name, a selected one in the selection colour.
+pub fn arranger_lane(
+    painter: &Painter,
+    rect: Rect,
+    sections: &[SongSection],
+    selected: &[SectionId],
+    horizontal: Horizontal,
+    theme: &Theme,
+) {
+    let colors = &theme.colors;
+    painter.rect_filled(rect, 0.0, colors.bar.0);
+    for section in sections {
+        let (x0, x1) = (
+            rect.left() + horizontal.x(section.start) as f32,
+            rect.left() + horizontal.x(section.end()) as f32,
+        );
+        if x1 < rect.left() || x0 > rect.right() {
+            continue;
+        }
+        let shown = Rect::from_min_max(
+            pos2(x0.max(rect.left()), rect.top() + 1.0),
+            pos2(x1.min(rect.right()), rect.bottom() - 1.0),
+        );
+        let fill = theme.swatch(section.colour);
+        let on = selected.contains(&section.id);
+        painter.rect_filled(shown, 2.0, fill);
+        if on {
+            painter.rect_stroke(
+                shown,
+                2.0,
+                Stroke::new(2.0, colors.accent.0),
+                egui::StrokeKind::Inside,
+            );
+        }
+        // Dark ink on a light colour, light ink on a dark one.
+        let [r, g, b, _] = fill.to_array();
+        let light = 0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b) > 140.0;
+        painter.with_clip_rect(shown).text(
+            pos2(shown.left() + 4.0, shown.center().y),
+            Align2::LEFT_CENTER,
+            &section.name,
+            theme.small_font(),
+            if light {
+                Color32::BLACK
+            } else {
+                Color32::WHITE
+            },
+        );
+    }
+    painter.line_segment(
+        [rect.left_bottom(), rect.right_bottom()],
+        Stroke::new(1.0, colors.separator.0),
+    );
+}
+
+/// Draws the arranger track's header (L-ARR-023), which reads Arranger.
+pub fn arranger_header(painter: &Painter, rect: Rect, theme: &Theme) {
+    painter.rect_filled(rect, 0.0, theme.colors.panel.0);
+    painter.text(
+        pos2(rect.left() + 6.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        "Arranger",
+        theme.small_font(),
+        theme.colors.text.0,
+    );
+    painter.line_segment(
+        [rect.left_bottom(), rect.right_bottom()],
+        Stroke::new(1.0, theme.colors.separator.0),
+    );
 }
 
 /// The time ruler's label spacings, in seconds.

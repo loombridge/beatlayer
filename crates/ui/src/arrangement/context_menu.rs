@@ -45,6 +45,10 @@ pub enum MenuKind {
     Breakpoint,
     /// An envelope's line: Add Value (C-TIME-026).
     Line,
+    /// The arranger track away from a section (IMP-22).
+    Arranger,
+    /// A section's (IMP-22).
+    Section,
 }
 
 /// The two menus and which one is open.
@@ -186,6 +190,16 @@ impl ContextMenus {
         self.scrub_at = Some(at);
     }
 
+    /// A right-click in the arranger track away from a section.
+    pub fn open_arranger(&mut self) {
+        self.kind = MenuKind::Arranger;
+    }
+
+    /// A right-click on a section, which is selected.
+    pub fn open_section(&mut self) {
+        self.kind = MenuKind::Section;
+    }
+
     /// A right-click on the loop brace.
     pub fn open_brace(&mut self) {
         self.kind = MenuKind::Brace;
@@ -235,6 +249,8 @@ impl ContextMenus {
             MenuKind::Brace => context_menus::arrangement_brace_in(),
             MenuKind::FragmentaryBar => context_menus::arrangement_fragmentary_bar_in(),
             MenuKind::Signature => context_menus::arrangement_signature_in(),
+            MenuKind::Arranger => context_menus::arrangement_arranger_in(),
+            MenuKind::Section => context_menus::arrangement_section_in(),
             MenuKind::Breakpoint | MenuKind::Line => return,
         };
         let menu = &menu;
@@ -274,11 +290,31 @@ impl ContextMenus {
                     .first()
                     .and_then(|clip| doc.clip(*clip))
                     .and_then(|clip| clip.colour);
-                if let Some(colour) = crate::palette::show(ui, theme, "clip-colour", current) {
+                crate::palette::show(
+                    ui,
+                    theme,
+                    shell,
+                    "clip-colour",
+                    current,
+                    crate::palette::Target::new("clip.set_colour", json!({ "clips": selected })),
+                    events,
+                );
+            } else if item.row == context_menus::SECTION_COLOUR_ROW {
+                // Spec: arranger-track R7. The palette colours the section.
+                let doc = shell.editor().document();
+                let current = shell
+                    .arrangement()
+                    .selected_sections()
+                    .first()
+                    .and_then(|section| doc.section(*section))
+                    .map(|section| section.colour);
+                if let Some(colour) =
+                    crate::palette::show_swatches(ui, theme, "section-colour", current)
+                {
                     invoke(
                         events,
-                        "clip.set_colour",
-                        json!({ "clips": selected, "colour": colour }),
+                        bl_shell::arranger_commands::SET_SECTION_COLOUR,
+                        json!({ "colour": colour }),
                     );
                     ui.close();
                 }
@@ -325,6 +361,14 @@ impl ContextMenus {
                             .selected_clips()
                             .first()
                             .map(|clip| json!({ "clip": clip }))
+                    }
+                    // Spec: linked-clips R1, R8. Both act on the selected
+                    // clips.
+                    (MenuKind::Clip, Action::Command(id))
+                        if id == bl_shell::linked_clip_commands::DUPLICATE_LINKED
+                            || id == bl_shell::linked_clip_commands::UNLINK =>
+                    {
+                        Some(json!({ "clips": shell.arrangement().selected_clips() }))
                     }
                     // Spec: stem-separation R22. The time selection's audio
                     // tracks and range.

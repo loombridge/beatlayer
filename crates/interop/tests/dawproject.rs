@@ -746,15 +746,24 @@ fn colours_take_the_nearest_swatch_and_a_missing_colour_the_new_one() {
     let document = &imported.project.document;
     // The file's colours are swatches 21 (a clip) and 33 (a scene) as drawn.
     let scenes: Vec<_> = document.scenes().collect();
-    assert_eq!(scenes[0].colour, Some(33));
+    assert_eq!(scenes[0].colour, Some(bl_model::Colour::Swatch(33)));
     assert_eq!(scenes[1].colour, None);
     let kick = track(document, "Kick");
-    assert_eq!(kick.slot(scenes[0].id).unwrap().colour, Some(21));
+    assert_eq!(
+        kick.slot(scenes[0].id).unwrap().colour,
+        Some(bl_model::Colour::Swatch(21))
+    );
     // A track with no colour takes `id mod 14`, as a new track does.
-    assert_eq!(kick.colour(), bl_model::id_swatch(kick.id().0));
+    assert_eq!(
+        kick.colour(),
+        bl_model::Colour::Swatch(bl_model::id_swatch(kick.id().0))
+    );
     // #ff8800 is nearest the second of the top row's colours, by CIELAB.
     let imported = import_of("cubase-shaped");
-    assert_eq!(track(&imported.project.document, "Pad").colour(), 1);
+    assert_eq!(
+        track(&imported.project.document, "Pad").colour(),
+        bl_model::Colour::Swatch(1)
+    );
 }
 
 /// A fade is in seconds, a fade in beats goes through the tempo map, and a

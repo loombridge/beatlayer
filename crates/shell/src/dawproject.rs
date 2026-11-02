@@ -77,11 +77,11 @@ pub struct Settings {
 struct LookColours(ThemeLook);
 
 impl NewColours for LookColours {
-    fn track(&self, id: TrackId) -> u8 {
+    fn track(&self, id: TrackId) -> bl_model::Colour {
         self.0.new_track_colour(id)
     }
 
-    fn clip(&self, id: ClipId) -> Option<u8> {
+    fn clip(&self, id: ClipId) -> Option<bl_model::Colour> {
         self.0.new_clip_colour(id)
     }
 }

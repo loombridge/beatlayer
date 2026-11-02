@@ -376,6 +376,15 @@ impl Shell {
             .then(|| serde_json::from_value::<device_ids::SelectDeviceArgs>(args.clone()).ok())
             .flatten()
             .and_then(|a| a.device);
+        // Spec: plugin-scanning R16. A plug-in preset's own state goes to its
+        // plug-in once the preset is loaded, added or put in a device's place.
+        let preset_file = match id {
+            device_ids::LOAD_PRESET | device_ids::ADD_PRESET => args.get("path"),
+            device_ids::REPLACE => args.get("preset"),
+            _ => None,
+        }
+        .and_then(Value::as_str)
+        .map(PathBuf::from);
         let user_library = self.browser_view.user_library().map(Path::to_path_buf);
         let zoom = self.zoom();
         let auto_hide = self.prefs.auto_hide_plug_in_windows.0;
@@ -395,8 +404,33 @@ impl Shell {
             },
         );
         let mut outcome = result.map_err(|error| device_error(id, error))?;
+        if let Some(file) = preset_file
+            && let Some(device) = outcome
+                .value
+                .get("device")
+                .and_then(|d| serde_json::from_value(d.clone()).ok())
+            && let Err(why) = self.give_preset_state(device, &file)
+        {
+            self.set_message(
+                format!("The plug-in refused the preset's state: {why}"),
+                true,
+            );
+        }
+        if id == device_ids::HOT_SWAP
+            && let Some(device) = self.devices.hot_swap()
+            && self.show_plugin_presets(device)
+        {
+            // Spec: plugin-scanning R18. A plug-in's presets are listed under
+            // its row, not in the User Library's folder for the device.
+            outcome.browse = None;
+        }
         if id == device_ids::STATE {
             outcome.value = to_value(&self.device_view_report());
+        }
+        // Spec: plugin-scanning R15. A preset saved from a plug-in lists under
+        // its row once the places are indexed again.
+        if id == device_ids::SAVE_PRESET {
+            self.browser_view.files_written();
         }
         // Spec: browser-tags R31. Starting hot-swap clears the search words
         // and the selected tags as a new step.
@@ -789,6 +823,24 @@ impl Shell {
         let swapping = self.devices.hot_swap().is_some() || armed_chain.is_some();
         match load {
             DevicesLoad::Preset(path) => {
+                // Spec: plugin-scanning R17. A preset saved from a plug-in the
+                // browser lists loads that plug-in with it: onto the selected
+                // track, a new track, or in place of the device armed.
+                if armed_chain.is_none()
+                    && let Some((format, plugin_id)) = bl_project::preset::Preset::plugin_of(&path)
+                    && let Some(plugin) = self
+                        .browser_view
+                        .scanned_plugin(format, &plugin_id)
+                        .cloned()
+                {
+                    let loaded = self.load_browser_plugin(
+                        browser_ids::LOAD_SELECTED,
+                        &plugin,
+                        Some(browser::PluginPreset::Beatlayer(path)),
+                    )?;
+                    self.touch();
+                    return Ok(loaded);
+                }
                 let path = path.to_string_lossy().into_owned();
                 if devices::is_chain_preset(Path::new(&path)) {
                     self.run_devices(device_ids::CHAIN_LOAD_PRESET, json!({ "path": path }))

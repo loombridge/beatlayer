@@ -94,6 +94,9 @@ impl TrackMenus {
                 .is_some_and(|t| t.kind() == bl_model::TrackKind::Group),
             several: view.selected_tracks().len() > 1,
             arrangement: in_arrangement,
+            midi: doc
+                .track(track)
+                .is_some_and(|t| t.kind() == bl_model::TrackKind::Midi),
             time_selection: in_arrangement
                 && view.time_selection().is_some()
                 && view.selected_tracks().contains(&track),
@@ -123,13 +126,36 @@ impl TrackMenus {
             // Spec: themes R16, R26. The palette colours the selected tracks.
             if item.row == "C-TRACK-015" {
                 let current = doc.track(track).map(bl_model::Track::colour);
-                if let Some(colour) = crate::palette::show(ui, theme, "track-colour", current) {
-                    events.push(UiEvent::Invoke(Invocation::new(
+                crate::palette::show(
+                    ui,
+                    theme,
+                    shell,
+                    "track-colour",
+                    current,
+                    crate::palette::Target::new(
                         "track.set_colour",
-                        json!({ "tracks": view.selected_tracks(), "colour": colour }),
-                    )));
-                    ui.close();
+                        json!({ "tracks": view.selected_tracks() }),
+                    ),
+                    events,
+                );
+                continue;
+            }
+            // Spec: chord-lane R5. The switch is ticked while the track follows
+            // the lane, and sets it the other way.
+            if item.row == bl_shell::menus::IMP_33_FOLLOW {
+                let follow = doc
+                    .track(track)
+                    .is_some_and(bl_model::Track::follow_chord_lane);
+                let mut state =
+                    crate::menus::item_state_in(item, shell, &keymap, self.platform, &contexts);
+                state.checked = Some(follow);
+                if let Some(invocation) = state.invocation.as_mut() {
+                    invocation.args = json!({ "track": track, "follow": !follow });
+                    state.enabled =
+                        shell.can_invoke_in(&invocation.id, &invocation.args, &contexts);
                 }
+                let response = crate::menus::draw_item(ui, state, self.platform, events);
+                crate::menus::take_focus_first(ui, &response);
                 continue;
             }
             // Spec: themes R17, R26. The assign items act on the selection.

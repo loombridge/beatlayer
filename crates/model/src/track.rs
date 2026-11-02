@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::automation::{Automation, AutomationTarget, TrackAutomation};
 use crate::clip::{AudioData, Clip, ClipData, EnvelopeKind, TakeLane};
+use crate::colour::Colour;
 use crate::device::Device;
 use crate::freeze::FrozenTrack;
 use crate::ids::{ChainId, ClipId, DeviceId, SceneId, TakeLaneId, TrackId};
@@ -48,6 +49,7 @@ fn frozen_output_clip(output: crate::freeze::FrozenOutput) -> Clip {
         groove: None,
         colour: None,
         info_text: String::new(),
+        link: None,
     }
 }
 
@@ -808,12 +810,16 @@ pub struct Track {
     /// linked-track editing spec, R1). A group always has two tracks or
     /// more.
     pub(crate) link: Option<crate::ids::LinkGroupId>,
-    /// The track's colour, a swatch from 0 to 69 (the themes spec, R14). A
+    /// The track's colour, a swatch from 0 to 69 or a `#RRGGBB` colour (the
+    /// themes spec, R14, R29). A
     /// new track takes swatch `id mod 14`.
-    pub(crate) colour: u8,
+    pub(crate) colour: Colour,
     /// The user's own info text (Edit Info Text); empty for none (the Info
     /// View spec, R9).
     pub(crate) info_text: String,
+    /// Whether the track plays its Arrangement clips through the chord lane
+    /// (WP-6.48; the chord lane spec, R5). Off in a new track.
+    pub(crate) follow_chord_lane: bool,
 }
 
 impl Track {
@@ -822,7 +828,7 @@ impl Track {
             id,
             kind,
             name,
-            colour: crate::colour::id_swatch(id.0),
+            colour: crate::colour::id_swatch(id.0).into(),
             mixer: Mixer::default(),
             sends: OrdMap::new(),
             routing: Routing::new(kind),
@@ -841,6 +847,7 @@ impl Track {
             tuning_layout: crate::TuningLayout::default(),
             link: None,
             info_text: String::new(),
+            follow_chord_lane: false,
         }
     }
 
@@ -895,15 +902,21 @@ impl Track {
         self.id
     }
 
+    /// Whether the track plays its Arrangement clips through the chord lane.
+    #[must_use]
+    pub const fn follow_chord_lane(&self) -> bool {
+        self.follow_chord_lane
+    }
+
     /// The track's own info text, empty for none.
     #[must_use]
     pub fn info_text(&self) -> &str {
         &self.info_text
     }
 
-    /// The track's colour: a swatch from 0 to 69.
+    /// The track's colour: a swatch from 0 to 69, or a colour of its own.
     #[must_use]
-    pub fn colour(&self) -> u8 {
+    pub fn colour(&self) -> Colour {
         self.colour
     }
 
@@ -1281,6 +1294,7 @@ impl Track {
             || self.delay != other.delay
             || self.keep_monitoring_latency != other.keep_monitoring_latency
             || self.tuning_bypass != other.tuning_bypass
+            || self.follow_chord_lane != other.follow_chord_lane
             || self.tuning_layout != other.tuning_layout
             || self.link != other.link
             || self.removed_stop_buttons != other.removed_stop_buttons

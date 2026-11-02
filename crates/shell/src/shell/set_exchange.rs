@@ -210,6 +210,7 @@ impl Shell {
             delay: from.delay(),
             keep_monitoring_latency: from.keep_monitoring_latency(),
             tuning_bypass: false,
+            follow_chord_lane: false,
             tuning_layout: bl_model::TuningLayout::default(),
             info_text: String::new(),
             frozen: None,

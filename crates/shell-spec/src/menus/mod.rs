@@ -108,11 +108,43 @@ pub const D24: &str = "D24";
 /// records Live's menus.
 pub const IMP_12: &str = "IMP-12";
 
+/// The row of Beatlayer's own Duplicate as Linked Clip (IMP-21), after
+/// Duplicate Track Without Clips in the Edit menu and after Duplicate in the
+/// clips' context menus: an improvement, so not a row of menus.md.
+pub const IMP_21: &str = "IMP-21";
+
+/// The row of Beatlayer's own Unlink Clip (IMP-21), after Duplicate as Linked
+/// Clip in the clips' context menus.
+pub const IMP_21_UNLINK: &str = "IMP-21-unlink";
+
+/// The row of Beatlayer's own Arranger Track item in the View menu (IMP-22),
+/// straight after Overview: an improvement, so not one of menus.md's Live
+/// rows, though the reference names it IMP-22.
+pub const IMP_22: &str = "IMP-22";
+
 /// The row of Beatlayer's own Return Tracks Scroll with Tracks (IMP-01),
 /// straight after Return Tracks in the Mixer Controls submenu and in the
 /// Arrangement Track Controls submenu: an improvement, so not one of
 /// menus.md's Live rows, though the reference names it IMP-01.
 pub const IMP_01: &str = "IMP-01";
+
+/// The row of Beatlayer's own Chord Lane (IMP-33), after Overview in the View
+/// menu: an improvement, so not one of menus.md's Live rows, though the
+/// reference names it IMP-33.
+pub const IMP_33: &str = "IMP-33";
+
+/// The row of Beatlayer's own Follow Chord Lane (IMP-33), in a MIDI track's
+/// menu after Save as Default MIDI Track: not one of menus.md's Live rows.
+pub const IMP_33_FOLLOW: &str = "IMP-33-follow";
+
+/// The row of Beatlayer's own Mark Empty Tracks (IMP-34), straight after
+/// Show Selected Grouped Track in the View menu: an improvement, so not a
+/// row of menus.md.
+pub const IMP_34: &str = "IMP-34";
+
+/// The row of Beatlayer's own Note Colors submenu (IMP-35), straight after
+/// Fold to Scale in the View menu: an improvement, so not a row of menus.md.
+pub const IMP_35: &str = "IMP-35";
 
 /// The row of Beatlayer's own Devices section switch (IMP-25), straight
 /// after Performance Impact in the Mixer Controls submenu: an improvement,

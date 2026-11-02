@@ -54,6 +54,10 @@ pub fn file_kind(name: &str) -> Option<ItemKind> {
 /// behaves as one (set exchange R2).
 #[must_use]
 pub fn path_kind(path: &Path) -> Option<ItemKind> {
+    // A plug-in's preset row isn't a file to preview or load as a device.
+    if super::plugin_presets::is_preset_key(&path.to_string_lossy()) {
+        return None;
+    }
     if path
         .to_string_lossy()
         .starts_with(super::tunings::BUNDLED_PREFIX)

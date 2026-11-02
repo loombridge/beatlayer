@@ -5,7 +5,9 @@ use bl_shell_spec::settings::ThemeLook;
 
 /// Colours the tracks and clips a command just made, inside its undo step:
 /// each track as Auto-Assign Track Colors, Default Track Color and Reduced
-/// Automatic Colors say, then each clip as Clip Color says, so a clip that
+/// Automatic Colors say, or its group's colour where New Tracks Take Group
+/// Color is on and the track was made inside a group (R30), then each clip
+/// as Clip Color says, so a clip that
 /// takes its track's colour takes the new track's. A new track already has
 /// swatch `id mod 14` and a new clip its track's, so with the default
 /// settings this changes nothing.
@@ -20,7 +22,12 @@ pub fn colour_new(
     clips: &[ClipId],
 ) -> Result<(), EditError> {
     for &track in tracks {
-        let colour = look.new_track_colour(track);
+        let doc = editor.document();
+        let group = look
+            .new_tracks_take_group_colour
+            .then(|| doc.parent(track).and_then(|group| doc.track(group)))
+            .flatten();
+        let colour = group.map_or_else(|| look.new_track_colour(track), bl_model::Track::colour);
         if editor
             .document()
             .track(track)

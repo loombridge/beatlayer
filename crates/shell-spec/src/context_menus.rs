@@ -22,7 +22,10 @@ use crate::comping::COPY_TO_MAIN_LANE;
 use crate::devices::{
     COMPARE_COPY, COMPARE_SWITCH, SAVE_DEFAULT_PRESET, SET_FLOATING, SET_ROLE, UNGROUP,
 };
-use crate::menus::{Action, IMP_12, MenuItem, Row, SEPARATOR, items};
+use crate::linked_clips::{DUPLICATE_LINKED, UNLINK as UNLINK_CLIP};
+use crate::menus::{
+    Action, IMP_12, IMP_21, IMP_21_UNLINK, IMP_33_FOLLOW, MenuItem, Row, SEPARATOR, items,
+};
 use crate::midi_files::EXPORT as EXPORT_MIDI_CLIP;
 use crate::notes::{CHOP as CHOP_NOTES, SPLIT as SPLIT_NOTES};
 use crate::slice::OPEN as SLICE_TO_MIDI;
@@ -53,6 +56,9 @@ const CLIP: &[Row] = &[
     ("C-CLIP-ARR-001", "Cut", Key(&["S-EDIT-001"])),
     ("C-CLIP-ARR-002", "Copy", Key(&["S-EDIT-002"])),
     ("C-CLIP-ARR-003", "Duplicate", Key(&["S-EDIT-004"])),
+    // IMP-21 places both straight after Duplicate.
+    (IMP_21, "Duplicate as Linked Clip", Cmd(DUPLICATE_LINKED)),
+    (IMP_21_UNLINK, "Unlink Clip", Cmd(UNLINK_CLIP)),
     ("C-CLIP-ARR-004", "Delete", Key(&["S-EDIT-005"])),
     SEPARATOR,
     (
@@ -195,6 +201,66 @@ const LOCATOR: &[Row] = &[
         "C-TIME-025a",
         "Edit Info Text",
         Cmd(crate::locator::SET_INFO_TEXT),
+    ),
+];
+
+/// The row of Beatlayer's own arranger track menus (IMP-22), which hold
+/// Create Section and Create Sections From Locators in the lane's, and
+/// Rename, Move Earlier, Move Later, Remove Section and Delete Section in a
+/// section's: improvements, so not rows of menus.md.
+pub const IMP_22: &str = "IMP-22";
+
+/// The row of a section's menu that holds the colour palette, drawn by the
+/// UI (the arranger track spec, R7).
+pub const SECTION_COLOUR_ROW: &str = "IMP-22-colour";
+
+/// The arranger track's own menu (IMP-22): the lane away from a section.
+const ARRANGER: &[Row] = &[
+    (
+        "IMP-22-create",
+        "Create Section",
+        Cmd(crate::arranger::ADD_SECTION),
+    ),
+    (
+        "IMP-22-from-locators",
+        "Create Sections From Locators",
+        Cmd(crate::arranger::SECTIONS_FROM_LOCATORS),
+    ),
+];
+
+/// A section's menu (IMP-22).
+const SECTION: &[Row] = &[
+    (
+        "IMP-22-rename",
+        "Rename Section",
+        Cmd(crate::arranger::RENAME_SECTION),
+    ),
+    (
+        SECTION_COLOUR_ROW,
+        "Colour palette",
+        Cmd(crate::arranger::SET_SECTION_COLOUR),
+    ),
+    SEPARATOR,
+    (
+        "IMP-22-earlier",
+        "Move Earlier",
+        Choice(crate::arranger::MOVE_SECTION, "{\"with\":\"earlier\"}"),
+    ),
+    (
+        "IMP-22-later",
+        "Move Later",
+        Choice(crate::arranger::MOVE_SECTION, "{\"with\":\"later\"}"),
+    ),
+    SEPARATOR,
+    (
+        "IMP-22-remove",
+        "Remove Section",
+        Cmd(crate::arranger::REMOVE_SECTION),
+    ),
+    (
+        "IMP-22-delete",
+        "Delete Section",
+        Cmd(crate::arranger::DELETE_SECTION),
     ),
 ];
 
@@ -387,6 +453,8 @@ pub struct TrackMenu {
     /// Every top-level device on the selected tracks is already off, so the
     /// Deactivate All Devices item reads Activate All Devices (IMP-25).
     pub devices_off: bool,
+    /// The track is a MIDI track, which has Follow Chord Lane (IMP-33).
+    pub midi: bool,
 }
 
 /// The rows the other states add after row `after`. menus.md doesn't
@@ -430,6 +498,15 @@ fn track_extras(after: &str, state: TrackMenu) -> Vec<Row> {
                     Cmd("take_lane.delete_unused"),
                 ));
             }
+        }
+        // Spec: chord-lane R5. A MIDI track's own switch, in a group of its own.
+        "C-TRACK-014" if state.midi => {
+            rows.push(SEPARATOR);
+            rows.push((
+                IMP_33_FOLLOW,
+                "Follow Chord Lane",
+                Cmd("track.set_follow_chord_lane"),
+            ));
         }
         "C-TRACK-016" if state.group => rows.push((
             "C-TRACK-017b",
@@ -564,6 +641,8 @@ const CLIP_SES: &[Row] = &[
     ("C-CLIP-SES-001", "Cut", Key(&["S-EDIT-001"])),
     ("C-CLIP-SES-002", "Copy", Key(&["S-EDIT-002"])),
     ("C-CLIP-SES-003", "Duplicate", Key(&["S-EDIT-004"])),
+    (IMP_21, "Duplicate as Linked Clip", Cmd(DUPLICATE_LINKED)),
+    (IMP_21_UNLINK, "Unlink Clip", Cmd(UNLINK_CLIP)),
     ("C-CLIP-SES-004", "Delete", Key(&["S-EDIT-005"])),
     SEPARATOR,
     ("C-CLIP-SES-005", "Rename", Key(&["S-EDIT-008"])),
@@ -1213,6 +1292,18 @@ pub fn arrangement_signature_in() -> Vec<MenuItem> {
     items(SIGNATURE)
 }
 
+/// The arranger track's menu away from a section (IMP-22).
+#[must_use]
+pub fn arrangement_arranger_in() -> Vec<MenuItem> {
+    items(ARRANGER)
+}
+
+/// A section's menu (IMP-22).
+#[must_use]
+pub fn arrangement_section_in() -> Vec<MenuItem> {
+    items(SECTION)
+}
+
 /// The loop brace's menu (C-TIME-023).
 #[must_use]
 pub fn arrangement_brace_in() -> Vec<MenuItem> {
@@ -1304,6 +1395,7 @@ mod tests {
         arrangement: true,
         time_selection: true,
         devices_off: false,
+        midi: true,
     };
 
     #[test]
@@ -1362,9 +1454,13 @@ mod tests {
     fn the_track_menus_other_states_add_the_items_menus_md_lists() {
         let base = track(TrackMenu::default());
         let all = track(EVERY_STATE);
+        // IMP-33's Follow Chord Lane is Beatlayer's own, so menus.md's Live rows
+        // don't list it by a C-TRACK ID; its own test follows.
         let added: Vec<_> = all
             .iter()
-            .filter(|i| !i.is_separator() && !base.iter().any(|b| b.row == i.row))
+            .filter(|i| {
+                !i.is_separator() && i.row != IMP_33_FOLLOW && !base.iter().any(|b| b.row == i.row)
+            })
             .collect();
         assert_eq!(added.len(), 10);
         let Some(text) = std::fs::read_to_string(
@@ -1381,6 +1477,28 @@ mod tests {
                 .unwrap_or_else(|| panic!("{id} isn't in menus.md"));
             assert!(line.contains(item.label), "{}: {line}", item.label);
         }
+    }
+
+    // Spec: chord-lane R5
+    #[test]
+    fn a_midi_tracks_menu_adds_follow_chord_lane_after_save_as_default_midi_track() {
+        let rows = |state| -> Vec<&'static str> { track(state).iter().map(|i| i.row).collect() };
+        assert!(!rows(TrackMenu::default()).contains(&IMP_33_FOLLOW));
+        let midi = rows(TrackMenu {
+            midi: true,
+            ..TrackMenu::default()
+        });
+        let default = midi.iter().position(|r| *r == "C-TRACK-014").unwrap();
+        assert_eq!(midi[default + 1], "", "in a group of its own");
+        assert_eq!(midi[default + 2], IMP_33_FOLLOW);
+        let item = track(TrackMenu {
+            midi: true,
+            ..TrackMenu::default()
+        })
+        .into_iter()
+        .find(|i| i.row == IMP_33_FOLLOW)
+        .unwrap();
+        assert_eq!(item.command(), Some("track.set_follow_chord_lane"));
     }
 
     #[test]

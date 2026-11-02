@@ -270,6 +270,8 @@ impl View<'_> {
             "delay": track.delay(),
             "keep_monitoring_latency": track.keep_monitoring_latency(),
             "tuning_bypass": track.tuning_bypass(),
+            // Spec: chord-lane R5, R12.
+            "follow_chord_lane": track.follow_chord_lane(),
             // Spec: tunings R24. Only a MIDI track's layout does anything.
             "tuning_layout": track.tuning_layout(),
             "clips": track.clips().len(),
@@ -391,6 +393,11 @@ impl View<'_> {
         if let Some((scene, _)) = slot {
             value["scene"] = json!(scene);
         }
+        // Spec: linked-clips R14. The clip's link and the other clips in it.
+        value["link"] = clip.link.map_or(
+            Value::Null,
+            |link| json!({ "id": link, "others": self.document.linked_clip_ids(clip.id) }),
+        );
         if self.detail == Detail::Full {
             value["saved"] = self.saved(clip);
         }
@@ -514,6 +521,12 @@ impl View<'_> {
             .map(|(param, value)| json!({ "param": param, "value": value }))
             .collect();
         value["params"] = self.page.slice(params);
+        // Spec: plugin-scanning R20. The preset a plug-in device last loaded
+        // or was saved as, and how much state of its own the set holds for it.
+        if let Some(plugin) = &device.plugin {
+            value["preset"] = json!(device.preset_name);
+            value["state_bytes"] = json!(plugin.data.len());
+        }
         // Spec: cv-tools R4, R20. An external device's routing, the CV
         // choosers of a CV device among it, and a CV device's calibration:
         // the fit, each step's error, and whether one is held.
@@ -721,6 +734,14 @@ fn overview(ctx: &Ctx<'_>, view: &View<'_>) -> Value {
         },
         "time_signature_at_start": settings.time_signatures.signature_at(Ticks::ZERO).to_string(),
         "scale": scale_value(settings.scale),
+        // Spec: chord-lane R2, R12.
+        "chord_lane": settings.chord_lane.iter().map(|region| json!({
+            "id": region.id,
+            "start": region.start,
+            "end": region.end,
+            "scale": scale_value(region.scale),
+            "transpose": region.transpose,
+        })).collect::<Vec<_>>(),
         "tuning": settings.tuning.as_ref().map(bl_model::Tuning::readout),
         "counts": {
             "tracks": document.track_count(),

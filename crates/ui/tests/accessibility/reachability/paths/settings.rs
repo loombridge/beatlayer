@@ -312,6 +312,22 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             settings("theme-colors", nothing, "Clip Color", Key::ArrowDown),
         ),
         (
+            "settings.set_new_tracks_take_group_colour",
+            settings(
+                "theme-colors",
+                nothing,
+                "New Tracks Take Group Color",
+                Key::Enter,
+            ),
+        ),
+        (
+            "settings.use_custom_colour",
+            Exception(Equivalent(
+                "a palette's custom row and its Custom Color… picker record the colour as they \
+                 colour the selection; the keyboard reaches both (themes R31)",
+            )),
+        ),
+        (
             "settings.set_create_fades_on_clip_edges",
             settings(
                 "record-warp-launch",
@@ -432,8 +448,16 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             ),
         ),
         (
+            "settings.set_multiple_plug_in_windows",
+            settings("plug-ins", nothing, "Multiple Plug-In Windows", Key::Enter),
+        ),
+        (
             "settings.set_auto_hide_plug_in_windows",
             settings("plug-ins", nothing, "Auto-Hide Plug-In Windows", Key::Enter),
+        ),
+        (
+            "settings.set_auto_open_plug_in_windows",
+            settings("plug-ins", nothing, "Auto-Open Plug-In Windows", Key::Enter),
         ),
         (
             "settings.set_outline_view_in_focus",
@@ -453,6 +477,19 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                 Key::Enter,
             ),
         ),
+        // The view options (the view options spec, R10 and R15): the wheel's
+        // switch in Display & Input, and the read of the empty tracks. The
+        // note colours and the mark are View menu items.
+        (
+            "settings.set_wheel_adjusts_values",
+            settings(
+                "display-input",
+                nothing,
+                "Adjust Values with Mouse Wheel",
+                Key::Enter,
+            ),
+        ),
+        ("track.list_empty", Exception(Query)),
         // The Shortcuts page (the custom shortcuts spec, R8 and R10): the
         // Remove and Reset buttons.
         (

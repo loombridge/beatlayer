@@ -38,6 +38,34 @@ use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::notes::{ClipTab, RandomizeAmounts};
 
 impl Shell {
+    /// Runs the chord lane's view commands (WP-6.48; the chord lane spec, R1,
+    /// R3): showing the lane and selecting a region. Neither is an undo step.
+    pub(super) fn run_chord_lane(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        use bl_shell_spec::chord_lane::{self as chord_ids, ChordLaneArgs, SelectRegionArgs};
+        match id {
+            chord_ids::VIEW_CHORD_LANE => {
+                let ChordLaneArgs { on } = Self::args(id, args)?;
+                let on = on.unwrap_or(!self.arrangement.chord_lane());
+                self.arrangement.set_chord_lane(on);
+                self.sync_window_views();
+            }
+            _ => {
+                let SelectRegionArgs { region } = Self::args(id, args)?;
+                if let Some(region) = region
+                    && self.editor.document().chord_region(region).is_none()
+                {
+                    return Err(ShellError::Failed {
+                        command: id.to_owned(),
+                        message: format!("the chord lane holds no {region}"),
+                    });
+                }
+                self.arrangement.select_chord_region(region);
+            }
+        }
+        self.touch();
+        Ok(to_value(&self.arrangement.state(self.editor.document())))
+    }
+
     /// Whether the Undo History panel shows (WP-6.28).
     #[must_use]
     pub fn undo_history_open(&self) -> bool {
@@ -229,7 +257,7 @@ impl Shell {
                 // Spec: device-chains R40. It closes editors only, so it
                 // changes nothing in the set and is never an undo step.
                 Self::args::<NoArgs>(id, args)?;
-                let closed = self.close_plug_in_windows();
+                let closed = self.close_plug_in_windows(None);
                 self.touch();
                 Ok(to_value(&ids::ClosedPlugInWindows { closed }))
             }
@@ -584,6 +612,8 @@ impl Shell {
                     undo_history: self.undo_history_open,
                     save_history: self.save_history.open,
                     plug_in_windows: self.plug_in_windows,
+                    note_colors: self.prefs.note_colors,
+                    mark_empty_tracks: self.prefs.mark_empty_tracks,
                 }))
             }
             ids::VIEW_TOGGLE_UNDO_HISTORY => {

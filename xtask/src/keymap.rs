@@ -308,8 +308,15 @@ const WIDGET: &[(&str, &str)] = &[
     ),
     (
         "S-A11Y-014",
-        "the Device View: Left and Right select the device before or after the selected one \
-         (`device.select`, device chains R43)",
+        "the Device View: Left and Right select the device before or after the selected ones, \
+         and Shift-Left and Shift-Right add the neighbouring device to the selection \
+         (`device.select`, device chains R43, R47)",
+    ),
+    (
+        "S-DEV-004",
+        "the Device View: Shift-click on a device's title bar selects the range from the device \
+         clicked on its own, and never fewer devices (`device.select` with `range`, device \
+         chains R47)",
     ),
     (
         "S-EDIT-012",
@@ -714,7 +721,6 @@ const OWNERS: &[(&str, &str)] = &[
     ("S-TRANS-003", "WP-6.74"),
     ("S-TRANS-004", "WP-6.74"),
     ("S-DEV-010", "WP-6.75"),
-    ("S-DEV-004", "WP-6.76"),
 ];
 
 /// The package that binds a pending shortcut, from `owners`.

@@ -12,7 +12,7 @@ use bl_model::PluginFormat;
 pub use bl_shell_spec::midi_io::PortDirection;
 pub use bl_shell_spec::settings::{
     Appearance, AutomationRecordMode, BRIGHTNESS, BUNDLED_THEME, COLOR_HUE, COLOR_INTENSITY,
-    ClipColour, CollectFiles, DefaultWarpMode, GRID_LINE_INTENSITY, LaunchPrefs,
+    ClipColour, CollectFiles, CustomColours, DefaultWarpMode, GRID_LINE_INTENSITY, LaunchPrefs,
     LoopWarpShortSamples, SessionAutomationTracks, SettingsPage, TakeoverMode, ThemeLook, Tone,
     WarpPrefs, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor, zoom_percent,
     zoom_step,
@@ -94,6 +94,16 @@ pub struct Preferences {
     /// not saved with the set. Off in a new install, so the returns stay
     /// pinned, as in Live.
     pub return_tracks_scroll: bool,
+    /// How the MIDI Note Editor colours notes (View ▸ Note Colors; the view
+    /// options spec, R2): By Velocity, Live's, in a new install.
+    pub note_colors: bl_shell_spec::view_options::NoteColors,
+    /// Mark Empty Tracks (View menu; the view options spec, R6): off in a
+    /// new install.
+    pub mark_empty_tracks: bool,
+    /// Adjust Values with Mouse Wheel (Display & Input; the view options
+    /// spec, R10): off in a new install, so the wheel only scrolls, as in
+    /// Live.
+    pub wheel_adjusts_values: bool,
     /// The MIDI Note Editor's Preview switch (Options > MIDI Note Editor
     /// Preview; WP-6.5, the step recording spec, R1): one switch for every
     /// MIDI clip, off in a new install.
@@ -156,6 +166,14 @@ pub struct Preferences {
     /// as Live's plug-in windows do. On by default, as observed in Live
     /// 12.4.6.
     pub auto_hide_plug_in_windows: OnByDefault,
+    /// Multiple Plug-In Windows (Plug-Ins, Plug-In Windows, L-SET-017):
+    /// while it's off, opening a plug-in's window closes the other
+    /// plug-in windows (WP-6.75). On by default, as observed in Live 12.
+    pub multiple_plug_in_windows: OnByDefault,
+    /// Auto-Open Plug-In Windows (Plug-Ins, Plug-In Windows, L-SET-017):
+    /// inserting a plug-in device opens its window (WP-6.75). On by
+    /// default, as observed in Live 12.
+    pub auto_open_plug_in_windows: OnByDefault,
     /// The plug-ins the browser hides, as `format/plugin_id` keys
     /// (WP-2.9, IMP-07). A set that uses a hidden plug-in still loads it.
     pub hidden_plugins: BTreeSet<String>,

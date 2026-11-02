@@ -64,6 +64,7 @@ pub mod automation;
 pub mod base64;
 pub mod bounce;
 mod changes;
+mod chord_lane;
 mod clip;
 mod clip_param;
 mod colour;
@@ -86,6 +87,7 @@ mod ids;
 mod lane_views;
 mod launch;
 mod layers;
+mod link;
 mod linked;
 mod locator;
 pub mod matrix;
@@ -107,6 +109,7 @@ mod routing;
 mod sample_edits;
 mod scale;
 mod scene;
+mod section;
 mod shared;
 mod spelling;
 mod track;
@@ -135,8 +138,8 @@ pub use bounce::{BouncedAutomation, BouncedTrack};
 pub use changes::{Change, ChangeSet};
 pub use clip::{
     AudioData, Clip, ClipData, ClipEnvelope, ClipFolds, Crossfade, EDGE_FADE_SECONDS, EnvelopeKind,
-    GroupKind, MAX_LOOP_REPEATS, MIN_MIDI_BRACE, MidiData, NewTakeLane, Note, NoteGroup, TakeClip,
-    TakeClipData, TakeLane, consolidated_midi, crossfades, fade_power,
+    GroupKind, LinkContents, MAX_LOOP_REPEATS, MIN_MIDI_BRACE, MidiData, NewTakeLane, Note,
+    NoteGroup, TakeClip, TakeClipData, TakeLane, consolidated_midi, crossfades, fade_power,
 };
 pub use clip_param::ClipParam;
 pub use column_widths::{ColumnWidths, MAX_COLUMN_WIDTH, MIN_COLUMN_WIDTH, clamp_column_width};
@@ -160,7 +163,8 @@ pub use mpe_settings::{MAX_NOTE_CHANNELS, MpeMode, MpeSettings, MpeZone, PluginM
 pub use mpe_view::{DEFAULT_LANE_HEIGHT, MpeLane, MpeView};
 pub use note_expression::Expression;
 pub mod freeze;
-pub use colour::{DEFAULT_TRACK_PALETTE, SWATCHES, TRACK_COLOURS, id_swatch, swatch_rgb};
+pub use chord_lane::{ChordRegion, MAX_TRANSPOSE};
+pub use colour::{Colour, DEFAULT_TRACK_PALETTE, SWATCHES, TRACK_COLOURS, id_swatch, swatch_rgb};
 pub use external::{
     CvCalibration, CvPort, CvStep, External, ExternalPort, HardwareLatency, MAX_CV_PORTS,
     MAX_HARDWARE_LATENCY_MS, MAX_HARDWARE_LATENCY_SAMPLES,
@@ -175,8 +179,8 @@ pub use groove::{
     GroovePlay, GroovePool, MovedTransients, clip_seed, noise,
 };
 pub use ids::{
-    ChainId, ClipId, ContentHash, DeviceId, GrooveId, LinkGroupId, LocatorId, ParamId,
-    ParseContentHashError, SceneId, TakeLaneId, TrackId,
+    ChainId, ChordRegionId, ClipId, ContentHash, DeviceId, GrooveId, LinkGroupId, LinkId,
+    LocatorId, ParamId, ParseContentHashError, SceneId, SectionId, TakeLaneId, TrackId,
 };
 /// The persistent collections the document's public types hold.
 pub use imbl::{OrdMap, Vector};
@@ -210,6 +214,7 @@ pub use repr::{SavedSong, saved_schema};
 pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange, SampleRegion};
 pub use scale::{CHROMATIC, Scale, ScaleName};
 pub use scene::{DEFAULT_SCENE_COUNT, SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
+pub use section::{SongSection, next_section_colour, next_section_name};
 pub use spelling::NoteSpelling;
 pub use track::{
     Channel, CrossfadeAssign, DeviceOutput, Input, MAX_TRACK_DELAY_MS, MAX_TRACK_DELAY_SAMPLES,

@@ -1853,3 +1853,156 @@ fn a_chains_copy_keeps_its_plugins_state_now() {
     let duplicate = shell.editor().document().chain(added).unwrap().devices[0].id;
     assert_eq!(held(&shell, duplicate), now, "the duplicate");
 }
+
+/// Two plug-in devices of the test plug-in on the audio track, both running.
+fn two_running_plugins(shell: &mut Shell) -> (DeviceId, DeviceId) {
+    shell.start_audio();
+    let track = audio_track(shell);
+    shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let a = load(shell, track);
+    let b = load(shell, track);
+    wait(shell, a, |i| i.active);
+    wait(shell, b, |i| i.active);
+    (a, b)
+}
+
+fn set_switch(shell: &mut Shell, command: &str, on: bool) {
+    shell.run(command, json!({ "on": on })).unwrap();
+}
+
+// Spec: clap-hosting R27. With Multiple Plug-In Windows on, as it is in a
+// new install, any number of plug-in windows stay open.
+#[test]
+fn with_multiple_plug_in_windows_on_no_window_closes_another() {
+    let mut shell = Shell::headless();
+    let (a, b) = two_running_plugins(&mut shell);
+    assert!(shell.multiple_plug_in_windows(), "on in a new install");
+    shell.run(ids::SHOW_WINDOW, json!({ "device": a })).unwrap();
+    shell.run(ids::SHOW_WINDOW, json!({ "device": b })).unwrap();
+    assert!(info(&mut shell, a).window_open && info(&mut shell, b).window_open);
+}
+
+// Spec: clap-hosting R27. With it off, opening a window closes the other
+// plug-in windows, and `keep_others` (a Cmd-click) keeps them. Switching it
+// off closes nothing already open.
+#[test]
+fn with_multiple_plug_in_windows_off_one_window_opens_at_a_time() {
+    let mut shell = Shell::headless();
+    let (a, b) = two_running_plugins(&mut shell);
+    shell.run(ids::SHOW_WINDOW, json!({ "device": a })).unwrap();
+    shell.run(ids::SHOW_WINDOW, json!({ "device": b })).unwrap();
+
+    set_switch(&mut shell, "settings.set_multiple_plug_in_windows", false);
+    assert!(
+        info(&mut shell, a).window_open && info(&mut shell, b).window_open,
+        "switching it off closes nothing"
+    );
+    shell
+        .run(ids::SHOW_WINDOW, json!({ "device": a, "shown": false }))
+        .unwrap();
+    shell
+        .run(ids::SHOW_WINDOW, json!({ "device": b, "shown": false }))
+        .unwrap();
+
+    shell.run(ids::SHOW_WINDOW, json!({ "device": a })).unwrap();
+    shell.run(ids::SHOW_WINDOW, json!({ "device": b })).unwrap();
+    assert!(
+        !info(&mut shell, a).window_open && info(&mut shell, b).window_open,
+        "opening the second closes the first"
+    );
+
+    shell
+        .run(
+            ids::SHOW_WINDOW,
+            json!({ "device": a, "keep_others": true }),
+        )
+        .unwrap();
+    assert!(
+        info(&mut shell, a).window_open && info(&mut shell, b).window_open,
+        "a Cmd-click keeps the other"
+    );
+}
+
+// Spec: clap-hosting R28. Inserting a plug-in from the Browser opens its
+// window once it has started while Auto-Open Plug-In Windows is on, as it is
+// in a new install, and not while it's off.
+#[test]
+fn auto_open_plug_in_windows_opens_an_inserted_plug_ins_window() {
+    if bl_plugin_host::scan::scan_program().is_none() {
+        eprintln!("beatlayer-scan wasn't built; skipping (build the workspace's bins)");
+        return;
+    }
+    let mut shell = Shell::headless();
+    shell.start_audio();
+    assert!(shell.auto_open_plug_in_windows(), "on in a new install");
+    let bundle = bl_test_clap::bundle().to_string_lossy().into_owned();
+    shell
+        .run(ids::SCAN, json!({ "paths": [bundle.clone()] }))
+        .unwrap();
+    let key = format!("{bundle}#{PLUGIN_ID}");
+    let insert = |shell: &mut Shell| -> DeviceId {
+        shell
+            .run(
+                bl_shell::browser_commands::SELECT,
+                json!({ "paths": [key] }),
+            )
+            .unwrap();
+        let loaded: PluginLoaded = serde_json::from_value(
+            shell
+                .run(bl_shell::browser_commands::LOAD_SELECTED, json!({}))
+                .unwrap(),
+        )
+        .unwrap();
+        loaded.device
+    };
+    let opened = insert(&mut shell);
+    wait(&mut shell, opened, |i| i.window_open);
+
+    set_switch(&mut shell, "settings.set_auto_open_plug_in_windows", false);
+    let closed = insert(&mut shell);
+    wait(&mut shell, closed, |i| i.active);
+    for _ in 0..5 {
+        shell.poll();
+    }
+    assert!(!info(&mut shell, closed).window_open, "off: it doesn't");
+}
+
+// Spec: clap-hosting R27, R28. Both switches are on in a new install, read
+// back by `settings.state`, and kept across a restart.
+#[test]
+fn the_plug_in_window_switches_persist_across_restarts() {
+    use bl_shell::audio::AudioHost;
+    use bl_shell::files::ProjectFiles;
+    use bl_shell::settings::Preferences;
+
+    let dir = std::env::temp_dir().join(format!("bl-shell-plug-in-windows-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let start = |dir: &std::path::Path| {
+        let prefs = Preferences::load(dir).unwrap();
+        Shell::new(
+            prefs.clone(),
+            Some(dir.to_owned()),
+            AudioHost::null(prefs.audio),
+            Box::new(ProjectFiles::new()),
+        )
+    };
+    let state = |shell: &mut Shell| shell.run("settings.state", json!({})).unwrap();
+    let mut shell = start(&dir);
+    let new_install = state(&mut shell);
+    assert_eq!(new_install["multiple_plug_in_windows"], true);
+    assert_eq!(new_install["auto_open_plug_in_windows"], true);
+    set_switch(&mut shell, "settings.set_multiple_plug_in_windows", false);
+    set_switch(&mut shell, "settings.set_auto_open_plug_in_windows", false);
+    let off = state(&mut shell);
+    assert_eq!(off["multiple_plug_in_windows"], false);
+    assert_eq!(off["auto_open_plug_in_windows"], false);
+    drop(shell);
+
+    let mut shell = start(&dir);
+    let restarted = state(&mut shell);
+    assert_eq!(restarted["multiple_plug_in_windows"], false);
+    assert_eq!(restarted["auto_open_plug_in_windows"], false);
+    let _ = std::fs::remove_dir_all(&dir);
+}

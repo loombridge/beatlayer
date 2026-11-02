@@ -806,7 +806,7 @@ impl Mix {
                 ctx.open_picker(Target::Command {
                     command: "chain.set_colour".to_owned(),
                     args: json!({ "chain": chain }),
-                    current: colour,
+                    current: colour.and_then(bl_model::Colour::swatch),
                 });
                 return;
             }
@@ -856,7 +856,7 @@ impl Mix {
     fn paint_lower(&self, paint: &mut Paint<'_>, layout: &Layout) {
         let model = paint.model;
         let doc = &model.document;
-        let swatch = |index: u8| bl_model::swatch_rgb(paint.colours, index);
+        let swatch = |colour: bl_model::Colour| colour.rgb(paint.colours);
         for (column, place) in layout.window.iter().enumerate() {
             let Some(track) = doc.track(place.track()) else {
                 continue;

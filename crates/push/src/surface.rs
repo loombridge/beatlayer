@@ -507,7 +507,7 @@ impl Push {
                 .model
                 .as_ref()
                 .and_then(|m| m.document.track(*track))
-                .map(bl_model::Track::colour),
+                .and_then(|t| t.colour().swatch()),
             Target::Command { current, .. } => *current,
         };
         self.picker = Some(Picker { target, current });
@@ -1438,7 +1438,7 @@ impl Push {
         self.screen = Screen::default();
         self.leds.clear();
         let colours = self.shared.track_colours();
-        let swatch = |index: u8| bl_model::swatch_rgb(&colours, index);
+        let swatch = |colour: bl_model::Colour| colour.rgb(&colours);
 
         // The ring's tracks label the lower buttons (R26).
         let claimed = self.lower_claimed();

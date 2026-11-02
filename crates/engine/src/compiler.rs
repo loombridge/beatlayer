@@ -3977,15 +3977,15 @@ mod tests {
         for command in [
             Command::SetTrackColour {
                 tracks: vec![audio_track, f.group],
-                colour: 40,
+                colour: bl_model::Colour::Swatch(40),
             },
             Command::SetClipColour {
                 clips: vec![clip_id],
-                colour: 41,
+                colour: bl_model::Colour::Swatch(41),
             },
             Command::SetSceneColour {
                 scenes: vec![scene],
-                colour: Some(42),
+                colour: Some(bl_model::Colour::Swatch(42)),
             },
             Command::AssignColourToClips {
                 tracks: vec![audio_track],

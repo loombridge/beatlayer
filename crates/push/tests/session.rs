@@ -40,7 +40,7 @@ fn clip_named(rig: &mut Rig, track: usize, scene: usize, colour: Option<u8>, nam
         Ticks::WHOLE,
         ClipData::Midi(MidiData::default()),
     );
-    clip.colour = colour;
+    clip.colour = colour.map(bl_model::Colour::Swatch);
     clip.name = name.to_owned();
     rig.apply(Command::CreateSlotClip { track, scene, clip });
     id
@@ -255,7 +255,7 @@ fn the_pads_show_clip_colours_pulse_while_playing_and_recording() {
     ];
     rig.tick();
     let colours = rig.shared.track_colours();
-    let rgb = |swatch| Some(bl_model::swatch_rgb(&colours, swatch));
+    let rgb = |swatch: u8| Some(bl_model::swatch_rgb(&colours, swatch));
     let track_swatch = rig.editor.document().track(t[2]).unwrap().colour();
 
     let stopped = rig.sim.led(&pad(0, 0)).unwrap();
@@ -264,7 +264,11 @@ fn the_pads_show_clip_colours_pulse_while_playing_and_recording() {
     let playing = rig.sim.led(&pad(0, 1)).unwrap();
     assert_eq!(rig.sim.colour(&pad(0, 1)), rgb(8));
     assert!(matches!(playing.animation, Some((_, PULSE))));
-    assert_eq!(rig.sim.colour(&pad(0, 2)), rgb(track_swatch), "the track's");
+    assert_eq!(
+        rig.sim.colour(&pad(0, 2)),
+        rgb(track_swatch.swatch().unwrap()),
+        "the track's"
+    );
     let recording = rig.sim.led(&pad(0, 3)).unwrap();
     assert_eq!(recording.animation, Some((fixed::RED, PULSE)));
     for (row, column) in [(0, 4), (1, 0), (7, 7)] {
@@ -289,7 +293,7 @@ fn a_scene_button_is_lit_while_its_scene_holds_a_clip() {
     let s = scenes(&rig);
     rig.apply(Command::SetSceneColour {
         scenes: vec![s[2]],
-        colour: Some(6),
+        colour: Some(bl_model::Colour::Swatch(6)),
     });
     rig.tick();
     let colours = rig.shared.track_colours();
@@ -673,7 +677,7 @@ fn the_state_reads_back_the_ring_and_what_the_pads_show() {
     rig.tick();
     let state = rig.snapshot().session.unwrap();
     assert_eq!(state.pads[0].what, "stopped");
-    assert_eq!(state.pads[0].colour, Some(3));
+    assert_eq!(state.pads[0].colour, Some(bl_model::Colour::Swatch(3)));
     assert_eq!(state.scene_buttons[0].what, "clip");
 }
 

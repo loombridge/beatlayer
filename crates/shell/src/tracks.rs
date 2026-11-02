@@ -63,8 +63,8 @@ pub struct TrackData {
     pub kind: TrackKind,
     /// Its name.
     pub name: String,
-    /// Its colour, a swatch (the themes spec, R19).
-    pub colour: u8,
+    /// Its colour (the themes spec, R19).
+    pub colour: bl_model::Colour,
     /// Its mixer settings.
     pub mixer: Mixer,
     /// Its sends.

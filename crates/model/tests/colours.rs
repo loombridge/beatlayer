@@ -3,8 +3,8 @@
 
 use bl_core::time::Ticks;
 use bl_model::{
-    AudioData, ChangeSet, Clip, ClipData, ClipId, Command, ContentHash, Document, Editor, MidiData,
-    NewTakeLane, SceneId, TakeClip, TakeClipData, TrackId, TrackKind,
+    AudioData, ChangeSet, Clip, ClipData, ClipId, Colour, Command, ContentHash, Document, Editor,
+    MidiData, NewTakeLane, SceneId, TakeClip, TakeClipData, TrackId, TrackKind,
 };
 
 const MEDIA: ContentHash = ContentHash([9; 32]);
@@ -58,11 +58,11 @@ impl Song {
         self.editor.document()
     }
 
-    fn track_colour(&self, track: TrackId) -> u8 {
+    fn track_colour(&self, track: TrackId) -> Colour {
         self.doc().track(track).unwrap().colour()
     }
 
-    fn clip_colour(&self, clip: ClipId) -> Option<u8> {
+    fn clip_colour(&self, clip: ClipId) -> Option<Colour> {
         self.doc().clip(clip).unwrap().colour
     }
 
@@ -142,8 +142,8 @@ fn a_new_track_takes_swatch_id_mod_14_and_a_new_scene_none() {
     let song = Song::new();
     for track in [song.audio, song.midi, song.group, song.inner] {
         assert_eq!(
-            u64::from(song.track_colour(track)),
-            track.0.get() % 14,
+            song.track_colour(track),
+            Colour::Swatch((track.0.get() % 14) as u8),
             "{track:?}"
         );
     }
@@ -174,10 +174,10 @@ fn a_new_clip_takes_its_tracks_colour_unless_it_brings_its_own() {
                 Ticks::WHOLE,
                 ClipData::Midi(MidiData::new([])),
             )
-            .with_colour(Some(41)),
+            .with_colour(Some(bl_model::Colour::Swatch(41))),
         })
         .unwrap();
-    assert_eq!(song.clip_colour(id), Some(41));
+    assert_eq!(song.clip_colour(id), Some(bl_model::Colour::Swatch(41)));
 }
 
 // Spec: themes R16, R25. Each colour command is one undo step with its name,
@@ -193,13 +193,13 @@ fn the_colour_commands_are_one_undo_step_each() {
     song.editor
         .apply(Command::SetTrackColour {
             tracks: vec![song.audio, song.midi],
-            colour: 33,
+            colour: bl_model::Colour::Swatch(33),
         })
         .unwrap();
     assert_eq!(song.steps(), before + 1);
     assert_eq!(song.last_step(), "Change Track Color");
-    assert_eq!(song.track_colour(song.audio), 33);
-    assert_eq!(song.track_colour(song.midi), 33);
+    assert_eq!(song.track_colour(song.audio), bl_model::Colour::Swatch(33));
+    assert_eq!(song.track_colour(song.midi), bl_model::Colour::Swatch(33));
     assert_eq!(
         song.clip_colour(clip),
         Some(was),
@@ -209,22 +209,25 @@ fn the_colour_commands_are_one_undo_step_each() {
     song.editor
         .apply(Command::SetClipColour {
             clips: vec![clip],
-            colour: 69,
+            colour: bl_model::Colour::Swatch(69),
         })
         .unwrap();
     assert_eq!(song.steps(), before + 2);
     assert_eq!(song.last_step(), "Change Clip Color");
-    assert_eq!(song.clip_colour(clip), Some(69));
+    assert_eq!(song.clip_colour(clip), Some(bl_model::Colour::Swatch(69)));
 
     song.editor
         .apply(Command::SetSceneColour {
             scenes: vec![scene],
-            colour: Some(12),
+            colour: Some(bl_model::Colour::Swatch(12)),
         })
         .unwrap();
     assert_eq!(song.steps(), before + 3);
     assert_eq!(song.last_step(), "Change Scene Color");
-    assert_eq!(song.doc().scene(scene).unwrap().colour, Some(12));
+    assert_eq!(
+        song.doc().scene(scene).unwrap().colour,
+        Some(bl_model::Colour::Swatch(12))
+    );
     song.editor
         .apply(Command::SetSceneColour {
             scenes: vec![scene],
@@ -234,7 +237,10 @@ fn the_colour_commands_are_one_undo_step_each() {
     assert_eq!(song.doc().scene(scene).unwrap().colour, None);
 
     song.editor.undo().unwrap();
-    assert_eq!(song.doc().scene(scene).unwrap().colour, Some(12));
+    assert_eq!(
+        song.doc().scene(scene).unwrap().colour,
+        Some(bl_model::Colour::Swatch(12))
+    );
     for _ in 0..3 {
         song.editor.undo().unwrap();
     }
@@ -252,15 +258,15 @@ fn a_swatch_outside_the_palette_is_refused() {
     for command in [
         Command::SetTrackColour {
             tracks: vec![song.audio],
-            colour: 70,
+            colour: bl_model::Colour::Swatch(70),
         },
         Command::SetClipColour {
             clips: vec![clip],
-            colour: 70,
+            colour: bl_model::Colour::Swatch(70),
         },
         Command::SetSceneColour {
             scenes: vec![scene],
-            colour: Some(70),
+            colour: Some(bl_model::Colour::Swatch(70)),
         },
     ] {
         let before = song.doc().clone();
@@ -282,7 +288,7 @@ fn assign_track_color_to_clips_reaches_every_view() {
     song.editor
         .apply(Command::SetTrackColour {
             tracks: vec![song.audio],
-            colour: 50,
+            colour: bl_model::Colour::Swatch(50),
         })
         .unwrap();
     let before = song.steps();
@@ -296,7 +302,7 @@ fn assign_track_color_to_clips_reaches_every_view() {
     assert_eq!(song.steps(), before + 1);
     assert_eq!(song.last_step(), "Assign Track Color to Clips");
     for clip in [main, slot, take] {
-        assert_eq!(song.clip_colour(clip), Some(50));
+        assert_eq!(song.clip_colour(clip), Some(bl_model::Colour::Swatch(50)));
     }
     assert_eq!(song.clip_colour(other), untouched);
 }
@@ -314,7 +320,7 @@ fn assign_to_a_group_reaches_nested_tracks_and_their_clips() {
     song.editor
         .apply(Command::SetTrackColour {
             tracks: vec![song.group],
-            colour: 61,
+            colour: bl_model::Colour::Swatch(61),
         })
         .unwrap();
     let before = song.steps();
@@ -331,13 +337,17 @@ fn assign_to_a_group_reaches_nested_tracks_and_their_clips() {
         "Assign Track Color to Grouped Tracks and Clips"
     );
     for track in [song.inner, song.nested, song.deep] {
-        assert_eq!(song.track_colour(track), 61, "{track:?}");
+        assert_eq!(
+            song.track_colour(track),
+            bl_model::Colour::Swatch(61),
+            "{track:?}"
+        );
     }
     for clip in [in_group, slot, deep] {
-        assert_eq!(song.clip_colour(clip), Some(61));
+        assert_eq!(song.clip_colour(clip), Some(bl_model::Colour::Swatch(61)));
     }
     assert_eq!(song.clip_colour(outside), outside_colour);
-    assert_ne!(song.track_colour(song.midi), 61);
+    assert_ne!(song.track_colour(song.midi), Colour::Swatch(61));
     // Only a group has tracks inside it.
     assert!(
         song.editor
@@ -362,15 +372,15 @@ fn a_colour_edit_changes_nothing_the_engine_hears() {
     for command in [
         Command::SetTrackColour {
             tracks: vec![song.audio, song.group],
-            colour: 20,
+            colour: bl_model::Colour::Swatch(20),
         },
         Command::SetClipColour {
             clips: vec![main, slot, take],
-            colour: 21,
+            colour: bl_model::Colour::Swatch(21),
         },
         Command::SetSceneColour {
             scenes: vec![scene],
-            colour: Some(22),
+            colour: Some(bl_model::Colour::Swatch(22)),
         },
         Command::AssignColourToClips {
             tracks: vec![song.audio],
@@ -409,29 +419,41 @@ fn the_colours_save_and_load() {
     song.editor
         .apply(Command::SetTrackColour {
             tracks: vec![song.audio],
-            colour: 44,
+            colour: bl_model::Colour::Swatch(44),
         })
         .unwrap();
     song.editor
         .apply(Command::SetClipColour {
             clips: vec![main, take],
-            colour: 3,
+            colour: bl_model::Colour::Swatch(3),
         })
         .unwrap();
     song.editor
         .apply(Command::SetSceneColour {
             scenes: vec![scene],
-            colour: Some(68),
+            colour: Some(bl_model::Colour::Swatch(68)),
         })
         .unwrap();
     let saved = serde_json::to_value(song.doc()).unwrap();
     let loaded: Document = serde_json::from_value(saved).unwrap();
     assert_eq!(&loaded, song.doc());
-    assert_eq!(loaded.track(song.audio).unwrap().colour(), 44);
-    assert_eq!(loaded.clip(main).unwrap().colour, Some(3));
-    assert_eq!(loaded.clip(take).unwrap().colour, Some(3));
-    assert_ne!(loaded.clip(slot).unwrap().colour, Some(3));
-    assert_eq!(loaded.scene(scene).unwrap().colour, Some(68));
+    assert_eq!(
+        loaded.track(song.audio).unwrap().colour(),
+        bl_model::Colour::Swatch(44)
+    );
+    assert_eq!(
+        loaded.clip(main).unwrap().colour,
+        Some(bl_model::Colour::Swatch(3))
+    );
+    assert_eq!(
+        loaded.clip(take).unwrap().colour,
+        Some(bl_model::Colour::Swatch(3))
+    );
+    assert_ne!(loaded.clip(slot).unwrap().colour, Some(Colour::Swatch(3)));
+    assert_eq!(
+        loaded.scene(scene).unwrap().colour,
+        Some(bl_model::Colour::Swatch(68))
+    );
 }
 
 // Spec: themes R21. A set saved before colours loads with each track at
@@ -460,8 +482,8 @@ fn a_set_from_before_colours_loads_in_the_colours_it_was_drawn_in() {
     let loaded: Document = serde_json::from_value(saved).unwrap();
     for track in [song.audio, song.midi, song.group, song.inner, song.nested] {
         assert_eq!(
-            u64::from(loaded.track(track).unwrap().colour()),
-            track.0.get() % 14
+            loaded.track(track).unwrap().colour(),
+            Colour::Swatch((track.0.get() % 14) as u8)
         );
     }
     let audio = loaded.track(song.audio).unwrap().colour();
@@ -474,4 +496,122 @@ fn a_set_from_before_colours_loads_in_the_colours_it_was_drawn_in() {
     let mut bad = serde_json::to_value(song.doc()).unwrap();
     bad["tracks"][0]["colour"] = serde_json::json!(70);
     assert!(serde_json::from_value::<Document>(bad).is_err());
+}
+
+// Spec: themes R29. A custom colour is saved as the colour itself, `#RRGGBB`,
+// on the track, the clip and the scene, and loads back as it was; the
+// swatches beside it stay numbers.
+#[test]
+fn a_custom_colour_saves_and_loads_as_rrggbb() {
+    let mut song = Song::new();
+    let scene = first_scene(&song);
+    let main = song.clip(song.audio, false);
+    let slot = song.slot_clip(song.audio, scene);
+    song.editor
+        .apply(Command::SetTrackColour {
+            tracks: vec![song.audio],
+            colour: Colour::Custom([0x12, 0xAB, 0xEF]),
+        })
+        .unwrap();
+    song.editor
+        .apply(Command::SetClipColour {
+            clips: vec![main],
+            colour: Colour::Custom([0xFF, 0x80, 0x00]),
+        })
+        .unwrap();
+    song.editor
+        .apply(Command::SetClipColour {
+            clips: vec![slot],
+            colour: Colour::Swatch(9),
+        })
+        .unwrap();
+    song.editor
+        .apply(Command::SetSceneColour {
+            scenes: vec![scene],
+            colour: Some(Colour::Custom([0, 0, 1])),
+        })
+        .unwrap();
+    assert_eq!(song.last_step(), "Change Scene Color");
+
+    let saved = serde_json::to_value(song.doc()).unwrap();
+    let text = saved.to_string();
+    for written in ["\"#12ABEF\"", "\"#FF8000\"", "\"#000001\""] {
+        assert!(text.contains(written), "{written} is saved as written");
+    }
+    let loaded: Document = serde_json::from_value(saved).unwrap();
+    assert_eq!(&loaded, song.doc());
+    assert_eq!(
+        loaded.track(song.audio).unwrap().colour(),
+        Colour::Custom([0x12, 0xAB, 0xEF])
+    );
+    assert_eq!(
+        loaded.clip(main).unwrap().colour,
+        Some(Colour::Custom([0xFF, 0x80, 0x00]))
+    );
+    assert_eq!(loaded.clip(slot).unwrap().colour, Some(Colour::Swatch(9)));
+    assert_eq!(
+        loaded.scene(scene).unwrap().colour,
+        Some(Colour::Custom([0, 0, 1]))
+    );
+    // Either case is read, and a colour is written in capitals.
+    assert_eq!(
+        serde_json::from_str::<Colour>("\"#ff8000\"").unwrap(),
+        Colour::Custom([0xFF, 0x80, 0x00])
+    );
+    assert_eq!(
+        serde_json::to_string(&Colour::Custom([0xFF, 0x80, 0x00])).unwrap(),
+        "\"#FF8000\""
+    );
+    assert_eq!(
+        serde_json::to_string(&Colour::Swatch(70 - 1)).unwrap(),
+        "69"
+    );
+}
+
+// Spec: themes R32. A saved colour that is neither a swatch from 0 to 69 nor
+// a `#RRGGBB` colour doesn't load, on a track, a clip or a scene.
+#[test]
+fn a_saved_colour_that_is_neither_a_swatch_nor_rrggbb_does_not_load() {
+    let mut song = Song::new();
+    let scene = first_scene(&song);
+    song.clip(song.audio, false);
+    song.editor
+        .apply(Command::SetSceneColour {
+            scenes: vec![scene],
+            colour: Some(Colour::Swatch(1)),
+        })
+        .unwrap();
+    let saved = serde_json::to_value(song.doc()).unwrap();
+    assert!(serde_json::from_value::<Document>(saved.clone()).is_ok());
+    for broken in [
+        serde_json::json!("#12345"),
+        serde_json::json!("#1234567"),
+        serde_json::json!("12AB34"),
+        serde_json::json!("#GG0000"),
+        serde_json::json!("teal"),
+        serde_json::json!(70),
+        serde_json::json!(256),
+        serde_json::json!(-1),
+        serde_json::json!(1.5),
+        serde_json::json!([1, 2, 3]),
+    ] {
+        let mut bad = saved.clone();
+        bad["tracks"][0]["colour"] = broken.clone();
+        assert!(
+            serde_json::from_value::<Document>(bad).is_err(),
+            "a track colour of {broken}"
+        );
+        let mut bad = saved.clone();
+        bad["scenes"][0]["colour"] = broken.clone();
+        assert!(
+            serde_json::from_value::<Document>(bad).is_err(),
+            "a scene colour of {broken}"
+        );
+        let mut bad = saved.clone();
+        bad["tracks"][0]["clips"][0]["colour"] = broken.clone();
+        assert!(
+            serde_json::from_value::<Document>(bad).is_err(),
+            "a clip colour of {broken}"
+        );
+    }
 }

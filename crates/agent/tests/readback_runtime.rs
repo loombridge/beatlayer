@@ -200,6 +200,8 @@ fn each_settings_command_reads_back_from_settings_state() {
             "default_track_colour": 12,
             "reduced_automatic_colours": false,
             "clip_colour": "track-color",
+            "new_tracks_take_group_colour": false,
+            "custom_colours": { "places": vec![Value::Null; 14], "used": [] },
             "appearance": "dark",
             "drawn_appearance": "dark",
             "themes": ["Beatlayer"],
@@ -314,6 +316,17 @@ fn each_settings_command_reads_back_from_settings_state() {
         &mut client,
         "settings.set_clip_colour",
         json!({ "clip_colour": "random" }),
+    );
+    // Spec: themes R28, R30.
+    run(
+        &mut client,
+        "settings.set_new_tracks_take_group_colour",
+        json!({ "on": true }),
+    );
+    run(
+        &mut client,
+        "settings.use_custom_colour",
+        json!({ "colour": "#336699" }),
     );
     run(
         &mut client,
@@ -441,6 +454,8 @@ fn each_settings_command_reads_back_from_settings_state() {
             "default_track_colour": 33,
             "reduced_automatic_colours": true,
             "clip_colour": "random",
+            "new_tracks_take_group_colour": true,
+            "custom_colours": { "places": ["#336699", null, null, null, null, null, null, null, null, null, null, null, null, null], "used": [0] },
             "appearance": "follow-system",
             "drawn_appearance": "dark",
             "themes": ["Beatlayer"],

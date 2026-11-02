@@ -529,7 +529,7 @@ fn ids<T: serde::de::DeserializeOwned>(status: &Value, key: &str) -> Vec<T> {
     serde_json::from_value(status[key].clone()).unwrap()
 }
 
-fn colours(shell: &Shell, tracks: &[bl_model::TrackId]) -> Vec<u8> {
+fn colours(shell: &Shell, tracks: &[bl_model::TrackId]) -> Vec<bl_model::Colour> {
     let doc = shell.editor().document();
     tracks
         .iter()
@@ -615,8 +615,14 @@ fn a_session_clips_stems_go_in_its_scenes_slots() {
         assert_eq!(held.slots().count(), 1);
     }
     // Spec: R26. The group takes the clip's colour, each part its own.
-    assert_eq!(colours(&shell, &created[..1]), [33]);
-    assert_eq!(colours(&shell, &created[1..]), [10, 2, 6, 4]);
+    assert_eq!(
+        colours(&shell, &created[..1]),
+        [bl_model::Colour::Swatch(33)]
+    );
+    assert_eq!(
+        colours(&shell, &created[1..]),
+        [10, 2, 6, 4].map(bl_model::Colour::Swatch)
+    );
     // The source is deactivated, and one undo step takes it all back.
     assert!(doc.slot(track, scene).unwrap().mute);
     assert_eq!(step_names(&shell)[0], "Separate Stems");
@@ -916,7 +922,7 @@ fn the_group_carries_the_source_tracks_devices_and_automation() {
     assert_eq!(envelope(&shell, created[0]), source_envelope);
     assert_eq!(
         doc.track(created[0]).unwrap().colour(),
-        StemKind::Bass.swatch()
+        bl_model::Colour::Swatch(StemKind::Bass.swatch())
     );
 }
 

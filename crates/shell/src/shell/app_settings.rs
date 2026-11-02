@@ -40,7 +40,7 @@ use crate::commands::ThemeArgs;
 use crate::commands::UserLibraryArgs;
 use crate::commands::UserLibraryResult;
 use crate::commands::{AutomationRecordModeArgs, TakeoverModeArgs};
-use crate::commands::{ClipColourArgs, SwatchArgs, ToneArgs};
+use crate::commands::{ClipColourArgs, CustomColourArgs, SwatchArgs, ToneArgs};
 use crate::settings::OnByDefault;
 use bl_commands::NoArgs;
 use serde_json::Value;
@@ -467,6 +467,24 @@ impl Shell {
             ids::SETTINGS_SET_REDUCED_AUTOMATIC_COLOURS => {
                 let SwitchArgs { on } = Self::args(id, args)?;
                 self.prefs.look.reduced_automatic_colours = on;
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_NEW_TRACKS_TAKE_GROUP_COLOUR => {
+                let SwitchArgs { on } = Self::args(id, args)?;
+                self.prefs.look.new_tracks_take_group_colour = on;
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_USE_CUSTOM_COLOUR => {
+                let CustomColourArgs { colour } = Self::args(id, args)?;
+                let Some(rgb) = bl_model::Colour::parse_hex(&colour) else {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: format!("`{colour}` isn't a #RRGGBB colour"),
+                    });
+                };
+                self.prefs.look.custom_colours.use_colour(rgb);
                 self.save_preferences();
                 Ok(Value::Null)
             }

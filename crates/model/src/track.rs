@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::automation::{Automation, AutomationTarget, TrackAutomation};
 use crate::clip::{AudioData, Clip, ClipData, EnvelopeKind, TakeLane};
+use crate::colour::Colour;
 use crate::device::Device;
 use crate::freeze::FrozenTrack;
 use crate::ids::{ChainId, ClipId, DeviceId, SceneId, TakeLaneId, TrackId};
@@ -808,9 +809,10 @@ pub struct Track {
     /// linked-track editing spec, R1). A group always has two tracks or
     /// more.
     pub(crate) link: Option<crate::ids::LinkGroupId>,
-    /// The track's colour, a swatch from 0 to 69 (the themes spec, R14). A
+    /// The track's colour, a swatch from 0 to 69 or a `#RRGGBB` colour (the
+    /// themes spec, R14, R29). A
     /// new track takes swatch `id mod 14`.
-    pub(crate) colour: u8,
+    pub(crate) colour: Colour,
     /// The user's own info text (Edit Info Text); empty for none (the Info
     /// View spec, R9).
     pub(crate) info_text: String,
@@ -822,7 +824,7 @@ impl Track {
             id,
             kind,
             name,
-            colour: crate::colour::id_swatch(id.0),
+            colour: crate::colour::id_swatch(id.0).into(),
             mixer: Mixer::default(),
             sends: OrdMap::new(),
             routing: Routing::new(kind),
@@ -901,9 +903,9 @@ impl Track {
         &self.info_text
     }
 
-    /// The track's colour: a swatch from 0 to 69.
+    /// The track's colour: a swatch from 0 to 69, or a colour of its own.
     #[must_use]
-    pub fn colour(&self) -> u8 {
+    pub fn colour(&self) -> Colour {
         self.colour
     }
 

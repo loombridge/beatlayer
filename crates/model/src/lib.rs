@@ -160,7 +160,7 @@ pub use mpe_settings::{MAX_NOTE_CHANNELS, MpeMode, MpeSettings, MpeZone, PluginM
 pub use mpe_view::{DEFAULT_LANE_HEIGHT, MpeLane, MpeView};
 pub use note_expression::Expression;
 pub mod freeze;
-pub use colour::{DEFAULT_TRACK_PALETTE, SWATCHES, TRACK_COLOURS, id_swatch, swatch_rgb};
+pub use colour::{Colour, DEFAULT_TRACK_PALETTE, SWATCHES, TRACK_COLOURS, id_swatch, swatch_rgb};
 pub use external::{
     CvCalibration, CvPort, CvStep, External, ExternalPort, HardwareLatency, MAX_CV_PORTS,
     MAX_HARDWARE_LATENCY_MS, MAX_HARDWARE_LATENCY_SAMPLES,

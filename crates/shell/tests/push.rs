@@ -497,7 +497,7 @@ fn the_buttons_run_the_apps_commands_and_the_picker_colours_a_track() {
     rig.pass(10);
     assert_eq!(
         rig.shell.editor().document().track(track).unwrap().colour(),
-        9
+        bl_model::Colour::Swatch(9)
     );
     assert_eq!(rig.steps(), steps + 1);
     assert_eq!(rig.state()["colour_picker"], false);
@@ -1463,7 +1463,7 @@ impl Rig {
         self.state()["leds"][format!("pad_{}_{column}", 7 - row)].clone()
     }
 
-    fn clip_colour(&self, track: usize, scene: usize) -> Option<u8> {
+    fn clip_colour(&self, track: usize, scene: usize) -> Option<bl_model::Colour> {
         let (track, scene) = (self.tracks()[track], self.scenes()[scene]);
         self.shell
             .editor()
@@ -1597,7 +1597,7 @@ fn colouring_duplicating_and_deleting_clips_are_one_undo_step_each() {
     assert_eq!(rig.state()["colour_picker"], true);
     assert_eq!(rig.steps(), steps, "opening it changes nothing");
     rig.pad(5, 0);
-    assert_eq!(rig.clip_colour(0, 0), Some(2));
+    assert_eq!(rig.clip_colour(0, 0), Some(bl_model::Colour::Swatch(2)));
     assert_eq!(rig.steps(), steps + 1);
 
     let steps = rig.steps();

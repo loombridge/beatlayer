@@ -68,6 +68,8 @@ fn an_agent_reads_clip_mode_and_reads_back_what_its_controls_set() {
         for _ in 0..6 {
             client.transport().shell.poll();
             client.transport().shell.midi().surfaces().tick();
+            // What the tick made the surfaces ask for, before the agent calls.
+            client.transport().shell.poll();
             loop {
                 run(client, "control_surface.list", json!({}));
                 if sim.pump() == 0 {

@@ -584,6 +584,8 @@ impl Shell {
                     undo_history: self.undo_history_open,
                     save_history: self.save_history.open,
                     plug_in_windows: self.plug_in_windows,
+                    note_colors: self.prefs.note_colors,
+                    mark_empty_tracks: self.prefs.mark_empty_tracks,
                 }))
             }
             ids::VIEW_TOGGLE_UNDO_HISTORY => {

@@ -840,10 +840,18 @@ fn title_bars(
                 ),
             )
         });
+        // Spec: view-options R8. The mark of an empty track, at the bar's
+        // right end; a track with a rack, which has the fold button, isn't
+        // empty.
+        let mark = shell
+            .shows_empty_mark(track)
+            .then(|| crate::widgets::paint_empty_mark(&painter, bar, theme.colors.clip_text.0));
         let name = Rect::from_min_max(
             pos2(bar.left() + 4.0, bar.top()),
             pos2(
-                fold.map_or(bar.right(), |(_, _, rect)| rect.left()) - 2.0,
+                mark.or_else(|| fold.map(|(_, _, rect)| rect.left()))
+                    .unwrap_or(bar.right())
+                    - 2.0,
                 bar.bottom(),
             ),
         );
@@ -883,6 +891,10 @@ fn title_bars(
             events,
         );
         crate::info_text::describe(ui.ctx(), &response, shell, InfoTarget::Track(track));
+        // Spec: view-options R9.
+        if mark.is_some() {
+            crate::widgets::describe_empty(ui.ctx(), response.id);
+        }
     }
     // The Session View's title bars are resized by their edges (R36).
     if of == MixerOf::Session {
@@ -2137,6 +2149,16 @@ impl StripParts<'_> {
                 }
             });
         }
+        // Spec: view-options R11 to R13.
+        if let Some(turn) = crate::wheel::input(&response, || TRACK_DELAY_GESTURE.to_owned()) {
+            let now = delay_stepped(delay, turn.steps, turn.fine);
+            if now != delay {
+                events.push(UiEvent::Invoke(Invocation::new(
+                    "mixer.set_track_delay",
+                    json!({ "track": self.track, "delay": now }),
+                )));
+            }
+        }
         let change = if reset {
             Some(TrackDelay::default())
         } else if steps != 0 {
@@ -2703,6 +2725,28 @@ impl StripParts<'_> {
             });
         }
         let doc = self.doc();
+        // Spec: view-options R11 to R13. A turn of the wheel steps it as the
+        // keys do, Shift finely, in the run's one undo step.
+        if let Some(turn) = crate::wheel::input(response, || control.gesture().to_owned()) {
+            let changes: Vec<(f64, Invocation)> = self
+                .starts(control)
+                .iter()
+                .filter_map(|(t, _)| {
+                    let value = control.step(control.value(doc, *t)?, turn.steps, turn.fine);
+                    Some((value, control.set(*t, value)))
+                })
+                .collect();
+            if control == Control::Volume
+                && let Some((volume, _)) = changes.first()
+            {
+                show_readout(ui.ctx(), volume_readout(*volume));
+            }
+            events.extend(
+                changes
+                    .into_iter()
+                    .map(|(_, change)| UiEvent::Invoke(change)),
+            );
+        }
         if reset {
             // Spec: mixer-view R6 (I-CLICK-021, S-VAL-004; observed: a
             // double-click resets the fader to 0 dB).
@@ -3314,6 +3358,14 @@ impl StripParts<'_> {
                     }
                 }
             });
+        }
+        // Spec: view-options R11 to R13.
+        if let Some(turn) =
+            crate::wheel::input(&response, || controls::CUE_VOLUME_GESTURE.to_owned())
+        {
+            events.push(UiEvent::Invoke(controls::cue_volume_stepped(
+                volume, turn.steps, turn.fine,
+            )));
         }
         let change = if reset {
             Some(controls::set_cue_volume(1.0))

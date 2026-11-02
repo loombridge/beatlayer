@@ -10947,6 +10947,7 @@ The Display & Input page's settings.
 | `permanent_scrub_areas` | boolean | yes | Permanent Scrub Areas, as `settings.set_permanent_scrub_areas` sets it (the time editing spec, R26). |
 | `use_tab_key_to_move_focus` | boolean | yes | Use Tab Key to Move Focus, as `focus.toggle_tab_navigation` toggles it. |
 | `wrap_tab_navigation` | boolean | yes | Wrap Tab Navigation, as `focus.toggle_wrap_navigation` toggles it. |
+| `wheel_adjusts_values` | boolean | yes | Adjust Values with Mouse Wheel, as `settings.set_wheel_adjusts_values` sets it (the view options spec, R10). |
 | `second_window_zoom_percent` | integer or null | no | The second window's zoom in percent, as `view.set_zoom` takes it with `window` set to `second`: only while the second window is open, when the page shows Second Window Zoom (interface-zoom R12). |
 
 <details><summary>JSON Schema</summary>
@@ -10977,6 +10978,10 @@ The Display & Input page's settings.
       "description": "Use Tab Key to Move Focus, as `focus.toggle_tab_navigation` toggles it.",
       "type": "boolean"
     },
+    "wheel_adjusts_values": {
+      "description": "Adjust Values with Mouse Wheel, as `settings.set_wheel_adjusts_values` sets it (the view options spec, R10).",
+      "type": "boolean"
+    },
     "wrap_tab_navigation": {
       "description": "Wrap Tab Navigation, as `focus.toggle_wrap_navigation` toggles it.",
       "type": "boolean"
@@ -10994,7 +10999,8 @@ The Display & Input page's settings.
     "outline_view_in_focus",
     "permanent_scrub_areas",
     "use_tab_key_to_move_focus",
-    "wrap_tab_navigation"
+    "wrap_tab_navigation",
+    "wheel_adjusts_values"
   ],
   "type": "object"
 }
@@ -11966,6 +11972,37 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `EmptyTracks`
+
+What `track.list_empty` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array of [`TrackId`](#trackid) | yes | The empty tracks, in display order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `track.list_empty` returns.",
+  "properties": {
+    "tracks": {
+      "description": "The empty tracks, in display order.",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "tracks"
+  ],
+  "type": "object"
 }
 ```
 
@@ -22279,6 +22316,71 @@ What the note clipboard holds, as `note.copy` reports it.
   "required": [
     "notes",
     "length"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `NoteColors`
+
+How the MIDI Note Editor colours notes (R2, R3).
+
+One of:
+
+- `"velocity"`: The clip's colour, paler the softer the note: Live's.
+- `"pitch_class"`: One hue for each pitch class, the same in every octave.
+- `"scale_degree"`: One hue for each degree of the clip's scale, grey outside it.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How the MIDI Note Editor colours notes (R2, R3).",
+  "oneOf": [
+    {
+      "const": "velocity",
+      "description": "The clip's colour, paler the softer the note: Live's.",
+      "type": "string"
+    },
+    {
+      "const": "pitch_class",
+      "description": "One hue for each pitch class, the same in every octave.",
+      "type": "string"
+    },
+    {
+      "const": "scale_degree",
+      "description": "One hue for each degree of the clip's scale, grey outside it.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `NoteColorsResult`
+
+What `view.set_note_colors` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `colors` | [`NoteColors`](#notecolors) | yes | The colouring in use afterwards. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `view.set_note_colors` returns.",
+  "properties": {
+    "colors": {
+      "$ref": "#/$defs/NoteColors",
+      "description": "The colouring in use afterwards."
+    }
+  },
+  "required": [
+    "colors"
   ],
   "type": "object"
 }
@@ -41095,6 +41197,8 @@ What `view.state` returns: what the view commands switch, without switching any 
 | `undo_history` | boolean | yes | Whether the Undo History panel shows. |
 | `save_history` | boolean | yes | Whether the Save History panel shows. |
 | `plug_in_windows` | boolean | yes | Whether floating devices' and plug-ins' windows are shown, as `view.toggle_plug_in_windows` sets it. |
+| `note_colors` | [`NoteColors`](#notecolors) | yes | How the MIDI Note Editor colours notes, as `view.set_note_colors` sets it (the view options spec, R2). |
+| `mark_empty_tracks` | boolean | yes | Whether empty tracks show a mark, as `view.set_mark_empty_tracks` sets it (the view options spec, R6). |
 
 <details><summary>JSON Schema</summary>
 
@@ -41117,6 +41221,14 @@ What `view.state` returns: what the view commands switch, without switching any 
     "focused_window": {
       "$ref": "#/$defs/WindowName",
       "description": "The window the commands that act on one window act on when they aren't told which: the one with the focus."
+    },
+    "mark_empty_tracks": {
+      "description": "Whether empty tracks show a mark, as `view.set_mark_empty_tracks` sets it (the view options spec, R6).",
+      "type": "boolean"
+    },
+    "note_colors": {
+      "$ref": "#/$defs/NoteColors",
+      "description": "How the MIDI Note Editor colours notes, as `view.set_note_colors` sets it (the view options spec, R2)."
     },
     "plug_in_windows": {
       "description": "Whether floating devices' and plug-ins' windows are shown, as `view.toggle_plug_in_windows` sets it.",
@@ -41153,7 +41265,9 @@ What `view.state` returns: what the view commands switch, without switching any 
     "assistant",
     "undo_history",
     "save_history",
-    "plug_in_windows"
+    "plug_in_windows",
+    "note_colors",
+    "mark_empty_tracks"
   ],
   "type": "object"
 }

@@ -15,6 +15,9 @@ pub const UI_FONT: &[u8] = include_bytes!("../fonts/inter/Inter-Regular.ttf");
 /// The colours in a theme's track palette (themes R9).
 const TRACK_COLOURS: usize = 14;
 
+/// The hues of the note colours: one for each pitch class.
+const PITCH_HUES: usize = 12;
+
 const DARK: &str = include_str!("../themes/dark.toml");
 const LIGHT: &str = include_str!("../themes/light.toml");
 
@@ -112,6 +115,11 @@ pub struct Colours {
     /// The keys of a clip's scale on the piano ruler, and the rows Highlight
     /// Scales shades (WP-6.7b).
     pub scale: Colour,
+    /// The hues of the note colours By Pitch Class and By Scale Degree
+    /// (WP-6.49): C to B, or the root up the scale.
+    pub pitch_hues: Vec<Colour>,
+    /// The grey of a note outside the clip's scale with By Scale Degree.
+    pub out_of_scale: Colour,
     /// Track and clip colours, assigned to new tracks in turn.
     pub track_palette: Vec<Colour>,
 }
@@ -188,6 +196,12 @@ impl Theme {
     /// A message if the file isn't a valid theme.
     pub fn parse(text: &str) -> Result<Self, String> {
         let theme: Self = toml::from_str(text).map_err(|e| format!("not a valid theme: {e}"))?;
+        let hues = theme.colors.pitch_hues.len();
+        if hues != PITCH_HUES {
+            return Err(format!(
+                "not a valid theme: the pitch hues are {hues} colours, not {PITCH_HUES}"
+            ));
+        }
         match theme.colors.track_palette.len() {
             TRACK_COLOURS => Ok(theme),
             n => Err(format!(
@@ -299,6 +313,34 @@ const PALEST_MIX: f32 = 0.6;
 pub fn note_colour(colour: Color32, velocity: u8) -> Color32 {
     let t = f32::from(velocity.clamp(1, 127) - 1) / 126.0;
     colour.lerp_to_gamma(Color32::WHITE, PALEST_MIX * (1.0 - t))
+}
+
+impl Theme {
+    /// The colour a note is drawn in before its velocity makes it paler
+    /// (the view options spec, R3): its pitch class's hue with By Pitch
+    /// Class, its degree's in the clip's `scale` with By Scale Degree (the
+    /// out-of-scale grey for a key the scale doesn't hold), and the clip's
+    /// own `face` otherwise, as with Scale Mode off.
+    #[must_use]
+    pub fn note_face(
+        &self,
+        colors: bl_shell::view_option_commands::NoteColors,
+        face: Color32,
+        key: u8,
+        scale: &bl_model::Scale,
+    ) -> Color32 {
+        use bl_shell::view_option_commands::NoteColors::{PitchClass, ScaleDegree};
+        let hues = &self.colors.pitch_hues;
+        match colors {
+            PitchClass => hues[usize::from(key % 12)].0,
+            ScaleDegree if scale.enabled => scale
+                .degree(key)
+                .map_or(self.colors.out_of_scale.0, |degree| {
+                    hues[degree % hues.len()].0
+                }),
+            _ => face,
+        }
+    }
 }
 
 /// Font definitions with only the bundled typeface, for every family.

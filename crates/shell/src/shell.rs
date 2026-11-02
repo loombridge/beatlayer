@@ -118,6 +118,7 @@ mod sample_edits;
 mod sample_keys;
 mod sample_swap;
 mod save_history;
+mod view_options;
 pub use sample_keys::TransientList;
 mod agent_server;
 mod app_settings;
@@ -2206,6 +2207,9 @@ impl Shell {
             // adds a device, or replaces the one being hot-swapped.
             Self::args::<NoArgs>(id, args)?;
             return self.load_into_devices(load);
+        }
+        if bl_shell_spec::view_options::handles(id) {
+            return self.run_view_options(id, args);
         }
         if multisampler_ids::handles(id) {
             return self.run_multisampler(id, args);

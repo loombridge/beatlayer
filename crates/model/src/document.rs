@@ -751,6 +751,29 @@ impl Document {
             .filter_map(|id| self.track(id))
     }
 
+    /// Whether a track is empty (the view options spec, R7): it holds no
+    /// clip anywhere, on its lanes, take lanes or Session slots, and no
+    /// device; a group is empty when it has no device and every track in it
+    /// is empty. Main never is.
+    #[must_use]
+    pub fn is_track_empty(&self, id: TrackId) -> bool {
+        self.track(id).is_some_and(|track| {
+            track.kind() != TrackKind::Main
+                && track.devices().len() == 0
+                && track.all_clips().next().is_none()
+                && track.children().all(|child| self.is_track_empty(child))
+        })
+    }
+
+    /// The empty tracks (see [`Document::is_track_empty`]), in display order.
+    #[must_use]
+    pub fn empty_tracks(&self) -> Vec<TrackId> {
+        self.track_order()
+            .into_iter()
+            .filter(|&id| self.is_track_empty(id))
+            .collect()
+    }
+
     /// How many tracks there are, counting the returns and Main.
     #[must_use]
     pub fn track_count(&self) -> usize {

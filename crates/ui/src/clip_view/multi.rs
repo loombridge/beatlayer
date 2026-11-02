@@ -104,6 +104,7 @@ struct Shown {
     clip: ClipId,
     name: String,
     colour: Color32,
+    scale: bl_model::Scale,
     midi: MidiData,
     clip_start: Ticks,
     length: Ticks,
@@ -251,6 +252,7 @@ impl ClipViewUi {
                     colour: clip
                         .colour
                         .map_or(theme.colors.accent.0, |swatch| theme.swatch(swatch)),
+                    scale: clip.scale,
                     midi: midi.clone(),
                     clip_start: clip.start,
                     length: clip.length,
@@ -338,6 +340,13 @@ impl ClipViewUi {
             for (place, note) in c.notes.iter().enumerate() {
                 let Some(y) = rows_of_keys.y_of(grid, note.key) else {
                     continue;
+                };
+                // Spec: view-options R3, R4. Only the hue changes, and a
+                // clip that isn't active stays grey.
+                let face = if active {
+                    theme.note_face(shell.note_colors(), face, note.key, &c.scale)
+                } else {
+                    face
                 };
                 for w in &c.windows {
                     let from = note.start.max(w.from);

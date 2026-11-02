@@ -1163,6 +1163,12 @@ pub struct ViewState {
     /// Whether floating devices' and plug-ins' windows are shown, as
     /// `view.toggle_plug_in_windows` sets it.
     pub plug_in_windows: bool,
+    /// How the MIDI Note Editor colours notes, as `view.set_note_colors`
+    /// sets it (the view options spec, R2).
+    pub note_colors: crate::view_options::NoteColors,
+    /// Whether empty tracks show a mark, as `view.set_mark_empty_tracks`
+    /// sets it (the view options spec, R6).
+    pub mark_empty_tracks: bool,
 }
 
 /// What `view.toggle_undo_history` returns: the Undo History panel's state

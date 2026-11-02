@@ -3997,3 +3997,83 @@ fn an_arm_by_selection_is_drawn_in_the_themes_pink() {
         "pink by selection"
     );
 }
+
+// The mouse wheel on controls (WP-6.49; the view options spec, R10 to R13).
+
+/// One notch of a mouse wheel, up (positive) or down.
+fn notch(h: &mut Harness, delta: f32, modifiers: Modifiers) {
+    h.frame(vec![Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Line,
+        delta: vec2(0.0, delta),
+        modifiers,
+        phase: egui::TouchPhase::Move,
+    }]);
+}
+
+// Spec: view-options R11, R13.
+#[test]
+fn the_wheel_moves_a_fader_a_decibel_a_notch_and_shift_a_tenth() {
+    let mut h = session();
+    h.shell
+        .run("settings.set_wheel_adjusts_values", json!({ "on": true }))
+        .unwrap();
+    let t = tracks(&h.shell);
+    let fader = control(&mut h, "3 Audio", "Track Volume");
+    h.frame(vec![Event::PointerMoved(fader.center())]);
+    h.frame(vec![]);
+    let steps = h.shell.editor().undo_history().len();
+    notch(&mut h, 1.0, Modifiers::NONE);
+    h.frame(vec![]);
+    assert!((controls::gain_db(mixer(&h.shell, t[2]).volume) - 1.0).abs() < 1e-9);
+    notch(&mut h, 1.0, Modifiers::SHIFT);
+    h.frame(vec![]);
+    assert!((controls::gain_db(mixer(&h.shell, t[2]).volume) - 1.1).abs() < 1e-9);
+    notch(&mut h, -1.0, Modifiers::NONE);
+    for _ in 0..40 {
+        h.frame(vec![]);
+    }
+    assert!((controls::gain_db(mixer(&h.shell, t[2]).volume) - 0.1).abs() < 1e-9);
+    assert_eq!(
+        h.shell.editor().undo_history().len(),
+        steps + 1,
+        "the run is one undo step"
+    );
+    assert_eq!(
+        h.shell.editor().undo_history().next(),
+        Some(controls::VOLUME_GESTURE)
+    );
+}
+
+// Spec: view-options R10, R11.
+#[test]
+fn the_wheel_scrolls_the_mixer_over_a_fader_unless_the_switch_is_on() {
+    for on in [false, true] {
+        let mut h = session();
+        many_tracks(&mut h, 20);
+        h.shell
+            .run("settings.set_wheel_adjusts_values", json!({ "on": on }))
+            .unwrap();
+        let t = tracks(&h.shell);
+        let fader = control(&mut h, "3 Audio", "Track Volume");
+        h.frame(vec![Event::PointerMoved(fader.center())]);
+        h.frame(vec![]);
+        for _ in 0..10 {
+            h.frame(vec![Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: vec2(0.0, -40.0),
+                modifiers: Modifiers::NONE,
+                phase: egui::TouchPhase::Move,
+            }]);
+        }
+        h.settle();
+        let scroll = state(&mut h.shell).session.scroll;
+        let volume = controls::gain_db(mixer(&h.shell, t[2]).volume);
+        if on {
+            assert_eq!(scroll, 0.0, "the wheel is the fader's");
+            assert!(volume < -1.0, "400 points turned it down: {volume}");
+        } else {
+            assert!(scroll > 100.0, "the wheel scrolls the mixer as before");
+            assert_eq!(volume, 0.0);
+        }
+    }
+}

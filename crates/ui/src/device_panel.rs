@@ -1084,6 +1084,21 @@ impl Control<'_> {
                 }
             });
         }
+        // Spec: view-options R11 to R13. A turn of the wheel moves it as the
+        // keys do, a tenth of a step with Shift (a stepped value has no
+        // finer step), in the run's one undo step.
+        if let Some(turn) = crate::wheel::input(response, || gesture_name(d)) {
+            let value = if turn.fine && !d.is_stepped() {
+                d.denormalize(d.normalize(self.value) + f64::from(turn.steps) * 0.001)
+            } else {
+                step(d, self.value, turn.steps)
+            };
+            let value = d.clamp(value);
+            crate::mixer::show_readout(ui.ctx(), readout(d, value));
+            if value != self.value {
+                events.push(UiEvent::Invoke(self.set(value)));
+            }
+        }
         if reset {
             self.change(d.default, events);
         } else if steps != 0 {

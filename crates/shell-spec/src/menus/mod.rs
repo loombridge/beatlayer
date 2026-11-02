@@ -114,6 +114,15 @@ pub const IMP_12: &str = "IMP-12";
 /// menus.md's Live rows, though the reference names it IMP-01.
 pub const IMP_01: &str = "IMP-01";
 
+/// The row of Beatlayer's own Mark Empty Tracks (IMP-34), straight after
+/// Show Selected Grouped Track in the View menu: an improvement, so not a
+/// row of menus.md.
+pub const IMP_34: &str = "IMP-34";
+
+/// The row of Beatlayer's own Note Colors submenu (IMP-35), straight after
+/// Fold to Scale in the View menu: an improvement, so not a row of menus.md.
+pub const IMP_35: &str = "IMP-35";
+
 /// The row of Beatlayer's own Devices section switch (IMP-25), straight
 /// after Performance Impact in the Mixer Controls submenu: an improvement,
 /// so not one of menus.md's Live rows, though the reference names it

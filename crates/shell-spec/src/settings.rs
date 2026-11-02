@@ -408,6 +408,9 @@ pub struct DisplayInputSettings {
     pub use_tab_key_to_move_focus: bool,
     /// Wrap Tab Navigation, as `focus.toggle_wrap_navigation` toggles it.
     pub wrap_tab_navigation: bool,
+    /// Adjust Values with Mouse Wheel, as `settings.set_wheel_adjusts_values`
+    /// sets it (the view options spec, R10).
+    pub wheel_adjusts_values: bool,
 }
 
 /// The Audio page's settings: the device choices as `audio.configure` takes

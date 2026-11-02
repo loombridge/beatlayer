@@ -1,6 +1,6 @@
 # View options: panning with the middle button, note colours, a mark on empty tracks, and the mouse wheel on controls
 
-- **Status:** draft
+- **Status:** implemented (R1 to R16 each have a passing test)
 - **Work packages:** WP-6.49b (R1, panning with the middle button, Live's; with Live's note colours by velocity in [piano-roll.md](piano-roll.md)), WP-6.49 (R2 to R16, the three options of Beatlayer's own)
 - **Parity-matrix row:** Interface placement and key bindings: Placement of every view, panel, and control (R1, panning with the middle button, which Live 12.0 added); [the improvements](../05-improvements.md), IMP-34 (a mark on empty tracks), IMP-35 (note colours by pitch class or scale degree) and IMP-36 (the mouse wheel adjusting controls)
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026, chapters 6, 10 and 42; the Live 12 release notes, 12.0 to 12.4.6; the UI parity reference's [menus.md](../ui-parity/menus.md) (View), [layout.md](../ui-parity/layout.md) L-SET-010, [interactions.md](../ui-parity/interactions.md) I-DRAG-009 and I-SCROLL-001 to 005, and [shortcuts.toml](../ui-parity/shortcuts.toml) S-VAL-001 to 008
@@ -66,18 +66,18 @@ This spec covers these four. The views they change are their own specs'; where a
 | Rule | Test | Kind |
 |---|---|---|
 | R1 | `crates/ui/tests/arrangement.rs`, `the_middle_button_pans_the_lanes`; `crates/ui/tests/session_view.rs`, `the_middle_button_pans_the_grid`; `crates/ui/tests/mixer.rs`, `the_middle_button_pans_the_mixer`; `crates/ui/tests/clip_view.rs`, `the_middle_button_pans_the_note_area`; `crates/ui/tests/sample_editor.rs`, `the_middle_button_pans_the_waveform`; `crates/ui/tests/device_view.rs`, `the_middle_button_pans_the_device_chain`; `crates/ui/tests/browser.rs`, `the_middle_button_pans_the_browsers_lists` | UI script |
-| R2 | to be written in WP-6.49 | |
-| R3 | to be written in WP-6.49 | |
-| R4 | to be written in WP-6.49 | |
-| R5 | to be written in WP-6.49 | |
-| R6 | to be written in WP-6.49 | |
-| R7 | to be written in WP-6.49 | |
-| R8 | to be written in WP-6.49 | |
-| R9 | to be written in WP-6.49 | |
-| R10 | to be written in WP-6.49 | |
-| R11 | to be written in WP-6.49 | |
-| R12 | to be written in WP-6.49 | |
-| R13 | to be written in WP-6.49 | |
-| R14 | to be written in WP-6.49 | |
-| R15 | to be written in WP-6.49 | |
-| R16 | to be written in WP-6.49 | |
+| R2 | `crates/ui/tests/view_options.rs`, `the_view_menu_offers_both_options_after_the_items_they_follow`; `crates/shell/tests/view_options.rs`, `the_options_are_off_at_first_read_back_and_survive_a_relaunch_outside_the_set` | UI script, headless |
+| R3 | `crates/ui/tests/clip_view.rs`, `by_pitch_class_every_c_has_one_hue_and_a_softer_note_is_paler`, `by_scale_degree_colours_the_clips_degrees_and_greys_the_rest` | UI script |
+| R4 | `crates/ui/tests/clip_view.rs`, `by_pitch_class_every_c_has_one_hue_and_a_softer_note_is_paler` (paler, deactivated grey), `by_scale_degree_colours_the_clips_degrees_and_greys_the_rest` (Scale Mode off) | UI script |
+| R5 | `crates/ui/tests/clip_view.rs`, `a_note_is_named_for_assistive_technology_with_its_pitch_velocity_and_degree` | UI script |
+| R6 | `crates/ui/tests/view_options.rs`, `the_view_menu_offers_both_options_after_the_items_they_follow`; `crates/shell/tests/view_options.rs`, `the_options_are_off_at_first_read_back_and_survive_a_relaunch_outside_the_set` | UI script, headless |
+| R7 | `crates/shell/tests/view_options.rs`, `track_list_empty_lists_tracks_with_no_clip_and_no_device_whatever_the_switch` | Headless |
+| R8 | `crates/ui/tests/view_options.rs`, `an_empty_track_wears_the_ring_in_the_arrangement_until_a_clip_or_a_device_is_added`, `the_session_view_and_both_mixers_mark_empty_tracks_too` | UI script |
+| R9 | `crates/ui/tests/view_options.rs`, `an_empty_track_wears_the_ring_in_the_arrangement_until_a_clip_or_a_device_is_added`, `the_session_view_and_both_mixers_mark_empty_tracks_too` | UI script |
+| R10 | `crates/ui/tests/view_options.rs`, `the_wheel_switch_is_the_last_row_of_navigation_and_keyboard`; `crates/ui/tests/mixer.rs`, `the_wheel_scrolls_the_mixer_over_a_fader_unless_the_switch_is_on`; `crates/ui/tests/device_panel.rs`, `with_the_switch_off_the_wheel_leaves_the_knob_alone` | UI script |
+| R11 | `crates/ui/tests/device_panel.rs`, `the_wheel_moves_a_knob_a_percent_a_notch_and_a_run_is_one_undo_step`, `shift_makes_the_wheel_step_finely`, `a_trackpad_moves_a_knob_a_step_for_every_twenty_points`; `crates/ui/tests/mixer.rs`, `the_wheel_moves_a_fader_a_decibel_a_notch_and_shift_a_tenth`; `crates/ui/tests/transport.rs`, `the_wheel_steps_the_tempo_field_as_the_keys_do` | UI script |
+| R12 | `crates/ui/tests/device_panel.rs`, `the_status_bar_reads_the_knob_while_the_wheel_moves_it`, `the_wheel_on_an_automated_knob_overrides_its_envelope_as_a_hand_move_does` | UI script |
+| R13 | `crates/ui/tests/device_panel.rs`, `the_wheel_moves_a_knob_a_percent_a_notch_and_a_run_is_one_undo_step`, `a_run_ends_when_the_pointer_leaves_the_control_or_a_key_is_pressed`; `crates/ui/tests/mixer.rs`, `the_wheel_moves_a_fader_a_decibel_a_notch_and_shift_a_tenth` | UI script |
+| R14 | `crates/shell/tests/view_options.rs`, `the_options_are_off_at_first_read_back_and_survive_a_relaunch_outside_the_set`; `cargo xtask commands` (schemas, descriptions, readback rows) | Headless |
+| R15 | `crates/shell/tests/view_options.rs`, `track_list_empty_lists_tracks_with_no_clip_and_no_device_whatever_the_switch` | Headless |
+| R16 | `crates/ui/tests/view_options.rs`, `the_ring_keeps_its_place_in_its_title_bar_at_every_zoom` | UI script |

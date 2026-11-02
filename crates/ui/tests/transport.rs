@@ -820,3 +820,37 @@ fn playback_options_switches_start_transport_with_tap_tempo_and_ticks_while_on()
     assert_eq!(state_of(&h).checked, Some(false));
     h.shell.audio_mut().stop();
 }
+
+// Spec: view-options R11, R13. The wheel over the Control Bar's tempo field.
+#[test]
+fn the_wheel_steps_the_tempo_field_as_the_keys_do() {
+    let mut h = Harness::new(Window::Main);
+    h.shell
+        .run("settings.set_wheel_adjusts_values", json!({ "on": true }))
+        .unwrap();
+    h.settle();
+    let tempo = rect(Element::Tempo).center();
+    h.frame(vec![Event::PointerMoved(tempo)]);
+    h.frame(vec![]);
+    let wheel = |h: &mut Harness, delta: f32, modifiers: Modifiers| {
+        h.frame(vec![Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            delta: egui::vec2(0.0, delta),
+            modifiers,
+            phase: egui::TouchPhase::Move,
+        }]);
+    };
+    let steps = h.shell.editor().undo_history().len();
+    wheel(&mut h, 1.0, Modifiers::NONE);
+    wheel(&mut h, 1.0, Modifiers::NONE);
+    h.frame(vec![]);
+    assert_eq!(state(&mut h.shell).tempo, 122.0, "a notch a step");
+    wheel(&mut h, 1.0, Modifiers::SHIFT);
+    h.frame(vec![]);
+    assert_eq!(state(&mut h.shell).tempo, 122.01, "Shift for a fine step");
+    for _ in 0..40 {
+        h.frame(vec![]);
+    }
+    assert_eq!(h.shell.editor().undo_history().len(), steps + 1);
+    assert_eq!(h.shell.editor().undo_history().next(), Some("Change tempo"));
+}

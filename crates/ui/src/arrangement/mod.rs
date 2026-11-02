@@ -17,6 +17,7 @@
 
 pub mod automation;
 pub mod benchmark;
+mod chord_lane;
 pub mod context_menu;
 pub mod editing;
 pub mod fades;
@@ -221,6 +222,8 @@ pub struct ArrangementUi {
     locator_drag: Option<bl_model::LocatorId>,
     /// The time-signature lane's gestures (WP-6.61).
     signature_lane: signatures::SignatureLane,
+    /// The chord lane's gestures (WP-6.48).
+    chord_lane: chord_lane::ChordLane,
     /// The point a held press in the scrub area or the beat-time ruler is
     /// looping, until the button is released (WP-6.59; time-editing R25).
     scrub_hold: Option<Ticks>,
@@ -396,6 +399,7 @@ impl ArrangementUi {
             snap_line: None,
             locator_drag: None,
             signature_lane: signatures::SignatureLane::default(),
+            chord_lane: chord_lane::ChordLane::default(),
             scrub_hold: None,
             locators_drawn: Vec::new(),
             mixer: None,
@@ -560,6 +564,12 @@ impl ArrangementUi {
         // Spec: time-editing R29. The lane shows while the set has changes.
         let layout = if doc.settings().time_signatures.has_changes() {
             layout.with_signature_lane()
+        } else {
+            layout
+        };
+        // Spec: chord-lane R1. The lane shows while View > Chord Lane is on.
+        let layout = if view.chord_lane() {
+            layout.with_chord_lane()
         } else {
             layout
         };
@@ -803,6 +813,25 @@ impl ArrangementUi {
             doc.settings().song_start,
             theme,
         );
+        if let (Some(lane), Some(header)) = (layout.chord_lane, layout.chord_header) {
+            rulers::chord_lane(
+                &ui.painter_at(lane),
+                lane,
+                horizontal,
+                doc.chord_lane(),
+                view.selected_chord_region(),
+                theme,
+            );
+            // The header column's cell, which names the lane.
+            ui.painter_at(header).rect_filled(header, 0.0, theme.colors.bar.0);
+            ui.painter_at(header).text(
+                pos2(header.left() + 6.0, header.center().y),
+                egui::Align2::LEFT_CENTER,
+                "Chord Lane",
+                theme.small_font(),
+                theme.colors.text_dim.0,
+            );
+        }
         rulers::time_ruler(
             &ui.painter_at(layout.time_ruler),
             layout.time_ruler,
@@ -821,6 +850,11 @@ impl ArrangementUi {
                 &mut self.snap_line,
                 events,
             );
+        }
+
+        if let Some(lane) = layout.chord_lane {
+            self.chord_lane
+                .show(ui, shell, theme, lane, &mut self.snap_line, events);
         }
 
         // The playhead, over the rulers and the lanes.
@@ -2978,6 +3012,16 @@ impl ArrangementUi {
                     json!({ "at": at }),
                 );
             }
+        }
+        // Spec: chord-lane R3. The Delete key deletes the selected region.
+        if let Some(region) = view.selected_chord_region()
+            && ui.input(|i| i.key_pressed(Key::Delete))
+        {
+            invoke(
+                events,
+                bl_shell::chord_lane_commands::DELETE_REGION,
+                json!({ "region": region }),
+            );
         }
         // Spec: time-editing R8. Cmd-R renames the selected locators.
         if !view.selected_locators().is_empty()

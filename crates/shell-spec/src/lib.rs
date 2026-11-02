@@ -111,6 +111,7 @@ pub mod automation;
 pub mod autosampler;
 pub mod bounce;
 pub mod browser;
+pub mod chord_lane;
 pub mod capture_midi;
 pub mod clip_envelope_editing;
 pub mod clip_properties;
@@ -182,6 +183,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     clip_envelope_editing::register(registry)?;
     groove::register(registry)?;
     locator::register(registry)?;
+    chord_lane::register(registry)?;
     notes::register(registry)?;
     transport::register(registry)?;
     mixer_view::register(registry)?;

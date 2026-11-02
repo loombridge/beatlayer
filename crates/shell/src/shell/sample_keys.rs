@@ -342,6 +342,13 @@ impl Shell {
         &mut self,
         step: &Invocation,
     ) -> Result<Invocation, ShellError> {
+        // Spec: chord-lane R3. A region being drawn gets the ID the project
+        // issues, which the pointer can't know.
+        if step.id == "chord_lane.add_region" && step.args["region"]["id"].is_null() {
+            let mut args = step.args.clone();
+            args["region"]["id"] = serde_json::json!(self.new_id::<bl_model::ChordRegionId>());
+            return Ok(Invocation::new(&step.id, args));
+        }
         if !GESTURE_WARP.contains(&step.id.as_str()) {
             return Ok(step.clone());
         }

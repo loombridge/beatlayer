@@ -22,7 +22,7 @@ use crate::comping::COPY_TO_MAIN_LANE;
 use crate::devices::{
     COMPARE_COPY, COMPARE_SWITCH, SAVE_DEFAULT_PRESET, SET_FLOATING, SET_ROLE, UNGROUP,
 };
-use crate::menus::{Action, IMP_12, MenuItem, Row, SEPARATOR, items};
+use crate::menus::{Action, IMP_12, IMP_33_FOLLOW, MenuItem, Row, SEPARATOR, items};
 use crate::midi_files::EXPORT as EXPORT_MIDI_CLIP;
 use crate::notes::{CHOP as CHOP_NOTES, SPLIT as SPLIT_NOTES};
 use crate::slice::OPEN as SLICE_TO_MIDI;
@@ -387,6 +387,8 @@ pub struct TrackMenu {
     /// Every top-level device on the selected tracks is already off, so the
     /// Deactivate All Devices item reads Activate All Devices (IMP-25).
     pub devices_off: bool,
+    /// The track is a MIDI track, which has Follow Chord Lane (IMP-33).
+    pub midi: bool,
 }
 
 /// The rows the other states add after row `after`. menus.md doesn't
@@ -430,6 +432,15 @@ fn track_extras(after: &str, state: TrackMenu) -> Vec<Row> {
                     Cmd("take_lane.delete_unused"),
                 ));
             }
+        }
+        // Spec: chord-lane R5. A MIDI track's own switch, in a group of its own.
+        "C-TRACK-014" if state.midi => {
+            rows.push(SEPARATOR);
+            rows.push((
+                IMP_33_FOLLOW,
+                "Follow Chord Lane",
+                Cmd("track.set_follow_chord_lane"),
+            ));
         }
         "C-TRACK-016" if state.group => rows.push((
             "C-TRACK-017b",
@@ -1304,6 +1315,7 @@ mod tests {
         arrangement: true,
         time_selection: true,
         devices_off: false,
+        midi: true,
     };
 
     #[test]

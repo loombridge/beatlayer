@@ -27,7 +27,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use bl_core::time::{Ticks, TimeSignature};
 use bl_model::{
-    AutomationTarget, ClipId, Document, LaneViews, LocatorId, TakeLaneId, TrackId, TrackKind,
+    AutomationTarget, ChordRegionId, ClipId, Document, LaneViews, LocatorId, TakeLaneId, TrackId,
+    TrackKind,
 };
 use bl_shell_spec::arrangement::{
     self as ids, ArrangementState, FadeHandle, FadeHandleState, FoldArgs, FoldGroupsArgs,
@@ -187,6 +188,10 @@ pub struct ArrangementView {
     /// The position of the selected time-signature marker (WP-6.61): see
     /// [`locator`].
     selected_signature: Option<Ticks>,
+    /// Whether the chord lane shows (WP-6.48; the chord lane spec, R1), and
+    /// its selected region (R3).
+    chord_lane: bool,
+    selected_chord_region: Option<ChordRegionId>,
     /// The take lanes whose headers are selected (the comping spec, R26): see
     /// [`take_lanes`].
     selected_take_lanes: Vec<TakeLaneId>,
@@ -278,6 +283,8 @@ impl ArrangementView {
             selected_clips: Vec::new(),
             selected_locators: Vec::new(),
             selected_signature: None,
+            chord_lane: false,
+            selected_chord_region: None,
             selected_take_lanes: Vec::new(),
             shown_take_lanes: BTreeSet::new(),
             take_heights: BTreeMap::new(),
@@ -599,6 +606,12 @@ impl ArrangementView {
     pub fn forget_missing_locators(&mut self, doc: &Document) {
         self.selected_locators
             .retain(|id| doc.locator(*id).is_some());
+        if self
+            .selected_chord_region
+            .is_some_and(|region| doc.chord_region(region).is_none())
+        {
+            self.selected_chord_region = None;
+        }
         let signatures = &doc.settings().time_signatures;
         if self
             .selected_signature
@@ -606,6 +619,31 @@ impl ArrangementView {
         {
             self.selected_signature = None;
         }
+    }
+
+    /// Whether the chord lane shows (WP-6.48).
+    #[must_use]
+    pub fn chord_lane(&self) -> bool {
+        self.chord_lane
+    }
+
+    /// Shows or hides the chord lane. Hiding it deselects its region.
+    pub fn set_chord_lane(&mut self, shown: bool) {
+        self.chord_lane = shown;
+        if !shown {
+            self.selected_chord_region = None;
+        }
+    }
+
+    /// The selected chord region.
+    #[must_use]
+    pub fn selected_chord_region(&self) -> Option<ChordRegionId> {
+        self.selected_chord_region
+    }
+
+    /// Selects a chord region, or none, as clicking one does.
+    pub fn select_chord_region(&mut self, region: Option<ChordRegionId>) {
+        self.selected_chord_region = region;
     }
 
     /// The position of the selected time-signature marker (WP-6.61).
@@ -1502,6 +1540,8 @@ impl ArrangementView {
             selected_clips: self.selected_clips.clone(),
             selected_locators: self.selected_locators.clone(),
             selected_time_signature: self.selected_signature,
+            chord_lane: self.chord_lane,
+            selected_chord_region: self.selected_chord_region,
             selected_take_lanes: self.selected_take_lanes.clone(),
             shown_take_lanes: self.shown_take_lanes.iter().copied().collect(),
             selected_fade: self.selected_fade,

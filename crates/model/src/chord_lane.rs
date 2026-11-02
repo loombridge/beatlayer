@@ -70,6 +70,22 @@ impl ChordRegion {
         check_transpose(self.transpose)
     }
 
+    /// What the lane writes in the region: its scale and its transposition,
+    /// such as "D Dorian +2", or "No Scale +0" (the chord lane spec, R2).
+    #[must_use]
+    pub fn name(&self) -> String {
+        let scale = if self.scale.enabled {
+            format!(
+                "{} {}",
+                Scale::root_name(self.scale.root),
+                self.scale.name.label()
+            )
+        } else {
+            "No Scale".to_owned()
+        };
+        format!("{scale} {:+}", self.transpose)
+    }
+
     /// Whether `tick` is inside the region.
     #[must_use]
     pub fn holds(&self, tick: Ticks) -> bool {

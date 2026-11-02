@@ -254,6 +254,7 @@ impl Shell {
                     }),
             ),
             ids::VIEW_HIGHLIGHT_SCALES => Some(self.clip_view.highlight_scales()),
+            bl_shell_spec::chord_lane::VIEW_CHORD_LANE => Some(self.arrangement.chord_lane()),
             panel_ids::FOLD_PANELS => Some(self.clip_view.panels_folded()),
             ids::VIEW_TOGGLE_INFO_VIEW => Some(self.info_view),
             assistant_ids::VIEW_TOGGLE_ASSISTANT => Some(self.assistant_open),

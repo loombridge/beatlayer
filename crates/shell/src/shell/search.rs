@@ -362,6 +362,7 @@ impl Shell {
                 arrangement: true,
                 time_selection: true,
                 devices_off: false,
+                midi: true,
             }),
             context_menus::note(),
         ];

@@ -3,7 +3,7 @@
 //! drawn with egui's painter (arrangement-view R5, R13).
 
 use bl_core::time::{TempoMap, Ticks, TimeSignatureMap};
-use bl_model::{Locator, LocatorId, SongStart};
+use bl_model::{ChordRegion, ChordRegionId, Locator, LocatorId, SongStart};
 use bl_shell::arrangement::{Horizontal, TransportView};
 use egui::{Align2, Color32, Painter, Rect, Stroke, pos2};
 
@@ -211,6 +211,58 @@ pub fn signature_lane(
         [rect.left_bottom(), rect.right_bottom()],
         Stroke::new(1.0, colors.separator.0),
     );
+}
+
+/// Draws the chord lane (L-ARR-024): each region from its start to its end,
+/// named for its scale and its transposition, the selected one in the
+/// selection colour.
+pub fn chord_lane(
+    painter: &Painter,
+    rect: Rect,
+    horizontal: Horizontal,
+    regions: &[ChordRegion],
+    selected: Option<ChordRegionId>,
+    theme: &Theme,
+) {
+    let colors = &theme.colors;
+    painter.rect_filled(rect, 0.0, colors.bar.0);
+    painter.line_segment(
+        [rect.left_bottom(), rect.right_bottom()],
+        Stroke::new(1.0, colors.separator.0),
+    );
+    for region in regions {
+        let Some(block) = region_rect(rect, horizontal, region) else {
+            continue;
+        };
+        let chosen = selected == Some(region.id);
+        let fill = if chosen {
+            colors.accent.0
+        } else {
+            colors.accent.0.gamma_multiply(0.35)
+        };
+        painter.rect_filled(block.shrink2(egui::vec2(0.0, 2.0)), 2.0, fill);
+        painter.with_clip_rect(block).text(
+            pos2(block.left() + 4.0, block.center().y),
+            Align2::LEFT_CENTER,
+            region.name(),
+            theme.small_font(),
+            colors.text.0,
+        );
+    }
+}
+
+/// Where a region sits in the lane `lane`, cut to the lane's width; `None`
+/// when it is out of view.
+#[must_use]
+pub fn region_rect(lane: Rect, horizontal: Horizontal, region: &ChordRegion) -> Option<Rect> {
+    let x0 = lane.left() + horizontal.x(region.start) as f32;
+    let x1 = lane.left() + horizontal.x(region.end) as f32;
+    (x1 > lane.left() && x0 < lane.right()).then(|| {
+        Rect::from_min_max(
+            pos2(x0.max(lane.left()), lane.top()),
+            pos2(x1.min(lane.right()), lane.bottom()),
+        )
+    })
 }
 
 /// Draws the scrub area, with the locators in it (L-ARR-003): each at its

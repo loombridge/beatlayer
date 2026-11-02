@@ -178,6 +178,7 @@ pub use bl_shell_spec::file_manager as file_manager_commands;
 pub use bl_shell_spec::groove as groove_commands;
 /// The Arrangement's locator command IDs and their argument and result
 /// types (WP-6.24).
+pub use bl_shell_spec::chord_lane as chord_lane_commands;
 pub use bl_shell_spec::locator as locator_commands;
 /// The MIDI file commands' IDs and their argument and result types
 /// (WP-2.21).

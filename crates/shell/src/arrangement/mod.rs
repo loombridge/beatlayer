@@ -186,8 +186,10 @@ pub struct ArrangementView {
     selected_clips: Vec<ClipId>,
     /// The selected locators (WP-6.24): see [`locator`].
     selected_locators: Vec<LocatorId>,
-    /// The selected sections of the arranger track (WP-6.45).
+    /// The selected sections of the arranger track (WP-6.45), and the time
+    /// selection selecting them made.
     selected_sections: Vec<SectionId>,
+    sections_span: Option<(Ticks, Ticks)>,
     /// The position of the selected time-signature marker (WP-6.61): see
     /// [`locator`].
     selected_signature: Option<Ticks>,
@@ -282,6 +284,7 @@ impl ArrangementView {
             selected_clips: Vec::new(),
             selected_locators: Vec::new(),
             selected_sections: Vec::new(),
+            sections_span: None,
             selected_signature: None,
             selected_take_lanes: Vec::new(),
             shown_take_lanes: BTreeSet::new(),
@@ -600,9 +603,19 @@ impl ArrangementView {
     }
 
     /// The selected sections, in the order they were selected (WP-6.45).
+    /// They stay selected only while their span is still the time selection
+    /// and no clip or locator is, so selecting anything else drops them and
+    /// Delete no longer deletes a section's time (R6, R11).
     #[must_use]
     pub fn selected_sections(&self) -> &[SectionId] {
-        &self.selected_sections
+        if self.time_selection == self.sections_span
+            && self.selected_clips.is_empty()
+            && self.selected_locators.is_empty()
+        {
+            &self.selected_sections
+        } else {
+            &[]
+        }
     }
 
     /// Selects sections, as clicking one does, and makes their span the
@@ -624,6 +637,9 @@ impl ArrangementView {
                 .map(|&track| Lane::Track { track })
                 .collect();
             self.select_span_on(lanes, start, end);
+            self.selected_locators.clear();
+            self.selected_signature = None;
+            self.sections_span = self.time_selection;
         }
         self.selected_sections = sections;
     }
@@ -1542,7 +1558,7 @@ impl ArrangementView {
             selected_tracks: self.selected.clone(),
             selected_clips: self.selected_clips.clone(),
             selected_locators: self.selected_locators.clone(),
-            selected_sections: self.selected_sections.clone(),
+            selected_sections: self.selected_sections().to_vec(),
             arranger_track: doc.settings().arranger_track,
             selected_time_signature: self.selected_signature,
             selected_take_lanes: self.selected_take_lanes.clone(),

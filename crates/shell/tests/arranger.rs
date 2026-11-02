@@ -678,6 +678,26 @@ fn selecting_a_section_selects_its_time_and_is_no_undo_step() {
 }
 
 #[test]
+fn selecting_a_clip_or_a_locator_drops_the_selected_section() {
+    // Spec: arranger-track R6, R11. Delete deletes a section's time only
+    // while the section is what's selected.
+    let mut s = set(true);
+    let verse = s.sections[1];
+    let a1 = s.a1;
+    s.run(ids::SELECT_SECTION, json!({ "sections": [verse] }));
+    s.run(edit_ids::SELECT_CLIPS, json!({ "clips": [a1] }));
+    assert!(s.state().selected_sections.is_empty());
+    assert!(s.shell.run(ids::DELETE_SECTION, json!({})).is_err());
+    s.run(ids::SELECT_SECTION, json!({ "sections": [verse] }));
+    let locator = s.doc().locators()[0].id;
+    s.run("locator.select", json!({ "locators": [locator] }));
+    assert!(s.state().selected_sections.is_empty());
+    s.run(ids::SELECT_SECTION, json!({ "sections": [verse] }));
+    assert_eq!(s.state().selected_sections, [verse]);
+    assert!(s.state().selected_locators.is_empty());
+}
+
+#[test]
 fn the_lane_shows_from_the_view_command_and_is_saved_with_no_undo_step() {
     // Spec: arranger-track R1.
     let mut s = set(false);

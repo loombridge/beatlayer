@@ -249,6 +249,7 @@ impl Shell {
                     groove: None,
                     colour: None,
                     info_text: String::new(),
+                    link: None,
                 },
             ));
         }
@@ -319,6 +320,7 @@ impl Shell {
                 groove: None,
                 colour: None,
                 info_text: String::new(),
+                link: None,
             });
         }
         Ok(lane)
@@ -383,6 +385,7 @@ impl Shell {
             groove: None,
             colour: None,
             info_text: String::new(),
+            link: None,
         };
         Ok(BouncedTrack {
             name: bounced_name(name),
@@ -714,6 +717,7 @@ impl Shell {
                         groove: None,
                         colour: None,
                         info_text: String::new(),
+                        link: None,
                     },
                 ));
             }
@@ -816,6 +820,7 @@ impl Shell {
                     groove: None,
                     colour: None,
                     info_text: String::new(),
+                    link: None,
                 },
             ));
         }

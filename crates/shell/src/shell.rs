@@ -1882,6 +1882,9 @@ impl Shell {
         if edit_ids::handles(id) {
             return self.run_edit(id, args);
         }
+        if bl_shell_spec::linked_clips::handles(id) {
+            return self.run_linked_clips(id, args);
+        }
         if automation_ids::handles(id) {
             // Spec: clip-envelopes R13. Edit ▸ Simplify Envelope acts on the
             // Envelope Editor's time selection while the editor has the

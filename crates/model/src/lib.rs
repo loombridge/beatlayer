@@ -87,6 +87,7 @@ mod ids;
 mod lane_views;
 mod launch;
 mod layers;
+mod link;
 mod linked;
 mod locator;
 pub mod matrix;
@@ -137,8 +138,8 @@ pub use bounce::{BouncedAutomation, BouncedTrack};
 pub use changes::{Change, ChangeSet};
 pub use clip::{
     AudioData, Clip, ClipData, ClipEnvelope, ClipFolds, Crossfade, EDGE_FADE_SECONDS, EnvelopeKind,
-    GroupKind, MAX_LOOP_REPEATS, MIN_MIDI_BRACE, MidiData, NewTakeLane, Note, NoteGroup, TakeClip,
-    TakeClipData, TakeLane, consolidated_midi, crossfades, fade_power,
+    GroupKind, LinkContents, MAX_LOOP_REPEATS, MIN_MIDI_BRACE, MidiData, NewTakeLane, Note,
+    NoteGroup, TakeClip, TakeClipData, TakeLane, consolidated_midi, crossfades, fade_power,
 };
 pub use clip_param::ClipParam;
 pub use column_widths::{ColumnWidths, MAX_COLUMN_WIDTH, MIN_COLUMN_WIDTH, clamp_column_width};
@@ -178,8 +179,8 @@ pub use groove::{
     GroovePlay, GroovePool, MovedTransients, clip_seed, noise,
 };
 pub use ids::{
-    ChainId, ChordRegionId, ClipId, ContentHash, DeviceId, GrooveId, LinkGroupId, LocatorId,
-    ParamId, ParseContentHashError, SceneId, SectionId, TakeLaneId, TrackId,
+    ChainId, ChordRegionId, ClipId, ContentHash, DeviceId, GrooveId, LinkGroupId, LinkId,
+    LocatorId, ParamId, ParseContentHashError, SceneId, SectionId, TakeLaneId, TrackId,
 };
 /// The persistent collections the document's public types hold.
 pub use imbl::{OrdMap, Vector};

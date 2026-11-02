@@ -362,6 +362,14 @@ impl ContextMenus {
                             .first()
                             .map(|clip| json!({ "clip": clip }))
                     }
+                    // Spec: linked-clips R1, R8. Both act on the selected
+                    // clips.
+                    (MenuKind::Clip, Action::Command(id))
+                        if id == bl_shell::linked_clip_commands::DUPLICATE_LINKED
+                            || id == bl_shell::linked_clip_commands::UNLINK =>
+                    {
+                        Some(json!({ "clips": shell.arrangement().selected_clips() }))
+                    }
                     // Spec: stem-separation R22. The time selection's audio
                     // tracks and range.
                     (MenuKind::Time, Action::Command(id))

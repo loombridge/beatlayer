@@ -1060,6 +1060,32 @@ impl Document {
         if rebuilt.index != self.index {
             return Err("the derived lookups don't match the tree".to_owned());
         }
+        self.check_links()
+    }
+
+    /// Spec: linked-clips R2, R3. Every link holds two or more clips of one
+    /// kind with the same contents.
+    fn check_links(&self) -> Result<(), String> {
+        let mut links: std::collections::BTreeMap<crate::LinkId, Vec<&Clip>> = Default::default();
+        for clip in self.tracks.values().flat_map(|track| track.all_clips()) {
+            if let Some(link) = clip.link {
+                links.entry(link).or_default().push(clip);
+            }
+        }
+        for (link, clips) in links {
+            if clips.len() < 2 {
+                return Err(format!("{link} holds only {}", clips[0].id));
+            }
+            if let Some(other) = clips.iter().find(|clip| {
+                clip.data.is_audio() != clips[0].data.is_audio()
+                    || !clip.shares_contents_with(clips[0])
+            }) {
+                return Err(format!(
+                    "{link}: {} doesn't hold {}'s contents",
+                    other.id, clips[0].id
+                ));
+            }
+        }
         Ok(())
     }
 }

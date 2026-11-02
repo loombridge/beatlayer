@@ -281,13 +281,26 @@ pub(crate) fn title_bar(
         events,
     );
     if !renaming {
-        ui.painter().text(
+        let name = ui.painter().text(
             pos2(rect.left() + 6.0, rect.center().y),
             Align2::LEFT_CENTER,
             &value.name,
             theme.small_font(),
             c.text.0,
         );
+        // Spec: linked-clips R10. A linked clip shows its link mark beside
+        // its name, and clicking it selects the link's clips.
+        if value.link.is_some() {
+            let area = Rect::from_min_size(
+                pos2(name.right() + 4.0, rect.top()),
+                vec2(crate::link_mark::WIDTH, rect.height()),
+            );
+            let others = doc.linked_clip_ids(clip).len();
+            let id = Id::new("clip-title-link-mark");
+            if crate::link_mark::show(ui, id, area, c.text.0, others, events) {
+                crate::link_mark::select_link(doc, clip, events);
+            }
+        }
     }
     if !audio {
         return;

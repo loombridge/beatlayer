@@ -1042,6 +1042,23 @@ pub enum Command {
         /// The swatch, or a `#RRGGBB` colour.
         colour: Colour,
     },
+    /// Links clips that hold the same contents (the linked clips spec, R2):
+    /// from then on an edit to one clip's contents reaches the others (R4).
+    /// The clips are all of one kind and already hold the same contents, so
+    /// nothing in them changes; clips that already belong to a link join it,
+    /// and they may belong to only one. `clip.duplicate_linked` makes its
+    /// copies this way.
+    LinkClips {
+        /// The clips, at least two, each listed once.
+        clips: Vec<ClipId>,
+    },
+    /// Takes clips out of their links (R8), keeping the contents they have.
+    /// A link left with one clip ends. A clip that is in no link is left as
+    /// it is.
+    UnlinkClips {
+        /// The clips, each listed once.
+        clips: Vec<ClipId>,
+    },
     /// Changes a clip's length, keeping its start.
     SetClipLength {
         /// The clip.
@@ -3104,6 +3121,8 @@ impl Command {
             Self::AssignColourToClips { .. } => "Assign Track Color to Clips",
             Self::AssignColourToGrouped { .. } => "Assign Track Color to Grouped Tracks and Clips",
             Self::SetClipColour { .. } => "Change Clip Color",
+            Self::LinkClips { .. } => "Link Clips",
+            Self::UnlinkClips { .. } => "Unlink Clip",
             Self::SetSceneColour { .. } => "Change Scene Color",
             Self::FreezeTracks { .. } => "Freeze tracks",
             Self::UnfreezeTracks { .. } => "Unfreeze tracks",
@@ -3559,6 +3578,9 @@ impl Document {
         // The copy shares every node with `self` until it's edited.
         let mut next = self.clone();
         next.apply_in_place(command)?;
+        // Spec: linked-clips R4. An edit to a linked clip's contents reaches
+        // every clip of its link in the same step.
+        next.sync_links(self);
         // Spec: macros R18. A device or chain that left its rack takes its
         // mappings with it, in the same undo step.
         next.prune_macro_mappings();
@@ -4325,9 +4347,12 @@ impl Document {
             Command::SetCueOut { channel } => {
                 self.set_main_channel(*channel, |routing| &mut routing.cue_out)
             }
-            Command::CreateClip { track, clip } => self.create_clip(*track, clip),
+            // Spec: linked-clips R7. A clip a command makes belongs to no link.
+            Command::CreateClip { track, clip } => self.create_clip(*track, &clip.unlinked()),
             Command::AddTakeLane { track, lane, index } => self.add_take_lane(*track, lane, *index),
-            Command::CreateTakeClip { lane, clip } => self.create_take_clip(*lane, clip),
+            Command::CreateTakeClip { lane, clip } => {
+                self.create_take_clip(*lane, &clip.unlinked())
+            }
             Command::RenameTakeLane { lane, name } => self.rename_take_lane(*lane, name),
             Command::DeleteTakeLanes { lanes } => self.remove_take_lanes(lanes),
             Command::DeleteAllTakeLanes { tracks } => self.delete_all_take_lanes(tracks),
@@ -4352,6 +4377,8 @@ impl Document {
                 }
                 Ok(())
             }
+            Command::LinkClips { clips } => self.link_clips(clips),
+            Command::UnlinkClips { clips } => self.unlink_clips(clips),
             Command::SetClipLength { clip, length } => {
                 let current = self.clip_ref(*clip)?;
                 check_extent(current.start, *length)?;
@@ -4569,27 +4596,33 @@ impl Document {
                 media,
                 seconds,
             } => {
-                let current = self.clip_ref(*clip)?.clone();
-                let ClipData::Audio(audio) = &current.data else {
-                    return Err(ModelError::NotAudioClip(*clip));
-                };
                 if !seconds.is_finite() || *seconds <= 0.0 {
                     return Err(ModelError::InvalidValue {
                         what: "the file's length",
                         value: *seconds,
                     });
                 }
-                let mut data = audio.reversed(*seconds, *media);
-                // The transient edits belong to the file they were made on
-                // (the warping spec, R27).
-                if data.media != audio.media {
-                    data.transient_edits = TransientEdits::default();
+                // Spec: linked-clips R4. Each clip of the link mirrors its
+                // own markers about the file.
+                let mut reversed = vec![*clip];
+                reversed.extend(self.linked_clip_ids(*clip));
+                for id in reversed {
+                    let current = self.clip_ref(id)?.clone();
+                    let ClipData::Audio(audio) = &current.data else {
+                        return Err(ModelError::NotAudioClip(id));
+                    };
+                    let mut data = audio.reversed(*seconds, *media);
+                    // The transient edits belong to the file they were made on
+                    // (the warping spec, R27).
+                    if data.media != audio.media {
+                        data.transient_edits = TransientEdits::default();
+                    }
+                    let mut next = current;
+                    next.data = ClipData::Audio(data);
+                    check_clip_data(&next.data)?;
+                    check_clip_fits(self.track_ref(self.clip_owner(id)?)?, &next.data)?;
+                    *self.clip_mut(id)? = next;
                 }
-                let mut next = current;
-                next.data = ClipData::Audio(data);
-                check_clip_data(&next.data)?;
-                check_clip_fits(self.track_ref(self.clip_owner(*clip)?)?, &next.data)?;
-                *self.clip_mut(*clip)? = next;
                 Ok(())
             }
             Command::SetClipData { clip, data } => {
@@ -4992,7 +5025,7 @@ impl Document {
                 self.set_scene_signature(*scene, *signature)
             }
             Command::CreateSlotClip { track, scene, clip } => {
-                self.create_slot_clip(*track, *scene, clip)
+                self.create_slot_clip(*track, *scene, &clip.unlinked())
             }
             Command::MoveSlotClip { clip, track, scene } => {
                 self.move_slot_clip(*clip, *track, *scene)
@@ -7001,9 +7034,11 @@ impl Document {
             .expect("just checked the scene exists")
             .clone();
         for (track, clip, source) in copies {
+            // Spec: linked-clips R7. A scene's copies are independent clips.
             let copied = Clip {
                 id: clip,
                 start: Ticks::ZERO,
+                link: None,
                 ..source
             };
             self.track_mut(track)?
@@ -7272,6 +7307,9 @@ impl Document {
     ) -> Result<(), ModelError> {
         let current = self.clip_ref(id)?.clone();
         let mut next = current.clone();
+        // Spec: linked-clips R5. A cropped clip leaves its link, so the
+        // others keep their contents.
+        next.link = None;
         match &current.data {
             ClipData::Audio(audio) => {
                 let Some(media) = media else {

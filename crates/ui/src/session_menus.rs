@@ -467,6 +467,10 @@ impl SessionMenus {
                 "C-CLIP-SES-006" | "C-CLIP-SES-009" | "C-CLIP-SES-014" | "C-CLIP-SES-019a"
                 | "C-CLIP-SES-020" => clicked_clip.map(|clip| json!({ "clip": clip })),
                 "C-SCENE-006" => on.scene.map(|scene| json!({ "scene": scene })),
+                // Spec: linked-clips R1, R8. The selected slots' clips.
+                bl_shell::menus::IMP_21 | bl_shell::menus::IMP_21_UNLINK => {
+                    Some(json!({ "clips": chosen.clips }))
+                }
                 _ => None,
             };
             if let (Some(args), Some(invocation)) = (args, state.invocation.as_mut()) {

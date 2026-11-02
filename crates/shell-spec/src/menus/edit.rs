@@ -1,7 +1,7 @@
 //! The Edit menu.
 
 use super::Action::{Choice, Command as Cmd, Shortcut as Key, Submenu, System};
-use super::{IMP_12, Row, SEPARATOR, SystemItem};
+use super::{IMP_12, IMP_21, Row, SEPARATOR, SystemItem};
 use crate::automation::SIMPLIFY;
 use crate::commands::EDIT_INFO_TEXT;
 use crate::devices::COMPARE_COPY;
@@ -20,6 +20,11 @@ pub(super) const EDIT: &[Row] = &[
         IMP_12,
         "Duplicate Track Without Clips",
         Cmd(crate::tracks::DUPLICATE_WITHOUT_CLIPS),
+    ),
+    (
+        IMP_21,
+        "Duplicate as Linked Clip",
+        Cmd(crate::linked_clips::DUPLICATE_LINKED),
     ),
     ("M-EDIT-007", "Delete", Key(&["S-EDIT-005"])),
     SEPARATOR,

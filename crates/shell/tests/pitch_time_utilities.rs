@@ -440,6 +440,8 @@ fn r7_add_interval_adds_selected_copies_and_leaves_out_those_off_the_keys() {
         ids::ADD_INTERVAL,
         json!({ "notes": [0], "by": 12, "in": "semitones" }),
     );
+    // An interval of 0 adds no copy on top of each note.
+    high.no_step(ids::ADD_INTERVAL, json!({ "by": 0 }));
     let message = high.refused(ids::ADD_INTERVAL, json!({ "by": 37 }));
     assert!(message.contains("-36 to 36"), "{message}");
 }

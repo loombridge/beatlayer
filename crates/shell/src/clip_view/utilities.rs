@@ -395,6 +395,8 @@ pub(super) fn run(
             let mut copies: Vec<Note> = target
                 .places
                 .iter()
+                // R7: an interval of 0 adds nothing, not a note on each note.
+                .filter(|_| by != 0)
                 .filter_map(|place| {
                     let note = &ordered[*place as usize];
                     // R7: left out where it leaves the keyboard, or the pads.

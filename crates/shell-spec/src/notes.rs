@@ -2593,8 +2593,8 @@ fn specs() -> Vec<CommandSpec> {
                  left out), from -36 to 36, a step being as `note.transpose` has it. The \
                  copies keep their notes' starts, lengths and values, and are selected. A copy \
                  that would leave keys 0 to 127 is left out, and so, on a Drum Rack track, is \
-                 one that would land on a key no chain receives. One undo step, `Interval`, \
-                 none if nothing is added.",
+                 one that would land on a key no chain receives, and an interval of 0 adds \
+                 nothing. One undo step, `Interval`, none if nothing is added.",
             )
             .permission(Permission::Edit)
             .contexts([NoteEditor, NoteSelectionContext])

@@ -59,6 +59,19 @@ pub struct LocateArgs {
     pub quantized: bool,
 }
 
+/// The arguments of `transport.play_selection`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PlaySelectionArgs {
+    /// Where playback starts, in ticks from 1.1.1.
+    pub start: Ticks,
+    /// Where playback stops, in ticks. With it, the Arrangement loop is
+    /// switched off until the song stops there; without it, playback goes
+    /// on as Play does.
+    #[serde(default)]
+    pub end: Option<Ticks>,
+}
+
 /// The arguments of `transport.scrub`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -141,6 +154,10 @@ pub fn command_from_args(id: &str, args: Value) -> Result<TransportCommand, RunE
                 TransportCommand::Locate(position)
             })
         }
+        Action::PlaySelection => {
+            let PlaySelectionArgs { start, end } = serde_json::from_value(args).map_err(invalid)?;
+            Ok(TransportCommand::PlaySelection { start, end })
+        }
         Action::Scrub => {
             let ScrubArgs { position, held } = serde_json::from_value(args).map_err(invalid)?;
             Ok(TransportCommand::Scrub {
@@ -195,6 +212,8 @@ enum Action {
     Run(TransportCommand),
     /// [`TransportCommand::Locate`], at the position in [`LocateArgs`].
     Locate,
+    /// [`TransportCommand::PlaySelection`], with [`PlaySelectionArgs`].
+    PlaySelection,
     /// [`TransportCommand::Scrub`], with [`ScrubArgs`].
     Scrub,
     /// [`TransportCommand::PhaseNudge`], with [`PhaseNudgeArgs`].
@@ -233,6 +252,7 @@ impl Entry {
         spec = match self.action {
             Action::Run(_) => spec.args::<NoArgs>(),
             Action::Locate => spec.args::<LocateArgs>(),
+            Action::PlaySelection => spec.args::<PlaySelectionArgs>(),
             Action::Scrub => spec.args::<ScrubArgs>(),
             Action::PhaseNudge => spec.args::<PhaseNudgeArgs>(),
             Action::SetRecording => spec.args::<SetRecordingArgs>(),
@@ -290,11 +310,13 @@ const ENTRIES: &[Entry] = &[
         action: Action::Run(TransportCommand::PlayStop),
         label: "Play/Stop",
         contexts: &[Global],
-        keys: &[("S-TRANS-001", None)],
+        keys: &[("S-TRANS-001", None), ("S-TRANS-004", None)],
         description: "Stops playback if the song is playing, and otherwise starts it from the \
-            insert marker: the space bar, and the Playback menu's Play item, which reads Stop \
-            while the song plays. Unlike `transport.stop`, it never returns to 1.1.1. An agent \
-            that knows what it wants should use `transport.play` or `transport.stop` instead.",
+            insert marker (from the start of the Arrangement's time selection when there is \
+            one, as the app runs it: the transport spec, R35): the space bar, and the Playback \
+            menu's Play item, which reads Stop while the song plays. Unlike `transport.stop`, \
+            it never returns to 1.1.1. An agent that knows what it wants should use \
+            `transport.play` or `transport.stop` instead.",
     },
     Entry {
         id: "transport.continue",
@@ -310,10 +332,27 @@ const ENTRIES: &[Entry] = &[
         action: Action::Run(TransportCommand::PlayFromInsertMarker),
         label: "Play From Insert Marker",
         contexts: &[Global, Arrangement],
-        keys: &[("S-ARR-032", None)],
+        keys: &[("S-ARR-032", None), ("S-TRANS-003", None)],
         description: "Starts playback from the insert marker, even when the song has a song \
-            start time (the transport spec, R21). Until the arrangement has time selections, \
-            this does what `transport.play` does. It changes nothing in the project.",
+            start time (the transport spec, R21). As the app runs it with a time selection in \
+            the Arrangement, it plays from the selection's start and stops on its end, with \
+            the Arrangement loop off until it stops (R35); an agent asks for that with \
+            `transport.play_selection`. It changes nothing in the project.",
+    },
+    Entry {
+        id: "transport.play_selection",
+        action: Action::PlaySelection,
+        label: "Play Selection",
+        contexts: &[Global],
+        keys: &[],
+        description: "Starts playback from `start`, in ticks from the start of the \
+            arrangement, and leaves the insert marker where it is, as Space does with a time \
+            selection. With `end`, after `start`, the song stops on that exact frame, as \
+            Option-Space does with a time selection: the Arrangement loop doesn't apply until \
+            then, `transport.state` reads `loop_on` false while it plays, and the loop is on \
+            again once the song has stopped. Without `end`, playback goes on as Play does, from \
+            the song start time if the set has one (the transport spec, R35, R36). It changes \
+            nothing in the project.",
     },
     Entry {
         id: "transport.locate",
@@ -456,6 +495,17 @@ mod tests {
         );
         assert!(matches!(
             command_from_args("transport.play", json!({ "from": 0 })),
+            Err(RunError::InvalidArgs { .. })
+        ));
+        assert_eq!(
+            command_from_args("transport.play_selection", json!({ "start": 5, "end": 9 })),
+            Ok(TransportCommand::PlaySelection {
+                start: Ticks(5),
+                end: Some(Ticks(9))
+            })
+        );
+        assert!(matches!(
+            command_from_args("transport.play_selection", json!({ "end": 9 })),
             Err(RunError::InvalidArgs { .. })
         ));
         assert!(matches!(

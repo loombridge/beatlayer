@@ -103,7 +103,9 @@ pub struct TransportState {
     pub loop_start: Ticks,
     /// How long the loop brace is, in ticks.
     pub loop_length: Ticks,
-    /// Whether the Arrangement Loop switch is on.
+    /// Whether the Arrangement Loop switch is on. While a Play Selection
+    /// that stops at the selection's end plays, it reads off (the transport
+    /// spec, R35).
     pub loop_on: bool,
     /// The loop brace's start as the Loop Start fields show it, as
     /// bar.beat.sixteenth.

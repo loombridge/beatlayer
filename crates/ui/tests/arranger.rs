@@ -326,12 +326,17 @@ fn dragging_a_section_moves_it_and_option_copies_it_each_as_one_undo_step() {
         spans(&h).iter().map(|s| s.0.as_str()).collect::<Vec<_>>(),
         ["Chorus", "Intro", "Verse"]
     );
-    // Option copies it instead.
+    // Option (Ctrl off macOS) copies it instead.
+    let copy = if cfg!(target_os = "macos") {
+        Modifiers::ALT
+    } else {
+        Modifiers::CTRL
+    };
     drag(
         &mut h,
         pos2(x(Ticks::ZERO) + 20.0, y),
         pos2(x(Ticks(8 * BAR)), y),
-        Modifiers::ALT,
+        copy,
     );
     assert_eq!(steps(&h), before + 2);
     assert_eq!(last_step(&h), "Copy Section");

@@ -349,41 +349,63 @@ fn build(choices: &[&str]) -> Vec<ParamDescriptor> {
         let n = i + 1;
         let name = |what: &str| format!("LFO {n} {what}");
         params.extend([
-            ParamDescriptor::toggle(lfo(i, L_ON), &format!("LFO {n}"), false).describe("Turns the LFO on."),
-            ParamDescriptor::choice(lfo(i, L_SHAPE), &name("Shape"), &LFO_SHAPES, 0).describe("The LFO's waveform."),
-            ParamDescriptor::continuous(lfo(i, L_RATE), &name("Rate"), (0.01, 40.0), 1.0, ParamUnit::Hertz)
-                .logarithmic()
-                .describe("The LFO's rate in hertz."),
+            ParamDescriptor::toggle(lfo(i, L_ON), &format!("LFO {n}"), false)
+                .describe("Turns the LFO on."),
+            ParamDescriptor::choice(lfo(i, L_SHAPE), &name("Shape"), &LFO_SHAPES, 0)
+                .describe("The LFO's waveform."),
+            ParamDescriptor::continuous(
+                lfo(i, L_RATE),
+                &name("Rate"),
+                (0.01, 40.0),
+                1.0,
+                ParamUnit::Hertz,
+            )
+            .logarithmic()
+            .describe("The LFO's rate in hertz."),
             ParamDescriptor::toggle(lfo(i, L_SYNC), &name("Sync"), false)
                 .describe("Plays the LFO in divisions of the song's tempo instead of hertz."),
             ParamDescriptor::choice(lfo(i, L_DIVISION), &name("Division"), &DIVISIONS, 4)
                 .describe("The LFO's cycle as a division of the tempo, with Sync on."),
-            ParamDescriptor::continuous(lfo(i, L_OFFSET), &name("Offset"), (0.0, 360.0), 0.0, ParamUnit::None)
-                .decimals(0)
-                .describe("Where in its cycle the LFO starts, in degrees."),
+            ParamDescriptor::continuous(
+                lfo(i, L_OFFSET),
+                &name("Offset"),
+                (0.0, 360.0),
+                0.0,
+                ParamUnit::None,
+            )
+            .decimals(0)
+            .describe("Where in its cycle the LFO starts, in degrees."),
             ParamDescriptor::toggle(lfo(i, L_RETRIGGER), &name("Retrigger"), true)
                 .describe("Restarts the LFO with every note; off runs it freely."),
-            percent(lfo(i, L_AMOUNT), &name("Amount"), 100.0).describe("The LFO's overall intensity."),
+            percent(lfo(i, L_AMOUNT), &name("Amount"), 100.0)
+                .describe("The LFO's overall intensity."),
             ParamDescriptor::choice(lfo(i, L_DEST_A), &name("Dest A"), choices, 0)
                 .describe("The first control the LFO moves."),
-            bipolar(lfo(i, L_AMOUNT_A), &name("Amount A"), 0.0)
-                .describe("How far the LFO moves its first destination, in per cent of its travel."),
+            bipolar(lfo(i, L_AMOUNT_A), &name("Amount A"), 0.0).describe(
+                "How far the LFO moves its first destination, in per cent of its travel.",
+            ),
             ParamDescriptor::choice(lfo(i, L_DEST_B), &name("Dest B"), choices, 0)
                 .describe("The second control the LFO moves."),
-            bipolar(lfo(i, L_AMOUNT_B), &name("Amount B"), 0.0)
-                .describe("How far the LFO moves its second destination, in per cent of its travel."),
+            bipolar(lfo(i, L_AMOUNT_B), &name("Amount B"), 0.0).describe(
+                "How far the LFO moves its second destination, in per cent of its travel.",
+            ),
         ]);
     }
-    for (which, source) in ["Pitch Bend", "Mod Wheel", "Pressure", "Slide"].into_iter().enumerate() {
+    for (which, source) in ["Pitch Bend", "Mod Wheel", "Pressure", "Slide"]
+        .into_iter()
+        .enumerate()
+    {
         params.extend([
             ParamDescriptor::choice(midi(which, 0), &format!("{source} Dest A"), choices, 0)
                 .describe("The first control this source moves."),
-            bipolar(midi(which, 1), &format!("{source} Amount A"), 0.0)
-                .describe("How far this source moves its first destination, in per cent of its travel."),
+            bipolar(midi(which, 1), &format!("{source} Amount A"), 0.0).describe(
+                "How far this source moves its first destination, in per cent of its travel.",
+            ),
             ParamDescriptor::choice(midi(which, 2), &format!("{source} Dest B"), choices, 0)
                 .describe("The second control this source moves."),
-            bipolar(midi(which, 3), &format!("{source} Amount B"), 0.0)
-                .describe("How far this source moves its second destination, in per cent of its travel."),
+            bipolar(midi(which, 3), &format!("{source} Amount B"), 0.0).describe(
+                "How far this source moves its second destination, in per cent of its travel.",
+            ),
         ]);
     }
     for (n, id) in KEYED.iter().enumerate() {
@@ -393,8 +415,9 @@ fn build(choices: &[&str]) -> Vec<ParamDescriptor> {
                 .describe("How far the played key moves this control, in per cent of its travel per four octaves from C3."),
         );
         params.push(
-            bipolar(ParamId(key_of(n).0 + 1), &format!("{name} Vel"), 0.0)
-                .describe("How far the note's velocity moves this control, in per cent of its travel."),
+            bipolar(ParamId(key_of(n).0 + 1), &format!("{name} Vel"), 0.0).describe(
+                "How far the note's velocity moves this control, in per cent of its travel.",
+            ),
         );
     }
     params.extend([
@@ -490,12 +513,48 @@ pub fn collision_matrix() -> MatrixLayout {
     let source = |name, range, scope| SourceDef { name, range, scope };
     let mut slots = Vec::new();
     for (src, dests) in [
-        (SRC_LFO1, [(lfo(0, L_DEST_A), lfo(0, L_AMOUNT_A)), (lfo(0, L_DEST_B), lfo(0, L_AMOUNT_B))]),
-        (SRC_LFO2, [(lfo(1, L_DEST_A), lfo(1, L_AMOUNT_A)), (lfo(1, L_DEST_B), lfo(1, L_AMOUNT_B))]),
-        (SRC_BEND, [(midi(PITCH_BEND, 0), midi(PITCH_BEND, 1)), (midi(PITCH_BEND, 2), midi(PITCH_BEND, 3))]),
-        (SRC_WHEEL, [(midi(MOD_WHEEL, 0), midi(MOD_WHEEL, 1)), (midi(MOD_WHEEL, 2), midi(MOD_WHEEL, 3))]),
-        (SRC_PRESSURE, [(midi(PRESSURE, 0), midi(PRESSURE, 1)), (midi(PRESSURE, 2), midi(PRESSURE, 3))]),
-        (SRC_SLIDE, [(midi(SLIDE, 0), midi(SLIDE, 1)), (midi(SLIDE, 2), midi(SLIDE, 3))]),
+        (
+            SRC_LFO1,
+            [
+                (lfo(0, L_DEST_A), lfo(0, L_AMOUNT_A)),
+                (lfo(0, L_DEST_B), lfo(0, L_AMOUNT_B)),
+            ],
+        ),
+        (
+            SRC_LFO2,
+            [
+                (lfo(1, L_DEST_A), lfo(1, L_AMOUNT_A)),
+                (lfo(1, L_DEST_B), lfo(1, L_AMOUNT_B)),
+            ],
+        ),
+        (
+            SRC_BEND,
+            [
+                (midi(PITCH_BEND, 0), midi(PITCH_BEND, 1)),
+                (midi(PITCH_BEND, 2), midi(PITCH_BEND, 3)),
+            ],
+        ),
+        (
+            SRC_WHEEL,
+            [
+                (midi(MOD_WHEEL, 0), midi(MOD_WHEEL, 1)),
+                (midi(MOD_WHEEL, 2), midi(MOD_WHEEL, 3)),
+            ],
+        ),
+        (
+            SRC_PRESSURE,
+            [
+                (midi(PRESSURE, 0), midi(PRESSURE, 1)),
+                (midi(PRESSURE, 2), midi(PRESSURE, 3)),
+            ],
+        ),
+        (
+            SRC_SLIDE,
+            [
+                (midi(SLIDE, 0), midi(SLIDE, 1)),
+                (midi(SLIDE, 2), midi(SLIDE, 3)),
+            ],
+        ),
     ] {
         for (dest, amount) in dests {
             slots.push(SlotDef {
@@ -682,8 +741,14 @@ pub fn collision_type() -> DeviceType {
             banks.push((title, chunk.iter().map(|id| format!("#{}", id.0)).collect()));
         }
     };
-    bank("Mallet", (MALLET_ON.0..=MALLET_COLOR.0).map(ParamId).collect());
-    bank("Noise", (NOISE_ON.0..=NOISE_RELEASE.0).map(ParamId).collect());
+    bank(
+        "Mallet",
+        (MALLET_ON.0..=MALLET_COLOR.0).map(ParamId).collect(),
+    );
+    bank(
+        "Noise",
+        (NOISE_ON.0..=NOISE_RELEASE.0).map(ParamId).collect(),
+    );
     for r in 0..2 {
         bank(
             &format!("Resonator {}", r + 1),
@@ -691,10 +756,19 @@ pub fn collision_type() -> DeviceType {
         );
     }
     for i in 0..2 {
-        bank(&format!("LFO {}", i + 1), (0..LFO_COUNT).map(|o| lfo(i, o)).collect());
+        bank(
+            &format!("LFO {}", i + 1),
+            (0..LFO_COUNT).map(|o| lfo(i, o)).collect(),
+        );
     }
-    bank("MIDI/MPE", (0..16).map(|o| ParamId((MIDI_BASE + o) as u32)).collect());
-    bank("Key and Vel", (0..24).map(|o| ParamId((KEYVEL_BASE + o) as u32)).collect());
+    bank(
+        "MIDI/MPE",
+        (0..16).map(|o| ParamId((MIDI_BASE + o) as u32)).collect(),
+    );
+    bank(
+        "Key and Vel",
+        (0..24).map(|o| ParamId((KEYVEL_BASE + o) as u32)).collect(),
+    );
     bank("Global", vec![VOICES, RETRIGGER, STRUCTURE, VOLUME]);
     let banks: Vec<(&str, Vec<&str>)> = banks
         .iter()
@@ -791,7 +865,9 @@ pub fn factory_presets() -> Vec<(&'static str, Vec<(ParamId, f64)>)> {
 
 /// Adds Collision to `registry`.
 pub fn register(registry: &mut Registry) {
-    add(registry, collision_type(), |device, config| make(device, config));
+    add(registry, collision_type(), |device, config| {
+        make(device, config)
+    });
 }
 
 /// Makes a Collision for `device` and `config`'s rate and block size: every
@@ -839,7 +915,11 @@ impl NativeDevice for Collision {
         self.engine.snapshot(audio, params);
         self.section.process(audio, params, &mut self.engine);
         for (c, channel) in audio.channels_mut().enumerate() {
-            let from = if c == 1 { &self.engine.out_r } else { &self.engine.out_l };
+            let from = if c == 1 {
+                &self.engine.out_r
+            } else {
+                &self.engine.out_l
+            };
             channel.copy_from_slice(&from[..frames]);
         }
     }
@@ -850,7 +930,10 @@ impl NativeDevice for Collision {
         let matrix = &self.engine.matrix;
         for (dest, def) in matrix.layout().dests.iter().enumerate() {
             if let (Some(param), Some(position)) = (def.param, matrix.shown(dest)) {
-                report(param, self.engine.descs[param.0 as usize].denormalize(position));
+                report(
+                    param,
+                    self.engine.descs[param.0 as usize].denormalize(position),
+                );
             }
         }
     }
@@ -1005,7 +1088,11 @@ impl Lfos {
     fn new(seed: u64) -> Self {
         let rng = |lfo: u64| {
             (0..=MAX_VOICES as u64)
-                .map(|v| Random::seeded(seed ^ (lfo + 1).wrapping_mul(0xA5A5) ^ v.wrapping_mul(0x9E37_79B9)))
+                .map(|v| {
+                    Random::seeded(
+                        seed ^ (lfo + 1).wrapping_mul(0xA5A5) ^ v.wrapping_mul(0x9E37_79B9),
+                    )
+                })
                 .collect::<Vec<_>>()
         };
         let mut lfos = Self {
@@ -1120,7 +1207,9 @@ impl Engine {
             strike: [Strike::default(); MAX_VOICES],
             hit_offset: [0.0; MAX_VOICES],
             noise_rng: (0..MAX_VOICES as u64)
-                .map(|v| Random::seeded(seed ^ 0x6E01_5E ^ (v + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15)))
+                .map(|v| {
+                    Random::seeded(seed ^ 0x006E_015E ^ (v + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15))
+                })
                 .collect(),
             noise_lp: [Svf::default(); MAX_VOICES],
             noise_hp: [Svf::default(); MAX_VOICES],
@@ -1158,7 +1247,9 @@ impl Engine {
     fn snapshot(&mut self, audio: &Audio<'_, '_>, params: &ParamBank) {
         let frames = audio.frames();
         for i in 0..PARAMS {
-            let index = params.index(ParamId(i as u32)).expect("the description holds it");
+            let index = params
+                .index(ParamId(i as u32))
+                .expect("the description holds it");
             self.ramps[i * self.max_frames..i * self.max_frames + frames]
                 .copy_from_slice(params.ramp(index));
         }
@@ -1222,20 +1313,40 @@ impl Engine {
         let mut position = desc.normalize(base);
         if let Some(n) = self.keyed[i] {
             let sources = Sources::of(voices);
+            // A velocity sensitivity of a level scales it: the hardest note
+            // plays the knob's level and softer ones less, never more.
+            let velocity = if id == MALLET_VOLUME {
+                sources.velocity(voice) - 1.0
+            } else {
+                sources.velocity(voice)
+            };
             position += self.raw(key_of(n), frame) / 100.0 * sources.key(voice)
-                + self.raw(ParamId(key_of(n).0 + 1), frame) / 100.0 * sources.velocity(voice);
+                + self.raw(ParamId(key_of(n).0 + 1), frame) / 100.0 * velocity;
         }
         let mut position = position.clamp(0.0, 1.0);
         if let Some(dest) = route {
-            position = self.matrix.position(dest, position, voice, frame, due, &|source, voice, frame| {
-                self.source(source, voice, frame, voices)
-            });
+            position = self.matrix.position(
+                dest,
+                position,
+                voice,
+                frame,
+                due,
+                &|source, voice, frame| self.source(source, voice, frame, voices),
+            );
         }
         desc.denormalize(position)
     }
 
     /// Resonator `r`'s settings for `voice` at `frame`.
-    fn setting(&self, r: usize, voice: usize, frame: usize, voices: &VoiceBlock, state: &State, frames: &FrameRange<usize>) -> Setting {
+    fn setting(
+        &self,
+        r: usize,
+        voice: usize,
+        frame: usize,
+        voices: &VoiceBlock,
+        state: &State,
+        frames: &FrameRange<usize>,
+    ) -> Setting {
         let v = |offset| self.val(res(r, offset), voice, frame, voices, true);
         let kind = (self.raw(res(r, R_TYPE), frame) as usize).min(RESONATOR_TYPES.len() - 1);
         // Spec: collision R8. The note's interval from C3 times Key, then
@@ -1259,9 +1370,7 @@ impl Engine {
             1.0
         };
         // Spec: collision R6. Rnd moves each note's strike from Hit.
-        let hit = (v(R_HIT) / 100.0
-            + self.hit_offset[voice] * v(R_RND) / 100.0)
-            .clamp(0.0, 1.0);
+        let hit = (v(R_HIT) / 100.0 + self.hit_offset[voice] * v(R_RND) / 100.0).clamp(0.0, 1.0);
         Setting {
             kind,
             hz,
@@ -1313,7 +1422,8 @@ impl Engine {
                 TYPE_PLATE => Shape::Plate,
                 _ => Shape::Beam,
             };
-            let quality = [Quality::Eco, Quality::Low, Quality::Medium, Quality::High][wanted.quality];
+            let quality =
+                [Quality::Eco, Quality::Low, Quality::Medium, Quality::High][wanted.quality];
             self.modal[r].rebuild_table(shape, quality, wanted.ratio, wanted.inharm);
         }
     }
@@ -1321,20 +1431,44 @@ impl Engine {
     /// Gives `voice`'s resonator `r` its settings (or, for a note that
     /// starts, sets it there with nothing ringing), and works out how much
     /// of the strike and the noise it takes.
-    fn apply(&mut self, r: usize, voice: usize, s: &Setting, frame: usize, voices: &VoiceBlock, reset: bool) {
+    fn apply(
+        &mut self,
+        r: usize,
+        voice: usize,
+        s: &Setting,
+        frame: usize,
+        voices: &VoiceBlock,
+        reset: bool,
+    ) {
         let inharm = self.val(res(r, R_INHARM), voice, frame, voices, true);
         let rate = self.rate;
-        let (strike, blow);
+        let (mut strike, mut blow);
         if Self::is_guide(s.kind) {
             let hz = s.hz.clamp(LOWEST_HZ, rate / 4.0);
             let params = WaveguideParams {
                 hz: hz as f32,
                 decay: s.decay as f32,
                 // A pipe and a tube have no Material: Radius moves it.
-                material: if s.kind == TYPE_STRING { s.material as f32 } else { 0.5 },
-                inharm: if s.kind == TYPE_STRING { (inharm / 100.0).max(0.0) as f32 } else { 0.0 },
-                opening: if s.kind == TYPE_PIPE { s.opening as f32 } else { 1.0 },
-                radius: if s.kind == TYPE_STRING { 0.0 } else { s.radius as f32 },
+                material: if s.kind == TYPE_STRING {
+                    s.material as f32
+                } else {
+                    0.5
+                },
+                inharm: if s.kind == TYPE_STRING {
+                    (inharm / 100.0).max(0.0) as f32
+                } else {
+                    0.0
+                },
+                opening: if s.kind == TYPE_PIPE {
+                    s.opening as f32
+                } else {
+                    1.0
+                },
+                radius: if s.kind == TYPE_STRING {
+                    0.0
+                } else {
+                    s.radius as f32
+                },
                 // A guide's positions run from an end (0) to the middle (0.5);
                 // Hit and Pos. run from the centre to the edge.
                 excite: (0.5 * (1.0 - s.hit)) as f32,
@@ -1373,6 +1507,13 @@ impl Engine {
             let w = TAU * hz / rate;
             strike = STRIKE_LEVEL * u / 27.6 * w.sin() / (TAU * C3_HZ / rate).sin();
             blow = BLOW_MODAL / 0.58 * 0.0556 * w.sin() * u.sqrt();
+            // The upper partials' input gain grows with how fast they die, so
+            // a low Material strikes far louder and a high one far quieter
+            // (measured: 25 dB between 0 and 100 %). This brings them back
+            // to the level at 50 %, over what the models' laws give.
+            let level = 10f64.powf(2.0 * s.material - 1.0);
+            strike *= level;
+            blow *= level.sqrt();
         }
         self.strike_scale[r][voice] = strike as f32;
         self.blow_scale[r][voice] = blow as f32;
@@ -1421,7 +1562,12 @@ impl Engine {
                         let phase = (self.lfos.phase[l][slot] + offset).fract();
                         let shape = self.raw(lfo(l, L_SHAPE), frame) as usize;
                         let amount = self.val(lfo(l, L_AMOUNT), v, frame, voices, due) / 100.0;
-                        (lfo_wave(shape, phase, self.lfos.held[l][slot], self.lfos.drawn[l][slot]) * amount) as f32
+                        (lfo_wave(
+                            shape,
+                            phase,
+                            self.lfos.held[l][slot],
+                            self.lfos.drawn[l][slot],
+                        ) * amount) as f32
                     } else {
                         0.0
                     };
@@ -1440,7 +1586,14 @@ impl Engine {
     }
 
     /// LFO `l`'s speed in cycles a second for `voice` at `frame`.
-    fn lfo_rate(&self, l: usize, voice: usize, frame: usize, voices: &VoiceBlock, due: bool) -> f64 {
+    fn lfo_rate(
+        &self,
+        l: usize,
+        voice: usize,
+        frame: usize,
+        voices: &VoiceBlock,
+        due: bool,
+    ) -> f64 {
         if self.raw(lfo(l, L_SYNC), frame) >= 0.5 {
             let division = (self.raw(lfo(l, L_DIVISION), frame) as usize).min(DIVISIONS.len() - 1);
             1.0 / (DIVISION_SIXTEENTHS[division] * 60.0 / self.bpm / 4.0)
@@ -1451,7 +1604,14 @@ impl Engine {
 
     /// Sets up the strike and the noise filter of a note that starts at
     /// `frame`, and puts its resonators at their start.
-    fn start_voice(&mut self, voice: usize, frame: usize, voices: &VoiceBlock, state: &State, frames: &FrameRange<usize>) {
+    fn start_voice(
+        &mut self,
+        voice: usize,
+        frame: usize,
+        voices: &VoiceBlock,
+        state: &State,
+        frames: &FrameRange<usize>,
+    ) {
         let rate = self.rate;
         let val = |id| self.val(id, voice, frame, voices, true);
         // Spec: collision R2. A raised cosine whose width Stiffness sets
@@ -1482,7 +1642,8 @@ impl Engine {
     fn tune_noise_filter(&mut self, voice: usize, frame: usize, voices: &VoiceBlock) {
         let level = f64::from(self.env_out[frame * self.stride + voice]);
         let hz = self.val(NOISE_FREQ, voice, frame, voices, true)
-            * (self.val(NOISE_ENV_AMT, voice, frame, voices, true) / 100.0 * ENV_OCTAVES * level).exp2();
+            * (self.val(NOISE_ENV_AMT, voice, frame, voices, true) / 100.0 * ENV_OCTAVES * level)
+                .exp2();
         let res = self.val(NOISE_RES, voice, frame, voices, true) / 100.0;
         let filter = self.raw(NOISE_FILTER, frame) as usize;
         let (lp, hp) = (&mut self.noise_lp[voice], &mut self.noise_hp[voice]);
@@ -1618,7 +1779,7 @@ impl Instrument for Engine {
         let mut at = from;
         while at < to {
             let clock = state.clock(at);
-            let due = clock % grid as u64 == 0;
+            let due = clock.is_multiple_of(grid as u64);
             let end = (at + grid - (clock % grid as u64) as usize).min(to);
             for r in 0..2 {
                 if self.raw(res(r, R_ON), at) < 0.5 {
@@ -1718,9 +1879,18 @@ mod tests {
     #[test]
     fn the_strike_is_a_raised_cosine_whose_width_stiffness_sets() {
         let rate = 48_000.0;
-        assert!((pulse_width(0.0, rate) - 0.02 * rate).abs() < 1e-6, "20 ms soft");
-        assert!((pulse_width(1.0, rate) - 0.000_1 * rate).abs() < 1e-6, "0.1 ms hard");
-        assert!(pulse_width(0.25, rate) > pulse_width(0.75, rate), "stiffer is shorter");
+        assert!(
+            (pulse_width(0.0, rate) - 0.02 * rate).abs() < 1e-6,
+            "20 ms soft"
+        );
+        assert!(
+            (pulse_width(1.0, rate) - 0.000_1 * rate).abs() < 1e-6,
+            "0.1 ms hard"
+        );
+        assert!(
+            pulse_width(0.25, rate) > pulse_width(0.75, rate),
+            "stiffer is shorter"
+        );
         assert!(pulse_width(1.0, 8_000.0) >= 1.0, "never under a frame");
         let width = 960.0;
         assert_eq!(raised_cosine(0.0, width), 0.0);

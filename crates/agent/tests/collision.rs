@@ -66,7 +66,11 @@ fn an_agent_sets_and_reads_back_every_parameter_copies_a_resonator_and_reads_the
     // Every parameter, moved to the far end of its range and read back.
     let mut wanted = Vec::new();
     for p in &collision_type().description.params {
-        let to = if p.default == p.max() { p.min() } else { p.max() };
+        let to = if p.default == p.max() {
+            p.min()
+        } else {
+            p.max()
+        };
         run(
             &mut client,
             "device.set_param",
@@ -119,5 +123,8 @@ fn an_agent_sets_and_reads_back_every_parameter_copies_a_resonator_and_reads_the
         .iter()
         .find(|p| p["id"] == json!(lfo(0, L_DEST_A)))
         .unwrap();
-    assert_eq!(state["text"], "Res 1 Tune", "the chooser reads as the destination");
+    assert_eq!(
+        state["text"], "Res 1 Tune",
+        "the chooser reads as the destination"
+    );
 }

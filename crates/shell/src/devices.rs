@@ -2925,7 +2925,10 @@ impl DeviceView {
         let moves: Vec<(ParamId, f64)> = (0..RES_COUNT)
             .map(|offset| {
                 let (source, target) = (res(from, offset), res(to, offset));
-                (target, description.value(&current.params, source).unwrap_or(0.0))
+                (
+                    target,
+                    description.value(&current.params, source).unwrap_or(0.0),
+                )
             })
             .collect();
         editor

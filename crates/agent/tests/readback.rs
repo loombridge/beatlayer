@@ -624,7 +624,7 @@ fn fixture() -> Project {
     for command in [
         Command::SetChainColour {
             chain: loud,
-            colour: Some(12),
+            colour: Some(bl_model::Colour::Swatch(12)),
         },
         Command::SetChainInfo {
             chain: loud,
@@ -934,7 +934,7 @@ fn fixture() -> Project {
         &mut editor,
         Command::SetSceneColour {
             scenes: vec![scenes[0]],
-            colour: Some(47),
+            colour: Some(bl_model::Colour::Swatch(47)),
         },
     );
     apply(
@@ -1726,6 +1726,81 @@ fn the_colour_commands_run_by_id_and_read_back() {
         )
         .unwrap();
     assert!(refused.ok().is_err());
+}
+
+// Spec: themes R25, R29. The colour commands take a `#RRGGBB` colour as well
+// as a swatch, by ID through the agent API, and the query tool reads back
+// whichever the object has.
+#[test]
+fn the_colour_commands_take_a_rrggbb_colour_by_id_and_read_it_back() {
+    let mut client = open(&fixture(), "custom-colours");
+    let keys = query(
+        &mut client,
+        json!({ "path": "track \"Keys\"", "detail": "full" }),
+    );
+    let track = keys["id"].clone();
+    let clip = keys["saved"]["clips"]["items"][0]["id"].clone();
+    let call = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        client
+            .call(
+                "run",
+                json!({ "commands": [{ "command": command, "args": args }] }),
+            )
+            .unwrap()
+    };
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        call(client, command, args)
+            .ok()
+            .unwrap_or_else(|error| panic!("{command}: {error}"))
+    };
+    let colour = |client: &mut Client<InProcess>, what: &Value| -> Value {
+        query(client, json!({ "id": what }))["colour"].clone()
+    };
+
+    run(
+        &mut client,
+        "track.set_colour",
+        json!({ "tracks": [track], "colour": "#12ABEF" }),
+    );
+    assert_eq!(colour(&mut client, &track), "#12ABEF");
+    // Either case goes in, a capital comes back.
+    run(
+        &mut client,
+        "clip.set_colour",
+        json!({ "clips": [clip], "colour": "#ff8000" }),
+    );
+    assert_eq!(colour(&mut client, &clip), "#FF8000");
+    // Assign Track Color to Clips carries a custom colour to the clips.
+    run(
+        &mut client,
+        "track.assign_colour_to_clips",
+        json!({ "tracks": [track] }),
+    );
+    assert_eq!(colour(&mut client, &clip), "#12ABEF");
+    let scene = query(&mut client, json!({ "path": "scene 1" }))["id"].clone();
+    run(
+        &mut client,
+        "scene.set_colour",
+        json!({ "scenes": [scene], "colour": "#000001" }),
+    );
+    assert_eq!(colour(&mut client, &scene), "#000001");
+    // A swatch still reads back as its number.
+    run(
+        &mut client,
+        "track.set_colour",
+        json!({ "tracks": [track], "colour": 7 }),
+    );
+    assert_eq!(colour(&mut client, &track), 7);
+    // What is neither is refused.
+    for bad in [json!("#12345"), json!("teal"), json!(70)] {
+        let refused = call(
+            &mut client,
+            "track.set_colour",
+            json!({ "tracks": [track], "colour": bad }),
+        );
+        assert!(refused.ok().is_err(), "{bad}");
+    }
+    assert_eq!(colour(&mut client, &track), 7);
 }
 
 // Spec: note-editing R32. Group Notes and Ungroup Notes run by ID through the

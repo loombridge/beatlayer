@@ -791,7 +791,7 @@ fn a_chains_menu_renames_and_colours() {
     );
     assert_eq!(
         h.shell.editor().document().chain(chains[0]).unwrap().colour,
-        Some(14)
+        Some(bl_model::Colour::Swatch(14))
     );
     assert_eq!(last_step(&h), "Change Chain Color");
 

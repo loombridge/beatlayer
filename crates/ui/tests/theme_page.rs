@@ -172,10 +172,11 @@ fn the_number_boxes_step_by_key_by_drag_and_by_a_screen_reader() {
     assert_eq!(Harness::node(&nodes, "Brightness").value, "50");
 }
 
-const COLOUR_ROWS: [&str; 4] = [
+const COLOUR_ROWS: [&str; 5] = [
     "Auto-Assign Track Colors",
     "Default Track Color",
     "Reduced Automatic Colors",
+    "New Tracks Take Group Color",
     "Clip Color",
 ];
 
@@ -197,7 +198,7 @@ fn the_track_and_clip_colors_rows_follow_customization_in_order() {
         assert!((b.x0 - x0).abs() < 0.5, "{name} shares the control column");
     }
     // Rows of the section are 22 points apart, under a heading of their own.
-    for i in 8..11 {
+    for i in 8..12 {
         assert!((rows[i + 1].y0 - rows[i].y0 - 22.0).abs() < 0.5, "row {i}");
     }
     assert!(
@@ -205,10 +206,10 @@ fn the_track_and_clip_colors_rows_follow_customization_in_order() {
         "Track and Clip Colors has a heading"
     );
     // The switches are 54 points wide, the choosers 108.
-    for i in [8, 10] {
+    for i in [8, 10, 11] {
         assert!((rows[i].x1 - rows[i].x0 - 54.0).abs() < 0.5);
     }
-    for i in [9, 11] {
+    for i in [9, 12] {
         assert!((rows[i].x1 - rows[i].x0 - 108.0).abs() < 0.5);
     }
     // The values of a new install, and Default Track Color waiting for
@@ -221,7 +222,9 @@ fn the_track_and_clip_colors_rows_follow_customization_in_order() {
         "swatch 12"
     );
     assert_eq!(Harness::node(&nodes, COLOUR_ROWS[2]).toggled, Some(false));
-    assert_eq!(Harness::node(&nodes, COLOUR_ROWS[3]).value, "Track Color");
+    // Spec: themes R30. Off in a new install.
+    assert_eq!(Harness::node(&nodes, COLOUR_ROWS[3]).toggled, Some(false));
+    assert_eq!(Harness::node(&nodes, COLOUR_ROWS[4]).value, "Track Color");
 }
 
 #[test]
@@ -234,6 +237,15 @@ fn the_track_and_clip_colors_rows_run_their_commands() {
     );
     h.settle();
     assert!(h.shell.look().reduced_automatic_colours);
+
+    // Spec: themes R30. New Tracks Take Group Color is a switch of its own.
+    assert!(!h.shell.look().new_tracks_take_group_colour);
+    h.accesskit(
+        Id::new(("switch", "new-tracks-take-group-colour")),
+        Action::Click,
+    );
+    h.settle();
+    assert!(h.shell.look().new_tracks_take_group_colour);
 
     h.accesskit(Id::new(("chooser", "clip-colour")), Action::Focus);
     h.settle();

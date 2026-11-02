@@ -250,7 +250,7 @@ impl ClipViewUi {
                     name: clip.name.clone(),
                     colour: clip
                         .colour
-                        .map_or(theme.colors.accent.0, |swatch| theme.swatch(swatch)),
+                        .map_or(theme.colors.accent.0, |swatch| theme.colour(swatch)),
                     midi: midi.clone(),
                     clip_start: clip.start,
                     length: clip.length,

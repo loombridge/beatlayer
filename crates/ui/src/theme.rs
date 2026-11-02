@@ -181,6 +181,17 @@ impl Theme {
         base.lerp_to_gamma(towards, mix.abs())
     }
 
+    /// The colour of a track, clip or scene colour: a swatch as the
+    /// palette gives it, a custom colour as saved (the themes spec, R15,
+    /// R29).
+    #[must_use]
+    pub fn colour(&self, colour: bl_model::Colour) -> Color32 {
+        match colour {
+            bl_model::Colour::Swatch(index) => self.swatch(index),
+            bl_model::Colour::Custom([r, g, b]) => Color32::from_rgb(r, g, b),
+        }
+    }
+
     /// Reads a theme file.
     ///
     /// # Errors

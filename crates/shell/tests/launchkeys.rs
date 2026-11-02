@@ -1319,11 +1319,8 @@ fn drum_rack(rig: &mut Rig, notes: &[u8]) -> DeviceId {
 /// The palette entry the colour of `track` lights.
 fn colour_of(rig: &Rig, track: TrackId) -> u8 {
     let doc = rig.shell.editor().document();
-    let swatch = doc.track(track).unwrap().colour();
-    bl_control::grid::nearest(bl_model::swatch_rgb(
-        &bl_model::DEFAULT_TRACK_PALETTE,
-        swatch,
-    ))
+    let colour = doc.track(track).unwrap().colour();
+    bl_control::grid::nearest(colour.rgb(&bl_model::DEFAULT_TRACK_PALETTE))
 }
 
 // Spec: supported-controllers R59. In Drum mode the MK3 lights its sixteen

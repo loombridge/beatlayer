@@ -962,8 +962,8 @@ pub struct ChainRow {
     pub id: ChainId,
     /// Its name.
     pub name: String,
-    /// Its colour, a swatch of the palette of 5 rows of 14, if it has one.
-    pub colour: Option<u8>,
+    /// Its colour, a swatch of the palette of 5 rows of 14 or a `#RRGGBB` colour, if it has one.
+    pub colour: Option<bl_model::Colour>,
     /// Its Chain Activator.
     pub enabled: bool,
     /// Whether it's soloed.
@@ -1793,8 +1793,8 @@ pub struct MacroInfo {
     /// Its name: Rename's, its one parameter's, or "Macro N" (macros spec,
     /// R10).
     pub name: String,
-    /// Its colour: a swatch of the palette of 5 rows of 14, or null.
-    pub colour: Option<u8>,
+    /// Its colour: a swatch of the palette of 5 rows of 14, a `#RRGGBB` colour, or null.
+    pub colour: Option<bl_model::Colour>,
     /// Its value, from 0 to 1.
     pub value: f64,
     /// How it reads: its parameter's value and unit, 0 to 127, or a shared

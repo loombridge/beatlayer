@@ -312,6 +312,22 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             settings("theme-colors", nothing, "Clip Color", Key::ArrowDown),
         ),
         (
+            "settings.set_new_tracks_take_group_colour",
+            settings(
+                "theme-colors",
+                nothing,
+                "New Tracks Take Group Color",
+                Key::Enter,
+            ),
+        ),
+        (
+            "settings.use_custom_colour",
+            Exception(Equivalent(
+                "a palette's custom row and its Custom Color… picker record the colour as they \
+                 colour the selection; the keyboard reaches both (themes R31)",
+            )),
+        ),
+        (
             "settings.set_create_fades_on_clip_edges",
             settings(
                 "record-warp-launch",

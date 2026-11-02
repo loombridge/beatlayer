@@ -301,7 +301,7 @@ Result: [`DeviceViewState`](README.md#deviceviewstate).
 
 **Change Macro Color**. Permission: `edit`. Contexts: `device-view`.
 
-Colours macro `macro_number` with swatch `colour` of the palette of 5 rows of 14 (0 to 69), or clears its colour with null. One undo step.
+Colours macro `macro_number` with swatch `colour` of the palette of 5 rows of 14 (0 to 69) or a colour of one's own as `#RRGGBB`, or clears its colour with null. One undo step.
 
 Default keys: none.
 
@@ -311,7 +311,7 @@ Arguments:
 |---|---|---|---|
 | `rack` | [`DeviceId`](README.md#deviceid) | yes | The rack. |
 | `macro_number` | integer from 0 to 255 | yes | The macro, numbered from 1. |
-| `colour` | integer or null | no | The swatch, or `null` for none. |
+| `colour` | [`Colour`](README.md#colour) or null | no | The swatch, or `null` for none. |
 
 Result: [`ChangeSet`](README.md#changeset).
 

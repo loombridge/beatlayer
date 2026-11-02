@@ -385,7 +385,7 @@ fn chain_edits_are_one_undo_step_each_and_undo_whole() {
         },
         Command::SetChainColour {
             chain: second,
-            colour: Some(69),
+            colour: Some(bl_model::Colour::Swatch(69)),
         },
         Command::SetChainInfo {
             chain: second,
@@ -429,7 +429,7 @@ fn chain_edits_are_one_undo_step_each_and_undo_whole() {
     assert_eq!(song.editor.undo_history().len(), before + 11);
     let chain = song.doc().chain(second).unwrap();
     assert_eq!(chain.name, "Wet");
-    assert_eq!(chain.colour, Some(69));
+    assert_eq!(chain.colour, Some(bl_model::Colour::Swatch(69)));
     assert_eq!(chain.devices.len(), 2);
     assert_eq!(chain.devices[0].id, fx_id);
     // Each edit undoes whole, in turn.
@@ -442,7 +442,7 @@ fn chain_edits_are_one_undo_step_each_and_undo_whole() {
     for bad in [
         Command::SetChainColour {
             chain: first,
-            colour: Some(70),
+            colour: Some(bl_model::Colour::Swatch(70)),
         },
         Command::SetChainVolume {
             chain: first,

@@ -617,6 +617,11 @@ impl Shell {
                     json!({ "rack": rack, "index": index }),
                 )
             }
+            "device.remove" if !has("device") && !self.devices.selection().is_empty() => {
+                // Spec: device-chains R47. Delete removes every selected
+                // device as one undo step.
+                self.run_devices(id, args)
+            }
             _ if device_ids::ON_SELECTED.contains(&id) && !has("device") => {
                 let args = self.filled_args(id, args)?;
                 self.run(id, args)

@@ -3314,7 +3314,7 @@ impl Command {
             // WP-5.1. Beatlayer's own names, after the device ones.
             Self::InsertChainDevice { .. } => "Insert Device",
             Self::MoveDeviceToChain { .. } => "Move Device",
-            Self::GroupDevices { .. } => "Group",
+            Self::GroupDevices { .. } => "Group Devices",
             Self::UngroupDevice { .. } => "Ungroup",
             Self::SetDeviceEnabledAll { .. } => "Change \"Device On\"",
             Self::AddChain { .. } => "Insert Chain",

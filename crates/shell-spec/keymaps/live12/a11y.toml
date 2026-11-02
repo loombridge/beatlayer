@@ -166,7 +166,7 @@ milestone = "M2"
 mac = ["Left", "Right"]
 win = ["Left", "Right"]
 status = "widget"
-handler = "the Device View: Left and Right select the device before or after the selected one (`device.select`, device chains R43)"
+handler = "the Device View: Left and Right select the device before or after the selected ones, and Shift-Left and Shift-Right add the neighbouring device to the selection (`device.select`, device chains R43, R47)"
 
 [[shortcut]]
 id = "S-A11Y-015"

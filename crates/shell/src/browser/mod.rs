@@ -1971,14 +1971,18 @@ impl BrowserView {
         }
         if label == Label::PlugIns {
             let items = self.plugin_rows();
+            let mut shown = true;
             let items = items
                 .into_iter()
                 // Spec: plugin-scanning R15. The presets listed under an open
-                // plug-in's row stay with it.
+                // plug-in's row stay with it, shown or filtered out.
                 .filter(|item| {
-                    item.kind == ItemKind::Preset
-                        || (tags.is_empty() || self.carries_all(&self.tag_key(&item.path), &tags))
-                            && self.item_passes(&selection, &builtin, item)
+                    if item.kind != ItemKind::Preset {
+                        shown = (tags.is_empty()
+                            || self.carries_all(&self.tag_key(&item.path), &tags))
+                            && self.item_passes(&selection, &builtin, item);
+                    }
+                    shown
                 })
                 .collect();
             self.rows = Rows::Items(items);

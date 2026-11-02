@@ -276,6 +276,36 @@ fn a_vst3_plug_ins_preset_lists_under_its_row_and_loads_its_state() {
     a_preset_keeps_a_plug_ins_state_lists_under_its_row_and_loads_into_a_new_device(&vst3());
 }
 
+// Spec: plugin-scanning R15, browser-tags R20. The presets open under a
+// plug-in's row leave the list with it when a filter hides it.
+#[test]
+fn a_filtered_out_plug_ins_presets_leave_with_its_row() {
+    if !ready() {
+        eprintln!("beatlayer-scan wasn't built; skipping (build the workspace's bins)");
+        return;
+    }
+    let library = Scratch::new("filtered");
+    let mut shell = shell(&library);
+    let format = clap();
+    let (_, _, path) = saved_preset(&mut shell, &format, 30);
+    shell
+        .run(browser_ids::OPEN_FOLDER, json!({ "path": format.key }))
+        .unwrap();
+    let key = format!("{}#preset/{path}", format.key);
+    assert!(row(&mut shell, &key).is_some(), "the preset's row");
+    shell
+        .run(
+            browser_ids::FILTER,
+            json!({ "tags": ["Format|VST3"], "add": false }),
+        )
+        .unwrap();
+    assert!(
+        row(&mut shell, &format.key).is_none(),
+        "the CLAP row is filtered out"
+    );
+    assert!(row(&mut shell, &key).is_none(), "and so is its preset");
+}
+
 // Spec: plugin-scanning R16. A plug-in device's preset saved before the state
 // field has no state, and loads its parameter values only.
 #[test]

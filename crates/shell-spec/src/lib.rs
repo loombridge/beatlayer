@@ -106,6 +106,7 @@
 
 pub mod agent;
 pub mod arrangement;
+pub mod arranger;
 pub mod assistant;
 pub mod audio;
 pub mod audio_editing;
@@ -128,7 +129,6 @@ pub mod editing;
 pub mod envelope_keys;
 pub mod export;
 pub mod file_manager;
-pub mod arranger;
 pub mod freeze;
 pub mod groove;
 pub mod keymap;

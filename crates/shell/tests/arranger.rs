@@ -133,21 +133,20 @@ fn set(with_sections: bool) -> Set {
         editor.apply(Command::AddLocator { locator }).unwrap();
     }
     // Intro, Verse and Chorus over bars 0 to 2, 2 to 5 and 5 to 8.
-    let sections = [(0, 2, "Intro"), (2, 5, "Verse"), (5, 8, "Chorus")]
-        .map(|(from, to, name)| {
-            let id: SectionId = editor.new_id();
-            if with_sections {
-                let section = SongSection {
-                    id,
-                    start: bars(from),
-                    length: bars(to - from),
-                    name: name.to_owned(),
-                    colour: (from % 14) as u8,
-                };
-                editor.apply(Command::AddSection { section }).unwrap();
-            }
-            id
-        });
+    let sections = [(0, 2, "Intro"), (2, 5, "Verse"), (5, 8, "Chorus")].map(|(from, to, name)| {
+        let id: SectionId = editor.new_id();
+        if with_sections {
+            let section = SongSection {
+                id,
+                start: bars(from),
+                length: bars(to - from),
+                name: name.to_owned(),
+                colour: (from % 14) as u8,
+            };
+            editor.apply(Command::AddSection { section }).unwrap();
+        }
+        id
+    });
     editor.clear_history().unwrap();
     let mut shell = Shell::new(
         Preferences::default(),
@@ -196,11 +195,6 @@ impl Set {
             .to_owned()
     }
 
-
-
-
-
-
     /// The sections, as `(name, start, end)` in bars.
     fn section_spans(&self) -> Vec<(String, i64, i64)> {
         self.doc()
@@ -246,7 +240,6 @@ impl Set {
         saved
     }
 
-
     /// Runs `id`, checks it is exactly one undo step named `name`, and that
     /// undo and redo give the set back exactly, then leaves it done.
     fn one_step(&mut self, id: &str, args: Value, name: &str) -> ArrangerResult {
@@ -267,7 +260,6 @@ impl Set {
         result
     }
 }
-
 
 fn span(start: i64, end: i64) -> Value {
     json!({ "start": bars(start), "end": bars(end) })
@@ -382,7 +374,10 @@ fn moving_a_section_later_lands_it_after_the_one_it_passes() {
     let last = s.doc().sections().last().unwrap().id;
     assert!(
         s.shell
-            .run(ids::MOVE_SECTION, json!({ "section": last, "with": "later" }))
+            .run(
+                ids::MOVE_SECTION,
+                json!({ "section": last, "with": "later" })
+            )
             .is_err()
     );
     assert!(
@@ -554,9 +549,7 @@ fn a_section_is_made_by_span_cut_short_and_never_over_another() {
     let mut s = set(true);
     let before = s.doc().clone();
     assert!(
-        s.shell
-            .run(ids::ADD_SECTION, span(3, 4))
-            .is_err(),
+        s.shell.run(ids::ADD_SECTION, span(3, 4)).is_err(),
         "a start inside a section is refused"
     );
     assert_eq!(*s.doc(), before);
@@ -574,7 +567,10 @@ fn a_section_is_made_by_span_cut_short_and_never_over_another() {
     assert_eq!(sections[3].name, "Section 1");
     assert_eq!(sections[3].colour, 7, "the one after the newest section's");
     // With no span it takes the time selection.
-    s.run("arrangement.select_time", json!({ "start": bars(13), "end": bars(14) }));
+    s.run(
+        "arrangement.select_time",
+        json!({ "start": bars(13), "end": bars(14) }),
+    );
     s.one_step(ids::ADD_SECTION, json!({}), "Add Section");
     assert_eq!(s.doc().sections().last().unwrap().name, "Section 2");
 }
@@ -626,12 +622,19 @@ fn renaming_colouring_and_resizing_are_one_undo_step_each() {
         "Resize Section",
     );
     assert_eq!(s.section_spans()[2], ("Chorus".to_owned(), 6, 9));
-    assert_eq!(s.without_section_ids(), clips, "nothing on the tracks moves");
+    assert_eq!(
+        s.without_section_ids(),
+        clips,
+        "nothing on the tracks moves"
+    );
     // A span that would reach another section is refused.
     let before = s.doc().clone();
     assert!(
         s.shell
-            .run(ids::RESIZE_SECTION, json!({ "section": verse, "end": bars(7) }))
+            .run(
+                ids::RESIZE_SECTION,
+                json!({ "section": verse, "end": bars(7) })
+            )
             .is_err()
     );
     assert_eq!(*s.doc(), before);
@@ -652,7 +655,10 @@ fn selecting_a_section_selects_its_time_and_is_no_undo_step() {
         json!({ "sections": [chorus], "mode": "extend" }),
     );
     assert_eq!(s.state().selected_sections, [verse, chorus]);
-    s.run(ids::SELECT_SECTION, json!({ "sections": [intro], "mode": "add" }));
+    s.run(
+        ids::SELECT_SECTION,
+        json!({ "sections": [intro], "mode": "add" }),
+    );
     assert_eq!(s.state().selected_sections, [verse, chorus, intro]);
     s.run(
         ids::SELECT_SECTION,
@@ -731,8 +737,14 @@ fn random_section_edits_among_time_edits_keep_the_rules_and_undo_exactly() {
                 ids::RESIZE_SECTION,
                 with(json!({ "start": at, "end": at + len })),
             ),
-            9 => (edit_ids::INSERT_SILENCE, json!({ "start": at, "end": at + len })),
-            10 => (edit_ids::DELETE_TIME, json!({ "start": at, "end": at + len })),
+            9 => (
+                edit_ids::INSERT_SILENCE,
+                json!({ "start": at, "end": at + len }),
+            ),
+            10 => (
+                edit_ids::DELETE_TIME,
+                json!({ "start": at, "end": at + len }),
+            ),
             11 => (edit_ids::CUT_TIME, json!({ "start": at, "end": at + len })),
             12 => (edit_ids::PASTE_TIME, json!({ "at": at })),
             _ => (ids::SECTIONS_FROM_LOCATORS, json!({})),

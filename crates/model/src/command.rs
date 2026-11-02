@@ -35,7 +35,6 @@ use crate::layers::{
     Distribution, Layer, LayerId, LayerSettings, LayerSort, LayerZone, Layers, Zone, ZoneKind,
 };
 use crate::locator::{Locator, SongStart, next_locator_name};
-use crate::section::SongSection;
 use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
 use crate::rack::{
     CHAIN_COLOURS, Chain, ChainSend, MACRO_STEPS_MAX, MACRO_STEPS_MIN, MACROS, Macro, MacroMapping,
@@ -45,6 +44,7 @@ use crate::record_quantization::RecordQuantization;
 use crate::sample_edits::{SampleEdit, SampleRange, SampleRegion};
 use crate::scale::{Scale, ScaleName};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
+use crate::section::SongSection;
 use crate::shared::Shared;
 use crate::track::{
     Channel, CrossfadeAssign, Input, MidiTo, Mixer, Monitor, Output, PanMode, SendTap, Tap, Track,

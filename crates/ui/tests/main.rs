@@ -6,6 +6,7 @@
 mod accessibility;
 mod agent_settings;
 mod arrangement;
+mod arranger;
 mod articulation_map;
 mod assistant_panel;
 mod assistant_settings;

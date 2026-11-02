@@ -11,7 +11,7 @@ use bl_cli::golden::{BLOCK, SAMPLE_RATE, fixture};
 use bl_cli::render::{self, Cue, Settings};
 use bl_core::time::Ticks;
 use bl_engine::MediaMap;
-use bl_model::{AudioData, Clip, ClipData, ContentHash, Command, Editor, TrackId, TrackKind};
+use bl_model::{AudioData, Clip, ClipData, Command, ContentHash, Editor, TrackId, TrackKind};
 use bl_shell::Shell;
 use bl_shell::audio::AudioHost;
 use bl_shell::files::SetStore;
@@ -58,7 +58,12 @@ fn set(file: ContentHash, parts: &[(i64, f64)]) -> Editor {
     for &(bar, file_start) in parts {
         let mut audio = AudioData::new(file);
         audio.start = file_start;
-        let clip = Clip::new(editor.new_id(), Ticks(bar * BAR), Ticks(BAR), ClipData::Audio(audio));
+        let clip = Clip::new(
+            editor.new_id(),
+            Ticks(bar * BAR),
+            Ticks(BAR),
+            ClipData::Audio(audio),
+        );
         editor.apply(Command::CreateClip { track, clip }).unwrap();
     }
     editor

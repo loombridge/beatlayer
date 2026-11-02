@@ -15,6 +15,7 @@
 //! keyboard is in [`editing`] (WP-1.8b), whose behaviour is in the
 //! arrangement editing spec.
 
+pub mod arranger;
 pub mod automation;
 pub mod benchmark;
 pub mod context_menu;
@@ -221,6 +222,7 @@ pub struct ArrangementUi {
     locator_drag: Option<bl_model::LocatorId>,
     /// The time-signature lane's gestures (WP-6.61).
     signature_lane: signatures::SignatureLane,
+    arranger_lane: arranger::ArrangerLane,
     /// The point a held press in the scrub area or the beat-time ruler is
     /// looping, until the button is released (WP-6.59; time-editing R25).
     scrub_hold: Option<Ticks>,
@@ -396,6 +398,7 @@ impl ArrangementUi {
             snap_line: None,
             locator_drag: None,
             signature_lane: signatures::SignatureLane::default(),
+            arranger_lane: arranger::ArrangerLane::default(),
             scrub_hold: None,
             locators_drawn: Vec::new(),
             mixer: None,
@@ -560,6 +563,12 @@ impl ArrangementUi {
         // Spec: time-editing R29. The lane shows while the set has changes.
         let layout = if doc.settings().time_signatures.has_changes() {
             layout.with_signature_lane()
+        } else {
+            layout
+        };
+        // Spec: arranger-track R2. The lane shows while the set says so.
+        let layout = if doc.settings().arranger_track {
+            layout.with_arranger_lane()
         } else {
             layout
         };
@@ -821,6 +830,30 @@ impl ArrangementUi {
                 &mut self.snap_line,
                 events,
             );
+        }
+        // Spec: arranger-track R2 to R7. The arranger track, over the track
+        // lanes' top, and its header.
+        if let (Some(lane), Some(header)) = (layout.arranger, layout.arranger_header) {
+            rulers::arranger_header(&ui.painter_at(header), header, theme);
+            rulers::arranger_lane(
+                &ui.painter_at(lane),
+                lane,
+                doc.sections(),
+                view.selected_sections(),
+                horizontal,
+                theme,
+            );
+            self.arranger_lane.show(
+                ui,
+                shell,
+                theme,
+                lane,
+                &mut self.menus,
+                &mut self.snap_line,
+                events,
+            );
+        } else {
+            self.arranger_lane.tab.clear();
         }
 
         // The playhead, over the rulers and the lanes.
@@ -2431,6 +2464,10 @@ impl ArrangementUi {
             // Spec: accessibility R10. The switch is in the Tab order,
             // after Automation Mode.
             crate::focus::register(ui.ctx(), id, bl_shell::Area::MainView, None);
+            // Spec: arranger-track R14. The sections follow it, in time order.
+            for section in &self.arranger_lane.tab {
+                crate::focus::register(ui.ctx(), *section, bl_shell::Area::MainView, None);
+            }
             response.widget_info(|| {
                 WidgetInfo::selected(WidgetType::Checkbox, true, on, "Lock Envelopes")
             });
@@ -3014,6 +3051,33 @@ impl ArrangementUi {
             })
         {
             invoke(events, locator_ids::DELETE, json!({}));
+        }
+        // Spec: arranger-track R7, R10, R11. With a section selected, Cmd-R
+        // renames it, Cmd-D duplicates it and Delete deletes it, unless its
+        // name is being typed.
+        if !view.selected_sections().is_empty() && !arranger::is_renaming(ui.ctx()) {
+            let pressed = |wanted: Key, command: bool| {
+                ui.input(|i| {
+                    i.events.iter().any(|event| {
+                        matches!(
+                            event,
+                            egui::Event::Key { key, pressed: true, modifiers, .. }
+                                if *key == wanted
+                                    && modifiers.command == command
+                                    && !modifiers.shift
+                                    && !modifiers.alt
+                        )
+                    })
+                })
+            };
+            use bl_shell::arranger_commands as section_ids;
+            if pressed(Key::R, true) {
+                invoke(events, section_ids::RENAME_SECTION, json!({}));
+            } else if pressed(Key::D, true) {
+                invoke(events, section_ids::DUPLICATE_SECTION, json!({}));
+            } else if pressed(Key::Delete, false) {
+                invoke(events, section_ids::DELETE_SECTION, json!({}));
+            }
         }
         // WP-1.8b: nudging, clip edges, extending the selection, and
         // resizing from the keyboard.

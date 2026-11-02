@@ -88,7 +88,6 @@ mod launch;
 mod layers;
 mod linked;
 mod locator;
-mod section;
 pub mod matrix;
 mod metronome;
 pub mod modulation;
@@ -108,6 +107,7 @@ mod routing;
 mod sample_edits;
 mod scale;
 mod scene;
+mod section;
 mod shared;
 mod spelling;
 mod track;
@@ -188,7 +188,6 @@ pub use layers::{
     SamplerTab, SustainMode, Zone, ZoneKind, snap_to_zero_crossing,
 };
 pub use locator::{Locator, SongStart};
-pub use section::{SongSection, next_section_colour, next_section_name};
 pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound};
 pub use pad_layout::{PadDirection, PadLayout, PadSpacing};
 pub use param::{
@@ -212,6 +211,7 @@ pub use repr::{SavedSong, saved_schema};
 pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange, SampleRegion};
 pub use scale::{CHROMATIC, Scale, ScaleName};
 pub use scene::{DEFAULT_SCENE_COUNT, SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
+pub use section::{SongSection, next_section_colour, next_section_name};
 pub use spelling::NoteSpelling;
 pub use track::{
     Channel, CrossfadeAssign, DeviceOutput, Input, MAX_TRACK_DELAY_MS, MAX_TRACK_DELAY_SAMPLES,

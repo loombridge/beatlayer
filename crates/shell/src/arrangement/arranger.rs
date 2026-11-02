@@ -9,12 +9,12 @@
 //! left as it was. The behaviour is in the arranger track spec.
 
 use bl_core::time::Ticks;
-use bl_model::{Command, Document, Editor, SongSection, SectionId, next_section_colour};
+use bl_model::{Command, Document, Editor, SectionId, SongSection, next_section_colour};
+use bl_shell_spec::arrangement::SwitchArgs;
 use bl_shell_spec::arranger::{
     self as ids, AddSectionArgs, ArrangerResult, CopySectionArgs, MoveSectionArgs, Neighbour,
     RenameSectionArgs, ResizeSectionArgs, SectionArgs, SelectSectionArgs, SetSectionColourArgs,
 };
-use bl_shell_spec::arrangement::SwitchArgs;
 use bl_shell_spec::editing::{SelectMode, TimeSpanArgs};
 use serde_json::Value;
 
@@ -37,6 +37,33 @@ pub fn label(id: &str) -> &'static str {
         ids::REMOVE_SECTION => "Remove Section",
         ids::DELETE_SECTION => "Delete Section",
         _ => "Select Section",
+    }
+}
+
+impl ArrangementView {
+    /// Where a section dragged to `at` is dropped (R8): the edge of a section
+    /// within reach of the pointer, else the editing grid. `bypass` (Cmd, Alt
+    /// on Windows) skips both.
+    #[must_use]
+    pub fn section_drop(
+        &self,
+        doc: &Document,
+        at: Ticks,
+        ticks_per_point: f64,
+        bypass: bool,
+    ) -> Ticks {
+        if bypass {
+            return at.max(Ticks::ZERO);
+        }
+        let reach = (super::snapping::REACH * ticks_per_point).round() as i64;
+        doc.sections()
+            .iter()
+            .flat_map(|s| [s.start, s.end()])
+            .map(|edge| ((edge - at).get().abs(), edge))
+            .filter(|(distance, _)| *distance <= reach)
+            .min()
+            .map_or_else(|| self.snap(doc, at), |(_, edge)| edge)
+            .max(Ticks::ZERO)
     }
 }
 
@@ -203,7 +230,15 @@ pub fn run(
         ids::DUPLICATE_SECTION => {
             let SectionArgs { section } = parse(args)?;
             let section = chosen(editor.document(), view, section)?.clone();
-            place(editor, view, label, edge_fades, &section, section.end(), true)
+            place(
+                editor,
+                view,
+                label,
+                edge_fades,
+                &section,
+                section.end(),
+                true,
+            )
         }
         ids::REMOVE_SECTION => {
             let SectionArgs { section } = parse(args)?;

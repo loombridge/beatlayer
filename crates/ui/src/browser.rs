@@ -3218,8 +3218,13 @@ impl BrowserUi {
         let doc = shell.editor().document();
         let pinned = view.pinned_tracks(doc).count();
         let layout = ArrangementLayout::compute(main_view, view.overview(), pinned);
-        let lanes = if doc.settings().time_signatures.has_changes() {
-            layout.with_signature_lane().lanes
+        let layout = if doc.settings().time_signatures.has_changes() {
+            layout.with_signature_lane()
+        } else {
+            layout
+        };
+        let lanes = if doc.settings().arranger_track {
+            layout.with_arranger_lane().lanes
         } else {
             layout.lanes
         };

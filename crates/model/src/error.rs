@@ -6,7 +6,9 @@ use bl_core::id::Id;
 use bl_core::time::Ticks;
 
 use crate::device::DeviceRole;
-use crate::ids::{ChainId, ClipId, DeviceId, GrooveId, LocatorId, SceneId, SectionId, TakeLaneId, TrackId};
+use crate::ids::{
+    ChainId, ClipId, DeviceId, GrooveId, LocatorId, SceneId, SectionId, TakeLaneId, TrackId,
+};
 use crate::layers::LayerId;
 use crate::track::TrackKind;
 

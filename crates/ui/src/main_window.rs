@@ -469,6 +469,11 @@ impl MainWindowUi {
                 // scrub area.
                 crate::arrangement::start_rename(ctx, *locator);
             }
+            Effect::RenameSection(section) => {
+                // Spec: arranger-track R7. Rename types the name in the
+                // section.
+                crate::arrangement::arranger::start_rename(ctx, *section);
+            }
             Effect::EditTimeSignature(at) => {
                 // Spec: time-editing R31. The signature is typed over its
                 // marker in the lane.

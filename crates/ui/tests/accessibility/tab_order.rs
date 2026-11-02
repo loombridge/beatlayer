@@ -192,6 +192,56 @@ fn tab_runs_through_the_arrangement_and_the_neighbour_keys_to_the_next_track() {
     assert_eq!(focused_id(&h), Some(main_view_id()));
 }
 
+// Spec: arranger-track R14.
+#[test]
+fn tab_reaches_the_sections_in_time_order_straight_after_lock_envelopes() {
+    let (mut h, tracks, _) = set();
+    for (from, to) in [(0, 2), (2, 4), (4, 6)] {
+        let whole = bl_core::time::Ticks::WHOLE.get();
+        h.shell
+            .run(
+                "arranger.add_section",
+                json!({ "start": from * whole, "end": to * whole }),
+            )
+            .unwrap();
+    }
+    h.shell
+        .run("arrangement.arranger_track", json!({ "on": true }))
+        .unwrap();
+    tab_navigation_on(&mut h);
+    press(&mut h, Key::Num2, Modifiers::ALT);
+    h.shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [tracks[2]] }),
+        )
+        .unwrap();
+    h.settle();
+    let sections: Vec<Id> = h
+        .shell
+        .editor()
+        .document()
+        .sections()
+        .iter()
+        .map(|s| bl_ui::arrangement::arranger::section_id(s.id))
+        .collect();
+    let mut order = Vec::new();
+    for _ in 0..30 {
+        press(&mut h, Key::Tab, Modifiers::NONE);
+        order.push(focused_id(&h).unwrap());
+    }
+    let lock = order
+        .iter()
+        .position(|id| *id == bl_ui::arrangement::lock_envelopes_id())
+        .expect("Lock Envelopes is in the order");
+    assert_eq!(order[lock + 1..=lock + 3], sections[..]);
+    assert_eq!(
+        order[lock + 4],
+        bl_ui::arrangement::optimize_height_id(),
+        "Optimize Height follows the sections"
+    );
+}
+
 fn peak_id(place: Place, track: TrackId) -> Id {
     Id::new(("mixer-peak", place, track))
 }

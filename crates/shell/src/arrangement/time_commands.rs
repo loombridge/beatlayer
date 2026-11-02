@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 
 use bl_core::time::{Bpm, Ticks, TimeSignatureChange};
 use bl_model::{
-    AutomationTarget, Breakpoint, Clip, Command, Document, Editor, Locator, SongSection, TakeLaneId,
-    TrackId,
+    AutomationTarget, Breakpoint, Clip, Command, Document, Editor, Locator, SongSection,
+    TakeLaneId, TrackId,
 };
 use bl_shell_spec::arrangement::Lane;
 use bl_shell_spec::editing::{

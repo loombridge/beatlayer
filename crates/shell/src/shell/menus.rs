@@ -22,6 +22,7 @@ use bl_model::TrackId;
 use bl_model::TrackKind;
 use bl_model::registry as model;
 use bl_shell_spec::arrangement as view_ids;
+use bl_shell_spec::arranger as arranger_ids;
 use bl_shell_spec::audio_editing as audio_ids;
 use bl_shell_spec::automation as automation_ids;
 use bl_shell_spec::autosampler as autosampler_ids;
@@ -37,7 +38,6 @@ use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::envelope_keys as envelope_key_ids;
 use bl_shell_spec::export as export_ids;
 use bl_shell_spec::freeze as freeze_ids;
-use bl_shell_spec::arranger as arranger_ids;
 use bl_shell_spec::locator as locator_ids;
 use bl_shell_spec::midi_tools as tool_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
@@ -226,9 +226,7 @@ impl Shell {
                 )
             }
             // Spec: arranger-track R1. Ticked while the lane shows.
-            arranger_ids::ARRANGER_TRACK => {
-                Some(self.editor.document().settings().arranger_track)
-            }
+            arranger_ids::ARRANGER_TRACK => Some(self.editor.document().settings().arranger_track),
             ids::VIEW_FULL_SCREEN => Some(self.full_screen_of(self.acting_window())),
             ids::VIEW_TOGGLE_SECOND_WINDOW => Some(self.second.open),
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser_of(self.acting_window())),

@@ -934,7 +934,11 @@ impl Document {
                 .locators
                 .iter()
                 .any(|locator| locator.id.0 == id)
-            || self.settings.sections.iter().any(|section| section.id.0 == id)
+            || self
+                .settings
+                .sections
+                .iter()
+                .any(|section| section.id.0 == id)
             || self
                 .settings
                 .grooves
@@ -958,7 +962,12 @@ impl Document {
             .iter()
             .map(|locator| locator.id.0)
             .max();
-        let section = self.settings.sections.iter().map(|section| section.id.0).max();
+        let section = self
+            .settings
+            .sections
+            .iter()
+            .map(|section| section.id.0)
+            .max();
         let groove = self
             .settings
             .grooves
@@ -966,11 +975,13 @@ impl Document {
             .iter()
             .map(|groove| groove.id.0)
             .max();
-        [track, clip, lane, device, chain, scene, locator, section, groove]
-            .into_iter()
-            .flatten()
-            .max()
-            .unwrap_or(self.main.0)
+        [
+            track, clip, lane, device, chain, scene, locator, section, groove,
+        ]
+        .into_iter()
+        .flatten()
+        .max()
+        .unwrap_or(self.main.0)
     }
 
     /// Checks that the document's derived lookups match its tree and that the

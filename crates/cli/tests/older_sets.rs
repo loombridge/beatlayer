@@ -1242,7 +1242,11 @@ fn sections_and_the_arranger_track_are_saved_and_an_older_set_has_none() {
     let older = encode_json(&project_of(&editor), 1).unwrap();
     let value: Value = serde_json::from_slice(&older).unwrap();
     assert!(value["document"]["settings"].get("sections").is_none());
-    assert!(value["document"]["settings"].get("arranger_track").is_none());
+    assert!(
+        value["document"]["settings"]
+            .get("arranger_track")
+            .is_none()
+    );
     let (loaded, _) = decode_json(&older, &LoadOptions::default()).unwrap();
     assert!(loaded.document.sections().is_empty());
     assert!(!loaded.document.settings().arranger_track);

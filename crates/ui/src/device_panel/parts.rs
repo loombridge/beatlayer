@@ -73,11 +73,6 @@ impl Control<'_> {
         self.value >= 0.5
     }
 
-    /// Sets the parameter as the control does: one undo step.
-    fn press(&self, events: &mut Vec<UiEvent>, value: f64) {
-        self.change(value, events);
-    }
-
     /// Whether the control was chosen: a click or Enter.
     fn chosen(ui: &Ui, response: &Response) -> bool {
         response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)))
@@ -343,7 +338,7 @@ impl Control<'_> {
             Face::Text(name),
         );
         if Self::chosen(ui, &response) {
-            self.press(events, if on { 0.0 } else { 1.0 });
+            self.change(if on { 0.0 } else { 1.0 }, events);
         }
         self.describe_switch(ui, &response);
     }
@@ -366,7 +361,7 @@ impl Control<'_> {
         };
         let response = self.button(ui, theme, (self.rect, self.id()), (Look::Dark, on), face);
         if Self::chosen(ui, &response) {
-            self.press(events, if on { 0.0 } else { 1.0 });
+            self.change(if on { 0.0 } else { 1.0 }, events);
         }
         self.describe_switch(ui, &response);
     }
@@ -402,7 +397,7 @@ impl Control<'_> {
             let face = glyph.map_or(Face::Text(choice), Face::Glyph);
             let response = self.button(ui, theme, (*rect, id), (Look::Dark, chosen), face);
             if Self::chosen(ui, &response) && !chosen {
-                self.press(events, index as f64);
+                self.change(index as f64, events);
             }
             let (name, choice) = (self.descriptor.name.clone(), choice.clone());
             response.widget_info(|| {
@@ -453,7 +448,7 @@ impl Control<'_> {
                 face,
             );
             if Self::chosen(ui, &response) && !chosen {
-                mode.press(events, index as f64);
+                mode.change(index as f64, events);
             }
             let label = unit_name(*unit);
             response
@@ -801,7 +796,7 @@ fn title_button(
     let on = control.on();
     let response = control.button(ui, theme, (rect, id), (Look::Dark, on), face);
     if Control::chosen(ui, &response) {
-        control.press(events, if on { 0.0 } else { 1.0 });
+        control.change(if on { 0.0 } else { 1.0 }, events);
     }
     control.describe_switch(ui, &response);
 }

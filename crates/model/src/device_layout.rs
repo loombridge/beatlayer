@@ -32,9 +32,52 @@ pub type DevicePages = std::collections::BTreeMap<DeviceId, PageChoice>;
 /// gaps above and below the frame and the 16-point title bar.
 pub const BODY_HEIGHT: f32 = 158.0;
 
-/// The space around and between the controls of a generic layout's band, in
-/// points. (Live's spacing is to observe.)
+/// The space around a band of controls, from its edge to the first control,
+/// in points: Live's body padding (observed in Live 12.4.16, 2 November
+/// 2026; layout L-DEV-042).
 pub const PADDING: f32 = 4.0;
+
+/// The space between two columns of controls, in points (observed).
+pub const COLUMN_GAP: f32 = 10.5;
+
+/// The space between two controls stacked in a column, in points (observed).
+pub const ROW_GAP: f32 = 9.5;
+
+/// The space between two buttons of a row, a stack or a grid, in points
+/// (observed).
+pub const BUTTON_GAP: f32 = 3.0;
+
+/// The height of a number box, chooser or text button, and the diameter of
+/// a round button, in points (observed).
+pub const BOX_HEIGHT: f32 = 12.0;
+
+/// The height of the name above a knob or a box, and of the value below a
+/// knob, in points (observed).
+pub const LABEL_HEIGHT: f32 = 9.0;
+
+/// The diameter of a large knob's ring, in points (observed).
+pub const KNOB_DIAMETER: f32 = 35.0;
+
+/// The diameter of a small knob's ring, in points (observed).
+pub const SMALL_KNOB_DIAMETER: f32 = 25.0;
+
+/// The width of a button in a grid or a stack, in points (observed): a grid
+/// cell is this wide and [`BOX_HEIGHT`] tall.
+pub const CELL_WIDTH: f32 = 22.0;
+
+/// The width of a segment in a row of text buttons, in points (observed).
+pub const SEGMENT_WIDTH: f32 = 36.0;
+
+/// The width of the unit pair beside a knob (`ms` over `sync`), in points
+/// (observed), and the space between it and the knob.
+pub const UNIT_PAIR_WIDTH: f32 = 18.0;
+
+/// The height of a section heading over a group of controls, in points.
+pub const HEADING_HEIGHT: f32 = 12.0;
+
+/// The width of a side strip: its toggle at the top, its name up its length,
+/// in points (observed).
+pub const STRIP_WIDTH: f32 = 22.0;
 
 /// A size in points.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -106,19 +149,55 @@ impl Rect {
     }
 }
 
-/// How a control draws its parameter.
+/// How a control draws its parameter. Every size is as Live draws it
+/// (observed in Live 12.4.16, 2 November 2026; layout L-DEV-042 to
+/// L-DEV-046).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Widget {
-    /// A round knob with its name above and its value below: continuous
-    /// values and gains.
+    /// A large round knob with its name above and its value below: the
+    /// arc runs in the accent from the parameter's default, so a bipolar
+    /// knob's from the centre, with a small notch at its top.
     Knob,
-    /// A switch button with its name above: toggles.
-    Toggle,
+    /// The same knob in Live's second, smaller size.
+    SmallKnob,
+    /// A plain number box, dragged or typed, with its name above.
+    Number,
+    /// A number box whose blue fill shows the value's place in its range
+    /// (a "lit" box), with its name above.
+    Slider,
+    /// A plain number box with a ◀ marker at its right (the amounts of
+    /// Chord and Sampler), with its name above.
+    Marked,
     /// A field that opens a menu of choices, with its name above.
     Chooser,
-    /// A number field, dragged or typed, with its name above.
-    Number,
+    /// A text button holding its parameter's name, orange with dark text
+    /// while on, dark grey with light text while off.
+    Toggle,
+    /// A text button like [`Toggle`](Self::Toggle) whose off state is
+    /// outlined in orange.
+    Outlined,
+    /// A small rectangular button with an icon ([`Control::glyph`]) in
+    /// place of text, lit while on.
+    IconToggle,
+    /// A round button with an icon ([`Control::glyph`]), lit while on.
+    Round,
+    /// A row of that many text buttons, one for each choice of a choice
+    /// parameter, the chosen one lit (Peak, RMS and Expand).
+    Segments(u8),
+    /// The same as a column of that many buttons.
+    Stack(u8),
+    /// The choices of a choice parameter as a grid of small buttons, filled
+    /// by rows (Note Echo's 1 2 3 4 over 5 6 8 16).
+    Grid {
+        /// How many buttons across.
+        columns: u8,
+        /// How many rows.
+        rows: u8,
+    },
+    /// A row of that many icon buttons, one for each choice of a choice
+    /// parameter (the filter types), the chosen one lit.
+    IconSegments(u8),
 }
 
 impl Widget {
@@ -133,15 +212,141 @@ impl Widget {
         }
     }
 
-    /// The space the control takes, its labels included, in points.
-    /// (Beatlayer's own sizes; Live's are to observe.)
+    /// The space the control takes, its labels included, in points, as Live
+    /// draws it (the widest a box gets is the device's to set,
+    /// [`Control::sized`]).
     #[must_use]
-    pub const fn size(self) -> Size {
+    pub fn size(self) -> Size {
+        let rows = |n: u8| f32::from(n) * BOX_HEIGHT + f32::from(n.saturating_sub(1)) * BUTTON_GAP;
         match self {
-            Self::Knob => Size::new(48.0, 52.0),
-            Self::Toggle | Self::Chooser | Self::Number => Size::new(48.0, 32.0),
+            Self::Knob => Size::new(40.0, LABEL_HEIGHT * 2.0 + 36.0),
+            Self::SmallKnob => Size::new(32.0, LABEL_HEIGHT * 2.0 + 23.0),
+            Self::Number | Self::Slider | Self::Marked | Self::Chooser => {
+                Size::new(53.0, LABEL_HEIGHT + BOX_HEIGHT)
+            }
+            Self::Toggle | Self::Outlined => Size::new(SEGMENT_WIDTH, BOX_HEIGHT),
+            Self::IconToggle => Size::new(CELL_WIDTH, BOX_HEIGHT),
+            Self::Round => Size::new(BOX_HEIGHT, BOX_HEIGHT),
+            Self::Segments(n) => Size::new(
+                f32::from(n) * SEGMENT_WIDTH + f32::from(n.saturating_sub(1)) * BUTTON_GAP,
+                BOX_HEIGHT,
+            ),
+            Self::Stack(n) => Size::new(SEGMENT_WIDTH + 9.0, rows(n)),
+            Self::Grid { columns, rows: r } => Size::new(
+                f32::from(columns) * CELL_WIDTH + f32::from(columns.saturating_sub(1)) * BUTTON_GAP,
+                rows(r),
+            ),
+            Self::IconSegments(n) => Size::new(
+                f32::from(n) * CELL_WIDTH + f32::from(n.saturating_sub(1)) * BUTTON_GAP,
+                BOX_HEIGHT,
+            ),
         }
     }
+
+    /// How many choices a widget that draws a choice parameter as buttons
+    /// has room for; `None` for the others.
+    #[must_use]
+    pub fn choice_capacity(self) -> Option<usize> {
+        match self {
+            Self::Segments(n) | Self::Stack(n) | Self::IconSegments(n) => Some(usize::from(n)),
+            Self::Grid { columns, rows } => Some(usize::from(columns) * usize::from(rows)),
+            _ => None,
+        }
+    }
+}
+
+/// An icon on an icon button, a round button or a unit pair: drawn by the UI
+/// in the button's colour.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Glyph {
+    /// A low-pass filter's response.
+    LowPass,
+    /// A high-pass filter's response.
+    HighPass,
+    /// A band-pass filter's response.
+    BandPass,
+    /// A notch filter's response.
+    Notch,
+    /// A metronome: the tempo-synced unit.
+    Metronome,
+    /// A play triangle.
+    Play,
+    /// A down triangle.
+    Down,
+    /// A lower-case i, for a device's information.
+    Info,
+    /// A left arrow.
+    Left,
+    /// A right arrow.
+    Right,
+    /// A plus sign.
+    Plus,
+    /// A minus sign.
+    Minus,
+    /// A flat and a sharp: Use Current Scale.
+    FlatSharp,
+}
+
+/// A unit a knob's two parameters read in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Unit {
+    /// Milliseconds.
+    Ms,
+    /// Hertz.
+    Hz,
+    /// Synced to the tempo: drawn as a metronome.
+    Sync,
+    /// A musical note.
+    Note,
+}
+
+impl Unit {
+    /// The text on the unit's button, or `None` where it draws an icon.
+    #[must_use]
+    pub const fn text(self) -> Option<&'static str> {
+        match self {
+            Self::Ms => Some("ms"),
+            Self::Hz => Some("Hz"),
+            Self::Note => Some("note"),
+            Self::Sync => None,
+        }
+    }
+
+    /// The icon on the unit's button, where it has one.
+    #[must_use]
+    pub const fn glyph(self) -> Option<Glyph> {
+        match self {
+            Self::Sync => Some(Glyph::Metronome),
+            _ => None,
+        }
+    }
+}
+
+/// A pair of unit buttons beside a knob that switch which of two parameters
+/// the knob shows: Arpeggiator's Rate (ms or sync), Envelope Follower's
+/// Delay, LFO's Rate. The knob shows one parameter, never both: the device's
+/// description says which two, as an [`Alternate`](crate::param::Alternate)
+/// whose switch is `mode`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct UnitPair {
+    /// The switch that picks the unit: off, the first unit's parameter (the
+    /// control's own) shows and the first button is lit.
+    pub mode: ParamId,
+    /// The two units, in the order of `mode`'s values.
+    pub units: [Unit; 2],
+}
+
+/// A condition that greys a control: while parameter `param`'s value, rounded,
+/// is `value`. The control stays visible and usable, as one of a device that
+/// is off does (L-DEV-011).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct GreyWhen {
+    /// The parameter that decides.
+    pub param: ParamId,
+    /// The value, rounded, at which the control is greyed.
+    pub value: i32,
 }
 
 /// One control in a band: a parameter, drawn by a widget, at a place in the
@@ -156,14 +361,91 @@ pub struct Control {
     pub x: f32,
     /// Its top edge, from the band's.
     pub y: f32,
+    /// Its size where the device sets it, in place of the widget's: the
+    /// width of a box, a row of buttons or a unit pair's control.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<Size>,
+    /// The icon of an icon button or a round button.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub glyph: Option<Glyph>,
+    /// The unit pair beside a knob, which makes the knob show one of two
+    /// parameters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<UnitPair>,
+    /// The condition that greys the control.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grey: Option<GreyWhen>,
 }
 
 impl Control {
+    /// A control for `param`, drawn by `widget`, at `x`, `y` in its band.
+    #[must_use]
+    pub const fn new(param: ParamId, widget: Widget, x: f32, y: f32) -> Self {
+        Self {
+            param,
+            widget,
+            x,
+            y,
+            size: None,
+            glyph: None,
+            unit: None,
+            grey: None,
+        }
+    }
+
+    /// The same control at `width` by `height` points.
+    #[must_use]
+    pub const fn sized(mut self, width: f32, height: f32) -> Self {
+        self.size = Some(Size::new(width, height));
+        self
+    }
+
+    /// The same control with `glyph` as its icon.
+    #[must_use]
+    pub const fn with_glyph(mut self, glyph: Glyph) -> Self {
+        self.glyph = Some(glyph);
+        self
+    }
+
+    /// The same knob with a unit pair beside it: the buttons set `mode`, the
+    /// switch of the description's alternate for this control's parameter.
+    #[must_use]
+    pub const fn with_unit(mut self, mode: ParamId, units: [Unit; 2]) -> Self {
+        self.unit = Some(UnitPair { mode, units });
+        self
+    }
+
+    /// The same control, greyed while `param`'s value rounds to `value`.
+    #[must_use]
+    pub const fn greyed_while(mut self, param: ParamId, value: i32) -> Self {
+        self.grey = Some(GreyWhen { param, value });
+        self
+    }
+
+    /// The space it takes: its own size, or its widget's, with the unit
+    /// pair to the left of a knob.
+    #[must_use]
+    pub fn extent(&self) -> Size {
+        self.size.unwrap_or_else(|| {
+            let size = self.widget.size();
+            if self.unit.is_some() {
+                Size::new(size.width + UNIT_PAIR_WIDTH + PADDING, size.height)
+            } else {
+                size
+            }
+        })
+    }
+
     /// Its rectangle in its band.
     #[must_use]
     pub fn rect(&self) -> Rect {
-        let size = self.widget.size();
+        let size = self.extent();
         Rect::new(self.x, self.y, size.width, size.height)
+    }
+
+    /// The parameters it places: its own, and a unit pair's switch.
+    fn params(&self) -> impl Iterator<Item = ParamId> {
+        [self.param].into_iter().chain(self.unit.map(|u| u.mode))
     }
 }
 
@@ -196,7 +478,8 @@ pub struct ControlBand {
 impl ControlBand {
     /// A band `height` tall holding `controls` top to bottom, then in
     /// further columns left to right as each fills, with [`PADDING`] around
-    /// and between them.
+    /// them, [`ROW_GAP`] between two in a column and [`COLUMN_GAP`] between
+    /// columns.
     #[must_use]
     pub fn stacked(height: f32, controls: &[(ParamId, Widget)]) -> Self {
         let mut placed = Vec::with_capacity(controls.len());
@@ -204,23 +487,31 @@ impl ControlBand {
         for (param, widget) in controls {
             let size = widget.size();
             if y > PADDING && y + size.height + PADDING > height {
-                x += column_width + PADDING;
+                x += column_width + COLUMN_GAP;
                 y = PADDING;
                 column_width = 0.0;
             }
-            placed.push(Control {
-                param: *param,
-                widget: *widget,
-                x,
-                y,
-            });
-            y += size.height + PADDING;
+            placed.push(Control::new(*param, *widget, x, y));
+            y += size.height + ROW_GAP;
             column_width = column_width.max(size.width);
         }
         Self {
             width: x + column_width + PADDING,
             height,
             controls: placed,
+            slots: None,
+        }
+    }
+
+    /// A band `width` by `height` points holding `controls` where they say
+    /// they sit: a device laid out as Live lays it out places each control
+    /// itself.
+    #[must_use]
+    pub fn free(width: f32, height: f32, controls: Vec<Control>) -> Self {
+        Self {
+            width,
+            height,
+            controls,
             slots: None,
         }
     }
@@ -315,11 +606,35 @@ pub enum LayoutNode {
     Column(Vec<LayoutNode>),
     /// Named pages, one of which shows at a time (WP-8.1).
     Pages(PagesNode),
+    /// A heading over a group of controls: it takes the width of the group
+    /// it sits over.
+    Heading(Heading),
 }
 
-/// The height of a pages node's tab row in the body, in points at 100%.
-/// (Beatlayer's own size.)
-pub const TAB_HEIGHT: f32 = 16.0;
+/// A section heading: a line of text over a group of controls (Electric's
+/// Hammer and Fork).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Heading {
+    /// The text.
+    pub text: String,
+    /// The width its text needs, in points: the least it takes.
+    pub width: f32,
+}
+
+impl Heading {
+    /// A heading reading `text`, at least `width` points wide.
+    #[must_use]
+    pub fn new(text: &str, width: f32) -> Self {
+        Self {
+            text: text.to_owned(),
+            width,
+        }
+    }
+}
+
+/// The height of a pages node's tab row in the body, in points at 100%
+/// (observed: a tab is as tall as a text button).
+pub const TAB_HEIGHT: f32 = BOX_HEIGHT;
 
 /// The least width of a tab in a body's tab row, or of a shell's section, in
 /// points at 100%. (Beatlayer's own size.)
@@ -337,7 +652,18 @@ pub enum PageStyle {
     /// A strip of sections, each its page's main controls under a section
     /// button, beside a display area the shown page fills.
     Shell,
+    /// A strip down the node's left edge ([`STRIP_WIDTH`] wide) with a ▼
+    /// toggle at its top and the node's name written up it; the node's area
+    /// right of it holds the second page while it is shown and the first,
+    /// which is empty, while it isn't ([`PagesNode::side_strip`]).
+    Strip,
 }
+
+/// The name of a side strip's page while its section is hidden.
+pub const STRIP_HIDDEN: &str = "Hidden";
+
+/// The name of a side strip's page while its section shows.
+pub const STRIP_SHOWN: &str = "Shown";
 
 /// One page of a pages node.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -371,7 +697,9 @@ impl Page {
         let mut band = |band: &ControlBand| {
             let (stride, count) = band.slots.map_or((0, 1), |g| (g.stride, g.count));
             for control in &band.controls {
-                found.extend((0..count).map(|slot| ParamId(control.param.0 + stride * slot)));
+                for param in control.params() {
+                    found.extend((0..count).map(|slot| ParamId(param.0 + stride * slot)));
+                }
             }
         };
         for node in self.section.iter().chain([&self.node]) {
@@ -380,7 +708,10 @@ impl Page {
                 LayoutNode::Cell(cell) => {
                     cell.top.iter().chain(&cell.bottom).for_each(&mut band);
                 }
-                LayoutNode::Row(_) | LayoutNode::Column(_) | LayoutNode::Pages(_) => {}
+                LayoutNode::Row(_)
+                | LayoutNode::Column(_)
+                | LayoutNode::Pages(_)
+                | LayoutNode::Heading(_) => {}
             });
         }
         found
@@ -423,6 +754,20 @@ impl PagesNode {
             pages,
             shown: 0,
         }
+    }
+
+    /// A side strip named `name` holding `section` while its toggle is on:
+    /// hidden in a new device, as Live's are.
+    #[must_use]
+    pub fn side_strip(name: &str, section: LayoutNode) -> Self {
+        Self::new(
+            name,
+            PageStyle::Strip,
+            vec![
+                Page::new(STRIP_HIDDEN, LayoutNode::Row(Vec::new())),
+                Page::new(STRIP_SHOWN, section),
+            ],
+        )
     }
 
     /// The index of the page that shows.
@@ -470,6 +815,15 @@ impl PagesNode {
                 let strip = self.strip();
                 Size::new(strip.width + pages.width, strip.height.max(pages.height))
             }
+            // The device widens while the section shows, so only the shown
+            // page counts.
+            PageStyle::Strip => {
+                let shown = self
+                    .pages
+                    .get(self.shown_index())
+                    .map_or(Size::default(), |p| p.node.natural());
+                Size::new(STRIP_WIDTH + shown.width, shown.height.max(BODY_HEIGHT))
+            }
         }
     }
 
@@ -508,6 +862,20 @@ impl PagesNode {
                 }
                 Rect::new(x, at.y, (at.width - strip.width).max(0.0), at.height)
             }
+            PageStyle::Strip => {
+                buttons.push(Rect::new(
+                    at.x + PADDING,
+                    at.y + PADDING,
+                    BOX_HEIGHT,
+                    BOX_HEIGHT,
+                ));
+                Rect::new(
+                    at.x + STRIP_WIDTH,
+                    at.y,
+                    (at.width - STRIP_WIDTH).max(0.0),
+                    at.height,
+                )
+            }
         };
         placed.pages.push(PlacedPages {
             name: self.name.clone(),
@@ -515,6 +883,7 @@ impl PagesNode {
             names: self.pages.iter().map(|p| p.name.clone()).collect(),
             buttons,
             shown: self.shown_index(),
+            rect: at,
         });
         page.node.place(area, slot, placed);
     }
@@ -526,6 +895,7 @@ impl LayoutNode {
         match self {
             Self::Band(band) => Size::new(band.width, band.height),
             Self::Cell(cell) => Size::new(cell.width, cell.height),
+            Self::Heading(heading) => Size::new(heading.width, HEADING_HEIGHT),
             Self::Row(children) => children.iter().fold(Size::default(), |s, c| {
                 let n = c.natural();
                 Size::new(s.width + n.width, s.height.max(n.height))
@@ -541,7 +911,7 @@ impl LayoutNode {
     /// Its share of extra width.
     fn grows_across(&self) -> f32 {
         match self {
-            Self::Band(_) => 0.0,
+            Self::Band(_) | Self::Heading(_) => 0.0,
             Self::Cell(cell) => cell.weight,
             Self::Row(children) => children.iter().map(Self::grows_across).sum(),
             Self::Column(children) => children.iter().map(Self::grows_across).fold(0.0, f32::max),
@@ -555,7 +925,7 @@ impl LayoutNode {
     /// Its share of extra height.
     fn grows_down(&self) -> f32 {
         match self {
-            Self::Band(_) => 0.0,
+            Self::Band(_) | Self::Heading(_) => 0.0,
             Self::Cell(cell) => cell.weight,
             Self::Row(children) => children.iter().map(Self::grows_down).fold(0.0, f32::max),
             Self::Column(children) => children.iter().map(Self::grows_down).sum(),
@@ -631,6 +1001,10 @@ impl LayoutNode {
                 }
             }
             Self::Pages(pages) => pages.place(at, slot, placed),
+            Self::Heading(heading) => placed.headings.push(PlacedHeading {
+                text: heading.text.clone(),
+                rect: Rect::new(at.x, at.y, at.width.max(heading.width), HEADING_HEIGHT),
+            }),
         }
     }
 
@@ -652,7 +1026,7 @@ impl LayoutNode {
                         .for_each(|n| n.visit(f));
                 }
             }
-            Self::Band(_) | Self::Cell(_) => {}
+            Self::Band(_) | Self::Cell(_) | Self::Heading(_) => {}
         }
     }
 
@@ -671,7 +1045,7 @@ impl LayoutNode {
                         .for_each(|n| n.visit_pages_mut(f));
                 }
             }
-            Self::Band(_) | Self::Cell(_) => {}
+            Self::Band(_) | Self::Cell(_) | Self::Heading(_) => {}
         }
     }
 }
@@ -690,10 +1064,69 @@ fn place_band(band: &ControlBand, x: f32, y: f32, slot: u32, placed: &mut Placed
             rect: Rect::new(
                 rect.x + control.x,
                 rect.y + control.y,
-                control.widget.size().width,
-                control.widget.size().height,
+                control.extent().width,
+                control.extent().height,
             ),
+            glyph: control.glyph,
+            unit: control.unit,
+            grey: control.grey,
         }));
+}
+
+/// A maker's mark in a device's title bar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Maker {
+    /// Softube, who made Amp.
+    Softube,
+    /// Cytomic, who made Glue Compressor.
+    Cytomic,
+}
+
+impl Maker {
+    /// The mark's text.
+    #[must_use]
+    pub const fn text(self) -> &'static str {
+        match self {
+            Self::Softube => "Softube",
+            Self::Cytomic => "cytomic",
+        }
+    }
+}
+
+/// A part a device adds to its title bar, besides the activator, the name,
+/// its title-bar tabs ([`PageStyle::TitleBar`]), Use Current Scale (the
+/// description's title switch) and the three round buttons at the right
+/// (L-DEV-004, L-DEV-045). Those on the right are drawn right to left, the
+/// last of the list outermost.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TitlePart {
+    /// A heading across the title bar over its tabs and parts, as Drift's
+    /// and Meld's.
+    Heading(String),
+    /// The MPE label, for a device that takes MPE.
+    Mpe,
+    /// A maker's mark.
+    Maker(Maker),
+    /// A lettered toggle for the parameter (the A A S buttons).
+    Letter(char, ParamId),
+    /// A round button with an icon after the activator (▶, ▼, i), lit while
+    /// the parameter is on.
+    Round(Glyph, ParamId),
+    /// A text button reading the parameter's name (Learn, Send).
+    Button(ParamId),
+}
+
+impl TitlePart {
+    /// The parameter the part toggles, if it has one.
+    #[must_use]
+    pub fn param(&self) -> Option<ParamId> {
+        match self {
+            Self::Letter(_, p) | Self::Round(_, p) | Self::Button(p) => Some(*p),
+            Self::Heading(_) | Self::Mpe | Self::Maker(_) => None,
+        }
+    }
 }
 
 /// A device's layout (IMP-14): bands of controls and display cells in rows
@@ -702,6 +1135,9 @@ fn place_band(band: &ControlBand, x: f32, y: f32, slot: u32, placed: &mut Placed
 pub struct DeviceLayout {
     /// The whole body.
     pub root: LayoutNode,
+    /// What the device adds to its title bar.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub title: Vec<TitlePart>,
     /// The part the device adds to its body while it is expanded (L-DEV-004,
     /// L-DEV-007), if it has one: placed to the right of [`root`](Self::root).
     /// It places its parameters' controls like the rest of the layout.
@@ -723,6 +1159,24 @@ pub struct PlacedControl {
     /// How it's drawn.
     pub widget: Widget,
     /// Where, from the body's top-left corner.
+    pub rect: Rect,
+    /// The icon of an icon or round button.
+    #[serde(default)]
+    pub glyph: Option<Glyph>,
+    /// The unit pair beside a knob.
+    #[serde(default)]
+    pub unit: Option<UnitPair>,
+    /// What greys the control.
+    #[serde(default)]
+    pub grey: Option<GreyWhen>,
+}
+
+/// A section heading where a layout placed it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PlacedHeading {
+    /// Its text.
+    pub text: String,
+    /// Where, from the body's top-left corner: as wide as the group under it.
     pub rect: Rect,
 }
 
@@ -753,6 +1207,10 @@ pub struct PlacedPages {
     pub buttons: Vec<Rect>,
     /// The index of the page that shows.
     pub shown: usize,
+    /// The node's whole area, from the body's top-left corner: a side strip
+    /// is its left [`STRIP_WIDTH`].
+    #[serde(default)]
+    pub rect: Rect,
 }
 
 /// A layout placed at a size.
@@ -769,6 +1227,9 @@ pub struct Placed {
     pub cells: Vec<PlacedCell>,
     /// Its pages nodes, in the layout's order.
     pub pages: Vec<PlacedPages>,
+    /// Its section headings, in the layout's order.
+    #[serde(default)]
+    pub headings: Vec<PlacedHeading>,
 }
 
 impl DeviceLayout {
@@ -777,8 +1238,16 @@ impl DeviceLayout {
     pub fn new(root: LayoutNode) -> Self {
         Self {
             root,
+            title: Vec::new(),
             expanded: None,
         }
+    }
+
+    /// The same, with `parts` in its title bar.
+    #[must_use]
+    pub fn with_title(mut self, parts: Vec<TitlePart>) -> Self {
+        self.title = parts;
+        self
     }
 
     /// The same, with `part` as what the device adds while expanded.
@@ -804,10 +1273,11 @@ impl DeviceLayout {
     /// [`place`]: Self::place
     #[must_use]
     pub fn shown(&self, expanded: bool) -> Self {
-        match (&self.expanded, expanded) {
-            (Some(part), true) => Self::new(LayoutNode::Row(vec![self.root.clone(), part.clone()])),
-            _ => Self::new(self.root.clone()),
-        }
+        let root = match (&self.expanded, expanded) {
+            (Some(part), true) => LayoutNode::Row(vec![self.root.clone(), part.clone()]),
+            _ => self.root.clone(),
+        };
+        Self::new(root).with_title(self.title.clone())
     }
 
     /// The same layout showing the page `choice` names for each pages node
@@ -879,7 +1349,10 @@ impl DeviceLayout {
         self.root.visit(&mut |node| match node {
             LayoutNode::Cell(cell) => count = count.max(cell.slot.map_or(0, |slot| slot + 1)),
             LayoutNode::Band(band) => count = count.max(band.slots.map_or(0, |g| g.count)),
-            LayoutNode::Row(_) | LayoutNode::Column(_) | LayoutNode::Pages(_) => {}
+            LayoutNode::Row(_)
+            | LayoutNode::Column(_)
+            | LayoutNode::Pages(_)
+            | LayoutNode::Heading(_) => {}
         });
         count
     }
@@ -948,6 +1421,19 @@ impl DeviceLayout {
         // expanded one.
         let whole = self.shown(true);
         let mut named: Vec<&str> = Vec::new();
+        for part in &self.title {
+            if let Some(param) = part.param() {
+                if !params.iter().any(|p| p.id == param) {
+                    problem = Some(format!(
+                        "the title bar has a part for parameter {}, which the device doesn't have",
+                        param.0
+                    ));
+                } else if seen.contains(&param) {
+                    problem = Some(format!("the layout places parameter {} twice", param.0));
+                }
+                seen.push(param);
+            }
+        }
         whole.root.visit(&mut |node| {
             if problem.is_some() {
                 return;
@@ -1000,7 +1486,7 @@ impl DeviceLayout {
                     }
                     named.push(&node.name);
                 }
-                LayoutNode::Row(_) | LayoutNode::Column(_) => {}
+                LayoutNode::Row(_) | LayoutNode::Column(_) | LayoutNode::Heading(_) => {}
             }
         });
         if let Some(problem) = problem {
@@ -1025,30 +1511,52 @@ fn check_band(
     problem: &mut Option<String>,
 ) {
     let whole = Rect::new(0.0, 0.0, band.width, band.height);
+    // A band of slot controls places each slot's copy of its parameters.
+    let (stride, count) = band
+        .slots
+        .map_or((0, 1), |group| (group.stride, group.count));
     for control in &band.controls {
+        for slot in 0..count {
+            for first in control.params() {
+                if problem.is_some() {
+                    return;
+                }
+                let param = ParamId(first.0 + stride * slot);
+                let n = param.0;
+                if !params.iter().any(|p| p.id == param) {
+                    *problem = Some(format!(
+                        "the layout has a control for parameter {n}, which the device doesn't have"
+                    ));
+                } else if seen.contains(&param) {
+                    *problem = Some(format!("the layout places parameter {n} twice"));
+                } else if !whole.contains(&control.rect()) {
+                    *problem = Some(format!("parameter {n}'s control lies outside its band"));
+                }
+                seen.push(param);
+            }
+        }
         if problem.is_some() {
             return;
         }
-        // A band of slot controls places each slot's copy of its parameters.
-        let (stride, count) = band
-            .slots
-            .map_or((0, 1), |group| (group.stride, group.count));
-        for slot in 0..count {
-            if problem.is_some() {
-                return;
+        let described = |param: ParamId| params.iter().find(|p| p.id == param);
+        if let (Some(room), Some(descriptor)) =
+            (control.widget.choice_capacity(), described(control.param))
+        {
+            match &descriptor.kind {
+                ParamKind::Choice { choices } if choices.len() <= room => {}
+                _ => {
+                    *problem = Some(format!(
+                        "parameter {}'s buttons need a choice with at most {room} choices",
+                        control.param.0
+                    ));
+                }
             }
-            let param = ParamId(control.param.0 + stride * slot);
-            let n = param.0;
-            if !params.iter().any(|p| p.id == param) {
-                *problem = Some(format!(
-                    "the layout has a control for parameter {n}, which the device doesn't have"
-                ));
-            } else if seen.contains(&param) {
-                *problem = Some(format!("the layout places parameter {n} twice"));
-            } else if !whole.contains(&control.rect()) {
-                *problem = Some(format!("parameter {n}'s control lies outside its band"));
-            }
-            seen.push(param);
+        }
+        if let Some(grey) = control.grey.filter(|g| described(g.param).is_none()) {
+            *problem = Some(format!(
+                "parameter {}'s control is greyed by parameter {}, which the device doesn't have",
+                control.param.0, grey.param.0
+            ));
         }
     }
 }
@@ -1109,8 +1617,9 @@ mod tests {
         assert!(layout.has_expanded());
         let (hidden, shown) = (layout.shown(false), layout.shown(true));
         assert!(!hidden.has_expanded() && !shown.has_expanded());
-        assert_eq!(hidden.docked_size(), Size::new(56.0, BODY_HEIGHT));
-        assert_eq!(shown.docked_size(), Size::new(112.0, BODY_HEIGHT));
+        let two_knobs = 2.0 * PADDING + Widget::Knob.size().width;
+        assert_eq!(hidden.docked_size(), Size::new(two_knobs, BODY_HEIGHT));
+        assert_eq!(shown.docked_size(), Size::new(2.0 * two_knobs, BODY_HEIGHT));
         let placed = shown.place(shown.docked_size());
         let at = |param: u32| {
             placed
@@ -1121,7 +1630,10 @@ mod tests {
                 .rect
         };
         assert_eq!(at(0), hidden.place(hidden.docked_size()).controls[0].rect);
-        assert!(at(2).x >= 56.0, "the expanded part sits right of the body");
+        assert!(
+            at(2).x >= two_knobs,
+            "the expanded part sits right of the body"
+        );
         // A parameter placed in both parts is refused, as in one band.
         let twice = DeviceLayout::new(LayoutNode::Band(ControlBand::stacked(
             BODY_HEIGHT,
@@ -1143,10 +1655,14 @@ mod tests {
         let layout = layout();
         layout.check(&params(5)).unwrap();
         let docked = layout.docked_size();
-        assert_eq!(docked, Size::new(56.0 + 120.0 + 56.0, BODY_HEIGHT));
+        let two_knobs = 2.0 * PADDING + Widget::Knob.size().width;
+        assert_eq!(
+            docked,
+            Size::new(two_knobs + 120.0 + two_knobs, BODY_HEIGHT)
+        );
         let placed = layout.place(Size::new(10.0, 10.0));
         assert_eq!(placed.size, docked, "never smaller than docked");
-        assert_eq!(placed.cells[0].rect, Rect::new(56.0, 0.0, 120.0, 60.0));
+        assert_eq!(placed.cells[0].rect, Rect::new(two_knobs, 0.0, 120.0, 60.0));
     }
 
     // Spec: device-framework R11
@@ -1239,7 +1755,10 @@ mod tests {
         assert_eq!(docked.height, BODY_HEIGHT);
         assert_eq!(layout.place(Size::new(2000.0, 900.0)).size, docked);
         // Two knobs fill a column of 158 points; seven make four columns.
-        assert_eq!(docked.width, PADDING + 4.0 * (48.0 + PADDING));
+        assert_eq!(
+            docked.width,
+            2.0 * PADDING + 4.0 * Widget::Knob.size().width + 3.0 * COLUMN_GAP
+        );
     }
 
     // Spec: device-framework R40
@@ -1545,5 +2064,262 @@ mod tests {
         );
         assert_eq!(layout.pages().len(), 1);
         assert_eq!(layout.pages()[0].name, "Pages");
+    }
+
+    fn choice_params(count: u32, choices: usize) -> Vec<ParamDescriptor> {
+        let names: Vec<String> = (0..choices).map(|n| n.to_string()).collect();
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        (0..count)
+            .map(|n| ParamDescriptor::choice(ParamId(n), &format!("C{n}"), &names, 0))
+            .collect()
+    }
+
+    // Spec: device-framework R52
+    #[test]
+    fn widgets_have_the_sizes_live_draws_them_at() {
+        // Two knob sizes, as Arpeggiator's Rate and Steps show; a box is 12
+        // points tall under a 9-point name.
+        assert_eq!(Widget::Knob.size(), Size::new(40.0, 54.0));
+        assert_eq!(Widget::SmallKnob.size(), Size::new(32.0, 41.0));
+        for widget in [
+            Widget::Number,
+            Widget::Slider,
+            Widget::Marked,
+            Widget::Chooser,
+        ] {
+            assert_eq!(widget.size(), Size::new(53.0, 21.0), "{widget:?}");
+        }
+        assert_eq!(Widget::Toggle.size().height, BOX_HEIGHT);
+        assert_eq!(Widget::Round.size(), Size::new(12.0, 12.0));
+        // Note Echo's grid: two rows of four 22-point buttons, 3 points apart.
+        assert_eq!(
+            Widget::Grid {
+                columns: 4,
+                rows: 2
+            }
+            .size(),
+            Size::new(4.0 * 22.0 + 3.0 * 3.0, 2.0 * 12.0 + 3.0)
+        );
+        assert_eq!(
+            Widget::Segments(3).size().width,
+            3.0 * SEGMENT_WIDTH + 2.0 * BUTTON_GAP
+        );
+        assert_eq!(
+            Widget::Stack(2).size().height,
+            2.0 * BOX_HEIGHT + BUTTON_GAP
+        );
+        assert_eq!(
+            Widget::Grid {
+                columns: 4,
+                rows: 2
+            }
+            .choice_capacity(),
+            Some(8)
+        );
+        assert_eq!(Widget::Knob.choice_capacity(), None);
+    }
+
+    // Spec: device-framework R52
+    #[test]
+    fn a_device_sets_the_size_and_place_of_a_control_it_lays_out_itself() {
+        let band = ControlBand::free(
+            130.0,
+            50.0,
+            vec![
+                Control::new(ParamId(0), Widget::Number, 4.0, 4.0).sized(80.0, 21.0),
+                Control::new(ParamId(1), Widget::SmallKnob, 90.0, 4.0),
+            ],
+        );
+        let layout = DeviceLayout::new(LayoutNode::Band(band));
+        layout.check(&params(2)).unwrap();
+        let placed = layout.place(layout.docked_size());
+        assert_eq!(placed.controls[0].rect, Rect::new(4.0, 4.0, 80.0, 21.0));
+        assert_eq!(
+            placed.controls[1].rect.size(),
+            Widget::SmallKnob.size(),
+            "the widget's own size where the device sets none"
+        );
+        // A control outside its band is refused.
+        let outside = ControlBand::free(
+            50.0,
+            40.0,
+            vec![Control::new(ParamId(0), Widget::Number, 4.0, 4.0).sized(80.0, 21.0)],
+        );
+        assert!(
+            DeviceLayout::new(LayoutNode::Band(outside))
+                .check(&params(1))
+                .unwrap_err()
+                .contains("outside")
+        );
+    }
+
+    // Spec: device-framework R55
+    #[test]
+    fn a_unit_pair_sits_left_of_its_knob_and_places_its_switch() {
+        let control = Control::new(ParamId(0), Widget::Knob, 4.0, 4.0)
+            .with_unit(ParamId(1), [Unit::Ms, Unit::Sync]);
+        assert_eq!(
+            control.extent().width,
+            Widget::Knob.size().width + UNIT_PAIR_WIDTH + PADDING
+        );
+        let layout = DeviceLayout::new(LayoutNode::Band(ControlBand::free(
+            100.0,
+            Widget::Knob.size().height + 8.0,
+            vec![control],
+        )));
+        // The switch is placed by the pair: the layout needs no other control
+        // for it, and a second one is a parameter placed twice.
+        layout.check(&params(2)).unwrap();
+        assert!(layout.check(&params(3)).is_err(), "a parameter is unplaced");
+        let twice = DeviceLayout::new(LayoutNode::Row(vec![
+            layout.root.clone(),
+            LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, &knobs(1, 1))),
+        ]));
+        assert!(twice.check(&params(2)).unwrap_err().contains("twice"));
+        assert_eq!(Unit::Sync.glyph(), Some(Glyph::Metronome));
+        assert_eq!(Unit::Ms.text(), Some("ms"));
+    }
+
+    // Spec: device-framework R54
+    #[test]
+    fn buttons_for_choices_need_a_choice_that_fits() {
+        let row = |widget| {
+            DeviceLayout::new(LayoutNode::Band(ControlBand::free(
+                200.0,
+                80.0,
+                vec![Control::new(ParamId(0), widget, 4.0, 4.0)],
+            )))
+        };
+        let three = choice_params(1, 3);
+        row(Widget::Segments(3)).check(&three).unwrap();
+        row(Widget::Stack(4)).check(&three).unwrap();
+        row(Widget::Grid {
+            columns: 2,
+            rows: 2,
+        })
+        .check(&three)
+        .unwrap();
+        assert!(
+            row(Widget::Segments(2))
+                .check(&three)
+                .unwrap_err()
+                .contains("at most 2"),
+            "a third choice has no button"
+        );
+        assert!(
+            row(Widget::IconSegments(4)).check(&params(1)).is_err(),
+            "a continuous parameter has no choices"
+        );
+    }
+
+    // Spec: device-framework R56
+    #[test]
+    fn a_control_is_greyed_by_a_parameter_the_device_has() {
+        let layout = |by| {
+            DeviceLayout::new(LayoutNode::Band(ControlBand::free(
+                100.0,
+                60.0,
+                vec![
+                    Control::new(ParamId(0), Widget::Knob, 4.0, 4.0).greyed_while(ParamId(by), 0),
+                    Control::new(ParamId(1), Widget::Toggle, 50.0, 4.0),
+                ],
+            )))
+        };
+        layout(1).check(&params(2)).unwrap();
+        assert!(
+            layout(9)
+                .check(&params(2))
+                .unwrap_err()
+                .contains("greyed by"),
+            "a switch the device doesn't have"
+        );
+        let placed = layout(1).place(layout(1).docked_size());
+        assert_eq!(
+            placed.controls[0].grey,
+            Some(GreyWhen {
+                param: ParamId(1),
+                value: 0
+            })
+        );
+        assert_eq!(placed.controls[1].grey, None);
+    }
+
+    // Spec: device-framework R56
+    #[test]
+    fn a_heading_takes_the_width_of_the_group_under_it() {
+        let group = LayoutNode::Column(vec![
+            LayoutNode::Heading(Heading::new("Hammer", 30.0)),
+            LayoutNode::Band(ControlBand::stacked(60.0, &knobs(0, 1))),
+        ]);
+        let layout = DeviceLayout::new(LayoutNode::Row(vec![group]));
+        layout.check(&params(1)).unwrap();
+        let docked = layout.docked_size();
+        assert_eq!(docked.height, HEADING_HEIGHT + 60.0);
+        let placed = layout.place(docked);
+        assert_eq!(placed.headings.len(), 1);
+        assert_eq!(placed.headings[0].text, "Hammer");
+        assert_eq!(placed.headings[0].rect.width, docked.width);
+        assert_eq!(placed.headings[0].rect.height, HEADING_HEIGHT);
+        assert_eq!(placed.bands[0].y, HEADING_HEIGHT, "the group sits under it");
+    }
+
+    // Spec: device-framework R57
+    #[test]
+    fn a_side_strip_widens_the_device_while_its_section_shows() {
+        let section = LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, &knobs(0, 1)));
+        let strip = LayoutNode::Pages(PagesNode::side_strip("Audio Routing", section.clone()));
+        let layout = DeviceLayout::new(LayoutNode::Row(vec![
+            strip,
+            LayoutNode::Cell(DisplayCell::new("Display", 100.0, BODY_HEIGHT, 1.0)),
+        ]));
+        layout.check(&params(1)).unwrap();
+        let hidden = layout.with_pages(&PageChoice::new());
+        let shown = layout.with_pages(&PageChoice::from([(
+            "Audio Routing".to_owned(),
+            STRIP_SHOWN.to_owned(),
+        )]));
+        assert_eq!(hidden.docked_size().width, STRIP_WIDTH + 100.0);
+        assert_eq!(
+            shown.docked_size().width,
+            STRIP_WIDTH + section.natural().width + 100.0
+        );
+        let placed = hidden.place(hidden.docked_size());
+        let pages = &placed.pages[0];
+        assert_eq!(pages.style, PageStyle::Strip);
+        assert_eq!(pages.names, [STRIP_HIDDEN, STRIP_SHOWN]);
+        assert_eq!(pages.buttons.len(), 1, "the ▼ toggle");
+        assert_eq!(pages.buttons[0].size(), Size::new(BOX_HEIGHT, BOX_HEIGHT));
+        assert!(placed.controls.is_empty(), "the hidden section places none");
+        assert_eq!(shown.place(shown.docked_size()).controls.len(), 1);
+        // The strip runs the body's whole height, whatever shows.
+        assert_eq!(hidden.docked_size().height, BODY_HEIGHT);
+    }
+
+    // Spec: device-framework R58
+    #[test]
+    fn title_parts_place_their_parameters_once() {
+        let band = LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, &knobs(0, 1)));
+        let parts = vec![
+            TitlePart::Heading("Filter".to_owned()),
+            TitlePart::Mpe,
+            TitlePart::Maker(Maker::Softube),
+            TitlePart::Letter('A', ParamId(1)),
+            TitlePart::Round(Glyph::Info, ParamId(2)),
+            TitlePart::Button(ParamId(3)),
+        ];
+        let layout = DeviceLayout::new(band.clone()).with_title(parts.clone());
+        layout.check(&params(4)).unwrap();
+        assert!(layout.check(&params(5)).is_err(), "a parameter is unplaced");
+        assert_eq!(
+            layout.shown(true).title,
+            parts,
+            "the expanded view keeps them"
+        );
+        let twice = DeviceLayout::new(band).with_title(vec![TitlePart::Button(ParamId(0))]);
+        assert!(twice.check(&params(1)).unwrap_err().contains("twice"));
+        let missing = DeviceLayout::new(LayoutNode::Row(Vec::new()))
+            .with_title(vec![TitlePart::Button(ParamId(7))]);
+        assert!(missing.check(&params(1)).is_err());
+        assert_eq!(Maker::Cytomic.text(), "cytomic");
     }
 }

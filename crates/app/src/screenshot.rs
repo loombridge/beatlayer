@@ -67,6 +67,16 @@ pub fn run(args: &Args, path: &Path) -> Result<(), String> {
             .invoke(ids::SET_OPEN, json!({ "path": set.to_string_lossy() }))
             .map_err(|e| e.to_string())?;
     }
+    // A device shot adds its device first, and shows it at 100% zoom.
+    let shot = match &args.device_shot {
+        Some(request) => {
+            shell
+                .invoke(ids::VIEW_SET_ZOOM, json!({ "percent": 100 }))
+                .map_err(|e| e.to_string())?;
+            Some(crate::device_shot::prepare(&mut shell, request)?)
+        }
+        None => None,
+    };
     let settings = args.open_settings;
     if settings {
         let _ = shell.invoke(ids::APP_SETTINGS, json!({}));
@@ -186,7 +196,19 @@ pub fn run(args: &Args, path: &Path) -> Result<(), String> {
         output = Some(frame_output);
     }
     let output = output.ok_or("nothing was drawn")?;
-    let image = render(&ctx, output, textures, size, &theme)?;
+    let mut image = render(&ctx, output, textures, size, &theme)?;
+    if let Some(device) = shot {
+        let view = main
+            .drawn_layout()
+            .and_then(|layout| layout.device_view)
+            .ok_or("the Device View isn't showing")?;
+        let frame = bl_ui::device_view::layout(&shell, view)
+            .into_iter()
+            .find(|(id, _)| *id == device)
+            .map(|(_, rect)| rect)
+            .ok_or("the device isn't in the Device View")?;
+        image = crate::device_shot::crop(&image, frame, SCALE * zoom);
+    }
     write_png(path, &image)?;
     println!(
         "screenshot: {} ({} x {} pixels, {} x {} points, zoom {}%)",

@@ -280,6 +280,11 @@ pub const DEVICE_GAP: f32 = 7.0;
 /// its layout's docked width ([`frame_width`]).
 pub const DEFAULT_DEVICE_WIDTH: f32 = 120.0;
 
+/// The least width at 100%, in points, of an unfolded device's body: its title
+/// bar holds the activator, a title switch and the three round buttons, with
+/// room for a few letters of the name between (Beatlayer's own; to observe).
+pub const MIN_DEVICE_WIDTH: f32 = 96.0;
+
 /// The width of a device's sidechain strip at 100%, in points: the strip
 /// down its left edge with the section's show/hide toggle and Sidechain
 /// Listen (observed; its width is to observe, and Beatlayer uses a title
@@ -418,7 +423,8 @@ pub fn rack_width(rack: &RackFrame) -> f32 {
 }
 
 /// The width at 100%, in points, of a device's own body: its layout's
-/// docked width when its type describes one (WP-2.5), and
+/// docked width when its type describes one (WP-2.5), at least
+/// [`MIN_DEVICE_WIDTH`], and
 /// [`DEFAULT_DEVICE_WIDTH`] otherwise.
 #[must_use]
 pub fn body_width(frame: &DeviceFrame) -> f32 {
@@ -426,7 +432,11 @@ pub fn body_width(frame: &DeviceFrame) -> f32 {
         return rack_width(rack);
     }
     frame.panel.as_ref().map_or(DEFAULT_DEVICE_WIDTH, |panel| {
-        panel.layout(frame.expanded).docked_size().width
+        panel
+            .layout(frame.expanded)
+            .docked_size()
+            .width
+            .max(MIN_DEVICE_WIDTH)
     })
 }
 

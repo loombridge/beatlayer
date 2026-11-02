@@ -60,6 +60,7 @@ mod kitbag;
 mod level_mod;
 mod lift;
 mod limiter;
+mod live_panels;
 mod looper;
 mod meld;
 mod midi_cc;

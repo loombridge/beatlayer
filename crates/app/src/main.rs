@@ -3,6 +3,7 @@
 //! (`bl-shell`) and drawn by `bl-ui` (WP-1.7).
 
 mod capture;
+mod device_shot;
 mod host;
 #[cfg(any(target_os = "macos", windows))]
 mod native_menu;
@@ -32,6 +33,10 @@ Options:
       --screenshot FILE  Draw the main window (with --settings, the Settings
                          window) offscreen, save it as a PNG, and quit; no
                          window opens
+      --device-shot DEVICE
+                         With --screenshot: add a new DEVICE to a track and save
+                         only its panel, at 100% zoom
+      --page PAGE        With --device-shot: show the page named PAGE
       --benchmark-scene  Show the Arrangement benchmark scene (200 tracks,
                          5,000 clips with waveforms) instead of a new set
       --user-library DIR Use DIR as the browser's User Library (made if it's
@@ -51,6 +56,7 @@ pub struct Args {
     pub open_settings: bool,
     pub drawn_menus: bool,
     pub screenshot: Option<PathBuf>,
+    pub device_shot: Option<device_shot::Request>,
     pub set: Option<PathBuf>,
     pub benchmark_scene: bool,
     pub commands: Vec<(String, serde_json::Value)>,
@@ -95,6 +101,20 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
             "--drawn-menus" => parsed.drawn_menus = true,
             "--screenshot" => {
                 parsed.screenshot = Some(it.next().ok_or("--screenshot takes a file")?.into());
+            }
+            "--device-shot" => {
+                parsed.device_shot = Some(device_shot::Request {
+                    device: it.next().ok_or("--device-shot takes a device's name")?,
+                    page: None,
+                });
+            }
+            "--page" => {
+                let page = it.next().ok_or("--page takes a page's name")?;
+                parsed
+                    .device_shot
+                    .as_mut()
+                    .ok_or("--page goes after --device-shot")?
+                    .page = Some(page);
             }
             "--benchmark-scene" => parsed.benchmark_scene = true,
             "--user-library" => {

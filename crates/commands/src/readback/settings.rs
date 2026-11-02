@@ -27,6 +27,8 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("keymap.reset", read("keymap.state", "shortcuts")),
     ("keymap.unbind", read("keymap.state", "shortcuts")),
     ("settings.set_auto_hide_plug_in_windows", read("settings.state", "auto_hide_plug_in_windows")),
+    ("settings.set_multiple_plug_in_windows", read("settings.state", "multiple_plug_in_windows")),
+    ("settings.set_auto_open_plug_in_windows", read("settings.state", "auto_open_plug_in_windows")),
     ("settings.set_continuous_save", read("settings.state", "file_folder.save_continuously")),
     ("settings.set_auto_warp_long_samples", read("settings.state", "warp.auto_warp_long_samples")),
     ("settings.set_default_warp_mode", read("settings.state", "warp.default_warp_mode")),

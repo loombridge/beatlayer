@@ -721,9 +721,15 @@ pub struct SettingsState {
     pub file_folder: FileFolderSettings,
     /// Library: Collect Files on Export and the User Library's folder.
     pub library: LibrarySettings,
+    /// Plug-Ins: Multiple Plug-In Windows, as
+    /// `settings.set_multiple_plug_in_windows` sets it.
+    pub multiple_plug_in_windows: bool,
     /// Plug-Ins: Auto-Hide Plug-In Windows, as
     /// `settings.set_auto_hide_plug_in_windows` sets it.
     pub auto_hide_plug_in_windows: bool,
+    /// Plug-Ins: Auto-Open Plug-In Windows, as
+    /// `settings.set_auto_open_plug_in_windows` sets it.
+    pub auto_open_plug_in_windows: bool,
     /// Plug-Ins: how the Browser shows plug-ins, as `plugin.settings` sets
     /// it.
     pub plug_ins: PluginSettings,

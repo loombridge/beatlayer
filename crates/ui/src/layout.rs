@@ -1621,6 +1621,8 @@ pub const SIGNATURE_LANE: f32 = 11.0;
 
 /// The height of the arranger track's lane (L-ARR-023).
 pub const ARRANGER_LANE: f32 = 18.0;
+/// How tall the chord lane is (L-ARR-024).
+pub const CHORD_LANE: f32 = 18.0;
 
 /// How tall the bar numbers are, above the time-signature lane inside the
 /// beat-time ruler.
@@ -1650,6 +1652,11 @@ pub struct ArrangementLayout {
     pub arranger: Option<Rect>,
     /// The arranger track's header, in the header column (L-ARR-023).
     pub arranger_header: Option<Rect>,
+    /// The chord lane, across the lanes' width above the first track, while
+    /// it shows (L-ARR-024), and its header in the header column.
+    pub chord_lane: Option<Rect>,
+    /// The chord lane's header (L-ARR-024).
+    pub chord_header: Option<Rect>,
     /// Set Locator (L-ARR-010, first row).
     pub set_locator: Rect,
     /// Automation Mode (L-ARR-010, first row).
@@ -1735,6 +1742,8 @@ impl ArrangementLayout {
             signature_lane: None,
             arranger: None,
             arranger_header: None,
+            chord_lane: None,
+            chord_header: None,
             set_locator: row(1299.0, 1335.0, 82.0),
             automation_mode: row(1340.0, 1356.0, 82.0),
             lock_envelopes: row(1360.0, 1376.0, 82.0),
@@ -1813,6 +1822,8 @@ impl ArrangementLayout {
         .chain(self.signature_lane.as_mut())
         .chain(self.arranger.as_mut())
         .chain(self.arranger_header.as_mut())
+        .chain(self.chord_lane.as_mut())
+        .chain(self.chord_header.as_mut())
         {
             rect.min.y = rect.min.y.clamp(top, bottom);
             rect.max.y = rect.max.y.clamp(top, bottom);
@@ -1852,6 +1863,26 @@ impl ArrangementLayout {
         self.arranger_header = Some(row(self.headers.left(), self.headers.right()));
         self.lanes.min.y += ARRANGER_LANE;
         self.headers.min.y += ARRANGER_LANE;
+        self.fitted()
+    }
+
+    /// The same layout with the chord lane showing (L-ARR-024): a row of its
+    /// own at the top of the track lanes, under the rulers, the scrub area
+    /// and the time-signature lane, which the track lanes and their headers
+    /// start under.
+    #[must_use]
+    pub fn with_chord_lane(mut self) -> Self {
+        let top = self.lanes.top();
+        self.chord_lane = Some(Rect::from_min_max(
+            pos2(self.lanes.left(), top),
+            pos2(self.lanes.right(), top + CHORD_LANE),
+        ));
+        self.chord_header = Some(Rect::from_min_max(
+            pos2(self.headers.left(), top),
+            pos2(self.headers.right(), top + CHORD_LANE),
+        ));
+        self.lanes.min.y += CHORD_LANE;
+        self.headers.min.y += CHORD_LANE;
         self.fitted()
     }
 
@@ -1907,6 +1938,9 @@ impl ArrangementLayout {
         ]);
         if let Some(lane) = self.signature_lane {
             rows.push(row("L-ARR-004", "Time Signature Lane", lane));
+        }
+        if let Some(lane) = self.chord_lane {
+            rows.push(row("L-ARR-024", "Chord Lane", lane));
         }
         if let Some(mixer) = self.mixer {
             rows.push(row("L-ARR-018", "Arrangement Mixer", mixer));

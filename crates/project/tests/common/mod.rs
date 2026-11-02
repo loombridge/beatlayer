@@ -443,6 +443,8 @@ impl Recipe {
             window_views: bl_model::WindowViews {
                 session: self.id_skip.is_multiple_of(3),
                 second_window: self.id_skip.is_multiple_of(2),
+                // WP-6.48: whether the chord lane shows saves there too.
+                chord_lane: self.id_skip.is_multiple_of(4),
             },
             // WP-6.18: the MPE tab's lanes save beside the song.
             mpe_view: bl_model::MpeView {

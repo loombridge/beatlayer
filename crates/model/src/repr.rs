@@ -107,6 +107,10 @@ struct TrackRepr {
     /// before WP-6.58 have none.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     info_text: String,
+    /// Whether the track follows the chord lane (WP-6.48, R10). Sets saved
+    /// before it have none, which loads not following.
+    #[serde(default, skip_serializing_if = "is_off")]
+    follow_chord_lane: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     children: Vec<TrackRepr>,
     /// The track's frozen audio (WP-4.14). Sets saved before it have none,
@@ -119,6 +123,11 @@ struct TrackRepr {
 /// it off, so a set that overrode none reads as before.
 fn on() -> bool {
     true
+}
+
+/// For serde's `skip_serializing_if`, which passes a reference.
+fn is_off(value: &bool) -> bool {
+    !*value
 }
 
 /// For serde's `skip_serializing_if`, which passes a reference.
@@ -246,6 +255,7 @@ impl TrackRepr {
             link: track.link(),
             colour: Some(track.colour()),
             info_text: track.info_text.clone(),
+            follow_chord_lane: track.follow_chord_lane,
             frozen: track.frozen.clone(),
             children: if with_children {
                 track
@@ -265,7 +275,7 @@ impl TryFrom<DocumentRepr> for Document {
 
     fn try_from(repr: DocumentRepr) -> Result<Self, ModelError> {
         let DocumentRepr {
-            settings,
+            mut settings,
             tracks,
             returns,
             main,
@@ -288,6 +298,12 @@ impl TryFrom<DocumentRepr> for Document {
         crate::section::check_sections(&settings.sections)?;
         for section in &settings.sections {
             loader.claim(section.id.0)?;
+        }
+        crate::chord_lane::check_all(&settings.chord_lane)?;
+        // The engine looks a note's region up by its order.
+        settings.chord_lane.sort_by_key(|region| region.start);
+        for region in &settings.chord_lane {
+            loader.claim(region.id.0)?;
         }
         crate::remote::check_all(&settings.remote)?;
         if let Some(tuning) = &settings.tuning {
@@ -480,6 +496,7 @@ impl Loader {
         }
         track.frozen = repr.frozen;
         track.info_text = repr.info_text;
+        track.follow_chord_lane = repr.follow_chord_lane;
         if let Some(routing) = repr.routing {
             track.routing = routing;
         }

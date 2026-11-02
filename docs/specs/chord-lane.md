@@ -1,6 +1,6 @@
 # The chord lane: a scale and a transposition for each section of the Arrangement
 
-- **Status:** draft
+- **Status:** built (R1 to R12 each have a passing test)
 - **Work packages:** WP-6.48 (R1 to R12)
 - **Parity-matrix row:** none: Beatlayer's own; [the improvements](../05-improvements.md), IMP-33 (a chord and transpose lane)
 - **Checked against:** [scales.md](scales.md) and the improvements' rules, read 20 October 2026; the lane is Beatlayer's own, so every rule here is too
@@ -38,15 +38,15 @@ This spec covers the lane, its regions, the tracks' switch and what playback doe
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.48 | |
-| R2 | to be written in WP-6.48 | |
-| R3 | to be written in WP-6.48 | |
-| R4 | to be written in WP-6.48 | |
-| R5 | to be written in WP-6.48 | |
-| R6 | to be written in WP-6.48 | |
-| R7 | to be written in WP-6.48 | |
-| R8 | to be written in WP-6.48 | |
-| R9 | to be written in WP-6.48 | |
-| R10 | to be written in WP-6.48 | |
-| R11 | to be written in WP-6.48 | |
-| R12 | to be written in WP-6.48 | |
+| R1 | `crates/ui/tests/chord_lane.rs`, `the_lane_is_hidden_in_a_new_set_and_shows_from_the_view_menu_above_the_first_track`; `crates/shell/tests/chord_lane.rs`, `the_lane_is_hidden_in_a_new_set_and_view_chord_lane_shows_and_hides_it`, `a_saved_set_keeps_the_lane_its_regions_and_each_track_s_switch`; `crates/cli/tests/older_sets.rs`, `a_set_saved_before_the_chord_lane_loads_with_no_regions_and_no_track_following` | unit |
+| R2 | `crates/model/tests/chord_lane.rs`, `regions_never_overlap_and_a_refused_edit_changes_nothing`, `a_region_that_breaks_a_rule_is_refused`; `crates/ui/tests/chord_lane.rs`, `drawing_in_the_lane_makes_a_region_on_the_grid_in_one_undo_step` | unit |
+| R3 | `crates/ui/tests/chord_lane.rs`, `drawing_in_the_lane_makes_a_region_on_the_grid_in_one_undo_step`, `a_region_is_moved_and_resized_with_the_pointer_one_undo_step_each`, `a_region_cannot_be_dragged_over_another`, `clicking_selects_a_region_and_delete_deletes_it`; `crates/shell/tests/chord_lane.rs`, `drawing_is_one_undo_step_however_far_the_drag_goes_and_selects_the_region`, `moving_and_resizing_are_one_undo_step_each`, `selecting_a_region_is_no_undo_step_and_a_missing_region_is_refused`; `crates/model/tests/chord_lane.rs`, `a_region_is_added_moved_set_and_deleted_one_undo_step_each` | unit |
+| R4 | `crates/ui/tests/chord_lane.rs`, `the_region_s_menu_sets_its_scale_and_its_transposition`; `crates/model/tests/chord_lane.rs`, `a_region_is_added_moved_set_and_deleted_one_undo_step_each` | unit |
+| R5 | `crates/model/tests/chord_lane.rs`, `only_a_midi_track_follows_the_lane`; `crates/ui/tests/chord_lane.rs`, `a_midi_track_s_menu_has_follow_chord_lane_ticked_while_it_follows`; `crates/shell/tests/chord_lane.rs`, `a_duplicated_track_follows_the_lane_as_its_source_did`; `crates/shell-spec/src/context_menus.rs`, `a_midi_tracks_menu_adds_follow_chord_lane_after_save_as_default_midi_track` | unit |
+| R6 | `crates/engine/tests/chord_lane.rs`, `a_following_track_s_notes_move_by_the_region_they_start_in`, `a_note_moved_off_the_keyboard_does_not_play`, `a_lane_edit_sends_data_and_no_program` | unit |
+| R7 | `crates/engine/tests/chord_lane.rs`, `a_note_held_across_a_region_s_edge_ends_on_its_own_key`, `a_moved_note_s_expressions_go_to_the_key_its_note_on_went_to` | unit |
+| R8 | `crates/engine/tests/chord_lane.rs`, `the_region_s_scale_is_the_following_track_s_current_scale` | unit |
+| R9 | `crates/engine/tests/chord_lane.rs`, `a_track_that_does_not_follow_and_a_session_clip_play_as_written` | unit |
+| R10 | `crates/model/tests/chord_lane.rs`, `the_lane_and_the_switch_are_saved_and_a_set_from_before_loads_with_neither`, `a_saved_lane_with_overlapping_regions_or_a_shared_id_does_not_load`; `crates/cli/tests/older_sets.rs`, `a_set_saved_before_the_chord_lane_loads_with_no_regions_and_no_track_following` | unit |
+| R11 | `crates/engine/tests/chord_lane.rs`, `a_following_track_s_notes_move_by_the_region_they_start_in` (block sizes 1, 64 and 512, under the allocation trap), `an_export_moves_its_notes_as_playback_does` | unit |
+| R12 | `crates/model/tests/command_registry.rs`, `every_command_runs_by_id`, `every_document_command_is_registered`; `crates/agent/tests/chord_lane.rs`, `every_chord_lane_command_runs_by_id_and_what_it_sets_reads_back`, `the_chord_lane_commands_have_the_classes_the_spec_gives`; `crates/agent/tests/readback.rs`, `every_query_readback_the_command_table_names_is_in_a_real_full_result` | unit |

@@ -55,6 +55,7 @@ impl Object {
                 "tempo.segments",
                 "time_signature_at_start",
                 "scale",
+                "chord_lane",
                 "tuning",
                 "counts.tracks",
                 "counts.clips",

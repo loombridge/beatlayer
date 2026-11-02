@@ -3925,6 +3925,77 @@ const ENTRIES: &[Entry] = &[
             that one as it is. One undo step, `Add Locator`.",
     },
     Entry {
+        id: "chord_lane.add_region",
+        action: Action::Apply("add_chord_region"),
+        label: "Add Chord Region",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Adds a region to the chord lane, as drawing in the lane does: `region` \
+            has a new `id`, a `start` and an `end` in ticks on the song's beats (1.1.1 or \
+            later, the end after the start), optionally a `scale` (`enabled`, `root` 0 is C, \
+            `name` from `song.scales`) and a `transpose` from -24 to 24 (0 by default). Regions \
+            never overlap: one that would is refused and nothing changes. A MIDI track that \
+            follows the lane (`track.set_follow_chord_lane`) plays its Arrangement clips' notes \
+            moved by the transposition of the region they start in: by that many degrees of the \
+            clip's scale where the clip's Scale Mode is on, by that many semitones where it is \
+            off. Where the region names a scale, the track's scale-aware devices take it as \
+            their current scale. Nothing in the clips changes. One undo step, `Add Chord \
+            Region`. `song` reads the regions in its `chord_lane` field.",
+    },
+    Entry {
+        id: "chord_lane.move_region",
+        action: Action::Apply("move_chord_region"),
+        label: "Move Chord Region",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Moves a chord region, or resizes it, to the new `start` and `end` in \
+            ticks, as dragging it or one of its edges does. A move that would overlap another \
+            region, start before 1.1.1 or end the region at or before its start is refused and \
+            nothing changes. One undo step, `Move Chord Region`.",
+    },
+    Entry {
+        id: "chord_lane.set_region",
+        action: Action::Apply("set_chord_region"),
+        label: "Set Chord Region",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Sets a chord region's scale and transposition, as its context menu does: \
+            `enabled` (whether it names a scale; false leaves the clips' own), `root` (0 is C \
+            and 11 is B), `name` (one of the names `song.scales` reads) and `transpose` (from \
+            -24 to 24, in degrees of each clip's scale where the clip's Scale Mode is on and in \
+            semitones where it is off). It leaves the values it isn't given as they were. One \
+            undo step, `Change Chord Region`.",
+    },
+    Entry {
+        id: "chord_lane.delete_region",
+        action: Action::Apply("delete_chord_region"),
+        label: "Delete Chord Region",
+        permission: Permission::Destructive,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Deletes a chord region, as selecting it and pressing Delete does. The \
+            tracks that follow the lane play the notes as written where it was. One undo step, \
+            `Delete Chord Region`. Because it removes the person's work, an agent asks first.",
+    },
+    Entry {
+        id: "track.set_follow_chord_lane",
+        action: Action::Apply("set_follow_chord_lane"),
+        label: "Follow Chord Lane",
+        permission: Permission::Edit,
+        contexts: &[TrackHeaders, Arrangement],
+        keys: &[],
+        description: "Switches a MIDI track's Follow Chord Lane, as its context menu's item \
+            does. On, the track's Arrangement clips play moved by the chord lane's region they \
+            start in and its scale-aware devices take that region's scale; off (a new track's), \
+            the track plays the notes as written. Session clips, audio clips and monitored \
+            input are never moved. Only MIDI tracks have it. The switch is saved with the set \
+            only where it's on, and each change is one undo step, named \"Follow Chord \
+            Lane\". `track` reads it back in `follow_chord_lane`.",
+    },
+    Entry {
         id: "song.delete_locator",
         action: Action::Apply("delete_locator"),
         label: "Delete Locator",

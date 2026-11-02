@@ -36,6 +36,7 @@ pub mod index;
 pub mod labels;
 pub mod listing;
 pub mod places;
+pub mod plugin_presets;
 pub mod preview;
 mod similar;
 pub mod swap;
@@ -82,6 +83,7 @@ use self::history::{History, Step};
 use self::index::{Index, Scope, Snapshot};
 use self::labels::{LabelPrefs, SavedLabel};
 use self::listing::{Entry, file_kind};
+pub use self::plugin_presets::{PluginPreset, Reveal};
 use self::preview::{Loader, MediaSamples};
 use self::tags::{Source, TagStore};
 use crate::audio::AudioHost;
@@ -323,6 +325,10 @@ pub struct BrowserView {
     /// while Show Hidden Plug-Ins is on, drawn dimmed; hot-swap never lists
     /// them.
     hidden_plugins: BTreeSet<String>,
+    /// The folders of Audio Units presets (plugin scanning R15), and the
+    /// Beatlayer presets found for the plug-ins under the index last read.
+    au_preset_folders: Vec<PathBuf>,
+    plugin_presets: Option<plugin_presets::Cache>,
     /// The tag groups, the tags in them, and the items that carry them
     /// (spec: browser-tags R6 to R9).
     tags: TagStore,
@@ -607,6 +613,8 @@ impl BrowserView {
             waker,
             plugins: Vec::new(),
             hidden_plugins: BTreeSet::new(),
+            au_preset_folders: plugin_presets::default_au_preset_folders(),
+            plugin_presets: None,
             tags: TagStore::new(),
             db: None,
             saved_files: HashMap::new(),
@@ -1772,6 +1780,7 @@ impl BrowserView {
                 details: None,
                 collections: Vec::new(),
                 hidden: false,
+                presets: false,
                 nested: Vec::new(),
             });
             if open && entry.kind == ItemKind::Set {
@@ -1805,6 +1814,7 @@ impl BrowserView {
             details: None,
             collections: Vec::new(),
             hidden: false,
+            presets: false,
             nested: Vec::new(),
         });
     }
@@ -1936,6 +1946,7 @@ impl BrowserView {
                     details: None,
                     collections: Vec::new(),
                     hidden: false,
+                    presets: false,
                     nested: Vec::new(),
                 })
                 .filter(|item| self.item_passes(&selection, &builtin, item))
@@ -1962,10 +1973,13 @@ impl BrowserView {
             let items = self.plugin_rows();
             let items = items
                 .into_iter()
+                // Spec: plugin-scanning R15. The presets listed under an open
+                // plug-in's row stay with it.
                 .filter(|item| {
-                    tags.is_empty() || self.carries_all(&self.tag_key(&item.path), &tags)
+                    item.kind == ItemKind::Preset
+                        || (tags.is_empty() || self.carries_all(&self.tag_key(&item.path), &tags))
+                            && self.item_passes(&selection, &builtin, item)
                 })
-                .filter(|item| self.item_passes(&selection, &builtin, item))
                 .collect();
             self.rows = Rows::Items(items);
             self.cursor = self.selected.last().and_then(|path| self.position_of(path));
@@ -2085,6 +2099,7 @@ impl BrowserView {
                             details: None,
                             collections: Vec::new(),
                             hidden: false,
+                            presets: false,
                             nested: Vec::new(),
                         });
                         if open {
@@ -2179,6 +2194,7 @@ impl BrowserView {
             details: None,
             collections: Vec::new(),
             hidden: false,
+            presets: false,
             nested: Vec::new(),
         };
         let mut items: Vec<Item> = tunings::BUNDLED
@@ -2225,6 +2241,7 @@ impl BrowserView {
     fn plugin_rows(&mut self) -> Vec<Item> {
         let query = self.search.trim().to_lowercase();
         let hidden = self.hidden_plugins.clone();
+        let presets = self.presets_by_plugin();
         let row = |p: &ScannedPlugin, depth: u16, folder: Option<String>| Item {
             path: plugin_key(p),
             name: p.name.clone(),
@@ -2237,7 +2254,13 @@ impl BrowserView {
             details: None,
             collections: Vec::new(),
             hidden: hidden.contains(&p.key()),
+            presets: false,
             nested: Vec::new(),
+        };
+        // Spec: plugin-scanning R15. A plug-in with presets has a fold
+        // triangle, and lists them under its row while it is open.
+        let rows = |p: &ScannedPlugin, depth: u16, folder: Option<String>| {
+            self.plugin_with_presets(row(p, depth, folder), presets.get(&plugin_key(p)))
         };
         let mut items = Vec::new();
         if !query.is_empty() || !self.applied_selection().is_empty() {
@@ -2245,7 +2268,7 @@ impl BrowserView {
                 self.plugins
                     .iter()
                     .filter(|p| p.name.to_lowercase().contains(&query))
-                    .map(|p| row(p, 0, p.vendor.clone())),
+                    .flat_map(|p| rows(p, 0, p.vendor.clone())),
             );
             if items.is_empty() {
                 self.note = Some(format!(
@@ -2273,6 +2296,7 @@ impl BrowserView {
                 details: None,
                 collections: Vec::new(),
                 hidden: false,
+                presets: false,
                 nested: Vec::new(),
             });
             if open {
@@ -2280,7 +2304,7 @@ impl BrowserView {
                     self.plugins
                         .iter()
                         .filter(|p| vendor_of(p) == Some(vendor))
-                        .map(|p| row(p, 1, None)),
+                        .flat_map(|p| rows(p, 1, None)),
                 );
             }
         }
@@ -2288,7 +2312,7 @@ impl BrowserView {
             self.plugins
                 .iter()
                 .filter(|p| vendor_of(p).is_none())
-                .map(|p| row(p, 0, None)),
+                .flat_map(|p| rows(p, 0, None)),
         );
         if items.is_empty() {
             self.note = Some(
@@ -2312,16 +2336,19 @@ impl BrowserView {
     #[must_use]
     pub fn selected_plugin(&self) -> Option<&ScannedPlugin> {
         match self.selected.as_slice() {
-            [one] => self.plugin(one),
+            // Spec: plugin-scanning R17. A preset of a plug-in loads it.
+            [one] => self.plugin_of_row(&one.to_string_lossy()),
             _ => None,
         }
     }
 
-    /// Whether `key` names a Plug-Ins row: a vendor folder or a plug-in.
+    /// Whether `key` names a Plug-Ins row: a vendor folder, a plug-in or one
+    /// of its presets.
     fn is_plugin_row(&self, key: &str) -> bool {
         key.strip_prefix(PLUGIN_FOLDER)
             .is_some_and(|vendor| self.plugins.iter().any(|p| vendor_of(p) == Some(vendor)))
             || self.plugin(Path::new(key)).is_some()
+            || self.plugin_preset(key).is_some()
     }
 
     /// How many rows the content pane has.
@@ -2353,6 +2380,7 @@ impl BrowserView {
                     details: None,
                     collections: Vec::new(),
                     hidden: false,
+                    presets: false,
                     nested: Vec::new(),
                 }
             }
@@ -3315,6 +3343,12 @@ impl BrowserView {
                         self.open.remove(&row);
                     }
                     self.rebuild();
+                    outcome.value = state(self, ctx.audio);
+                    return Ok(outcome);
+                } else if self.plugin(Path::new(&path)).is_some() {
+                    // Spec: plugin-scanning R15. A plug-in's presets open in
+                    // place, and the ones open under another plug-in close.
+                    self.toggle_plugin_presets(Path::new(&path), open);
                     outcome.value = state(self, ctx.audio);
                     return Ok(outcome);
                 } else if path.starts_with(PLUGIN_FOLDER) && self.is_plugin_row(&path) {

@@ -564,6 +564,19 @@ impl AuHost {
         })
     }
 
+    /// Gives the device's unit a state it saved before, or an `.aupreset`
+    /// file's property list. The unit keeps the state it had if it refuses.
+    ///
+    /// # Errors
+    ///
+    /// [`AuError::NoInstance`] if the device has no unit running, and
+    /// [`AuError::Refused`] if the data isn't a property list.
+    pub fn load_state(&self, device: DeviceId, data: &[u8]) -> Result<(), AuError> {
+        let mut guard = lock(&self.inner.main);
+        let instance = instance(guard.get()?, device)?;
+        load_state(&instance.unit, data).map_err(|_| AuError::Refused("that state".to_owned()))
+    }
+
     /// What the device's unit is doing, or `None` if the device has no
     /// Audio Unit, running or failed.
     #[must_use]

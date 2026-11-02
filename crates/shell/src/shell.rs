@@ -901,6 +901,9 @@ pub struct Shell {
     /// floating devices' windows and the plug-ins' editor windows;
     /// WP-2.5b): view state, never part of the set.
     plug_in_windows: bool,
+    /// The states a preset gave plug-ins the engine hasn't started yet, which
+    /// they take when they run (the plug-in scanning spec, R16).
+    pending_states: BTreeMap<bl_model::DeviceId, Vec<u8>>,
     /// The native device types the engine offers, which the plug-ins'
     /// join in the Device View (WP-2.6).
     native_types: Vec<bl_engine::DeviceType>,
@@ -1476,6 +1479,7 @@ impl Shell {
             session_watch: crate::session_capture::Watch::default(),
             automation_recording: false,
             plug_in_windows: true,
+            pending_states: BTreeMap::new(),
             devices: {
                 // Beatlayer's native devices (WP-2.5; none ship yet).
                 let mut devices = DeviceView::new();
@@ -2058,10 +2062,12 @@ impl Shell {
         if id == browser_ids::LOAD_SELECTED
             && let Some(plugin) = self.browser_view.selected_plugin().cloned()
         {
-            // Spec: plugin-scanning R11. A plug-in chosen in the browser
-            // loads as `plugin.load` loads it.
+            // Spec: plugin-scanning R11, R17. A plug-in chosen in the
+            // browser loads as `plugin.load` loads it, and a preset of one
+            // loads it with that preset.
             Self::args::<NoArgs>(id, args)?;
-            let loaded = self.load_browser_plugin(id, &plugin)?;
+            let preset = self.browser_view.selected_plugin_preset();
+            let loaded = self.load_browser_plugin(id, &plugin, preset)?;
             self.touch();
             return Ok(loaded);
         }

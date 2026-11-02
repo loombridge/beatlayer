@@ -349,6 +349,12 @@ impl DeviceView {
         self.hot_swap
     }
 
+    /// Arms `device` for hot-swapping again, once a load has replaced the
+    /// one that was (the plug-in scanning spec, R17).
+    pub(crate) fn rearm_hot_swap(&mut self, device: DeviceId) {
+        self.hot_swap = Some(device);
+    }
+
     /// The chain armed by its Hot-Swap button, if one is.
     #[must_use]
     pub fn hot_swap_chain(&self) -> Option<ChainId> {
@@ -3914,7 +3920,7 @@ fn select_track(
 /// parameters' ranges, without values for parameters it doesn't have (a
 /// preset from another version of the device, say: the device framework
 /// spec, R7).
-fn load_preset(
+pub(crate) fn load_preset(
     view: &DeviceView,
     editor: &mut Editor,
     device: DeviceId,

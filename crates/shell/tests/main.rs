@@ -112,6 +112,7 @@ mod packages;
 mod packs;
 mod pedal;
 mod plugin_list;
+mod plugin_presets;
 mod plugin_scanning;
 mod plugins;
 mod plugins_au;

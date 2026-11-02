@@ -102,6 +102,7 @@ impl Shell {
         // The open plug-in editors follow View ▸ Plug-In Windows and
         // Auto-Hide Plug-In Windows, as the tracks' floating windows do.
         self.apply_plug_in_windows();
+        changed |= self.apply_pending_states();
         if self.kit.idle() {
             changed = true;
         }

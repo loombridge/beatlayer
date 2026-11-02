@@ -1966,3 +1966,53 @@ fn the_trim_and_loop_switch_readbacks_change_with_their_commands() {
     );
     assert_ne!(read(&mut client, &midi, field), before, "{field}");
 }
+
+// Spec: plugin-scanning R20. The query tool reads back the preset a plug-in
+// device holds and how much state of its own the set keeps for it.
+#[test]
+fn a_plug_in_devices_preset_and_state_read_back() {
+    let mut shell = Shell::headless();
+    let track = shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|t| t.kind() == TrackKind::Audio)
+        .map(bl_model::Track::id)
+        .unwrap();
+    let device = shell.edit(|editor| {
+        let id: DeviceId = editor.new_id();
+        let plugin = Device::new(
+            id,
+            "Test",
+            DeviceKind::Plugin {
+                format: bl_model::PluginFormat::Clap,
+                plugin_id: "com.example.test".to_owned(),
+            },
+        );
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device: plugin,
+            })
+            .unwrap();
+        editor
+            .amend_plugin_state(
+                id,
+                Some(bl_model::PluginState {
+                    path: String::new(),
+                    data: vec![1, 2, 3],
+                }),
+            )
+            .unwrap();
+        editor
+            .amend_device_preset_name(id, Some("Warm".to_owned()))
+            .unwrap();
+        id
+    });
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("test-agent").unwrap();
+    let got = query(&mut client, json!({ "id": device }));
+    assert_eq!(got["preset"], "Warm");
+    assert_eq!(got["state_bytes"], 3);
+}

@@ -723,7 +723,10 @@ fn the_scene_views_title_bar_opens_the_scene_menu() {
     let mut h = harness();
     let g = Grid::new(&h);
     h.shell
-        .run("session.select", json!({ "scene": g.scenes[0] }))
+        .run(
+            "session.select",
+            json!({ "scene": g.scenes[0], "scene_view": true }),
+        )
         .unwrap();
     h.shell
         .run(

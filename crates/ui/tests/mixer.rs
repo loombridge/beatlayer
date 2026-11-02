@@ -3831,9 +3831,10 @@ fn option_drags_every_tracks_edge_and_the_limits_hold() {
     assert_eq!(doc_widths(&h)[0], 400.0);
 }
 
-// Spec: mixer-view R36 (I-DRAG-005), session-view R26.
+// Spec: mixer-view R36 (I-DRAG-005). The edge widens Main like any track's
+// and reveals nothing.
 #[test]
-fn dragging_main_s_left_edge_widens_it_and_shows_the_scene_fields() {
+fn dragging_main_s_left_edge_widens_it_and_shows_no_scene_fields() {
     let mut h = session();
     let main = h.shell.editor().document().main_id();
     assert!(!h.shell.mixer_view().scene_tempo());
@@ -3850,7 +3851,7 @@ fn dragging_main_s_left_edge_widens_it_and_shows_the_scene_fields() {
             .column_width(h.shell.editor().document(), main),
         164.0
     );
-    assert!(h.shell.mixer_view().scene_tempo());
+    assert!(!h.shell.mixer_view().scene_tempo());
     let nodes = tree(&mut h);
     assert_eq!(rect_of(Harness::node(&nodes, "Main")).width(), 164.0);
 }

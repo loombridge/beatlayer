@@ -41,7 +41,26 @@ pub struct CollectionStore {
 impl CollectionStore {
     /// Takes what the database holds.
     pub fn load(&mut self, rows: Vec<(String, Vec<u32>)>, nested: Vec<NestedRow>) {
-        self.nested = nested;
+        // A damaged file can hold a loop or a parent that isn't there: keep
+        // the collections whose chain reaches one of the seven.
+        let reaches_top = |row: &NestedRow| {
+            let mut at = row.parent;
+            for _ in 0..nested.len() {
+                if u8::try_from(at).is_ok_and(|n| NUMBERS.contains(&n)) {
+                    return true;
+                }
+                match nested.iter().find(|n| n.id == at) {
+                    Some(parent) => at = parent.parent,
+                    None => return false,
+                }
+            }
+            false
+        };
+        self.nested = nested
+            .iter()
+            .filter(|row| reaches_top(row))
+            .cloned()
+            .collect();
         self.items = rows
             .into_iter()
             .map(|(key, collections)| {
@@ -671,7 +690,7 @@ mod tests {
     #[test]
     fn an_item_is_in_several_collections_and_leaves_them_all_at_once() {
         let mut store = CollectionStore::default();
-        let numbers = |list: &[u8]| list.iter().copied().collect::<BTreeSet<u8>>();
+        let numbers = |list: &[u32]| list.iter().copied().collect::<BTreeSet<u32>>();
         assert!(store.set("/a.wav", numbers(&[3, 1])).is_some());
         assert_eq!(store.of("/a.wav"), [1, 3]);
         assert!(store.set("/a.wav", numbers(&[1, 3])).is_none(), "no change");
@@ -684,7 +703,47 @@ mod tests {
     #[test]
     fn what_the_database_holds_outside_one_to_seven_is_left_out() {
         let mut store = CollectionStore::default();
-        store.load(vec![("/a.wav".to_owned(), vec![0, 2, 9])]);
+        store.load(vec![("/a.wav".to_owned(), vec![0, 2, 9])], Vec::new());
         assert_eq!(store.of("/a.wav"), [2]);
+    }
+
+    // Spec: browser-tags R45. A loop or an orphan in a damaged file is left
+    // out, so walking the collections always ends.
+    #[test]
+    fn a_damaged_file_with_a_loop_or_an_orphan_loads_without_them() {
+        let row = |id, parent| NestedRow {
+            id,
+            parent,
+            name: format!("c{id}"),
+        };
+        let mut store = CollectionStore::default();
+        store.load(
+            vec![("/a.wav".to_owned(), vec![8, 9, 10, 11])],
+            vec![row(8, 2), row(9, 10), row(10, 9), row(11, 40)],
+        );
+        assert_eq!(store.nested().len(), 1);
+        assert_eq!(store.of("/a.wav"), [8]);
+        assert_eq!(store.top_of(8), 2);
+    }
+
+    // Spec: browser-tags R45, R46. A nested collection is numbered from 8,
+    // is named "New Collection" and numbered when taken, takes the colour of
+    // the collection at its top, and moves before a sibling.
+    #[test]
+    fn nested_collections_are_numbered_named_coloured_and_ordered() {
+        let mut store = CollectionStore::default();
+        let a = store.add(2, None);
+        let b = store.add(2, None);
+        let c = store.add(a, Some("Deep".to_owned()));
+        assert_eq!([a, b, c], [8, 9, 10]);
+        assert_eq!(store.name_of(b), Some("New Collection 2"));
+        assert_eq!(store.top_of(c), 2);
+        assert_eq!(store.top_of(5), 5);
+        assert_eq!(store.descendants(2).len(), 3);
+        store.move_to(b, 2, Some(0));
+        assert_eq!(store.children(2), [b, a]);
+        store.move_to(c, 2, None);
+        assert_eq!(store.children(2), [b, a, c]);
+        assert!(store.exists(8) && !store.exists(11) && !store.exists(0));
     }
 }

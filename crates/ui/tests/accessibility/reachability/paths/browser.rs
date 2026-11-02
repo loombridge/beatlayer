@@ -20,6 +20,9 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ("browser.reset_label_order", Exception(LABELS)),
         ("browser.set_label_icon", Exception(LABELS)),
         ("browser.set_label_shown", Exception(LABELS)),
+        ("browser.add_collection", Exception(NESTED_COLLECTIONS)),
+        ("browser.delete_collection", Exception(NESTED_COLLECTIONS)),
+        ("browser.move_collection", Exception(NESTED_COLLECTIONS)),
         ("browser.set_columns", Exception(COLUMNS)),
         // The browser's tags (browser-tags R10 to R16).
         ("browser.add_tag", Exception(TAG_EDITOR)),

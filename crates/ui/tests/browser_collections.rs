@@ -623,7 +623,7 @@ fn a_plug_in_rows_menu_hides_it_and_content_options_shows_hidden_plug_ins() {
     }
     let scratch = Scratch::new("hide");
     let (mut h, _) = harness(&scratch);
-    let bundle = text(&bl_test_clap::bundle());
+    let bundle = text(bl_test_clap::bundle());
     h.shell
         .run(
             bl_shell::plugin_commands::SCAN,

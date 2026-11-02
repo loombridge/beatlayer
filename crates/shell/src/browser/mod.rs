@@ -3298,10 +3298,10 @@ impl BrowserView {
                     open,
                     keep_others,
                 } = parse(args)?;
-                let path = if path.starts_with(collections::FOLDER_PREFIX) {
+                let path = if let Some(rest) = path.strip_prefix(collections::FOLDER_PREFIX) {
                     // Spec: browser-tags R47. A nested collection opens in
                     // place, and the sidebar's fold follows.
-                    let number = path[collections::FOLDER_PREFIX.len()..]
+                    let number = rest
                         .parse::<u32>()
                         .ok()
                         .filter(|n| self.collections.exists(*n))

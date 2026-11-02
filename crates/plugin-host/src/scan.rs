@@ -1016,6 +1016,6 @@ mod tests {
         ];
         apply_format_preference(&mut plugins, Some(PluginFormat::Vst3));
         let ids: Vec<&str> = plugins.iter().map(|p| p.plugin_id.as_str()).collect();
-        assert_eq!(ids, ["b.clap", "a.vst3"]);
+        assert_eq!(ids, ["a.vst3", "b.clap"]);
     }
 }

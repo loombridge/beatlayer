@@ -10,6 +10,7 @@ bl_rt::install_trap!();
 mod analysis;
 mod automation;
 mod capture_midi;
+mod chord_lane;
 mod clip_envelopes;
 mod clip_launch;
 mod clip_settings;

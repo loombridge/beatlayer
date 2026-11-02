@@ -929,6 +929,7 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                  save the list",
             )),
         ),
+        ("plugin.hide", Exception(HIDE_PLUG_IN)),
         (
             "plugin.settings",
             settings(

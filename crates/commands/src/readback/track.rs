@@ -64,6 +64,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("track.assign_colour_to_grouped", query(Track, "colour")),
     ("track.set_devices_enabled", query(Track, "devices")),
     ("track.ungroup", query(Song, "tracks")),
+    ("track.set_follow_chord_lane", query(Track, "follow_chord_lane")),
     ("track.set_tuning_bypass", query(Track, "tuning_bypass")),
     ("track.set_tuning_layout", query(Track, "tuning_layout")),
 ];

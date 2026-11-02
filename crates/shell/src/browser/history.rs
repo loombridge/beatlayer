@@ -183,6 +183,7 @@ impl BrowserView {
                 .iter()
                 .any(|folder| folder.to_string_lossy() == path.as_str()),
             Label::Saved(id) => self.saved.iter().any(|saved| saved.id == *id),
+            Label::Collection(number) => self.collections.exists(*number),
             _ => true,
         };
         self.label = if exists { step.label } else { Label::All };

@@ -196,6 +196,9 @@ impl PlacedController {
 pub struct Sounding {
     /// The ID its note-on carried.
     pub note_id: Option<u32>,
+    /// The key its note-on went to, which its expressions go to too: not
+    /// the note's own where the chord lane moved it (the chord lane spec, R7).
+    pub key: u8,
     /// Where the note starts in the song.
     pub song_start: Ticks,
     /// The song frames it starts and ends on. A note that started in an
@@ -239,6 +242,7 @@ pub fn play_expressions(
 ) {
     let Sounding {
         note_id,
+        key,
         song_start,
         on,
         off,
@@ -260,7 +264,7 @@ pub fn play_expressions(
                         value: (value * scale).clamp(-1.0, 1.0) as f32,
                     },
                     channel: 0,
-                    key: note.key,
+                    key,
                     velocity: 0.0,
                     note_id,
                 });

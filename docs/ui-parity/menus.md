@@ -261,6 +261,7 @@ The View menu is taller than the screen at 1600 × 1000 and scrolls.
 | | — | | | | |
 | M-VIEW-034 | Overview | ⌥⌘O | S-VIEW-011 | | |
 | IMP-22 | Arranger Track | | | | Beatlayer addition: shows the arranger track (L-ARR-023; `arrangement.arranger_track`), unticked in a new set; no key ([arranger track](../specs/arranger-track.md) R1) |
+| IMP-33 | Chord Lane | | | | Beatlayer addition: shows the chord lane (L-ARR-024; `view.chord_lane`), unticked in a new set; no key ([chord lane](../specs/chord-lane.md) R1) |
 | M-VIEW-035 | Scene Tempo and Time Signature | | | | Shows the Main track's scene tempo and signature fields |
 | | — | | | | |
 | M-VIEW-036 | Automation Mode | A | S-ENV-001 | disabled | |
@@ -503,6 +504,7 @@ Other states:
 | C-TRACK-018 | Link Tracks, Unlink Track(s) (several tracks selected, or a group track's header) | manual 6.14.1 |
 | C-TRACK-019 | Show Take Lanes, Insert Take Lane, Delete All Take Lanes, Delete All Unused Take Lanes (Arrangement) | manual 21.1, 21.2; release notes 12.2 |
 | C-TRACK-020 | Crop Clip (from a time selection in the track) | manual 22.2 |
+| IMP-33 | Follow Chord Lane, ticked while the track follows the chord lane (a MIDI track; after Save as Default MIDI Track, in a group of its own) | Beatlayer ([chord lane](../specs/chord-lane.md) R5) |
 
 ### Scene (C-SCENE)
 

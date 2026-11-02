@@ -6,8 +6,51 @@ use egui::Key;
 
 pub(crate) fn entries() -> Vec<(&'static str, Path)> {
     use Path::Exception;
-    use Reason::{Equivalent, LaterView, Live, Query};
+    use Reason::{Equivalent, Gap, LaterView, Live, Query};
     vec![
+        // The chord lane (WP-6.48).
+        (
+            "chord_lane.add_region",
+            Exception(Gap(
+                "drawing a region is a pointer drag in the lane; a way to add one from the \
+                 keyboard is for a maintainer to choose (the chord lane spec, R3)",
+            )),
+        ),
+        (
+            "chord_lane.move_region",
+            Exception(Gap(
+                "moving and resizing a region are pointer drags; a keyboard way to move or \
+                 resize the selected one is for a maintainer to choose (the chord lane spec, R3)",
+            )),
+        ),
+        (
+            "chord_lane.select_region",
+            Exception(Equivalent(
+                "clicking a region selects it, and Tab reaches the regions in the Arrangement's \
+                 Tab order, where the focus selects (the chord lane spec, R3)",
+            )),
+        ),
+        (
+            "chord_lane.delete_region",
+            Exception(Equivalent(
+                "the Delete key while a region is selected, which the Arrangement's keyboard \
+                 runs directly (the chord lane spec, R3)",
+            )),
+        ),
+        (
+            "chord_lane.set_region",
+            Exception(Equivalent(
+                "the region's context menu, which Shift-F10 (Ctrl-Option-Shift-M on macOS) \
+                 opens on the focused region (the chord lane spec, R4)",
+            )),
+        ),
+        (
+            "track.set_follow_chord_lane",
+            Exception(Equivalent(
+                "Follow Chord Lane in a MIDI track's context menu, which the keys open on the \
+                 focused title bar (the chord lane spec, R5)",
+            )),
+        ),
         // The Control Bar's transport (control-bar-transport R11).
         ("automation.copy", Exception(ENVELOPE_EDIT)),
         ("automation.cut", Exception(ENVELOPE_EDIT)),

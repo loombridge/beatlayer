@@ -1285,6 +1285,16 @@ impl BrowserUi {
                 theme.colors.pending.0,
             );
         }
+        // L-BRW-008: a search or a filter that matches nothing says so.
+        if total == 0 && view.note().is_none() && view.results_bar() {
+            painter.text(
+                list.center(),
+                Align2::CENTER_CENTER,
+                "No Results",
+                theme.small_font(),
+                theme.colors.text_dim.0,
+            );
+        }
         // Spec: accessibility R7: outlined only with Outline View in Focus.
         if ui.memory(|m| m.has_focus(list_id())) && crate::focus::outlined(ui.ctx()) {
             ui.painter().rect_stroke(
@@ -3766,7 +3776,7 @@ pub(crate) enum Glyph {
     Down,
     Up,
     Filter,
-    Bookmark,
+    AddLabel,
     Cross,
     Menu,
     Wave,
@@ -3800,19 +3810,22 @@ pub(crate) fn glyph(painter: &egui::Painter, rect: Rect, glyph: Glyph, colour: C
             c + vec2(s, s * 0.7),
             c + vec2(0.0, -s),
         ]),
-        Glyph::Bookmark => {
-            let w = s * 0.8;
-            painter.add(Shape::convex_polygon(
-                vec![
-                    c + vec2(-w, -s),
-                    c + vec2(w, -s),
-                    c + vec2(w, s),
-                    c + vec2(0.0, s * 0.4),
-                    c + vec2(-w, s),
-                ],
-                colour,
-                Stroke::NONE,
-            ));
+        Glyph::AddLabel => {
+            // Three lines and a plus: Live's Add Label mark.
+            for dy in [-s, 0.0, s] {
+                painter.line_segment(
+                    [c + vec2(-s * 1.4, dy), c + vec2(s * 0.2, dy)],
+                    Stroke::new(1.0, colour),
+                );
+            }
+            painter.line_segment(
+                [c + vec2(s * 0.9, -s * 0.6), c + vec2(s * 0.9, s * 0.6)],
+                Stroke::new(1.0, colour),
+            );
+            painter.line_segment(
+                [c + vec2(s * 0.3, 0.0), c + vec2(s * 1.5, 0.0)],
+                Stroke::new(1.0, colour),
+            );
         }
         Glyph::Cross => {
             painter.line_segment([c + vec2(-s, -s), c + vec2(s, s)], Stroke::new(1.5, colour));

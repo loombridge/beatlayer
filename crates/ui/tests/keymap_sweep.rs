@@ -419,15 +419,14 @@ fn the_views_gestures_are_marked_and_the_waiting_shortcuts_name_their_packages()
             entry.status
         );
     }
-    for (shortcut, milestone, package) in [("S-DEV-010", "M6", "WP-6.75")] {
-        let entry = keymap.entry_for(shortcut).expect(shortcut);
-        assert_eq!(
-            entry.status,
-            Status::Pending {
-                milestone: milestone.to_owned(),
-                package: Some(package.to_owned()),
-            },
-            "{shortcut}"
-        );
-    }
+    let shortcut = "S-DEV-010";
+    let entry = keymap.entry_for(shortcut).expect(shortcut);
+    assert_eq!(
+        entry.status,
+        Status::Pending {
+            milestone: "M6".to_owned(),
+            package: Some("WP-6.75".to_owned()),
+        },
+        "{shortcut}"
+    );
 }

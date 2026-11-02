@@ -212,7 +212,11 @@ impl Shell {
                 }))
             }
             plugin_ids::SHOW_WINDOW => {
-                let plugin_ids::ShowWindowArgs { device, shown } = Self::args(id, args)?;
+                let plugin_ids::ShowWindowArgs {
+                    device,
+                    shown,
+                    keep_others,
+                } = Self::args(id, args)?;
                 let device = target(self, device)?;
                 if crate::plugins::is_vst3(self.editor.document(), device) {
                     return Err(unavailable(
@@ -228,6 +232,12 @@ impl Shell {
                     crate::plugins::info(&self.plugins, &self.au, &self.vst3, &self.lv2, device)
                         .is_some_and(|info| info.window_open);
                 if shown.unwrap_or(!open) {
+                    // Spec: clap-hosting R27. One window at a time unless
+                    // Multiple Plug-In Windows is on or the click keeps
+                    // the others.
+                    if !self.prefs.multiple_plug_in_windows.0 && !keep_others {
+                        self.close_plug_in_windows(Some(device));
+                    }
                     // Spec: clap-hosting R13 and au-hosting's second part.
                     // Titled "<device>/<track>", as Live titles a plug-in's
                     // window.
@@ -867,6 +877,14 @@ impl Shell {
                     self.dirty = true;
                 }
                 self.document_changed();
+                // Spec: clap-hosting R28. Its window opens once the
+                // plug-in has started.
+                if self.prefs.auto_open_plug_in_windows.0
+                    && let Ok(plugin_ids::PluginLoaded { device, .. }) =
+                        serde_json::from_value(loaded.clone())
+                {
+                    self.auto_open.push(device);
+                }
                 Ok(loaded)
             }
             Err(error) => {

@@ -209,7 +209,9 @@ fn each_settings_command_reads_back_from_settings_state() {
     // Spec: automation R31. On in a new install.
     assert_eq!(before["snap_automation_to_grid"], true);
     assert_eq!(before["warp_recorded_audio"], true);
+    assert_eq!(before["multiple_plug_in_windows"], true);
     assert_eq!(before["auto_hide_plug_in_windows"], true);
+    assert_eq!(before["auto_open_plug_in_windows"], true);
     // Spec: warping R29. What a new install has.
     assert_eq!(
         before["warp"],
@@ -367,7 +369,17 @@ fn each_settings_command_reads_back_from_settings_state() {
     );
     run(
         &mut client,
+        "settings.set_multiple_plug_in_windows",
+        json!({ "on": false }),
+    );
+    run(
+        &mut client,
         "settings.set_auto_hide_plug_in_windows",
+        json!({ "on": false }),
+    );
+    run(
+        &mut client,
+        "settings.set_auto_open_plug_in_windows",
         json!({ "on": false }),
     );
     run(
@@ -449,7 +461,9 @@ fn each_settings_command_reads_back_from_settings_state() {
     assert_eq!(state["create_fades_on_clip_edges"], false);
     assert_eq!(state["snap_automation_to_grid"], false);
     assert_eq!(state["warp_recorded_audio"], false);
+    assert_eq!(state["multiple_plug_in_windows"], false);
     assert_eq!(state["auto_hide_plug_in_windows"], false);
+    assert_eq!(state["auto_open_plug_in_windows"], false);
     assert_eq!(
         state["warp"],
         json!({

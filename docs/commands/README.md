@@ -34073,7 +34073,9 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
 | `automation_record_mode` | [`AutomationRecordMode`](#automationrecordmode) | yes | The mode an Arrangement recording writes control moves in, as `settings.set_automation_record_mode` sets it (the automation spec, R18). |
 | `file_folder` | [`FileFolderSettings`](#filefoldersettings) | yes | File & Folder: the Temporary Folder, as `settings.set_temporary_folder` sets it. |
 | `library` | [`LibrarySettings`](#librarysettings) | yes | Library: Collect Files on Export and the User Library's folder. |
+| `multiple_plug_in_windows` | boolean | yes | Plug-Ins: Multiple Plug-In Windows, as `settings.set_multiple_plug_in_windows` sets it. |
 | `auto_hide_plug_in_windows` | boolean | yes | Plug-Ins: Auto-Hide Plug-In Windows, as `settings.set_auto_hide_plug_in_windows` sets it. |
+| `auto_open_plug_in_windows` | boolean | yes | Plug-Ins: Auto-Open Plug-In Windows, as `settings.set_auto_open_plug_in_windows` sets it. |
 | `plug_ins` | [`PluginSettings`](#pluginsettings) | yes | Plug-Ins: how the Browser shows plug-ins, as `plugin.settings` sets it. |
 | `agents` | [`AgentsPageSettings`](#agentspagesettings) | yes | Agents. |
 | `assistant` | [`AssistantState`](#assistantstate) | yes | Agents, the assistant: provider, base URL, model, and whether an API key is stored for the provider (the key itself is never reported). |
@@ -34100,6 +34102,10 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
       "description": "Plug-Ins: Auto-Hide Plug-In Windows, as `settings.set_auto_hide_plug_in_windows` sets it.",
       "type": "boolean"
     },
+    "auto_open_plug_in_windows": {
+      "description": "Plug-Ins: Auto-Open Plug-In Windows, as `settings.set_auto_open_plug_in_windows` sets it.",
+      "type": "boolean"
+    },
     "automation_record_mode": {
       "$ref": "#/$defs/AutomationRecordMode",
       "description": "The mode an Arrangement recording writes control moves in, as `settings.set_automation_record_mode` sets it (the automation spec, R18)."
@@ -34123,6 +34129,10 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "library": {
       "$ref": "#/$defs/LibrarySettings",
       "description": "Library: Collect Files on Export and the User Library's folder."
+    },
+    "multiple_plug_in_windows": {
+      "description": "Plug-Ins: Multiple Plug-In Windows, as `settings.set_multiple_plug_in_windows` sets it.",
+      "type": "boolean"
     },
     "page": {
       "$ref": "#/$defs/SettingsPage",
@@ -34187,7 +34197,9 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "automation_record_mode",
     "file_folder",
     "library",
+    "multiple_plug_in_windows",
     "auto_hide_plug_in_windows",
+    "auto_open_plug_in_windows",
     "plug_ins",
     "agents",
     "assistant"

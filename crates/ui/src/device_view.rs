@@ -1040,8 +1040,14 @@ impl DeviceViewUi {
             && (response.clicked()
                 || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))))
         {
-            // Spec: clap-hosting R13. Not an undo step.
-            invoke(events, PLUGIN_SHOW_WINDOW, json!({ "device": frame.id }));
+            // Spec: clap-hosting R13, R35. Not an undo step. Cmd-click
+            // (Ctrl-click) keeps the other plug-in windows open.
+            let keep_others = ui.input(|i| i.modifiers.command);
+            invoke(
+                events,
+                PLUGIN_SHOW_WINDOW,
+                json!({ "device": frame.id, "keep_others": keep_others }),
+            );
         }
         let c = &theme.colors;
         let painter = ui.painter_at(rect.expand(2.0));

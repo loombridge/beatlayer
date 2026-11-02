@@ -160,6 +160,12 @@ pub struct ShowWindowArgs {
     /// Open (true) or close (false) the window; switches if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shown: Option<bool>,
+    /// Keep the other plug-in windows open while this one opens, as a
+    /// Cmd-click (Ctrl-click) on the window button does. Without it, a
+    /// window opened while Multiple Plug-In Windows is off closes the
+    /// others.
+    #[serde(default)]
+    pub keep_others: bool,
 }
 
 /// Arguments of `plugin.info`.
@@ -689,8 +695,10 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  opens in a window Beatlayer owns, with the plug-in's own view embedded into \
                  it; on macOS, and for a plug-in that won't embed, in a floating window of the \
                  plug-in's own. An open window follows View ▸ Plug-In Windows and Auto-Hide \
-                 Plug-In Windows, which hide and show it without closing it. It changes only \
-                 the view: it isn't an undo step. Returns `plugin.info`'s report.",
+                 Plug-In Windows, which hide and show it without closing it. While Multiple \
+                 Plug-In Windows is off, opening a window closes the other plug-in windows \
+                 unless `keep_others` is true. It changes only the view: it isn't an undo \
+                 step. Returns `plugin.info`'s report.",
             )
             .permission(Permission::Read)
             .context(DeviceView)

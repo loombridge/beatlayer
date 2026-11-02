@@ -229,7 +229,7 @@ impl Shell {
                 // Spec: device-chains R40. It closes editors only, so it
                 // changes nothing in the set and is never an undo step.
                 Self::args::<NoArgs>(id, args)?;
-                let closed = self.close_plug_in_windows();
+                let closed = self.close_plug_in_windows(None);
                 self.touch();
                 Ok(to_value(&ids::ClosedPlugInWindows { closed }))
             }

@@ -13,11 +13,13 @@ use bl_core::time::{Bpm, TimeSignature};
 use bl_model::SceneId;
 use bl_shell::mixer_view_commands as view;
 use bl_shell::scene_fields::SceneField;
+use bl_ui::layout::mixer::{MixerLayout, SceneRow, Sections, SessionLayout, TrackColumn};
+use bl_ui::layout::{REFERENCE, ShellLayout, TITLE_BAR};
 use bl_ui::scene_fields::field_id;
 use bl_ui::scene_view::scene_view_id;
 use common::{Harness, Node, Window};
 use egui::accesskit::{Action, Role};
-use egui::{Event, Key, Modifiers, Pos2, Rect};
+use egui::{Event, Key, Modifiers, Pos2, Rect, vec2};
 use serde_json::json;
 
 fn harness() -> Harness {
@@ -133,20 +135,89 @@ fn typing_stepping_and_a_double_click_set_and_clear_a_scenes_tempo() {
     );
 }
 
-// Spec: session-view R21. Selecting a scene gives the detail area to the
-// Scene View, with the same fields, whether or not the Main column shows
-// them.
+/// The centre of a scene's number in the Main column.
+fn number_of(h: &Harness, scene: usize) -> Pos2 {
+    let view = ShellLayout::compute(REFERENCE, true, true)
+        .translate(vec2(0.0, TITLE_BAR))
+        .main_view;
+    let session = SessionLayout::compute(view, Some(Sections::DEFAULT));
+    let columns = h.shell.mixer_columns();
+    let returns = h.shell.editor().document().returns().count();
+    let layout = MixerLayout::compute(
+        session.slots,
+        &vec![TrackColumn::track(); columns.len()],
+        returns,
+        Sections::DEFAULT,
+        0.0,
+    );
+    SceneRow::compute(session.scene_row(scene, 0.0), layout.main.rect)
+        .number
+        .center()
+}
+
+fn scene_view_shows(h: &mut Harness) -> bool {
+    nodes(h)
+        .iter()
+        .any(|node| node.id == scene_view_id().accesskit_id())
+}
+
+fn main_column_is_highlighted(h: &mut Harness) -> bool {
+    nodes(h)
+        .iter()
+        .any(|node| node.label == "Main" && node.selected == Some(true))
+}
+
+// Spec: session-view R26 (I-CLICK-037). A single click on a scene's number
+// selects the scene and highlights the Main track; the Scene View stays
+// closed.
 #[test]
-fn a_selected_scene_takes_the_detail_area_for_the_scene_view() {
+fn a_click_on_a_scene_number_selects_the_scene_and_highlights_main() {
     let mut h = harness();
     let scene = first_scene(&h);
-    let all = nodes(&mut h);
-    assert!(
-        !all.iter()
-            .any(|node| node.id == scene_view_id().accesskit_id())
-    );
+    assert!(!main_column_is_highlighted(&mut h));
+    h.click(number_of(&h, 0));
+    h.settle();
+    assert_eq!(h.shell.session().state().scenes, vec![scene]);
+    assert!(main_column_is_highlighted(&mut h));
+    assert!(!scene_view_shows(&mut h));
+}
+
+// Spec: session-view R26 (I-CLICK-036). A double-click on a scene's number
+// opens its Scene View; selecting a slot puts the view back.
+#[test]
+fn a_double_click_on_a_scene_number_opens_the_scene_view() {
+    let mut h = harness();
+    let scene = first_scene(&h);
+    let at = number_of(&h, 0);
+    h.time += 1.0;
+    h.click(at);
+    h.click(at);
+    h.settle();
+    assert_eq!(h.shell.session().state().scene_view, Some(scene));
+    assert!(scene_view_shows(&mut h));
+    let track = h.shell.mixer_columns()[0];
+    h.shell
+        .run("session.select", json!({ "track": track, "scene": scene }))
+        .unwrap();
+    assert!(!scene_view_shows(&mut h));
     h.shell
         .run("session.select", json!({ "scene": scene }))
+        .unwrap();
+    assert!(!scene_view_shows(&mut h), "a click only selects it");
+}
+
+// Spec: session-view R26. The Scene View, once open, has the same fields,
+// whether or not the Main column shows them.
+#[test]
+fn an_open_scene_view_has_the_scenes_fields_and_follow_actions() {
+    let mut h = harness();
+    let scene = first_scene(&h);
+    assert!(!scene_view_shows(&mut h));
+    h.shell
+        .run(
+            "session.select",
+            json!({ "scene": scene, "scene_view": true }),
+        )
         .unwrap();
     let all = nodes(&mut h);
     let view = all

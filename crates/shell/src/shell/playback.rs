@@ -370,8 +370,18 @@ impl Shell {
         &self.session_states
     }
 
+    /// The first scene selected in the Session View, while it's in front:
+    /// where a slice's clip lands.
+    pub(crate) fn selected_scene(&self) -> Option<bl_model::SceneId> {
+        (self.main_view_of(WindowKind::Main) == MainView::Session)
+            .then(|| self.session.state().scenes.first().copied())
+            .flatten()
+            .filter(|scene| self.editor.document().scene(*scene).is_some())
+    }
+
     /// The scene the Scene View shows in the detail area (L-SES-011): the
-    /// first scene selected in the Session View, while it's in front.
+    /// one a double-click on its number opened, while it's still selected
+    /// in the Session View and that view is in front.
     #[must_use]
     pub fn scene_view_scene(&self) -> Option<bl_model::SceneId> {
         self.scene_view_scene_in(WindowKind::Main)
@@ -382,7 +392,7 @@ impl Shell {
     #[must_use]
     pub fn scene_view_scene_in(&self, window: WindowKind) -> Option<bl_model::SceneId> {
         (self.main_view_of(window) == MainView::Session)
-            .then(|| self.session.state().scenes.first().copied())
+            .then(|| self.session.scene_view())
             .flatten()
             .filter(|scene| self.editor.document().scene(*scene).is_some())
     }

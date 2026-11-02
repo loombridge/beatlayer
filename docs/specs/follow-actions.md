@@ -66,7 +66,7 @@ This spec covers the actions, the chance, the follow time, the global switch, sc
 | R11 | `crates/engine/tests/follow.rs`, `a_scenes_follow_action_runs_when_the_scene_launches_and_not_when_its_clip_does` | engine test |
 | R12 | `crates/engine/tests/follow.rs`, `two_renders_make_the_same_choices_and_the_split_matches_the_chance`; `crates/engine/src/session/follow.rs`, `the_a_b_split_matches_the_chance_and_the_draw_repeats` | engine, unit |
 | R13 | `crates/ui/tests/launch_panel.rs`, `the_follow_controls_drive_their_command_and_read_back_the_document` | UI script |
-| R14 | `crates/ui/tests/scene_view.rs`, `a_selected_scene_takes_the_detail_area_for_the_scene_view` | UI script |
+| R14 | `crates/ui/tests/scene_view.rs`, `an_open_scene_view_has_the_scenes_fields_and_follow_actions` | UI script |
 | R15 | `crates/shell/tests/session_view.rs`, `shift_enter_switches_the_selected_clips_follow_actions_on_then_off` | shell test |
 | R16 | `crates/shell/tests/session_view.rs`, `create_follow_action_chain_wires_the_selection_into_a_loop` | shell test |
 | R17 | `crates/model/tests/command_registry.rs`, `every_command_is_complete`, `every_document_command_is_registered`, `every_command_runs_by_id`, `schemas_match_what_commands_serialise`; `crates/agent/tests/readback.rs` | unit, agent test |

@@ -1304,21 +1304,11 @@ fn a_chains_menu_edit_info_text_types_the_text_in_the_info_view() {
     let (rack, chains) = rack(&mut h, &["Pad", "Lead"]);
     let name = row(&layout_of(&mut h, rack), 0).name.center();
     let nodes = Harness::nodes(&right_click(&mut h, name));
-    // The chain menu is taller since the custom colours (themes R28), so
-    // from a chain at the bottom of the window it opens upwards over the
-    // Arrangement View, where a pointer click on its item doesn't reach it
-    // (see the pull request); the item is chosen through the accessibility
-    // tree instead.
-    let target = item(&nodes, "Edit Info Text").id;
-    h.frame(vec![Event::AccessKitActionRequest(
-        egui::accesskit::ActionRequest {
-            action: egui::accesskit::Action::Click,
-            target_tree: egui::accesskit::TreeId::ROOT,
-            target_node: target,
-            data: None,
-        },
-    )]);
-    h.settle();
+    let b = item(&nodes, "Edit Info Text").bounds.unwrap();
+    click(
+        &mut h,
+        pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32),
+    );
     assert!(h.main.is_typing(), "the Info View is a text field");
     h.frame(vec![Event::Text("Soft strings".to_owned())]);
     h.key(Key::Enter, Modifiers::NONE);

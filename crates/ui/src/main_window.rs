@@ -1166,8 +1166,13 @@ impl MainWindowUi {
         }) else {
             return;
         };
-        // A click in the search field isn't a click in the pane under it.
-        if self.search_field.contains(pos) {
+        // A click in the search field, or in a menu or dialog over a pane,
+        // isn't a click in the pane under it.
+        if self.search_field.contains(pos)
+            || ctx
+                .layer_id_at(pos)
+                .is_some_and(|layer| layer.order != egui::Order::Background)
+        {
             return;
         }
         let areas = [

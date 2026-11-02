@@ -513,7 +513,11 @@ impl DeviceViewUi {
             if let (Some(&first), Some(&last)) = (selected.first(), selected.last())
                 && grow != 0
             {
-                let edge = if grow > 0 { last + 1 } else { first.wrapping_sub(1) };
+                let edge = if grow > 0 {
+                    last + 1
+                } else {
+                    first.wrapping_sub(1)
+                };
                 if let Some(next) = state.devices.get(edge) {
                     let mut run: Vec<_> = state.selection.clone();
                     run.push(next.id);

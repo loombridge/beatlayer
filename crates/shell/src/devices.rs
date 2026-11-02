@@ -3383,8 +3383,8 @@ impl DeviceView {
     fn range_to(&self, doc: &Document, device: DeviceId) -> Result<Vec<DeviceId>, DeviceError> {
         let siblings = chain_of(doc, device);
         let position = |d: DeviceId| siblings.iter().position(|s| *s == d);
-        let to = position(device)
-            .ok_or_else(|| DeviceError::InvalidArgs(format!("no {device}")))?;
+        let to =
+            position(device).ok_or_else(|| DeviceError::InvalidArgs(format!("no {device}")))?;
         let Some(from) = self.selected.and_then(position) else {
             return Ok(vec![device]);
         };

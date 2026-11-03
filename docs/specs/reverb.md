@@ -78,7 +78,7 @@ allows.
 - **R11.** Stereo sets the width of the output: at 0 the two channels are
   one (mono), at 120 each channel keeps its own network, and in between
   the side signal is scaled between the two. (S1)
-- **R12.** Density chooses how many combs run: Sparse the fewest, High all
+- **R12.** Density chooses how many combs run: Low the fewest, High all
   of them, for a richer tail at a higher cost. (S1)
 - **R13.** Reflect sets the amplitude of the early reflections, Diffuse
   that of the diffuse tail: at 0 the section is silent, and the two mix
@@ -87,6 +87,7 @@ allows.
   reverberated one: at 0 the output is the input, at 100 it is the
   reverb alone. (S1)
 - **R15.** Every parameter is automatable and nothing the device does on
+- **R16.** The panel is Live's (observed in Live 12.4.16, 2 November 2026): four black sections along the top, Input Filter (Lo Cut and Hi Cut over a display with its two values), Early Reflections (Spin, Amount and Rate over a display, with Shape under it), Diffusion Network (High, its display and values, Low, Diffusion and Scale) and Chorus (the switch with Amount and Rate); under them Predelay, Smooth, Size, Decay, Freeze with Flat and Cut, Stereo and Density; at the right Reflect, Diffuse and Dry/Wet. Reflect and Diffuse read in dB, a gain reaching -inf dB and up to +6 dB, and Density's choices read Low, Mid and High. A new Reverb has the input's high cut on, Spin at 0.30 Hz, the high damping on, Diffusion 60 %, Scale 40 %, Chorus at 0.02 Hz, a 2.5 ms predelay, Smooth Fast, a 1.2 s Decay, Flat and Cut on, the Low density, Reflect and Diffuse at 0 dB and 55 % Dry/Wet. (Layout L-DEV-091)
   the audio thread allocates, locks, or blocks: every line, filter and
   LFO is made with the device. Its impulse response is finite, bounded,
   and flushes to exact silence with no denormals left when the tail has
@@ -111,6 +112,7 @@ allows.
 | R13 | `crates/devices/tests/reverb.rs`, `reflect_and_diffuse_route_the_early_reflections_and_the_tail` | unit, real-time trap |
 | R14 | `crates/devices/tests/reverb.rs`, `dry_wet_balances_the_dry_and_the_wet` | unit, real-time trap |
 | R15 | `crates/devices/tests/reverb.rs`, `the_impulse_response_is_finite_and_ends_in_silence`, and every test in the file runs its blocks as real-time sections under the allocation trap; `crates/devices/tests/rules.rs`, `every_parameter_is_automatable_to_the_frame` (rule G2; the device has no gain, so G1 holds trivially) | unit, real-time trap |
+| R16 | `crates/devices/tests/live_panels.rs`, `reverb_holds_lives_controls_in_lives_order` | unit |
 | the layout | `crates/devices/tests/reverb.rs`, `the_layout_places_every_parameter_once` | unit |
 
 ## Beatlayer's own choices
@@ -131,7 +133,7 @@ allows.
 - **The damping shelves are one-poles.** Beatlayer mixes a low-passed copy
   of each comb's feedback into it by High's amount (turnover 4 kHz) and
   subtracts a low-passed copy by Low's amount (turnover 500 Hz).
-- **Density is how many combs run**: 4 at Sparse, 8 at Normal, 12 at
+- **Density is how many combs run**: 4 at Low, 8 at Mid, 12 at
   High. Smooth's times are Beatlayer's: Fast 50 ms, Slow one second.
 - **Freeze's Cut defaults on.** A new device starts with Cut on, so Freeze
   alone holds what is there.
@@ -142,17 +144,17 @@ allows.
 
 ## Defaults and ranges
 
-A new Reverb starts with Low Cut and High Cut off (100 Hz and 10 kHz),
-Spin off (20 %, 1 Hz), Shape 50 %, High on at 50 % and Low off at 50 %,
-Diffusion and Scale 50 %, Chorus off (20 %, 0.5 Hz), Predelay 10 ms,
-Smooth None, Size 50 %, Decay 2 s, Freeze off, Flat off, Cut on,
-Stereo 120, Density Normal, Reflect and Diffuse and Dry/Wet 100 %.
+A new Reverb starts with Low Cut off and High Cut on (100 Hz and 10 kHz),
+Spin off (20 %, 0.3 Hz), Shape 50 %, High on at 50 % and Low off at 50 %,
+Diffusion 60 % and Scale 40 %, Chorus off (20 %, 0.02 Hz), Predelay 2.5 ms,
+Smooth Fast, Size 50 %, Decay 1.2 s, Freeze off, Flat on, Cut on,
+Stereo 120, Density Low, Reflect and Diffuse 0 dB and Dry/Wet 55 % (R16).
 
 The ranges are Low Cut Frequency 20 to 500 Hz, High Cut Frequency 1 to
 20 kHz, Spin Amount 0 to 100 % and Spin Rate 0.01 to 10 Hz, Shape 0 to
 100 %, High and Low 0 to 100 %, Diffusion and Scale 0 to 100 %, Chorus
 Amount 0 to 100 % and Rate 0.01 to 10 Hz, Predelay 0 to 250 ms, Size 0
-to 100 %, Decay 0.1 to 60 s, Stereo 0 to 120, and Reflect, Diffuse and
+to 100 %, Decay 0.1 to 60 s, Stereo 0 to 120, Reflect and Diffuse a gain from −∞ dB to +6 dB, and
 Dry/Wet 0 to 100 %.
 
 Spin's modulation starts the right channel's LFO a third of a cycle on

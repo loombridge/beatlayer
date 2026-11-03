@@ -6,7 +6,9 @@ use std::f64::consts::TAU;
 
 use bl_dsp::Random;
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{
+    BODY_HEIGHT, BOX_HEIGHT, Control, ControlBand, DisplayCell, LayoutNode, PADDING, Widget,
+};
 use bl_model::{
     Device, DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit,
 };
@@ -52,10 +54,10 @@ pub const AXES: [(&str, ParamId); 7] = [
     ("Delay Time", TIME),
     ("Frequency", FREQUENCY),
     ("Pitch", PITCH),
-    ("Random Pitch", RANDOM_PITCH),
+    ("Rand Pitch", RANDOM_PITCH),
     ("Spray", SPRAY),
     ("Feedback", FEEDBACK),
-    ("Dry/Wet", DRY_WET),
+    ("DryWet", DRY_WET),
 ];
 /// The widest spray, in milliseconds.
 const MAX_SPRAY_MS: f64 = 500.0;
@@ -71,26 +73,26 @@ const GRAINS: usize = 8;
 pub fn grain_delay_type() -> DeviceType {
     let names: Vec<&str> = AXES.iter().map(|(name, _)| *name).collect();
     let params = vec![
-        ParamDescriptor::toggle(SYNC, "Sync", false)
+        ParamDescriptor::toggle(SYNC, "Sync", true)
             .describe("Sets the delay time in beat divisions rather than milliseconds."),
-        ParamDescriptor::integer(DIVISION, "Division", (1, 16), 4, ParamUnit::None)
+        ParamDescriptor::integer(DIVISION, "Division", (1, 16), 2, ParamUnit::None)
             .describe("The delay time in sixteenth notes while Sync is on."),
         ParamDescriptor::continuous(PERCENT, "Time %", (-50.0, 50.0), 0.0, ParamUnit::Percent)
             .describe("Shortens or lengthens the synced time, for a swing."),
         ParamDescriptor::continuous(TIME, "Time", (1.0, 5_000.0), 100.0, ParamUnit::Milliseconds)
             .logarithmic()
             .describe("The delay time in milliseconds while Sync is off."),
-        ParamDescriptor::continuous(FREQUENCY, "Frequency", (1.0, 150.0), 20.0, ParamUnit::Hertz)
+        ParamDescriptor::continuous(FREQUENCY, "Frequency", (1.0, 150.0), 60.0, ParamUnit::Hertz)
             .logarithmic()
             .describe("How often a grain starts; higher means smaller, quicker grains."),
-        ParamDescriptor::continuous(PITCH, "Pitch", (-36.0, 36.0), 0.0, ParamUnit::Semitones)
+        ParamDescriptor::continuous(PITCH, "Pitch", (-36.0, 36.0), 0.0, ParamUnit::None)
             .describe("Transposes the grains, as a crude pitch shifter."),
         ParamDescriptor::continuous(
             RANDOM_PITCH,
             "Random Pitch",
             (0.0, 100.0),
             0.0,
-            ParamUnit::Percent,
+            ParamUnit::None,
         )
         .describe("Varies each grain's pitch at random."),
         ParamDescriptor::continuous(
@@ -103,11 +105,11 @@ pub fn grain_delay_type() -> DeviceType {
         .describe("Starts each grain a random time later, smearing the signal."),
         ParamDescriptor::continuous(FEEDBACK, "Feedback", (0.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("How much of the output feeds back into the delay."),
-        ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 50.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 100.0, ParamUnit::Percent)
             .describe("The balance between the dry and the grains."),
-        ParamDescriptor::choice(X_AXIS, "X Axis", &names, 0)
+        ParamDescriptor::choice(X_AXIS, "X Axis", &names, 2)
             .describe("The parameter the X–Y display's horizontal axis moves."),
-        ParamDescriptor::choice(Y_AXIS, "Y Axis", &names, AXES.len() - 1)
+        ParamDescriptor::choice(Y_AXIS, "Y Axis", &names, 1)
             .describe("The parameter the X–Y display's vertical axis moves."),
     ];
     DeviceType::native(GRAIN_DELAY, "Grain Delay", DeviceRole::AudioEffect).with_description(
@@ -132,39 +134,77 @@ pub fn grain_delay_type() -> DeviceType {
     )
 }
 
+/// The sixteenths the buttons of the delay time set: Live's 1 2 3 4 over 5 6 8 16.
+const STEPS: [i32; 8] = [1, 2, 3, 4, 5, 6, 8, 16];
+/// The axes the buttons along the display's foot offer, in Live's order: every
+/// axis but Dry/Wet, which only the vertical axis has.
+const X_BUTTONS: [i32; 6] = [0, 4, 1, 2, 3, 5];
+/// The axes the buttons beside the boxes offer: every axis but the delay time.
+const Y_BUTTONS: [i32; 6] = [4, 1, 2, 3, 5, 6];
+
+/// Grain Delay as Live draws it: at the left a box for each of Spray,
+/// Frequency, Pitch, Rand Pitch, Feedback and DryWet beside the button that
+/// makes it the display's vertical axis, then the delay time as a grid of
+/// sixteenths with Sync and the per cent; the X-Y display, and under it the
+/// buttons that choose its horizontal axis.
 fn layout() -> DeviceLayout {
-    let time = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (SYNC, Widget::Toggle),
-            (DIVISION, Widget::Number),
-            (PERCENT, Widget::Knob),
-            (TIME, Widget::Knob),
+    use Widget::{Number, Slider, Stack, Toggle};
+    const LEFT: f32 = 101.0;
+    const DISPLAY: f32 = 250.0;
+    const TOP: f32 = 144.0;
+    let at = Control::new;
+    let mut left: Vec<Control> = [SPRAY, FREQUENCY, PITCH, RANDOM_PITCH, FEEDBACK, DRY_WET]
+        .into_iter()
+        .enumerate()
+        .map(|(row, param)| {
+            at(param, Slider, 4.0, 4.0 + 15.0 * row as f32)
+                .unnamed()
+                .sized(40.0, BOX_HEIGHT)
+        })
+        .collect();
+    left.extend([
+        at(Y_AXIS, Stack(6), 46.0, 4.0)
+            .with_steps(&Y_BUTTONS)
+            .sized(51.0, 87.0),
+        at(
+            DIVISION,
+            Widget::Grid {
+                columns: 4,
+                rows: 2,
+            },
+            4.0,
+            97.0,
+        )
+        .with_steps(&STEPS)
+        .hidden_while(SYNC, 0),
+        at(TIME, Number, 4.0, 97.0)
+            .unnamed()
+            .sized(97.0, BOX_HEIGHT)
+            .shown_only_while(SYNC, 0),
+        at(SYNC, Toggle, 4.0, 127.0).sized(29.0, BOX_HEIGHT),
+        at(PERCENT, Number, 51.0, 127.0)
+            .unnamed()
+            .sized(39.0, BOX_HEIGHT),
+    ]);
+    let foot = ControlBand::free(
+        LEFT + DISPLAY,
+        BODY_HEIGHT - TOP,
+        vec![
+            at(X_AXIS, Widget::Segments(6), 4.0, 0.0)
+                .with_steps(&X_BUTTONS)
+                .sized(LEFT + DISPLAY - 8.0, BOX_HEIGHT),
         ],
     );
-    let display = DisplayCell::new("X-Y", 160.0, BODY_HEIGHT, 1.0).with_top(ControlBand::stacked(
-        40.0,
-        &[(X_AXIS, Widget::Chooser), (Y_AXIS, Widget::Chooser)],
-    ));
-    let grains = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (FREQUENCY, Widget::Knob),
-            (PITCH, Widget::Knob),
-            (RANDOM_PITCH, Widget::Knob),
-            (SPRAY, Widget::Knob),
-            (FEEDBACK, Widget::Knob),
-            (DRY_WET, Widget::Knob),
-        ],
-    );
-    DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Band(time),
-        LayoutNode::Cell(display),
-        LayoutNode::Band(grains),
+    DeviceLayout::new(LayoutNode::Column(vec![
+        LayoutNode::Row(vec![
+            LayoutNode::Band(ControlBand::free(LEFT, TOP, left)),
+            LayoutNode::Cell(DisplayCell::new("X-Y", DISPLAY, TOP - PADDING, 1.0))
+                .inset(0.0, PADDING, PADDING, 0.0),
+        ]),
+        LayoutNode::Band(foot),
     ]))
 }
 
-/// Adds Grain Delay to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, grain_delay_type(), Scatter::new);
 }

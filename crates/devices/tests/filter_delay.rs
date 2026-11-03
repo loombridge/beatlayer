@@ -6,13 +6,40 @@
 use crate::common;
 use bl_core::time::{Bpm, Frames, TempoMap};
 use bl_devices::filter_delay::{
-    DIVISION, DRY, FEEDBACK, FILTER, FREQ, ON, PAN, SYNC, TIME, VOLUME, WIDTH, filter_delay_type,
-    line_param,
+    DIVISION, DRY, FEEDBACK, FILTER, FREQ, ON, PAN, SYNC, TIME, VOLUME, WIDTH, feedback_param,
+    filter_delay_type, line_param,
 };
-use bl_engine::{Registry, TransportInfo};
-use bl_model::ParamId;
+use bl_engine::{DeviceType, Registry, TransportInfo};
 use bl_model::param::db_to_gain;
-use common::{device, node, run_at, run_blocks, set};
+use bl_model::{Device, ParamId};
+use common::{node, run_at, run_blocks, set};
+
+/// A filter delay set up as these tests were written: every line's band at
+/// 1 kHz, its time four sixteenths a line (4, 8, 12), Pan at left, centre and
+/// right, Volume and Dry at 0 dB and the one Feedback at 50 % for all three
+/// lines; a test's own settings come after, and a Feedback it sets goes to every
+/// line, as the one Feedback did. Live's panel has other defaults, and a line
+/// each of Feedback: a test of those is in `live_panels`.
+fn device(device_type: &DeviceType, params: &[(ParamId, f64)]) -> Device {
+    let mut all = Vec::new();
+    for line in 0..3 {
+        all.extend([
+            (line_param(line, FREQ), 1_000.0),
+            (line_param(line, DIVISION), 4.0 * (line as f64 + 1.0)),
+            (line_param(line, PAN), (line as f64 - 1.0) * 100.0),
+            (line_param(line, VOLUME), 1.0),
+            (feedback_param(line), 50.0),
+        ]);
+    }
+    all.push((DRY, 1.0));
+    for (id, value) in params {
+        all.push((*id, *value));
+        if *id == FEEDBACK {
+            all.extend([(feedback_param(1), *value), (feedback_param(2), *value)]);
+        }
+    }
+    common::device(device_type, &all)
+}
 
 fn registry() -> Registry {
     let mut registry = Registry::new();

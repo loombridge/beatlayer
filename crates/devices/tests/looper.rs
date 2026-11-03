@@ -692,6 +692,8 @@ fn fixed_length_past_30_s_while_playing_keeps_the_song_tempo() {
             (TRANSPORT, STOP),
             (QUANTIZATION, Q_OFF),
             (RECORD_LENGTH, 5.0),
+            // The take ends in Play: Live's panel starts it ending in Overdub.
+            (AFTER_RECORD, 0.0),
             (INPUT_OUTPUT, IO_NEVER),
             (TEMPO_CONTROL, 1.0),
         ],

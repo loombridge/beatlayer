@@ -49,6 +49,9 @@ const SKIPPED: &[(&str, &str)] = &[
     ("link.set_enabled", "joins a Link session on the network"),
     ("stems.install", "downloads packages from the network"),
     ("packages.install", "downloads packages from the network"),
+    ("extension.install", "needs an extension package file"),
+    ("extension.remove", "needs an installed extension"),
+    ("extension.set_enabled", "needs an installed extension"),
     (
         "stems.separate",
         "needs the stem separation packages installed",

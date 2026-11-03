@@ -433,6 +433,34 @@ pub(crate) fn a_drum_synth(h: &mut Harness) {
         .unwrap();
 }
 
+/// An Analog on the third track, the selected track, no device selected, its
+/// Global section shown (WP-8.15).
+pub(crate) fn an_analog_on_its_global_page(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let t = bl_devices::analog_type();
+    let added: bl_shell::device_commands::DeviceAdded = serde_json::from_value(
+        h.shell
+            .run(
+                "device.add",
+                json!({ "device": { "kind": t.kind, "name": t.name, "role": t.role } }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    h.shell
+        .run(
+            "device.set_page",
+            json!({ "device": added.device, "node": bl_devices::analog::PAGES, "page": "Global" }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
 /// A Granulator III on audio track 3, the selected track, no device
 /// selected (WP-8.27).
 pub(crate) fn a_granulator(h: &mut Harness) {

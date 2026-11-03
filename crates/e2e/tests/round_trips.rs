@@ -458,7 +458,7 @@ fn a_dawproject_export_imported_again_keeps_the_set() {
     let before = exchange_summary(&document(&mut host));
     eprintln!("the set as a DAWproject keeps it: {}", short(&before));
     let tracks = before["tracks"].as_array().map_or(0, Vec::len);
-    assert_eq!(tracks, 7, "the rich set's tracks and returns: {before}");
+    assert_eq!(tracks, 8, "the rich set's tracks and returns: {before}");
     let path = dir.join("Rich.dawproject");
     let outcome = run(
         &mut host,

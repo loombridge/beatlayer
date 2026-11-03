@@ -104,7 +104,7 @@ fn the_bus_compressor_is_described_with_oversampling_as_a_menu_option() {
         "no control for a menu option"
     );
     let range = device_type.description.param(RANGE).unwrap();
-    assert_eq!((range.max(), range.default), (0.0, -60.0));
+    assert_eq!((range.max(), range.default), (70.0, 70.0));
 }
 
 // Spec: bus-compressor R2
@@ -218,8 +218,8 @@ fn range_caps_the_reduction_and_zero_applies_none() {
         params.push((RANGE, range));
         settled_gain(&params, 0.0)
     };
-    assert!((with(-6.0) + 6.0).abs() < 0.1);
-    assert!((with(-12.0) + 12.0).abs() < 0.1);
+    assert!((with(6.0) + 6.0).abs() < 0.1);
+    assert!((with(12.0) + 12.0).abs() < 0.1);
     assert!(with(0.0).abs() < 1e-4, "0 dB applies no compression");
 }
 

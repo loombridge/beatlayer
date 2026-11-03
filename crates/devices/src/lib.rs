@@ -134,6 +134,7 @@ pub mod utility;
 pub mod vector_delay;
 pub mod vocoder;
 pub mod wavetable;
+pub mod wavetable_mod;
 pub mod wavetables;
 pub mod wax;
 

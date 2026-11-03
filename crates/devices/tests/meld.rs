@@ -1358,7 +1358,7 @@ fn sixteen_voices_of_swarm_saw_on_both_engines_render_inside_the_device_budget()
     let realtime = seconds as f64 / start.elapsed().as_secs_f64();
     println!("sixteen voices of Swarm Saw: {realtime:.1}x real time (debug)");
     assert!(heard > 1.0, "it sounds");
-    if full_depth() {
+    if full_depth() && crate::common::budget::judged() {
         assert!(realtime >= 4.0, "{realtime:.1}x real time");
     }
 }

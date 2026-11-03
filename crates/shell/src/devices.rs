@@ -2078,6 +2078,8 @@ impl DeviceView {
             | ids::ADD_DESTINATION
             | ids::REMOVE_DESTINATION
             | ids::COPY_RESONATOR
+            | ids::COPY_MODULATION
+            | ids::CLEAR_MODULATION
             | ids::SET_PARTIALS
             | ids::COPY_OSCILLATOR
             | ids::SET_ENVELOPE_LEVELS
@@ -2916,7 +2918,43 @@ impl DeviceView {
                 let device = self.target(editor.document(), device)?;
                 let current = editor.document().device(device).expect("the target exists");
                 let name = self.grid_destination(device, current, &destination)?;
-                self.destinations.entry(device).or_default().insert(name);
+                // Spec: meld R63. On Meld's grids a row nothing routes into
+                // leaves when another is added.
+                let leaves: Vec<String> = if matches!(&current.kind, DeviceKind::Native { device_type }
+                    if device_type == bl_devices::meld::MELD)
+                {
+                    let layout = self.matrix_of(device, current)?;
+                    let state = layout.state(current);
+                    // Each engine's rows are kept apart from the other's.
+                    let engine_of = |row: &str| {
+                        layout
+                            .dests
+                            .iter()
+                            .position(|d| d.name == row)
+                            .and_then(bl_devices::meld::dest_engine)
+                    };
+                    let engine = engine_of(&name);
+                    self.destinations
+                        .get(&device)
+                        .into_iter()
+                        .flatten()
+                        .filter(|row| engine_of(row) == engine)
+                        .filter(|row| {
+                            !state.slots.iter().any(|slot| {
+                                slot.kind == bl_model::matrix::SlotKind::Free
+                                    && slot.destination == Some(row.as_str())
+                            })
+                        })
+                        .cloned()
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                let rows = self.destinations.entry(device).or_default();
+                for row in leaves {
+                    rows.remove(&row);
+                }
+                rows.insert(name);
             }
             ids::REMOVE_DESTINATION => {
                 let removed = self.remove_destination(args, editor)?;
@@ -2928,6 +2966,18 @@ impl DeviceView {
                 let copied = self.copy_resonator(args, editor)?;
                 outcome.document_changed = true;
                 outcome.value = to_value(&copied);
+                return Ok(outcome);
+            }
+            ids::COPY_MODULATION => {
+                let copied = self.copy_modulation(args, editor)?;
+                outcome.document_changed = true;
+                outcome.value = to_value(&copied);
+                return Ok(outcome);
+            }
+            ids::CLEAR_MODULATION => {
+                let cleared = self.clear_modulation(args, editor)?;
+                outcome.document_changed = true;
+                outcome.value = to_value(&cleared);
                 return Ok(outcome);
             }
             ids::SET_PARTIALS => {
@@ -3281,6 +3331,194 @@ impl DeviceView {
             device,
             destination: name,
             cleared: slots.into_iter().map(|(slot, _)| slot).collect(),
+        })
+    }
+
+    /// The Meld `device` names, and the engine (0 for A, 1 for B) `engine`
+    /// names.
+    fn meld_engine(
+        &self,
+        editor: &Editor,
+        device: Option<DeviceId>,
+        engine: &str,
+    ) -> Result<(DeviceId, usize, std::sync::Arc<bl_model::MatrixLayout>), DeviceError> {
+        use bl_devices::meld::MELD;
+        let device = self.target(editor.document(), device)?;
+        let current = editor.document().device(device).expect("the target exists");
+        if !matches!(&current.kind, DeviceKind::Native { device_type } if device_type == MELD) {
+            return Err(DeviceError::Unavailable(format!("{device} isn't a Meld")));
+        }
+        let engine = match engine {
+            "A" | "a" => 0,
+            "B" | "b" => 1,
+            other => {
+                return Err(DeviceError::InvalidArgs(format!(
+                    "`engine` is `A` or `B`, not `{other}`"
+                )));
+            }
+        };
+        let layout = self.matrix_of(device, current)?;
+        Ok((device, engine, layout))
+    }
+
+    /// Meld's routes as (slot, source, destination, amount) places.
+    fn meld_routes(
+        layout: &bl_model::MatrixLayout,
+        device: &Device,
+    ) -> Vec<(usize, usize, usize, f64)> {
+        layout
+            .state(device)
+            .slots
+            .iter()
+            .filter_map(|row| {
+                let source = layout.source_named(row.source?)?;
+                let dest = layout.dest_named(row.destination?)?;
+                Some((row.slot, source, dest, row.amount))
+            })
+            .collect()
+    }
+
+    /// Copies the routes of one of Meld's engines to the other
+    /// (`meld.copy_modulation`; meld R64), in one undo step.
+    fn copy_modulation(
+        &self,
+        args: Value,
+        editor: &mut Editor,
+    ) -> Result<ids::ModulationCopied, DeviceError> {
+        use bl_devices::meld::{dest_engine, dest_for, source_for};
+        let args: ids::CopyModulationArgs = parse(args)?;
+        let (device, from, layout) = self.meld_engine(editor, args.device, &args.engine)?;
+        let to = 1 - from;
+        let current = editor.document().device(device).expect("the target exists");
+        let routes = Self::meld_routes(&layout, current);
+        let copies: Vec<(usize, usize, f64)> = routes
+            .iter()
+            .filter(|&&(_, _, dest, _)| dest_engine(dest) == Some(from))
+            .map(|&(_, source, dest, amount)| (source_for(source, to), dest_for(dest, to), amount))
+            .fold(
+                Vec::<(usize, usize, f64)>::new(),
+                |mut all, (source, dest, amount)| {
+                    // Two slots with the same pair copy as one, their amounts summed.
+                    match all.iter_mut().find(|c| (c.0, c.1) == (source, dest)) {
+                        Some(copy) => copy.2 = (copy.2 + amount).clamp(-100.0, 100.0),
+                        None => all.push((source, dest, amount)),
+                    }
+                    all
+                },
+            );
+        let targets: Vec<usize> = copies.iter().map(|&(_, dest, _)| dest).collect();
+        let replaced: Vec<usize> = routes
+            .iter()
+            .filter(|&&(_, _, dest, _)| targets.contains(&dest))
+            .map(|&(slot, ..)| slot)
+            .collect();
+        let held = routes.len() - replaced.len();
+        let room = layout.slots.len() - held;
+        if copies.len() > room {
+            return Err(DeviceError::InvalidArgs(format!(
+                "the copy needs {} slots and {room} are free",
+                copies.len()
+            )));
+        }
+        // The slots the copies take, planned on a copy of the device with the
+        // replaced routes gone.
+        let mut planned = current.clone();
+        planned
+            .routes
+            .retain(|r| !replaced.contains(&usize::from(r.slot)));
+        let mut writes = Vec::with_capacity(copies.len());
+        for &(source, dest, amount) in &copies {
+            let route = layout
+                .plan_set(
+                    &planned,
+                    None,
+                    layout.sources[source].name,
+                    layout.dests[dest].name,
+                )
+                .map_err(|e| DeviceError::InvalidArgs(e.to_string()))?;
+            planned.routes.push(route.clone());
+            writes.push((route, amount));
+        }
+        editor
+            .transact("Copy Modulation", |editor| {
+                for slot in replaced {
+                    let amount = layout.slots[slot].amount;
+                    editor.apply(Command::ClearModRoute {
+                        device,
+                        slot: slot as u8,
+                    })?;
+                    editor.apply(Command::SetDeviceParam {
+                        device,
+                        param: amount,
+                        value: 0.0,
+                    })?;
+                }
+                for (route, amount) in writes {
+                    let param = layout.slots[usize::from(route.slot)].amount;
+                    editor.apply(Command::SetModRoute {
+                        device,
+                        slot: route.slot,
+                        source: route.source,
+                        destination: route.destination,
+                    })?;
+                    editor.apply(Command::SetDeviceParam {
+                        device,
+                        param,
+                        value: amount,
+                    })?;
+                }
+                Ok::<(), bl_model::EditError>(())
+            })
+            .map_err(|e| DeviceError::Failed(e.to_string()))?;
+        let letter = |engine: usize| ["A", "B"][engine].to_owned();
+        Ok(ids::ModulationCopied {
+            device,
+            from: letter(from),
+            to: letter(to),
+            routes: copies.len(),
+        })
+    }
+
+    /// Clears the routes of one of Meld's engines (`meld.clear_modulation`;
+    /// meld R64), in one undo step.
+    fn clear_modulation(
+        &self,
+        args: Value,
+        editor: &mut Editor,
+    ) -> Result<ids::ModulationCleared, DeviceError> {
+        use bl_devices::meld::{dest_engine, source_engine};
+        let args: ids::ClearModulationArgs = parse(args)?;
+        let (device, engine, layout) = self.meld_engine(editor, args.device, &args.engine)?;
+        let current = editor.document().device(device).expect("the target exists");
+        let cleared: Vec<usize> = Self::meld_routes(&layout, current)
+            .into_iter()
+            .filter(|&(_, source, dest, _)| {
+                dest_engine(dest) == Some(engine)
+                    || (dest_engine(dest).is_none() && source_engine(source) == Some(engine))
+            })
+            .map(|(slot, ..)| slot)
+            .collect();
+        let count = cleared.len();
+        editor
+            .transact("Clear Modulation", |editor| {
+                for slot in cleared {
+                    editor.apply(Command::ClearModRoute {
+                        device,
+                        slot: slot as u8,
+                    })?;
+                    editor.apply(Command::SetDeviceParam {
+                        device,
+                        param: layout.slots[slot].amount,
+                        value: 0.0,
+                    })?;
+                }
+                Ok::<(), bl_model::EditError>(())
+            })
+            .map_err(|e| DeviceError::Failed(e.to_string()))?;
+        Ok(ids::ModulationCleared {
+            device,
+            engine: ["A", "B"][engine].to_owned(),
+            routes: count,
         })
     }
 
@@ -4325,6 +4563,15 @@ fn new_device(id: DeviceId, args: &AddDeviceArgs, types: &[DeviceType]) -> Devic
         .with_role(args.device.role);
     if args.device.sidechain || known.is_some_and(|t| t.sidechain) {
         device = device.with_sidechain();
+        // Spec: granulator iii R18. A device whose node always hears its
+        // source starts with External on.
+        if let Some(sidechain) = device
+            .sidechain
+            .as_mut()
+            .filter(|_| known.is_some_and(|t| t.sidechain_on))
+        {
+            sidechain.enabled = true;
+        }
     }
     // Spec: external-devices R9. A device whose type works with hardware
     // starts with its routing, which `device.set_external` sets.

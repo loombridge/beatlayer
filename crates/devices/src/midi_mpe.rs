@@ -13,7 +13,7 @@
 //! What the manual leaves open — the exact curve laws, the smoothing's time
 //! constants, and what Default does to a note that carries no expression — is
 //! Beatlayer's own, written into the spec. Its panel is laid out as Live
-//! draws it (layout L-DEV-072): a column of tabs for the three sources with
+//! draws it (layout L-DEV-087): a column of tabs for the three sources with
 //! the shown source's curve knobs under them, a transfer curve whose foot
 //! holds the curve type, Min, Max, X and Y, and, in the expanded part, the
 //! shown source's settings.
@@ -305,7 +305,7 @@ fn layout() -> DeviceLayout {
 /// the source has of its own, then its conversion.
 fn settings(s: u32) -> ControlBand {
     let at = |param, widget, y| Control::new(param, widget, 6.0, y).sized(76.0, 12.0);
-    let tick = |param, y| at(param, Widget::Tick, y);
+    let tick = |param, y| at(param, Widget::Check, y);
     let mut controls = vec![
         tick(source_smooth(s), 3.0),
         at(source_rise(s), Widget::Inline, 18.0),

@@ -11,7 +11,7 @@ Note Echo creates rhythmic repetitions of incoming MIDI notes. Delay time can be
 
 Each repetition applies a progressive pitch transposition in semitones (Pitch) and velocity attenuation (Velocity Decay). Feedback determines the recirculation of generated echoes until velocities fall to zero. When the MPE switch is enabled, per-note expression messages (Pressure, Slide, Bend) accompany the echoed notes and decay across repetitions according to dedicated feedback controls; with MPE disabled, expression data is omitted from echoes.
 
-The device takes Live's name, Note Echo; its panel is laid out as Live draws it (layout L-DEV-071). Echoes wait in a preallocated internal queue; deactivating, moving, or deleting the device cleanly terminates sounding notes without hanging notes.
+The device takes Live's name, Note Echo; its panel is laid out as Live draws it (layout L-DEV-086). Echoes wait in a preallocated internal queue; deactivating, moving, or deleting the device cleanly terminates sounding notes without hanging notes.
 
 ## Sources
 

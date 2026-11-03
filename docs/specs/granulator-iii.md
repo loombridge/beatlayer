@@ -1,6 +1,6 @@
 # Granulator III: grains from a sample in Classic, Loop and Cloud modes, MPE, and capturing audio in real time
 
-- **Status:** draft
+- **Status:** implemented
 - **Work packages:** WP-8.26 (Granulator III, part 1: the grain engine in its three modes, its envelope, filter and volume, MPE and the waveform display: R1 to R17), WP-8.27 (Granulator III, part 2: capturing audio in real time, the captured audio kept as a file, and the panel: R18 to R27). Voices and per-note bends are [the instruments' voice section](instrument-voices.md); the filter is [the instruments' filter](instrument-filter.md); loading and referencing a sample is the [sampler](sampler.md)'s and [the multisampler](multisampler.md)'s; choosing a source is a sidechain's ([routing](routing.md) R22 to R31); where a capture's file goes is [recording](recording.md) R3's
 - **Parity-matrix row:** Instruments: Granulator III
 - **Checked against:** Ableton's Granulator III pack page (ableton.com/en/packs/granulator-iii/), read 30 October 2026; the device isn't described in the Live 12 reference manual, read 30 October 2026, or the Live 12 release notes
@@ -45,14 +45,14 @@ Live's Granulator III is a Max for Live device; Beatlayer's is native, with Live
 
 **Capture and the panel (WP-8.27)**
 
-- **R18.** The device has a capture source, chosen as a sidechain's Source is ([routing](routing.md) R23): No Input (the default) or a track, tapped Post FX, and a capture Length (1 to 30 s, 10 s by default). The capture buffer is made with the device at 30 s of stereo audio at the engine's rate. (S1, S4; Beatlayer's own)
-- **R19.** `granulator.capture` (`edit`) starts or stops a capture by the device's ID (`action`: `start` or `stop`); the panel's Capture button runs it. A capture writes the source's audio into the buffer from the frame it starts, sample for sample, aligned for latency as a sidechain is, and stops by itself after Length. It's refused with No Input chosen. (S1, S4; the command's name is Beatlayer's own)
+- **R18.** The device has a capture source, which is its sidechain's Source ([routing](routing.md) R22 to R25, R29 to R31), chosen as any sidechain's is: No Input (the default) or a track, tapped Post FX; the device's sidechain starts with External on, which a capture needs. Its capture Length is the parameter Capture Length (1 to 30 s, 10 s by default). The node holds a copy of the capture for its grains, made with the device at 30 s of stereo audio at the engine's rate; the buffer a capture is shared through is made, off the audio thread, when the capture starts, at Length's size, and never grows. (S1, S4; Beatlayer's own)
+- **R19.** `granulator.capture` (`edit`) starts or stops a capture by the device's ID (`action`: `start` or `stop`); the panel's Capture button runs it. A capture writes the source's audio into the buffer from the block it starts in, sample for sample, aligned for latency as a sidechain is, and stops by itself after Length. It's refused with No Input chosen, with External off, with a set that has never been saved (it has no project folder), with no audio engine running, and while a capture already runs. (S1, S4; the command's name is Beatlayer's own)
 - **R20.** While a capture fills, the device plays grains from it: Position and Spray are shares of what has been captured so far, so grains read only audio already written. (S1; Beatlayer's own reading)
 - **R21.** When a capture ends, the audio captured is the device's source, as one undo step, Capture Audio; a worker thread writes it to a WAV file in the project's `Samples/Recorded/` folder, named `<track label> Granulator III Capture [YYYY-MM-DD HHMMSS].wav` as recording R3 names files, and the set references it as a loaded sample, so a reopened set plays it identically. Undo brings back the previous source; the file stays. (S4)
-- **R22.** The buffer is handed to the worker through a queue; nothing the capture does on the audio thread allocates, locks, blocks or waits on the file. (S5)
+- **R22.** The audio thread only stores into the shared buffer; once the capture is over, the shell reads it and hands it to a worker thread that writes the file. Saving the set waits for a capture that has ended to be written and applied, so the saved set holds it. Nothing the capture does on the audio thread allocates, locks, blocks or waits on the file. (S5)
 - **R23.** The query tool's `device` result reports the capture under `capture`: the source, Length, whether it is capturing, the frames captured and the file of the last capture. (S5)
-- **R24.** The source and Length are device settings, saved with the set; changing them is one undo step each, Change Capture Source and Change Capture Length. (S4; Beatlayer's own)
-- **R25.** The panel holds the Capture button, the source chooser and Length beside the display, and its controls and display lie within the body at 50 %, 100 % and 200 % zoom with nothing overlapping. (S5)
+- **R24.** The source and Length are device settings, saved with the set; changing them is one undo step each, the sidechain's own `Change "Routing"` for the source ([routing](routing.md) R31) and the parameter's for Capture Length. (S4; Beatlayer's own)
+- **R25.** The panel holds the Capture button, over the display's bottom-left corner (it reads Stop while a capture runs), the source chooser in the sidechain section beside the display, and Capture Length with the Grain page's controls; its controls and display lie within the body at 50 %, 100 % and 200 % zoom with nothing overlapping. (S5)
 - **R26.** An offline render captures as playback does: the same frames, the same audio. (S4, S5)
 - **R27.** The panel is Beatlayer's own look. (S5)
 
@@ -67,9 +67,9 @@ Live's Granulator III is a Max for Live device; Beatlayer's is native, with Live
 | R13 | `granulator_iii.rs`: `mpe_slide_pressure_and_per_note_pitch_move_one_notes_grains_alone` | render (MPE moves one note's grains alone) |
 | R14, R17 | `granulator_iii.rs`: `the_display_reads_the_waveform_position_spray_and_each_grain_headless`, `it_is_an_instrument_named_for_live_with_the_display_and_three_pages`; `crates/cli/tests/agent.rs` (as R2) | agent API (`device.display`); layout test |
 | R16 | the block-size tests above; every block of `granulator_iii.rs` runs under the allocation trap; `rtsan/tests/granulator_iii.rs`: `granulator_iii_passes_under_rtsan` | real-time trap; repeated renders identical |
-| R18, R19, R20 | to be written in WP-8.27 | engine test (a generated source captured sample for sample, aligned for latency) |
-| R21, R24 | to be written in WP-8.27 | shell test (one undo step; the file in the project folder; reopened identically) |
-| R22 | to be written in WP-8.27 | RealtimeSanitizer (`rtsan/tests`) |
-| R23 | to be written in WP-8.27 | agent API; `cargo xtask commands` |
-| R25, R27 | to be written in WP-8.27 | layout test at three zooms; review |
-| R26 | to be written in WP-8.27 | offline render test |
+| R18, R19, R20 | `crates/engine/tests/granulator_capture.rs`: `a_capture_holds_the_sources_audio_sample_for_sample_and_stops_at_length`, `stopping_ends_a_capture_where_it_is`; `granulator_iii.rs`: `grains_play_from_what_a_capture_holds_so_far_and_it_stops_at_length`, `a_capture_without_a_sidechain_signal_holds_silence` | engine test (a tone track captured sample for sample through the sidechain, whose alignment for latency is the engine's, tested in `pdc.rs`); render |
+| R21, R24 | `crates/shell/tests/granulator_capture.rs`: `a_capture_ends_as_one_undo_step_with_its_file_in_the_project_and_reopens_identically`, `stop_ends_a_capture_before_its_length`, `a_capture_that_ends_as_the_set_is_saved_is_not_lost` | shell test (one undo step; the file in the project folder; reopened identically) |
+| R22 | `rtsan/tests/granulator_iii.rs`: `granulator_iii_passes_under_rtsan` (captures start, restart, run to Length and stop); every block of `granulator_iii.rs` runs under the allocation trap | RealtimeSanitizer (`rtsan/tests`) |
+| R23 | `crates/shell/tests/granulator_capture.rs` (the `capture` reading); `crates/agent/tests/granulator_capture.rs`: `an_agent_reads_a_granulators_capture_and_is_refused_with_no_input`; `cargo xtask commands` | agent API |
+| R25, R27 | `crates/ui/tests/granulator_panel.rs`: `the_capture_button_and_length_lie_within_the_body_at_three_zooms_with_nothing_overlapping`; review | layout test at three zooms; review |
+| R26 | `crates/engine/tests/granulator_capture.rs`: `an_offline_render_captures_the_same_audio_at_any_block_size` | offline render test |

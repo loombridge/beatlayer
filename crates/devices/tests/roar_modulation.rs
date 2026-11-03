@@ -28,6 +28,27 @@ fn registry() -> Registry {
     registry
 }
 
+/// What a new Roar had before it took Live's panel defaults (Multi Band
+/// routing, a compressor at 25 %, the sidechain's high-pass on and so on): the
+/// tests below look at one thing at a time from this base.
+fn base(params: &[(ParamId, f64)]) -> Vec<(ParamId, f64)> {
+    let mut all = vec![
+        (bl_devices::roar::ROUTING_MODE, 0.0),
+        (bl_devices::roar::TONE_FREQUENCY, 1_000.0),
+        (bl_devices::roar::LOW_CROSSOVER, 250.0),
+        (bl_devices::roar::HIGH_CROSSOVER, 2_500.0),
+        (bl_devices::roar::FB_TIME, 100.0),
+        (bl_devices::roar::FB_AMOUNT, 50.0),
+        (bl_devices::roar::FB_WIDTH, 4.0),
+        (bl_devices::roar::COMPRESSION, 0.0),
+        (bl_devices::roar::SIDECHAIN_HP, 0.0),
+        (p(2, bl_devices::roar::FREQUENCY), 20_000.0),
+        (p(2, bl_devices::roar::RESONANCE), 0.0),
+    ];
+    all.extend_from_slice(params);
+    all
+}
+
 fn p(stage: usize, offset: u32) -> ParamId {
     stage_param(stage, offset)
 }
@@ -74,7 +95,7 @@ impl Run {
 /// with the song playing from its start, and returns both channels.
 fn render(params: &[(ParamId, f64)], run: &Run, block: usize) -> Vec<Vec<f32>> {
     let device_type: DeviceType = roar_type();
-    let mut node = node(&registry(), &device(&device_type, params), block);
+    let mut node = node(&registry(), &device(&device_type, &base(params)), block);
     let tempo = TempoMap::constant(Bpm::DEFAULT);
     let frames = run.left.len();
     let mut out: Vec<Vec<f32>> = (0..CHANNELS).map(|_| Vec::with_capacity(frames)).collect();
@@ -180,7 +201,7 @@ fn the_matrix_has_an_automatable_amount_for_each_source_and_target() {
     assert_eq!(value(FB_NOTE).max(), 127.0);
     assert_eq!(value(FB_TIME).min(), 1.0);
     assert_eq!(value(FB_TIME).max(), 2_000.0);
-    assert_eq!(value(COMPRESSION).default, 0.0);
+    assert_eq!(value(COMPRESSION).default, 25.0);
     assert_eq!(value(lfo_param(0, LFO_RATE)).min(), 0.01);
     assert_eq!(value(lfo_param(1, LFO_RATE)).max(), 40.0);
     assert_eq!(value(lfo_param(0, LFO_SIXTEENTHS)).max(), 16.0);
@@ -635,7 +656,7 @@ fn each_source_publishes_its_last_two_seconds_to_device_display() {
     // LFO 1 at 2 Hz fills the 64 points of its trace with four cycles.
     let params = with(clean(0), &[(lfo_param(0, LFO_RATE), 2.0)]);
     let device_type = roar_type();
-    let mut node = node(&registry(), &device(&device_type, &params), 4_096);
+    let mut node = node(&registry(), &device(&device_type, &base(&params)), 4_096);
     let mut reader = node.display().expect("the device has a display");
     let input = noise(4_096);
     for _ in 0..30 {

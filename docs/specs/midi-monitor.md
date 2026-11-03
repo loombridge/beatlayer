@@ -37,7 +37,7 @@ This spec covers the device only. How a display's data reaches its cell and agen
 
 ## Defaults, ranges and details
 
-- Freeze and Clear start off. They are items of the device's context menu; the panel is laid out as Live draws it (layout L-DEV-070), one display cell under an MPE label, with no buttons for them.
+- Freeze and Clear start off. They are items of the device's context menu; the panel is laid out as Live draws it (layout L-DEV-085), one display cell under an MPE label, with no buttons for them.
 - The Flow and MPE lists hold their most recent 16 entries; the counts are of everything seen.
 - The display offers three views, Note, Flow and MPE, chosen with `device.set_display_view`; the first is the one it starts in. The cell draws the keyboard in every view and lists the readings; Live's three drawings differ more than this (S1).
 - A note whose key is still sounding is drawn with its note-on velocity; a key whose note-off has come is zero.

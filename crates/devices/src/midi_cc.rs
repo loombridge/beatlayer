@@ -169,7 +169,7 @@ fn layout() -> DeviceLayout {
         at(MOD_WHEEL, Widget::Knob, centres[0] - 20.0, 7.0),
         at(PITCH_BEND, Widget::Knob, centres[1] - 20.0, 7.0),
         at(PRESSURE, Widget::Knob, centres[2] - 20.0, 7.0),
-        at(CUSTOM_A, Widget::Check, centres[3] - 25.5, 7.0).sized(51.0, 40.0),
+        at(CUSTOM_A, Widget::Square, centres[3] - 25.5, 7.0).sized(51.0, 40.0),
         at(CUSTOM_A_CC, Widget::Chooser, centres[3] - 25.5, 64.0)
             .sized(51.0, 12.0)
             .unnamed(),

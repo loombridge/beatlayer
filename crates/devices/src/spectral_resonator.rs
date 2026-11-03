@@ -22,7 +22,9 @@ use core::f64::consts::{FRAC_PI_4, TAU};
 use bl_dsp::Random;
 use bl_dsp::stft::{self, Complex32, Stft, Window};
 use bl_engine::{DeviceType, KeyPitches, NodeConfig, NodeData, NoteEvent, NoteKind, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{
+    BODY_HEIGHT, BOX_HEIGHT, Control, ControlBand, DisplayCell, Heading, LayoutNode, Widget,
+};
 use bl_model::{
     Device, DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayMarker,
     DisplayReading, DisplaySeries, DisplaySpectrogram, ParamDescriptor, ParamId, ParamUnit, Scale,
@@ -124,6 +126,9 @@ pub const GRID: SpectrogramGrid = SpectrogramGrid {
     levels: [-90.0, 0.0],
 };
 
+/// The Hz one per cent of Mod Rate is: 100 % is 20 Hz.
+const MOD_RATE_HZ: f64 = 0.2;
+
 /// The seconds the spectrogram covers.
 const HISTORY_SECONDS: f64 = 4.0;
 
@@ -198,12 +203,18 @@ pub fn spectral_resonator_type() -> DeviceType {
             ),
         ParamDescriptor::continuous(SHIFT, "Shift", (-48.0, 48.0), 0.0, ParamUnit::Semitones)
             .describe("Moves the input's spectrum before it reaches the resonances."),
-        ParamDescriptor::continuous(DECAY, "Decay", (0.05, 20.0), 1.0, ParamUnit::Seconds)
-            .logarithmic()
-            .describe("How long a partial at 1 kHz takes to fall 60 dB."),
-        ParamDescriptor::continuous(HF_DAMP, "HF Damp", (0.0, 100.0), 0.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(
+            DECAY,
+            "Decay",
+            (50.0, 20_000.0),
+            222.0,
+            ParamUnit::Milliseconds,
+        )
+        .logarithmic()
+        .describe("How long a partial at 1 kHz takes to fall 60 dB."),
+        ParamDescriptor::continuous(HF_DAMP, "Hi Damp", (0.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("Shortens the decay of the partials above 1 kHz, up to 8 times at 20 kHz."),
-        ParamDescriptor::continuous(LF_DAMP, "LF Damp", (0.0, 100.0), 0.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(LF_DAMP, "Lo Damp", (0.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("Shortens the decay of the partials below 1 kHz, up to 8 times at 20 Hz."),
         ParamDescriptor::integer(HARMONICS, "Harmonics", (1, 64), 32, ParamUnit::None)
             .describe("How many partials sound: more is brighter."),
@@ -211,15 +222,20 @@ pub fn spectral_resonator_type() -> DeviceType {
             "Chorus moves the partials in a sine, Wander moves each along its own random line, \
              and Granular gates each on and off at random and scatters its pitch.",
         ),
-        ParamDescriptor::continuous(MOD_RATE, "Mod Rate", (0.01, 20.0), 1.0, ParamUnit::Hertz)
-            .logarithmic()
-            .describe("How fast the modulation moves."),
-        ParamDescriptor::continuous(PCH_MOD, "Pch. Mod", (0.0, 12.0), 0.2, ParamUnit::Semitones)
+        ParamDescriptor::continuous(
+            MOD_RATE,
+            "Mod Rate",
+            (0.05, 100.0),
+            10.0,
+            ParamUnit::Percent,
+        )
+        .describe("How fast the modulation moves."),
+        ParamDescriptor::continuous(PCH_MOD, "Pch.Mod", (0.0, 12.0), 0.0, ParamUnit::Semitones)
             .describe("How far the modulation moves a partial's pitch."),
         ParamDescriptor::integer(UNISON, "Unison", (1, 8), 1, ParamUnit::None).describe(
             "How many copies of each partial sound, detuned and spread between the channels.",
         ),
-        ParamDescriptor::continuous(UNI_AMT, "Uni. Amt", (0.0, 100.0), 30.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(UNI_AMT, "Uni. Amt", (0.0, 100.0), 10.0, ParamUnit::Percent)
             .describe("How far Unison's copies are detuned: 100 % is 50 cents either way."),
         ParamDescriptor::toggle(QUANTIZE, "Quantize", false).describe(
             "Moves each partial to the nearest note of the current scale or tuning, or the \
@@ -236,7 +252,7 @@ pub fn spectral_resonator_type() -> DeviceType {
         ),
         ParamDescriptor::integer(POLYPHONY, "Polyphony", (2, 16), 8, ParamUnit::None)
             .describe("The voices of Poly: a note past them takes the place of the oldest voice."),
-        ParamDescriptor::toggle(MIDI_GATE, "MIDI Gate", true).describe(
+        ParamDescriptor::toggle(MIDI_GATE, "MIDI Gate", false).describe(
             "In Mono, the resonances sound only while a note is held, ringing out after it; off, \
              they ring at the last note.",
         ),
@@ -253,6 +269,7 @@ pub fn spectral_resonator_type() -> DeviceType {
     .with_midi_sidechain_tap()
     .with_description(
         DeviceDescription::new(params)
+            .with_alternate(USE_SCALE, FREQ, SD_SHIFT)
             .with_layout(layout())
             .with_spectrogram(GRID)
             .with_title_switch(USE_SCALE)
@@ -273,11 +290,11 @@ pub fn spectral_resonator_type() -> DeviceType {
                 (
                     "Damping and Modulation",
                     &[
-                        "HF Damp",
-                        "LF Damp",
+                        "Hi Damp",
+                        "Lo Damp",
                         "Modulation",
                         "Mod Rate",
-                        "Pch. Mod",
+                        "Pch.Mod",
                         "Unison",
                         "Uni. Amt",
                         "Quantize",
@@ -299,39 +316,86 @@ pub fn spectral_resonator_type() -> DeviceType {
     )
 }
 
-/// The display cell, then the pitch, the resonance, the modulation, Unison
-/// and the output; the MIDI source's parameters in the expanded part.
+/// The panel as Live lays it out (observed in Live 12.4.16, 2 November 2026;
+/// layout L-DEV-081): the mode and the MIDI source's parameters down the
+/// left, Freq, Stretch and Shift, Decay and the damps, the modulation, the
+/// display with Harmonics and Quantize along its top, and the output. Transp.
+/// is in the expanded part, which Live's panel doesn't show; SD Shift takes
+/// Freq's place while Use Current Scale is on.
 fn layout() -> DeviceLayout {
-    use Widget::{Chooser, Knob, Number, Toggle};
-    let band = |controls: &[(ParamId, Widget)]| {
-        LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, controls))
-    };
+    use Widget::{Knob, SmallKnob};
     DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Cell(DisplayCell::new(SPECTROGRAM, 260.0, BODY_HEIGHT, 1.0)),
-        band(&[
-            (PITCH_MODE, Chooser),
-            (FREQ, Knob),
-            (SD_SHIFT, Number),
-            (TRANSP, Number),
+        LayoutNode::Column(vec![
+            LayoutNode::Heading(Heading::new("Mode", 76.0)),
+            LayoutNode::Band(ControlBand::free(
+                76.0,
+                146.0,
+                vec![
+                    Control::new(PITCH_MODE, Widget::Segments(2), 3.0, 4.0).sized(69.0, 11.0),
+                    Control::new(MONO_POLY, Widget::Cycle, 3.7, 75.7).sized(43.0, 11.0),
+                    Control::new(POLYPHONY, Widget::Number, 50.7, 75.7)
+                        .unnamed()
+                        .sized(21.7, 11.0),
+                    Control::new(MIDI_GATE, Widget::BesideSwitch(47), 3.5, 90.4).sized(69.0, 11.0),
+                    Control::new(GLIDE, Widget::BesideDim(28), 3.0, 115.0).sized(69.0, BOX_HEIGHT),
+                    Control::new(PB, Widget::BesideDim(28), 3.0, 129.7).sized(69.0, BOX_HEIGHT),
+                ],
+            )),
         ]),
-        band(&[
-            (DECAY, Knob),
-            (STRETCH, Knob),
-            (SHIFT, Knob),
-            (HARMONICS, Number),
-        ]),
-        band(&[(HF_DAMP, Knob), (LF_DAMP, Knob), (QUANTIZE, Toggle)]),
-        band(&[(MODULATION, Chooser), (MOD_RATE, Knob), (PCH_MOD, Knob)]),
-        band(&[(UNISON, Number), (UNI_AMT, Knob)]),
-        band(&[(INPUT_SEND, Knob), (DRY_WET, Knob)]),
+        LayoutNode::Band(ControlBand::free(
+            55.0,
+            BODY_HEIGHT,
+            vec![
+                Control::new(FREQ, Knob, 6.8, 4.3),
+                Control::new(STRETCH, Widget::Slider, 5.5, 101.3).sized(42.6, 21.0),
+                Control::new(SHIFT, Widget::Slider, 5.5, 130.0).sized(42.6, 21.0),
+            ],
+        )),
+        LayoutNode::Band(ControlBand::free(
+            46.0,
+            BODY_HEIGHT,
+            vec![
+                Control::new(DECAY, SmallKnob, 3.8, 4.3),
+                Control::new(HF_DAMP, SmallKnob, 4.5, 57.6),
+                Control::new(LF_DAMP, SmallKnob, 4.5, 111.0),
+            ],
+        )),
+        LayoutNode::Band(ControlBand::free(
+            55.0,
+            BODY_HEIGHT,
+            vec![
+                Control::new(MODULATION, Widget::Stack(4), 4.7, 4.4).sized(45.2, 55.5),
+                Control::new(MOD_RATE, SmallKnob, 11.4, 76.0),
+                Control::new(PCH_MOD, Widget::Number, 4.7, 130.0)
+                    .captioned("Pch.Mod")
+                    .sized(45.2, 21.0),
+            ],
+        )),
+        LayoutNode::Cell(
+            DisplayCell::new(SPECTROGRAM, 181.7, BODY_HEIGHT, 1.0).with_top(ControlBand::free(
+                181.7,
+                17.3,
+                vec![
+                    Control::new(HARMONICS, Widget::Readout, 44.8, 3.0).sized(60.0, BOX_HEIGHT),
+                    Control::new(QUANTIZE, Widget::Check, 126.7, 3.0).sized(52.0, BOX_HEIGHT),
+                ],
+            )),
+        ),
+        LayoutNode::Band(ControlBand::free(
+            59.6,
+            BODY_HEIGHT,
+            vec![
+                Control::new(INPUT_SEND, SmallKnob, 15.5, 4.3).captioned("Send"),
+                Control::new(UNISON, Widget::Number, 6.3, 54.0).sized(48.8, 21.0),
+                Control::new(UNI_AMT, Widget::Number, 6.3, 80.4).sized(48.8, 21.0),
+                Control::new(DRY_WET, SmallKnob, 15.5, 111.0),
+            ],
+        )),
     ]))
-    .with_expanded(band(&[
-        (MONO_POLY, Chooser),
-        (POLYPHONY, Number),
-        (MIDI_GATE, Toggle),
-        (GLIDE, Knob),
-        (PB, Number),
-    ]))
+    .with_expanded(LayoutNode::Band(ControlBand::stacked(
+        BODY_HEIGHT,
+        &[(TRANSP, Widget::Number)],
+    )))
 }
 
 /// Adds Spectral Resonator to `registry`.
@@ -882,7 +946,7 @@ impl SpectralResonator {
         // number as Stretch reaches -100 %, and the sum stays as loud.
         let squeeze = (count as f64).powf((stretch.min(0.0)) / 2.0) as f32;
         let (hf, lf) = (f64::from(p.hf[i]) / 100.0, f64::from(p.lf[i]) / 100.0);
-        let decay = f64::from(p.decay[i]).max(1.0e-3);
+        let decay = (f64::from(p.decay[i]) / 1_000.0).max(1.0e-3);
         let depth = f64::from(p.pch_mod[i]);
         self.ratio = (f64::from(p.shift[i]) / 12.0).exp2();
         if p.quantize {
@@ -1237,7 +1301,8 @@ impl NativeDevice for SpectralResonator {
             self.scale_seen = Some(scale);
             let boundary = self.pos.is_multiple_of(TICK as u64);
             if boundary {
-                self.mod_phase += f64::from(p.mod_rate[i]) / self.rate * TICK as f64;
+                self.mod_phase +=
+                    (f64::from(p.mod_rate[i]) * MOD_RATE_HZ).max(0.01) / self.rate * TICK as f64;
             }
             if boundary || moved {
                 self.tune(&p, scale, hidden, i);

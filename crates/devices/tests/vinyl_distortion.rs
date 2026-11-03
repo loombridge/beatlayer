@@ -37,7 +37,7 @@ const TWO_SECONDS: usize = 96_000;
 /// Both models off but for one, and Crackle off: the base of the harmonic
 /// tests.
 fn only(drive: ParamId, others: ParamId) -> [(ParamId, f64); 3] {
-    [(drive, 100.0), (others, 0.0), (SOFT_HARD, 1.0)]
+    [(drive, 1.0), (others, 0.0), (SOFT_HARD, 1.0)]
 }
 
 // Spec: vinyl-distortion R1
@@ -104,15 +104,15 @@ fn drive_scales_both_models_and_at_zero_the_signal_passes_whole() {
                 (DRIVE, drive),
                 (TRACING_FREQ, 3_000.0),
                 (PINCH_DRIVE, 0.0),
-                (TRACING_DRIVE, 100.0),
+                (TRACING_DRIVE, 1.0),
             ],
             &input,
             512,
         );
         partial(&out[0], 6_000.0)
     };
-    assert!((second(50.0) / second(100.0) - 0.5).abs() < 0.01);
-    let out = render(&[(DRIVE, 0.0)], &input, 512);
+    assert!((second(0.5) / second(1.0) - 0.5).abs() < 0.01);
+    let out = render(&[(DRIVE, 0.0), (TRACING_DRIVE, 1.0)], &input, 512);
     assert_eq!(out[0], input);
     assert_eq!(out[1], input);
 }
@@ -125,6 +125,8 @@ fn soft_distorts_less_than_hard() {
         let out = render(
             &[
                 (SOFT_HARD, mode),
+                (TRACING_DRIVE, 0.5),
+                (PINCH_DRIVE, 0.5),
                 (TRACING_FREQ, 3_000.0),
                 (PINCH_FREQ, 3_000.0),
             ],
@@ -200,9 +202,9 @@ fn crackle_volume_at_minus_infinity_is_silent_and_no_density_is_no_crackle() {
 fn a_render_repeats_run_after_run_and_at_any_block_size() {
     let input = noise(20_000);
     let params = [
-        (TRACING_DRIVE, 70.0),
-        (PINCH_DRIVE, 80.0),
-        (DRIVE, 90.0),
+        (TRACING_DRIVE, 0.7),
+        (PINCH_DRIVE, 0.8),
+        (DRIVE, 0.9),
         (CRACKLE_DENSITY, 80.0),
         (CRACKLE_VOLUME, 0.3),
     ];

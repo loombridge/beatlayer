@@ -6,9 +6,10 @@
 //!
 //! Beatlayer's own layout; Live's is to observe.
 
+use bl_model::device_layout::BOX_HEIGHT;
 use bl_model::{DeviceId, HardwareLatency, MAX_HARDWARE_LATENCY_MS, MAX_HARDWARE_LATENCY_SAMPLES};
 use bl_shell::device_commands::{
-    CvSection, EXTERNAL_SECTION_WIDTH, ExternalSection, TITLE_BAR_HEIGHT,
+    CvSection, EXTERNAL_EFFECT_WIDTH, EXTERNAL_SECTION_WIDTH, ExternalSection, TITLE_BAR_HEIGHT,
 };
 use bl_shell::routing::{self, Chooser, ExternalChoosers};
 use bl_shell::{Area, Invocation, Shell};
@@ -86,16 +87,34 @@ pub fn rows(frame: Rect) -> [Rect; 5] {
     ]
 }
 
+/// The External Audio Effect's section down the left of its frame (the
+/// panel's own first band reaches under it).
+#[must_use]
+pub fn effect_section_rect(frame: Rect) -> Rect {
+    Rect::from_min_max(
+        pos2(frame.left(), frame.top() + TITLE_BAR_HEIGHT),
+        pos2(frame.left() + EXTERNAL_EFFECT_WIDTH, frame.bottom()),
+    )
+}
+
 /// Where the External Audio Effect's controls sit, top to bottom: the Audio
 /// To chooser, the Audio From chooser, and Hardware Latency with its unit
-/// switch beside it (the box, then the switch).
+/// switch beside it (the box, then the switch), as Live places them
+/// (observed in Live 12.4.16, 2 November 2026; layout L-DEV-077). Its Phase
+/// switch is between the second chooser and Hardware Latency, drawn by the
+/// panel's layout.
 #[must_use]
 pub fn effect_rows(frame: Rect) -> [Rect; 4] {
-    let section = section_rect(frame).shrink2(vec2(3.0, 0.0));
-    let latency = row_at(section, 2);
-    let unit = unit_beside(latency);
-    let latency = Rect::from_min_max(latency.min, pos2(unit.left() - 2.0, latency.bottom()));
-    [row_at(section, 0), row_at(section, 1), latency, unit]
+    let body = frame.min + vec2(0.0, TITLE_BAR_HEIGHT);
+    let at = |x: f32, y: f32, width: f32| {
+        Rect::from_min_size(body + vec2(x, y), vec2(width, BOX_HEIGHT))
+    };
+    [
+        at(4.0, 16.5, 78.0),
+        at(4.0, 71.5, 78.0),
+        at(4.0, 141.0, 32.5),
+        at(40.0, 141.0, 22.0),
+    ]
 }
 
 /// The row `n` of the section, each control with its name above it.
@@ -166,8 +185,14 @@ pub fn draw(
     events: &mut Vec<UiEvent>,
 ) {
     let c = &theme.colors;
-    let area = section_rect(frame);
-    ui.painter_at(area).rect_filled(area, 0.0, c.control.0);
+    let area = if section.output {
+        effect_section_rect(frame)
+    } else {
+        section_rect(frame)
+    };
+    if !section.output {
+        ui.painter_at(area).rect_filled(area, 0.0, c.control.0);
+    }
     let Some(ExternalChoosers {
         midi_to: midi_to_chooser,
         channel: channel_chooser,
@@ -211,7 +236,12 @@ pub fn draw(
         )
     };
 
-    // The names above the controls.
+    // The names above the controls: the effect's are at Live's size.
+    let name_font = if section.output {
+        egui::FontId::proportional(9.0)
+    } else {
+        theme.small_font()
+    };
     let painter = ui.painter_at(area);
     for (rect, name) in [
         (midi_to, "MIDI To"),
@@ -224,7 +254,23 @@ pub fn draw(
             pos2(rect.left() + 1.0, rect.top() - 1.0),
             Align2::LEFT_BOTTOM,
             name,
-            theme.small_font(),
+            name_font.clone(),
+            c.text_dim.0,
+        );
+    }
+    if section.output {
+        // The line between the two directions and the name over the Phase
+        // switch, which the panel's layout draws.
+        let body = frame.min + vec2(0.0, TITLE_BAR_HEIGHT);
+        painter.line_segment(
+            [body + vec2(4.0, 53.0), body + vec2(82.0, 53.0)],
+            Stroke::new(1.0, c.separator.0),
+        );
+        painter.text(
+            body + vec2(5.0, 112.0),
+            Align2::LEFT_BOTTOM,
+            "Phase",
+            name_font,
             c.text_dim.0,
         );
     }
@@ -270,7 +316,7 @@ pub fn draw(
         shell,
         theme,
         device,
-        section.hardware_latency,
+        (section.hardware_latency, section.output),
         (latency, unit),
         events,
     );
@@ -283,7 +329,7 @@ fn latency_controls(
     shell: &Shell,
     theme: &Theme,
     device: DeviceId,
-    current: HardwareLatency,
+    (current, bare): (HardwareLatency, bool),
     (latency, unit): (Rect, Rect),
     events: &mut Vec<UiEvent>,
 ) {
@@ -293,7 +339,13 @@ fn latency_controls(
     // While Delay Compensation is off both it and its unit switch are
     // disabled, keeping the value.
     let available = shell.editor().document().settings().delay_compensation;
-    let text = latency_text(current);
+    let full = latency_text(current);
+    // The unit is on its switch beside the box when the box has no room.
+    let text = if bare {
+        full.split(' ').next().unwrap_or(&full).to_owned()
+    } else {
+        full.clone()
+    };
     let id = control_id(device, "latency");
     let response = ui.interact(
         latency,
@@ -351,7 +403,7 @@ fn latency_controls(
         if available { c.text.0 } else { c.pending.0 },
     );
     focus_ring(ui, theme, latency, &response);
-    describe(ui, id, Role::SpinButton, "Hardware Latency", &text);
+    describe(ui, id, Role::SpinButton, "Hardware Latency", &full);
     if !available {
         ui.ctx().accesskit_node_builder(id, |node| {
             node.set_disabled();
@@ -506,7 +558,7 @@ fn draw_cv(
         shell,
         theme,
         device,
-        section.hardware_latency,
+        (section.hardware_latency, false),
         (latency, unit),
         events,
     );

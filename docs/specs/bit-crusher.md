@@ -24,10 +24,10 @@ This spec covers the device's behaviour. The device framework (parameters, smoot
 
 Everything below that the manual doesn't state (the ranges, the defaults, the filters' shape and the quantiser's exact curves) is Beatlayer's own, listed to observe in Live.
 
-- **R1.** Rate runs from 100 Hz to 48 kHz (default 8 kHz, logarithmic). The signal is held at that rate: the output's lines sit at multiples of the Rate plus and minus the input's frequency, within 1 Hz. At the engine's rate or above, the signal isn't held at all. (S1)
-- **R2.** Bits runs from 2 to 16 (default 8). The quantiser has `2^Bits` levels, evenly spaced from −1 to one step under +1, with a level at zero, so a ramp through full scale takes exactly that many values. (S2)
+- **R1.** Rate runs from 100 Hz to 48 kHz (default 40 kHz, logarithmic; layout L-DEV-074). The signal is held at that rate: the output's lines sit at multiples of the Rate plus and minus the input's frequency, within 1 Hz. At the engine's rate or above, the signal isn't held at all. (S1)
+- **R2.** Bits runs from 2 to 16 (default 16). The quantiser has `2^Bits` levels, evenly spaced from −1 to one step under +1, with a level at zero, so a ramp through full scale takes exactly that many values. (S2)
 - **R3.** Shape runs from 0 to 100 % (default 0 %). At 0 % the steps are even. As it rises the quantiser works on the signal raised to the power `1 / (1 + 3 × Shape)`, so its steps are finer at small amplitudes and coarser at large ones, and full scale still reaches the top level the plain quantiser reaches. (S2)
-- **R4.** DC Shift runs from −50 % to +50 % (default 0 %) of one step. It is added to the signal, in steps, before the rounding and is not taken off afterwards, so it moves where the quantiser's thresholds fall and leaves its levels where they are. (S2)
+- **R4.** DC Shift is a switch (off by default) that adds a quarter of a step to the signal, in steps, before the rounding and is not taken off afterwards, so it moves where the quantiser's thresholds fall and leaves its levels where they are. (S2)
 - **R5.** Post is a 24 dB per octave low-pass filter after the hold (default off), whose corner is half the Rate times two to the power of Post Octave, Post Octave running from −4 to +4 (default 0). Its corner sits at that frequency within 2 %. The corner never passes 0.45 of the engine's rate. (S1)
 - **R6.** Pre is the same filter before the hold (default off), with its corner at half the Rate; it does nothing when the Rate is at or above the engine's. (S1)
 - **R7.** Jitter runs from 0 to 100 % (default 0 %). It varies the step of each channel's hold clock by up to ±50 % at 100 %, each channel with a random source of its own, so channels that hear the same input stop being identical: their correlation falls below 1. At 0 % they are identical. (S1, S4)
@@ -49,3 +49,7 @@ Everything below that the manual doesn't state (the ranges, the defaults, the fi
 | R8 | `crates/devices/tests/bit_crusher.rs`, `dry_wet_0_per_cent_nulls_against_the_input` | real-time trap |
 | R9 | `crates/devices/tests/bit_crusher.rs`, `a_render_repeats_run_after_run_and_at_any_block_size`; `rtsan/tests/devices.rs`, `crush_passes_under_rtsan` | real-time trap, RTSan |
 | R10 | `crates/cli/tests/agent.rs`, `an_agent_sets_the_lo_fi_effects_by_id_and_finds_them_after_a_save_and_reopen`; `crates/devices/tests/rules.rs`, `every_parameter_is_automatable_to_the_frame` | MCP script, real-time trap |
+
+## Not built yet
+
+- DC Shift's offset: Live reads it as a switch; the quarter of a step it adds here is Beatlayer's own.

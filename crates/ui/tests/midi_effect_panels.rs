@@ -1,8 +1,8 @@
 //! The MIDI effects' panels as Live lays them out (layout L-DEV-063 to
-//! L-DEV-073): each device's panel holds Live's controls in Live's order and
-//! kinds and none else, and the parts new with them (the stepper, Scale's grid,
-//! Chord's Velocity and Chance buttons, the switch box, MPE Control's tab
-//! column) do what they draw.
+//! L-DEV-069 and L-DEV-085 to L-DEV-088): each device's panel holds Live's
+//! controls in Live's order and kinds and none else, and the parts new with
+//! them (the stepper, Scale's grid, Chord's Velocity and Chance buttons, the
+//! switch box, MPE Control's tab column) do what they draw.
 //!
 //! Spec: device-framework R52 to R59; midi-scale-map R13; midi-chord R19.
 
@@ -19,7 +19,7 @@ use serde_json::json;
 
 use Widget::{
     Bare, Check, Chooser, Cycle, Grid, IconSegments, IconToggle, Inline, Knob, Marked, Mode,
-    Number, Outlined, Segments, Slider, SmallKnob, Stack, Stepper, Switch, Tick, Toggle,
+    Number, Outlined, Segments, Slider, SmallKnob, Square, Stack, Stepper, Switch, Toggle,
 };
 
 const GRID_4_2: Widget = Grid {
@@ -214,7 +214,7 @@ fn cc_controls_two_pages_hold_eight_cells_each() {
         ]
     );
     assert_eq!(first[0].1, Knob);
-    assert_eq!(first[3].1, Check);
+    assert_eq!(first[3].1, Square);
     assert_eq!(first[5].1, SmallKnob);
     let second = panel("CC Control", &[("Controls", "9-16")]);
     assert_eq!(second.len(), 16);
@@ -262,32 +262,32 @@ fn mpe_controls_settings_follow_the_source_tab() {
         (
             "Press",
             &[
-                ("Press Default", Tick),
+                ("Press Default", Check),
                 ("Press Default Value", Bare),
-                ("Swap to Slide", Tick),
-                ("Press to AT", Tick),
+                ("Swap to Slide", Check),
+                ("Press to AT", Check),
             ],
         ),
         (
             "Slide",
             &[
-                ("Slide Default", Tick),
+                ("Slide Default", Check),
                 ("Slide Default Value", Bare),
-                ("Slide Centered", Tick),
+                ("Slide Centered", Check),
                 ("Slide Mode", Segments(3)),
-                ("Slide to Mod", Tick),
+                ("Slide to Mod", Check),
             ],
         ),
         (
             "NotePB",
-            &[("Pitch Range", Segments(4)), ("NotePB to PB", Tick)],
+            &[("Pitch Range", Segments(4)), ("NotePB to PB", Check)],
         ),
     ];
     for (source, own) in own {
         let with = panel_with("MPE Control", &[("Source", source)], Some(true));
         let without = panel_with("MPE Control", &[("Source", source)], Some(false));
         let mut live = vec![
-            (format!("{source} Smooth"), Tick),
+            (format!("{source} Smooth"), Check),
             (format!("{source} Rise"), Inline),
             (format!("{source} Fall"), Inline),
         ];
@@ -594,7 +594,7 @@ fn arpeggiator_opens_expanded_and_its_toggle_hides_the_right_part() {
     assert!(!expanded(&h, other));
 }
 
-// Spec: device-framework R70. Note Echo's Sync button reads Time and the
+// Spec: device-framework R74. Note Echo's Sync button reads Time and the
 // delay-time box takes Swing's place while Sync is off.
 #[test]
 fn note_echos_sync_button_switches_between_sync_and_time() {
@@ -623,7 +623,7 @@ fn note_echos_sync_button_switches_between_sync_and_time() {
     assert!(shown(&h, SWING) && !shown(&h, TIME_MS));
 }
 
-// Spec: device-framework R70. Note Length's Trigger button switches between
+// Spec: device-framework R74. Note Length's Trigger button switches between
 // Note On and Note Off, which wakes the release knobs; Latch is a button of
 // its own.
 #[test]

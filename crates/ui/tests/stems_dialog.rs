@@ -136,12 +136,16 @@ fn an_audio_clips_menu_opens_the_packages_dialog_the_first_time() {
     );
     let output = h.settle();
     let shown = labels(&output);
-    for text in [
-        "Download Required Packages Now",
-        "Cancel",
-        "ONNX Runtime 1.28.3",
-        "Demucs (HTDemucs) 4.1.0",
-    ] {
+    // The runtime's name and version depend on the platform.
+    let packages: Vec<String> = bl_shell::stems::packages()
+        .iter()
+        .map(|p| format!("{} {}", p.name, p.version))
+        .collect();
+    assert!(packages.contains(&"Demucs (HTDemucs) 4.1.0".to_owned()));
+    for text in ["Download Required Packages Now", "Cancel"]
+        .into_iter()
+        .chain(packages.iter().map(String::as_str))
+    {
         assert!(
             shown.iter().any(|l| l.contains(text)),
             "{text} in {shown:?}"

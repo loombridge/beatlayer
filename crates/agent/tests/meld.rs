@@ -115,3 +115,137 @@ fn an_agent_sets_and_reads_back_every_parameter_and_reads_the_macros_by_type() {
         "B"
     );
 }
+
+fn matrix(client: &mut Client<InProcess>, device: DeviceId) -> Value {
+    client
+        .call("query", json!({ "id": device }))
+        .unwrap()
+        .ok()
+        .unwrap_or_else(|error| panic!("query failed: {error}"))["matrix"]
+        .clone()
+}
+
+// Spec: meld R62 to R64, R67, R73
+#[test]
+fn an_agent_routes_by_engine_names_copies_and_clears_reads_the_matrix_and_the_displays() {
+    let mut client = client();
+    let track = client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|track| track.kind() == TrackKind::Midi)
+        .map(bl_model::Track::id)
+        .expect("the default set has a MIDI track");
+    let added = run(
+        &mut client,
+        "device.add",
+        json!({
+            "device": {
+                "kind": { "native": { "device_type": MELD } },
+                "name": "Meld",
+                "role": "instrument",
+            },
+            "track": track,
+        }),
+    );
+    let device: DeviceId = serde_json::from_value(added["results"][0]["result"]["device"].clone())
+        .expect("the new device");
+    let before = matrix(&mut client, device);
+    assert_eq!(before["slots"].as_array().unwrap().len(), 64);
+    let names = |key: &str| -> Vec<String> {
+        before[key]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["name"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let (sources, destinations) = (names("sources"), names("destinations"));
+    for name in ["A LFO 1 FX", "B Amp Env", "MPE Slide", "Spread"] {
+        assert!(sources.contains(&name.to_owned()), "{name}");
+    }
+    for name in [
+        "A Filter Frequency",
+        "B Filter Frequency",
+        "B Pitch Quant",
+        "Mixer Drive",
+    ] {
+        assert!(destinations.contains(&name.to_owned()), "{name}");
+    }
+    // Routes by name, read back, and refused across the engines.
+    for (source, destination, amount) in [
+        ("A LFO 1", "A Filter Frequency", 40.0),
+        ("A Mod Env", "A Pitch Quant", -20.0),
+    ] {
+        run(
+            &mut client,
+            "device.set_route",
+            json!({ "device": device, "source": source, "destination": destination, "amount": amount }),
+        );
+    }
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "device.set_route", "args": {
+                "device": device, "source": "A LFO 1", "destination": "B Filter Frequency",
+            } }] }),
+        )
+        .unwrap()
+        .ok();
+    assert!(
+        refused.is_err(),
+        "an engine's modulator doesn't reach the other engine"
+    );
+    let copied = run(
+        &mut client,
+        "meld.copy_modulation",
+        json!({ "device": device, "engine": "A" }),
+    );
+    assert_eq!(copied["results"][0]["result"]["routes"], 2);
+    let slots = matrix(&mut client, device)["slots"].clone();
+    let route = |source: &str, destination: &str| {
+        slots
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|slot| slot["source"] == source && slot["destination"] == destination)
+            .cloned()
+            .unwrap_or_else(|| panic!("{source} to {destination} is a slot"))
+    };
+    assert_eq!(route("B LFO 1", "B Filter Frequency")["amount"], 40.0);
+    assert_eq!(route("B Mod Env", "B Pitch Quant")["amount"], -20.0);
+    let cleared = run(
+        &mut client,
+        "meld.clear_modulation",
+        json!({ "device": device, "engine": "B" }),
+    );
+    assert_eq!(cleared["results"][0]["result"]["routes"], 2);
+    // The displays an agent reads headless: every series, and a reading each.
+    let shown = run(&mut client, "device.display", json!({ "device": device }));
+    let display = &shown["results"][0]["result"];
+    let series: Vec<&str> = display["series"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["name"].as_str().unwrap())
+        .collect();
+    for name in [
+        "A Oscillator",
+        "B Filter",
+        "A Amp Envelope",
+        "B Mod Envelope",
+        "A LFO 1 FX",
+    ] {
+        assert!(series.contains(&name), "{name}");
+    }
+    assert!(
+        display["readings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["name"] == "A Oscillator"
+                && r["text"].as_str().unwrap().starts_with("Basic Shapes"))
+    );
+}

@@ -401,17 +401,17 @@ fn with_live_s_title_bar_drawn_top_anchored_rows_sit_at_layout_md_s_positions() 
     let mut h = Harness::with_title_bar(Window::Main);
     assert_eq!(h.size, egui::vec2(1600.0, 1000.0));
     let nodes = Harness::nodes(&h.settle());
-    // L-CTRL-004, L-CTRL-024, L-CTRL-027: controls 18 pt tall centred 37 pt
-    // from the top.
+    // L-CTRL-004, L-CTRL-024, L-CTRL-027: fields 16 pt tall (the theme's
+    // `control_field`) centred 37 pt from the top.
     assert_near(
         bounds_of(&nodes, Role::Button, "Tap Tempo"),
-        [54.0, 82.0, 28.0, 46.0],
+        [54.0, 82.0, 29.0, 45.0],
         "Tap Tempo",
     );
     let cpu = bounds_of(&nodes, Role::Meter, "CPU Load");
     // The Control Bar's right group is 20 points left of Live's, the
     // assistant's toggle having taken the far right (D24).
-    assert_near(cpu, [1419.0, 1468.0, 28.0, 46.0], "CPU Load");
+    assert_near(cpu, [1419.0, 1468.0, 29.0, 45.0], "CPU Load");
     // L-WIN-005: the main view from 61 pt down to the detail area.
     let main = bounds_of(&nodes, Role::Pane, "Arrangement View");
     assert_near(main, [320.0, 1591.0, 61.0, 766.0], "main view");
@@ -429,7 +429,7 @@ fn without_a_drawn_title_bar_the_layout_starts_below_the_system_s() {
     let nodes = Harness::nodes(&h.settle());
     assert_near(
         bounds_of(&nodes, Role::Button, "Tap Tempo"),
-        [54.0, 82.0, 28.0 - 23.0, 46.0 - 23.0],
+        [54.0, 82.0, 29.0 - 23.0, 45.0 - 23.0],
         "Tap Tempo",
     );
 }

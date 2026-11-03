@@ -285,7 +285,7 @@ impl SessionMenus {
         let menu = context_menus::clip_title();
         for item in shown(&menu) {
             if item.is_separator() {
-                ui.separator();
+                crate::menus::separator(ui);
                 continue;
             }
             if item.row == context_menus::CLIP_TITLE_COLOUR {
@@ -345,7 +345,7 @@ impl SessionMenus {
             .map(|clip| clip.id);
         for item in shown(menu) {
             if item.is_separator() {
-                ui.separator();
+                crate::menus::separator(ui);
                 continue;
             }
             let row = item.row;

@@ -7,7 +7,7 @@
 
 ## The behaviour
 
-Pedal models a guitar effects pedal in three types: Overdrive, warm and smooth; Distortion, tighter and harder; and Fuzz, unstable and gated. Gain drives the signal into the circuit, a three-band EQ after it shapes the tone (Mid with a choice of three centre frequencies), Sub raises the lowest frequencies, Output sets the level and Dry/Wet mixes in the dry signal. A Hi-Quality option in the title bar's context menu reduces aliasing further.
+Pedal models a guitar effects pedal in three types: Overdrive, warm and smooth; Distortion, tighter and harder; and Fuzz, unstable and gated. Drive drives the signal into the circuit, a three-band EQ after it shapes the tone (Mid with a choice of three centre frequencies), Sub, a switch, raises the lowest frequencies, Output sets the level and Dry/Wet mixes in the dry signal. A Hi-Quality option in the title bar's context menu reduces aliasing further.
 
 The device takes Live's name with Beatlayer's own type ID, `beatlayer.pedal`. Its three circuits are Beatlayer's own designs, written below, named after no manufacturer's product.
 
@@ -21,17 +21,17 @@ The device takes Live's name with Beatlayer's own type ID, `beatlayer.pedal`. It
 
 ## Rules
 
-- **R1.** Pedal (`beatlayer.pedal`) is an audio effect with Live's name, Beatlayer's own layout and no display cell: the type switch (Overdrive, Distortion, Fuzz; Overdrive in a new device), Gain, Output, Bass, Mid with its frequency switch, Treble, Sub and Dry/Wet. (S1; the layout is Beatlayer's own)
-- **R2.** Gain, 0 to 100 % (50 % by default), sets the circuit's drive g = 10^(Gain × 48 / 20) (0 to +48 dB). The circuit runs at four times the sample rate through the oversampler (device framework R8), or eight times with Hi-Quality on, a switch saved with the device. (S1; the law and factors are Beatlayer's own)
+- **R1.** Pedal (`beatlayer.pedal`) is an audio effect with Live's name and Live's layout and no display cell (layout L-DEV-070): Drive and Output across the top, the type row (OD, Distort and Fuzz; OD in a new device), Bass, Mid with its frequency pill and Treble, the Sub button and Dry/Wet. (S1; observed in Live 12.4.16)
+- **R2.** Drive, 0 to 100 % (0 % by default, as Live's panel reads), sets the circuit's drive g = 10^(Drive × 48 / 20) (0 to +48 dB). The circuit runs at four times the sample rate through the oversampler (device framework R8), or eight times with Hi-Quality on, a switch saved with the device. (S1; the law and factors are Beatlayer's own)
 - **R3.** Overdrive: a 720 Hz first-order high-pass before the clipper (so the lows stay clean), a soft clipper that keeps part of the clean signal, y = g (u + tanh(g u)) / (1 + g), whose slope at zero is g, and a 6 kHz low-pass after. (S1; Beatlayer's own)
 - **R4.** Distortion: a 100 Hz high-pass, a hard clipper of two diodes y = sign(v)·(1 − e^(−|v|)) with v = g u, and a 5 kHz second-order low-pass after. (S1; Beatlayer's own)
 - **R5.** Fuzz: a biased transistor stage y = tanh(g (u + β)) − tanh(g β), β = 0.3, whose bias β falls by up to 0.25 while the stage's envelope (a 2 ms attack, 80 ms release follower of its input) is high, so loud notes sputter and decaying ones gate; then a second stage y = tanh(3y) and a 4 kHz low-pass. The bias's motion depends only on the signal, so a render repeats run after run. (S1; Beatlayer's own)
-- **R6.** Each type's static curve, measured with a slow sine sweep with the envelope held, lies within 0.01 of its formula, and its harmonic balance on a 220 Hz sine at −12 dBFS with Gain 50 % (the second against the third harmonic) is within 1 dB of its design's figure. DC after the circuit is below −80 dBFS (a 5 Hz high-pass follows it). (Beatlayer's own)
-- **R7.** The EQ, after the circuit: Bass, −15 to +15 dB, a peak at 100 Hz with Q 0.7; Mid, −15 to +15 dB, a peak with Q 1 at 500 Hz, 1 kHz or 2 kHz as its switch says (1 kHz by default); Treble, −15 to +15 dB, a shelf at 3.3 kHz; Sub, 0 to +15 dB, a low shelf below 250 Hz. Each band's measured response at small signal is within 0.5 dB of its design at every Mid position. (S1; gains and Qs are Beatlayer's own)
+- **R6.** Each type's static curve, measured with a slow sine sweep with the envelope held, lies within 0.01 of its formula, and its harmonic balance on a 220 Hz sine at −12 dBFS with Drive 50 % (the second against the third harmonic) is within 1 dB of its design's figure. DC after the circuit is below −80 dBFS (a 5 Hz high-pass follows it). (Beatlayer's own)
+- **R7.** The EQ, after the circuit: Bass, −100 to +100 % (0 by default; 100 % is 15 dB), a peak at 100 Hz with Q 0.7; Mid, −100 to +100 %, a peak with Q 1 at 500 Hz, 1 kHz or 2 kHz as its pill says (1 kHz by default); Treble, −100 to +100 %, a shelf at 3.3 kHz; Sub, a switch (off by default) that puts a low shelf of +6 dB below 250 Hz. Each band's measured response at small signal is within 0.5 dB of its design at every Mid position. (S1; the gains, the 100 % = 15 dB scale, Sub's +6 dB and the Qs are Beatlayer's own)
 - **R8.** Output is a gain from −∞ to +12 dB (0 dB by default, rule G1); Dry/Wet, 0 to 100 % (100 % by default), balances the dry signal, delayed by the latency, against the pedal's. The device reports the oversampler's latency for the chosen quality. (S1, S3)
-- **R9.** A render is bit-identical at block sizes 1, 64, 512 and 4,096 and run after run; aliasing from a 5 kHz sine at −36 dBFS at Gain 100 % stays 60 dB below the fundamental in the band below 20 kHz, and 75 dB with Hi-Quality (at full drive the clipped edges' harmonics past half the oversampled rate fold back and no filter removes them, so louder sines alias more: about −30 dB at −6 dBFS); nothing on the audio thread allocates, locks or blocks. (S1, S3; the levels are Beatlayer's own)
+- **R9.** A render is bit-identical at block sizes 1, 64, 512 and 4,096 and run after run; aliasing from a 5 kHz sine at −36 dBFS at Drive 100 % stays 60 dB below the fundamental in the band below 20 kHz, and 75 dB with Hi-Quality (at full drive the clipped edges' harmonics past half the oversampled rate fold back and no filter removes them, so louder sines alias more: about −30 dB at −6 dBFS); nothing on the audio thread allocates, locks or blocks. (S1, S3; the levels are Beatlayer's own)
 - **R10.** Every parameter is automatable and modulatable (rule G2) and set and read back through the agent API; changing type crossfades over 20 ms. (S3)
-- **R11.** Pedal declares one bank of eight ([control surfaces](control-surfaces.md) R19): Type, Gain, Bass, Mid, Treble, Sub, Output, Dry/Wet, with Mid Frequency in a second, and Hi-Quality, a menu option, in the Options bank the framework adds last, so every automatable parameter is in a bank. (S3; Beatlayer's own)
+- **R11.** Pedal declares one bank of eight ([control surfaces](control-surfaces.md) R19): Type, Drive, Bass, Mid, Treble, Sub, Output, Dry/Wet, with Mid Frequency in a second, and Hi-Quality, a menu option, in the Options bank the framework adds last, so every automatable parameter is in a bank. (S3; Beatlayer's own)
 - **R12.** A set with Pedal saves and reopens with every parameter and Hi-Quality. (S3)
 
 ## Tests
@@ -45,3 +45,7 @@ The device takes Live's name with Beatlayer's own type ID, `beatlayer.pedal`. It
 | R10 | `crates/devices/tests/pedal.rs`, `a_change_of_type_crossfades_over_twenty_milliseconds`; `crates/devices/tests/rules.rs` over the shipped types; `crates/cli/tests/agent.rs`, `an_agent_inserts_pedal_and_sets_and_reads_back_its_parameters` | unit, real-time trap, agent API |
 | R11 | `crates/devices/tests/banks.rs` over the shipped types | unit |
 | R12 | `crates/shell/tests/pedal.rs`, `a_set_with_pedal_reopens_with_every_parameter` | unit |
+
+## Not built yet
+
+- The three-position pill's labels, Sub's boost (+6 dB here) and what 100 % of Bass, Mid and Treble is (15 dB here) are Beatlayer's own: Live's panel reads them as Mid's pill, Sub's button and % values.

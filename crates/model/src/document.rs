@@ -510,6 +510,16 @@ impl Document {
             })
     }
 
+    /// Whether the Arrangement holds a video clip, which the Video Window
+    /// needs to show (the video spec, R16).
+    #[must_use]
+    pub fn has_video_clip(&self) -> bool {
+        self.tracks
+            .values()
+            .flat_map(|track| track.clips())
+            .any(|clip| matches!(&clip.data, ClipData::Audio(audio) if audio.video))
+    }
+
     /// The spans of the Arrangement clips that lead the tempo (R43), in
     /// display order: what the Main track's lane shows and where the tempo
     /// commands refuse.

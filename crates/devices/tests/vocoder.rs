@@ -19,6 +19,15 @@ use common::{RATE, device, node};
 const RATE_HZ: f64 = 48_000.0;
 
 /// A registry with the Vocoder alone.
+/// The Gate value (a gain) for `db` dBFS, −80 or less being open.
+fn gate_value(db: f64) -> f64 {
+    if db <= -80.0 {
+        0.0
+    } else {
+        10f64.powf(db / 20.0)
+    }
+}
+
 fn registry() -> Registry {
     let mut registry = Registry::empty();
     bl_devices::vocoder::register(&mut registry);
@@ -615,15 +624,19 @@ fn depth_gives_the_mean_at_0_the_level_at_100_and_the_level_squared_at_200() {
 fn gate_silences_bands_below_it() {
     let (a, b, input) = two_tones(12.0, 48_000);
     // The louder tone's band is about −8 dBFS, the quieter's about −20.
-    let (_, open) = published(&[(GATE, -80.0)], &input, None);
-    let (_, gated) = published(&[(GATE, -14.0)], &input, None);
+    let (_, open) = published(&[(GATE, gate_value(-80.0))], &input, None);
+    let (_, gated) = published(&[(GATE, gate_value(-14.0))], &input, None);
     assert!(level_of(&open, b) > -40.0);
     assert_eq!(level_of(&gated, b), -80.0, "the quiet band is silenced");
     assert!((level_of(&gated, a) - level_of(&open, a)).abs() < 0.01);
     // Heard: the quiet tone as the carrier plays only with the gate open.
     let carrier = both(&sine(b, 0.4, 48_000));
     let loud = |gate| {
-        let (out, _) = published(&[(CARRIER, 1.0), (GATE, gate)], &input, Some(&carrier));
+        let (out, _) = published(
+            &[(CARRIER, 1.0), (GATE, gate_value(gate))],
+            &input,
+            Some(&carrier),
+        );
         rms(&out[0], 36_000, 48_000)
     };
     // (What is left is the tone leaking through the open bands far away.)
@@ -883,7 +896,7 @@ fn unvoiced_adds_noise_to_the_upper_bands_on_a_hiss_and_none_on_a_vowel() {
     };
     let off = play(&hiss, &[(UNVOICED, 0.0)]);
     assert!(off[0].iter().all(|s| *s == 0.0));
-    let on = play(&hiss, &[(UNVOICED, 100.0)]);
+    let on = play(&hiss, &[(UNVOICED, 1.0)]);
     let heard = rms(&on[0], 24_000, frames);
     assert!(heard > 1e-3, "{heard}");
     // The noise is in the upper half of the bands: above the centre of the
@@ -896,19 +909,19 @@ fn unvoiced_adds_noise_to_the_upper_bands_on_a_hiss_and_none_on_a_vowel() {
     };
     assert!(power(1_500.0, 20_000.0) > power(20.0, 700.0) * 100.0);
     // A vowel adds none, at any Sens. a vowel's zero crossings stay under.
-    let vowel_on = play(&ah, &[(UNVOICED, 100.0), (SENS, 40.0)]);
+    let vowel_on = play(&ah, &[(UNVOICED, 1.0), (SENS, 40.0)]);
     assert!(rms(&vowel_on[0], 12_000, frames) < heard * 0.01);
     // Sens. at 0 % never calls a frame unvoiced; the Slow frames agree.
-    let never = play(&hiss, &[(UNVOICED, 100.0), (SENS, 0.0)]);
+    let never = play(&hiss, &[(UNVOICED, 1.0), (SENS, 0.0)]);
     assert!(never[0].iter().all(|s| *s == 0.0));
-    let slow = play(&hiss, &[(UNVOICED, 100.0), (FAST_SLOW, 1.0)]);
+    let slow = play(&hiss, &[(UNVOICED, 1.0), (FAST_SLOW, 1.0)]);
     assert!(rms(&slow[0], 24_000, frames) > 1e-3);
     // Under Gate, a quiet hiss is not heard either.
     let quiet: Vec<Vec<f32>> = hiss
         .iter()
         .map(|c| c.iter().map(|s| s * 0.001).collect())
         .collect();
-    let gated = play(&quiet, &[(UNVOICED, 100.0), (GATE, -40.0)]);
+    let gated = play(&quiet, &[(UNVOICED, 1.0), (GATE, gate_value(-40.0))]);
     assert!(gated[0].iter().all(|s| *s == 0.0));
 }
 
@@ -1012,7 +1025,7 @@ fn renders(block: usize, frames: usize) -> Vec<Vec<Vec<f32>>> {
             let mut node = vocoder(
                 &[
                     (CARRIER, f64::from(carrier)),
-                    (UNVOICED, 50.0),
+                    (UNVOICED, 0.5),
                     (NOISE_X, 30.0),
                     (NOISE_Y, 30.0),
                     (CHANNEL_MODE, 2.0),
@@ -1050,7 +1063,7 @@ fn a_bank_of_40_bands_in_l_r_with_every_carrier_allocates_nothing() {
                 (CARRIER, carrier),
                 (BANDS, 9.0),
                 (CHANNEL_MODE, 2.0),
-                (UNVOICED, 100.0),
+                (UNVOICED, 1.0),
                 (ENHANCE, 1.0),
             ],
             4_096,
@@ -1072,7 +1085,7 @@ fn the_display_reads_each_bands_level_centre_range_and_gate_headless() {
     values.insert(BANDS, 1.0);
     values.insert(RANGE_LOW, 100.0);
     values.insert(RANGE_HIGH, 6_400.0);
-    values.insert(GATE, -30.0);
+    values.insert(GATE, gate_value(-30.0));
     let shown = bl_devices::display(VOCODER, id, &description, &values, None).unwrap();
     assert!(!shown.live);
     let bands: Vec<_> = shown
@@ -1125,9 +1138,9 @@ fn the_parameters_have_the_names_defaults_and_ranges_the_spec_gives() {
     assert_eq!(param(RANGE_HIGH).default, 12_000.0);
     assert_eq!(param(BW).default, 100.0);
     assert_eq!(param(DEPTH).default, 100.0);
-    assert_eq!(param(ATTACK).default, 5.0);
-    assert_eq!(param(RELEASE).default, 100.0);
-    assert_eq!(param(GATE).default, -80.0);
+    assert_eq!(param(ATTACK).default, 1.0);
+    assert_eq!(param(RELEASE).default, 150.0);
+    assert_eq!(param(GATE).default, 0.0, "−∞ dB");
     assert_eq!(param(PITCH_LOW).default, 50.0);
     assert_eq!(param(PITCH_HIGH).default, 1_000.0);
     assert_eq!(param(UNVOICED).default, 0.0);
@@ -1137,5 +1150,5 @@ fn the_parameters_have_the_names_defaults_and_ranges_the_spec_gives() {
         .layout
         .place(t.description.layout.docked_size())
         .cells;
-    assert_eq!(cells.len(), 1, "the band display");
+    assert_eq!(cells.len(), 2, "the carrier's display and the band display");
 }

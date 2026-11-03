@@ -53,7 +53,7 @@ Decoding runs in a crate of its own, `bl-video`, on a video thread that decodes 
 
 ### The Video Window (WP-9.26)
 
-- **R16.** View ▸ Video Window (M-VIEW-029) and Cmd-Option-Shift-V, Ctrl-Alt-Shift-V (S-VIEW-009), show and hide the Video Window (L-OTH-004), ticked while it shows; enabled only while the set has a video clip in the Arrangement. Dropping a movie into the Arrangement shows it. (S3, S8)
+- **R16.** View ▸ Video Window (M-VIEW-029) and Cmd-Option-Shift-V, Ctrl-Alt-Shift-V (S-VIEW-009), show and hide the Video Window (L-OTH-004) by running `view.toggle_video_window` (`read`), ticked while it shows; enabled only while the set has a video clip in the Arrangement, and the window closes with the last one. Dropping a movie into the Arrangement shows it. (S3, S8)
 - **R17.** The window floats above the main window and the second window, can be moved anywhere and resized from its bottom-right corner, the picture scaled to fit with its aspect kept and black around it. Its place and size are kept in the preferences, not in a set, so they're the same in every set. (S3, S8)
 - **R18.** The window shows the frame at the playhead within one frame, from the bottom-most track's playing video clip; with no video clip playing at the playhead, black. (S3, S4)
 - **R19.** While a video clip's warp marker is dragged, the window shows the frame under the marker. (S6)
@@ -89,5 +89,11 @@ Decoding runs in a crate of its own, `bl-video`, on a video thread that decodes 
 | R13 | `crates/shell/tests/video_clips.rs`: `video.frame_at` at a song position and at a movie time | shell test |
 | R14 | `crates/shell/tests/video_clips.rs`: the File Manager lists a movie, and replacing it by a movie keeps a video clip | shell test |
 | R15 | `crates/interop/tests/dawproject.rs` (`video_timelines_become_video_clips`); a Live set's video clips wait on the Live set importer (WP-9.14 to WP-9.17) | interop test |
-| R16 to R23 | to be written in WP-9.26: `crates/ui/tests/video_window.rs` on the test clock; `crates/ui/tests/keymap/resolve.rs` for S-VIEW-009 | UI script |
+| R16 | `crates/shell/tests/video_window.rs` (`the_window_needs_a_video_clip_and_a_dropped_movie_shows_it`); `crates/ui/tests/video_window.rs` (`the_view_menu_item_and_its_key_show_and_hide_the_window`); `crates/ui/tests/keymap/resolve.rs` (S-VIEW-009 is bound) | shell test, UI script |
+| R17 | `crates/shell/tests/video_window.rs` (`the_window_keeps_its_place_and_size_and_goes_full_screen_and_to_the_movies_size`: kept in the preferences, the same in every set); `crates/ui/tests/video_window.rs` (`the_picture_is_scaled_to_fit_with_black_around_it_and_black_where_none_plays`). That the window floats above the main windows and resizes from its corner is the operating system's, in `crates/app/src/host.rs`, and is checked by hand | shell test, UI script, manual |
+| R18, R23 | `crates/shell/tests/video_window.rs` (`the_window_draws_the_frame_at_the_playhead_and_black_where_none_plays`: during playback on the test clock the frame drawn is the one `video.frame_at` names at the playhead, black after the clip); `crates/ui/tests/video_window.rs` (the picture drawn as a texture) | shell test, UI script |
+| R19 | `crates/shell/tests/video_window.rs` (`a_dragged_warp_marker_shows_the_frame_under_it`) | shell test |
+| R20 | `crates/ui/tests/video_window.rs` (`a_double_click_goes_full_screen_and_back_and_option_double_click_sets_the_movies_size`) | UI script |
+| R21 | `crates/shell/tests/video_window.rs` (`video.window_state` after each `video.set_window`) | shell test |
+| R22 | `crates/ui/tests/video_window.rs` (`the_window_is_named_video_and_its_picture_is_an_image_of_the_clip_and_the_frames_time`, and Esc in `a_double_click_goes_full_screen_and_back_and_option_double_click_sets_the_movies_size`) | UI script |
 | R24, R25 | `crates/shell/tests/export_video.rs`: a Motion JPEG export checked frame by frame, its sound against the audio export's, and the selected clip's whole-movie span | shell test |

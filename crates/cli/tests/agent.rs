@@ -3027,7 +3027,7 @@ fn an_agent_inserts_pedal_and_sets_and_reads_back_its_parameters() {
             set(TYPE, 2.0),
             set(GAIN, 80.0),
             set(MID_FREQUENCY, 2.0),
-            set(SUB, 9.0),
+            set(SUB, 1.0),
             set(OUTPUT, 0.5),
             set(HI_QUALITY, 1.0),
         ] }),
@@ -3057,7 +3057,7 @@ fn an_agent_inserts_pedal_and_sets_and_reads_back_its_parameters() {
             json!(2.0),
             json!(80.0),
             json!(2.0),
-            json!(9.0),
+            json!(1.0),
             json!(0.5),
             json!(1.0)
         ]
@@ -3238,7 +3238,7 @@ fn an_agent_inserts_veer_sets_its_parameters_and_points_its_midi_sidechain_at_a_
         json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
     );
     let params = read["results"][0]["result"]["params"].as_array().unwrap();
-    assert_eq!(params.len(), 34, "every parameter is listed");
+    assert_eq!(params.len(), 35, "every parameter is listed");
     let value = |id: bl_model::ParamId| {
         params
             .iter()
@@ -3575,6 +3575,175 @@ fn an_agent_reads_spectral_resonators_spectrogram_partials_and_fundamental_throu
         .find(|r| r["name"] == "Voice 1 Fundamental")
         .expect("the sounding voice's fundamental");
     assert!((fundamental["value"].as_f64().unwrap() - 110.0).abs() < 0.5);
+    assert_eq!(host.offline.heap_operations(), 0);
+}
+
+// Spec: auto-shift R17, R21, R23 and routing R39: an agent adds Auto Shift,
+// sets every parameter by ID, points its MIDI source at a MIDI track with a
+// tapping point and reads them all back.
+#[test]
+fn an_agent_sets_every_auto_shift_parameter_and_its_midi_source_and_reads_them_back() {
+    use bl_devices::auto_shift::{AUTO_SHIFT, auto_shift_type};
+
+    let mut shell = Shell::headless();
+    shell.set_device_types(bl_devices::device_types());
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("auto-shift-agent").unwrap();
+    let tracks = default_tracks(&mut client);
+    let (keys, audio) = (tracks[0], tracks[2]);
+    let reply = call(
+        &mut client,
+        "run",
+        json!({ "label": "Add Auto Shift", "commands": [
+            { "command": "device.add",
+              "args": { "track": audio,
+                        "device": { "kind": { "native": { "device_type": AUTO_SHIFT } },
+                                    "name": "Auto Shift", "role": "audio_effect",
+                                    "midi_sidechain": true } } },
+        ] }),
+    );
+    let device = reply["results"][0]["result"]["device"].clone();
+    // Every parameter moved to a value other than its default.
+    let description = auto_shift_type().description;
+    let wanted: Vec<(bl_model::ParamId, f64)> = description
+        .params
+        .iter()
+        .map(|p| {
+            let (lo, hi) = (p.min(), p.max());
+            let value = if (p.default - hi).abs() > (p.default - lo).abs() {
+                lo + 0.75 * (hi - lo)
+            } else {
+                lo + 0.25 * (hi - lo)
+            };
+            (p.id, p.clamp(value))
+        })
+        .collect();
+    let mut commands: Vec<Value> = wanted
+        .iter()
+        .map(|(param, value)| {
+            json!({ "command": "device.set_param",
+                    "args": { "device": device, "param": param, "value": value } })
+        })
+        .collect();
+    commands.push(json!({ "command": "device.set_midi_sidechain_source",
+                          "args": { "device": device, "track": keys, "tap": "post_mixer" } }));
+    call(
+        &mut client,
+        "run",
+        json!({ "label": "Set Auto Shift", "commands": commands }),
+    );
+    let read = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+    );
+    let params = read["results"][0]["result"]["params"].as_array().unwrap();
+    assert_eq!(
+        params.len(),
+        description.params.len(),
+        "every parameter is listed"
+    );
+    for (id, value) in &wanted {
+        let found = params
+            .iter()
+            .find(|p| p["id"] == json!(id.0))
+            .unwrap_or_else(|| panic!("parameter {id:?}"));
+        assert_eq!(found["value"], json!(value), "{}", found["name"]);
+        assert_eq!(found["automatable"], json!(true));
+    }
+    let query =
+        || json!({ "path": format!("device {}", device.as_u64().unwrap()), "detail": "full" });
+    let found = call(&mut client, "query", query());
+    assert_eq!(found["saved"]["midi_sidechain"]["source"], json!(keys));
+    assert_eq!(found["saved"]["midi_sidechain"]["tap"], json!("post_mixer"));
+}
+
+// Spec: auto-shift R16, R17: `device.display` reads the detected and the
+// corrected pitch of a running Auto Shift headless: a steady tone off the
+// scale is read at its pitch and its target.
+#[test]
+fn an_agent_reads_auto_shifts_detected_and_corrected_pitch_through_device_display() {
+    use bl_devices::auto_shift::{self, AUTO_SHIFT};
+
+    let mut registry = bl_devices::testing::registry();
+    bl_devices::register(&mut registry);
+    let mut host = EngineHost::with_registry(512, registry);
+    host.client
+        .transport()
+        .shell
+        .set_device_types(bl_devices::device_types());
+    let device = |index: u32, name: &str, device_type: &str| {
+        json!({ "command": "device.insert",
+                "args": { "track": {"$ref": "Track"}, "index": index,
+                          "device": { "id": {"$new": name}, "name": name,
+                                      "kind": { "native": { "device_type": device_type } },
+                                      "enabled": true, "params": [] } } })
+    };
+    host.call(
+        "run",
+        json!({ "label": "Add devices", "commands": [
+            { "command": "track.create",
+              "args": { "id": {"$new": "Track"}, "kind": "audio", "name": "Track", "index": 0 } },
+            device(0, "Tone", bl_engine::nodes::TEST_TONE),
+            device(1, "Shift", AUTO_SHIFT),
+            { "command": "device.set_param",
+              "args": { "device": {"$ref": "Tone"}, "param": 0, "value": 340.0 } },
+            { "command": "device.set_param",
+              "args": { "device": {"$ref": "Tone"}, "param": 1, "value": -6.0 } },
+            { "command": "device.set_param",
+              "args": { "device": {"$ref": "Shift"}, "param": auto_shift::SMOOTH.0, "value": 0.0 } },
+        ] }),
+    );
+    let shift = {
+        let document = host.client.transport().shell.editor().document();
+        let track = document.tracks().find(|t| t.name() == "Track").unwrap();
+        track.devices().nth(1).unwrap().id
+    };
+    host.play_to(98_304);
+    host.publish_displays();
+    let reply = host.call(
+        "run",
+        json!({ "label": "Read", "commands": [
+            { "command": "device.display", "args": { "device": shift } },
+        ] }),
+    );
+    let shown = &reply["results"][0]["result"];
+    assert_eq!(shown["live"], true);
+    let reading = |name: &str| {
+        shown["readings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["name"] == name)
+            .unwrap_or_else(|| panic!("no {name}: {shown}"))["value"]
+            .as_f64()
+            .unwrap()
+    };
+    assert_eq!(reading("Voiced"), 1.0);
+    // 340 Hz is a little over E (key 64), and F (65) is the nearer note.
+    assert!(
+        (reading("Input Pitch") - 64.55).abs() < 0.1,
+        "{}",
+        reading("Input Pitch")
+    );
+    assert!(
+        (reading("Target Pitch") - 65.0).abs() < 0.05,
+        "{}",
+        reading("Target Pitch")
+    );
+    assert!(
+        (reading("Correction") - 45.0).abs() < 10.0,
+        "{}",
+        reading("Correction")
+    );
+    assert!(reading("Latency") > 10.0);
+    let series: Vec<&str> = shown["series"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(series, ["Detected", "Corrected"]);
     assert_eq!(host.offline.heap_operations(), 0);
 }
 
@@ -4127,12 +4296,12 @@ fn an_agent_sets_the_vocoder_by_id_reads_its_bands_and_finds_it_after_a_reopen()
         (vocoder::DEPTH, 150.0),
         (vocoder::ATTACK, 20.0),
         (vocoder::RELEASE, 400.0),
-        (vocoder::UNVOICED, 60.0),
+        (vocoder::UNVOICED, 0.6),
         (vocoder::RANGE_LOW, 100.0),
         (vocoder::RANGE_HIGH, 6_400.0),
         (vocoder::BW, 140.0),
         (vocoder::FILTER_MODE, 1.0),
-        (vocoder::GATE, -40.0),
+        (vocoder::GATE, 0.01),
         (vocoder::ENHANCE, 1.0),
         (vocoder::CHANNEL_MODE, 2.0),
         (vocoder::NOISE_X, 20.0),
@@ -4302,7 +4471,7 @@ fn an_agent_loads_a_sample_into_granulator_iii_reads_its_display_and_finds_it_af
     }
     let read = one(&mut client, "device.parameters", json!({ "device": id }));
     let params = read["params"].as_array().unwrap();
-    assert_eq!(params.len(), 30);
+    assert_eq!(params.len(), 31);
     assert!(params.iter().all(|p| p["automatable"] == json!(true)));
     for (param, value) in &sets {
         let found = params.iter().find(|p| p["id"] == param.0).unwrap();
@@ -5877,7 +6046,7 @@ fn an_agent_adds_sets_and_reads_the_saturation_devices_by_id_and_reopens_them() 
     };
     assert_eq!(parameters(&mut client, singe).as_array().unwrap().len(), 19);
     assert_eq!(parameters(&mut client, grit).as_array().unwrap().len(), 6);
-    assert_eq!(parameters(&mut client, valve).as_array().unwrap().len(), 9);
+    assert_eq!(parameters(&mut client, valve).as_array().unwrap().len(), 10);
 
     let set = |client: &mut Client<InProcess>, device: &Value, param: u32, value: f64| {
         call(
@@ -7108,7 +7277,7 @@ fn an_agent_adds_sets_and_reads_resonators_by_id_and_reopens_it() {
     let parameters = |client: &mut Client<InProcess>| {
         run(client, "device.parameters", json!({ "device": device }))["params"].clone()
     };
-    assert_eq!(parameters(&mut client).as_array().unwrap().len(), 30);
+    assert_eq!(parameters(&mut client).as_array().unwrap().len(), 31);
 
     // Every parameter moved to the other end of its range, and read back.
     let mut wanted = Vec::new();

@@ -69,6 +69,8 @@ pub mod analysed_media;
 pub mod arrangement;
 pub mod assistant;
 pub mod audio;
+pub mod audio_to_midi;
+mod audio_to_midi_racks;
 pub mod auto_warp;
 mod automation_record;
 pub mod autosample;
@@ -133,6 +135,9 @@ pub use bl_shell_spec::arrangement as arrangement_commands;
 /// The Audio Utilities panel's command IDs and their argument and result
 /// types (WP-4.10b).
 pub use bl_shell_spec::audio_panel as audio_panel_commands;
+/// Convert Harmony, Melody and Drums to New MIDI Track's command IDs and
+/// their argument and result types (IMP-06).
+pub use bl_shell_spec::audio_to_midi as audio_to_midi_commands;
 /// The automation editing command IDs and their argument and result types
 /// (WP-6.25).
 pub use bl_shell_spec::automation as automation_commands;
@@ -249,11 +254,13 @@ pub use bl_shell_spec::tracks as track_commands;
 pub use bl_shell_spec::transport as transport_commands;
 pub use bl_shell_spec::tunings as tuning_commands;
 pub use bl_shell_spec::{
-    audio_editing, bounce, commands, context_menus, freeze, keymap, menus, register,
+    audio_editing, bounce, commands, context_menus, freeze, keymap, menus, register, video,
 };
+/// A decoded picture the Video Window draws (WP-9.26).
+pub use bl_video::Frame as VideoFrame;
 /// The autosampler's progress (WP-5.16).
 pub use shell::autosample::Status as AutosampleStatus;
 pub use shell::{
     Area, Effect, ExportPrefs, GesturePhase, InfoTarget, Invocation, KEY_TRACK_NUMBER, MainView,
-    Message, Shell, ShellError, TransientList, WindowKind,
+    Message, Shell, ShellError, TransientList, VideoView, WindowKind,
 };

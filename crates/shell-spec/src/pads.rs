@@ -81,17 +81,25 @@ pub const IDS: &[&str] = &[
 pub const PADS_SHOWN: u8 = 16;
 /// How many notes one row of the pad view holds.
 pub const PADS_PER_ROW: u8 = 4;
-/// A pad's width at 100%, in points.
-pub const PAD_WIDTH: f32 = 56.0;
-/// A pad's height at 100%, in points.
-pub const PAD_HEIGHT: f32 = 34.0;
-/// The gap between pads at 100%.
-pub const PAD_GAP: f32 = 3.0;
+/// A pad's width at 100%, in points (observed in Live 12.4.16, 2 November
+/// 2026; layout L-DEV-049).
+pub const PAD_WIDTH: f32 = 47.6;
+/// A pad's height at 100%, in points (observed).
+pub const PAD_HEIGHT: f32 = 35.2;
+/// The gap between two pads of a row at 100% (observed).
+pub const PAD_GAP: f32 = 3.1;
+/// The gap between two rows of pads at 100% (observed).
+pub const PAD_ROW_GAP: f32 = 2.5;
 /// The overview's width at 100%: the strip at the pad view's left that shows
-/// all 128 notes as eight groups of sixteen.
-pub const PAD_OVERVIEW_WIDTH: f32 = 30.0;
+/// all 128 notes as eight groups of sixteen (observed).
+pub const PAD_OVERVIEW_WIDTH: f32 = 18.2;
+/// The space left of the overview, and between it and the pads, at 100%
+/// (observed).
+pub const PAD_MARGIN: f32 = 4.0;
+pub const PAD_OVERVIEW_GAP: f32 = 2.9;
 /// The width at 100% of a drum rack's pad view: the overview, then the grid.
-pub const RACK_PAD_WIDTH: f32 = PAD_OVERVIEW_WIDTH + 4.0 + 4.0 * PAD_WIDTH + 3.0 * PAD_GAP + 4.0;
+pub const RACK_PAD_WIDTH: f32 =
+    PAD_MARGIN + PAD_OVERVIEW_WIDTH + PAD_OVERVIEW_GAP + 4.0 * PAD_WIDTH + 3.0 * PAD_GAP + 5.2;
 /// The width at 100% the chain list gains with Input/Output on: the
 /// Preview button, Receive, Play and Choke.
 pub const DRUM_IO_WIDTH: f32 = 150.0;

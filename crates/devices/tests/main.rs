@@ -37,6 +37,7 @@ mod device_compare;
 mod dice;
 mod digital_degradation;
 mod drum_bus;
+mod drum_panels;
 mod drum_sampler;
 mod drum_synths;
 mod echo;

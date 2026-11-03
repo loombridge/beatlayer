@@ -55,19 +55,8 @@ fn find(request: &Request) -> Result<DeviceType, String> {
         })
 }
 
-/// Adds the device to the first track it fits (a MIDI track for an
-/// instrument or a MIDI effect, an audio track for an audio effect), selects
-/// that track, and shows the page.
-///
-/// # Errors
-///
-/// A message if the device or page isn't found, or a command fails.
-pub fn prepare(shell: &mut Shell, request: &Request) -> Result<DeviceId, String> {
-    let device_type = find(request)?;
-    let kind = match device_type.role {
-        DeviceRole::AudioEffect => TrackKind::Audio,
-        DeviceRole::Instrument | DeviceRole::MidiEffect => TrackKind::Midi,
-    };
+/// Adds `device` to the first track of `kind` and selects that track.
+fn add(shell: &mut Shell, kind: TrackKind, device: serde_json::Value) -> Result<DeviceId, String> {
     let track = shell
         .editor()
         .document()
@@ -78,16 +67,44 @@ pub fn prepare(shell: &mut Shell, request: &Request) -> Result<DeviceId, String>
     shell
         .invoke("arrangement.select_tracks", json!({ "tracks": [track] }))
         .map_err(|e| e.to_string())?;
+    let added = shell
+        .run("device.add", json!({ "device": device }))
+        .map_err(|e| e.to_string())?;
+    serde_json::from_value(added["device"].clone())
+        .map_err(|e| format!("device.add didn't say which device it added: {e}"))
+}
+
+/// Adds the device to the first track it fits (a MIDI track for an
+/// instrument or a MIDI effect, an audio track for an audio effect), selects
+/// that track, and shows the page.
+///
+/// # Errors
+///
+/// A message if the device or page isn't found, or a command fails.
+pub fn prepare(shell: &mut Shell, request: &Request) -> Result<DeviceId, String> {
+    // A Drum Rack isn't a described device: it is a rack of the drum kind.
+    if plain(&request.device) == "drumrack" {
+        return add(
+            shell,
+            TrackKind::Midi,
+            json!({
+                "kind": { "rack": { "kind": "drum" } },
+                "name": "Drum Rack",
+                "role": "instrument",
+            }),
+        );
+    }
+    let device_type = find(request)?;
+    let kind = match device_type.role {
+        DeviceRole::AudioEffect => TrackKind::Audio,
+        DeviceRole::Instrument | DeviceRole::MidiEffect => TrackKind::Midi,
+    };
     let device = json!({
         "kind": device_type.kind,
         "name": device_type.name,
         "role": device_type.role,
     });
-    let added = shell
-        .run("device.add", json!({ "device": device }))
-        .map_err(|e| e.to_string())?;
-    let id: DeviceId = serde_json::from_value(added["device"].clone())
-        .map_err(|e| format!("device.add didn't say which device it added: {e}"))?;
+    let id = add(shell, kind, device)?;
     if let Some(page) = &request.page {
         let wanted = plain(page);
         let mut shown = false;

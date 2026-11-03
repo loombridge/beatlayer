@@ -7,21 +7,22 @@ use std::f64::consts::TAU;
 
 use bl_dsp::random::Random;
 use bl_engine::{DeviceType, Registry};
-use bl_model::device_layout::Widget;
+use bl_model::device_layout::{Control, Widget};
 use bl_model::{
     DeviceDescription, DeviceDisplay, DeviceId, DeviceRole, OrdMap, ParamDescriptor, ParamId,
 };
 
 use crate::drum_synth::{
-    DECAY, DrumSynth, Filter, Hit, Pass, Preset, VOLUME, decay, layout, master_at, percent, tune,
-    volume,
+    DECAY, DrumSynth, Filter, Hit, Pass, Preset, VOLUME, decay, decay_ms, large, master_at, panel,
+    percent, tune, tune_semitones, volume,
 };
 use crate::framework::{ParamBank, add};
 
 /// DS Snare's device type id.
 pub const DS_SNARE: &str = "beatlayer.ds_snare";
 
-/// The pitch of the body and the noise filter, in semitones.
+/// The pitch of the body and the noise filter: 50 % is their own, and the
+/// ends are two octaves away.
 pub const TUNE: ParamId = ParamId(2);
 /// How far the body's sines are triangles, and how high the noise filter's
 /// cutoff is.
@@ -32,7 +33,7 @@ pub const TONE: ParamId = ParamId(4);
 pub const FILTER: ParamId = ParamId(5);
 
 /// The noise filter's types, in the chooser's order.
-pub const FILTERS: [&str; 3] = ["Low-pass", "High-pass", "Band-pass"];
+pub const FILTERS: [&str; 3] = ["LP", "HP", "BP"];
 
 /// The body's two sines, in hertz at Tune 0.
 const BODY_HZ: [f64; 2] = [185.0, 330.0];
@@ -54,36 +55,40 @@ const NOISE_GAIN: [f64; 3] = [3.0, 1.0, 2.0];
 #[must_use]
 pub fn ds_snare_type() -> DeviceType {
     let params = vec![
-        decay(250.0),
+        decay(25.0),
         volume(),
-        tune(TUNE, "Tune"),
+        tune(TUNE, "Tune", 41.0),
         percent(
             COLOR,
             "Color",
-            50.0,
+            81.0,
             "Shapes the pitched part: from sines to triangles. It also raises the noise \
              filter's cutoff, from 2 kHz to 8 kHz.",
         ),
         percent(
             TONE,
             "Tone",
-            50.0,
+            51.0,
             "How much noise there is against the pitched part: none at 0, only noise at 100 %.",
         ),
         ParamDescriptor::choice(FILTER, "Filter", &FILTERS, 1).describe(
-            "Filters the noise: a low-pass, a high-pass or a band-pass at the Color's cutoff.",
+            "Filters the noise: a low-pass (LP), a high-pass (HP) or a band-pass (BP) at the Color's \
+             cutoff.",
         ),
     ];
     DeviceType::native(DS_SNARE, "DS Snare", DeviceRole::Instrument).with_description(
         DeviceDescription::new(params)
-            .with_layout(layout(&[
-                (COLOR, Widget::Knob),
-                (TONE, Widget::Knob),
-                (FILTER, Widget::Chooser),
-                (TUNE, Widget::Knob),
-                (DECAY, Widget::Knob),
-                (VOLUME, Widget::Knob),
-            ]))
+            .with_layout(panel(
+                (
+                    vec![
+                        large(COLOR, 0),
+                        large(TONE, 1),
+                        Control::new(FILTER, Widget::Stack(3), 92.0, 55.5).sized(41.0, 42.0),
+                    ],
+                    Vec::new(),
+                ),
+                [DECAY, TUNE, VOLUME],
+            ))
             .with_banks(&[
                 ("Tone", &["Color", "Tone", "Filter", "Tune"]),
                 ("Level", &["Decay", "Volume"]),
@@ -95,20 +100,20 @@ pub fn ds_snare_type() -> DeviceType {
 pub const PRESETS: [Preset; 3] = [
     Preset {
         name: "Tight",
-        params: &[(TONE, 45.0), (COLOR, 30.0), (DECAY, 140.0)],
+        params: &[(TONE, 45.0), (COLOR, 30.0), (DECAY, 44.0)],
     },
     Preset {
         name: "Fat Back",
-        params: &[(TUNE, -3.0), (TONE, 65.0), (COLOR, 60.0), (DECAY, 380.0)],
+        params: &[(TUNE, 43.8), (TONE, 65.0), (COLOR, 60.0), (DECAY, 60.7)],
     },
     Preset {
         name: "Rim Crack",
         params: &[
-            (TUNE, 5.0),
+            (TUNE, 60.4),
             (TONE, 80.0),
             (COLOR, 90.0),
             (FILTER, 2.0),
-            (DECAY, 120.0),
+            (DECAY, 41.5),
         ],
     },
 ];
@@ -129,11 +134,17 @@ pub fn display(
     description: &DeviceDescription,
     values: &OrdMap<ParamId, f64>,
 ) -> DeviceDisplay {
-    crate::drum_synth::display(device, description, values, |value, ms| {
-        let tone = value(TONE) / 100.0;
-        let master = master_at(ms, value(DECAY));
-        ((1.0 - tone) * master.powi(BODY_FASTER)).max(tone * master)
-    })
+    crate::drum_synth::display(
+        device,
+        description,
+        values,
+        |_| Vec::new(),
+        |value, ms| {
+            let tone = value(TONE) / 100.0;
+            let master = master_at(ms, decay_ms(value(DECAY)));
+            ((1.0 - tone) * master.powi(BODY_FASTER)).max(tone * master)
+        },
+    )
 }
 
 /// A triangle from 0 up, for a phase in cycles.
@@ -176,7 +187,7 @@ impl Hit for Snare {
         let master = f64::from(master);
         let color = at(COLOR) / 100.0;
         let tone = at(TONE) / 100.0;
-        let tuned = 2f64.powf(at(TUNE) / 12.0);
+        let tuned = 2f64.powf(tune_semitones(at(TUNE)) / 12.0);
         let sweep = 2f64.powf((-t / BODY_SWEEP).exp() / 12.0);
         let mut body = 0.0;
         for (phase, hz) in self.phases.iter_mut().zip(BODY_HZ) {

@@ -24,12 +24,21 @@ fn tempo(bpm: f64) -> TempoMap {
     TempoMap::constant(Bpm::new(bpm).expect("a tempo in range"))
 }
 
-/// Fully wet, no feedback, both lines a sixteenth note long: 6,000 frames
-/// at 120 BPM.
+/// Fully wet, no feedback, both lines a sixteenth note long in notes: 6,000
+/// frames at 120 BPM, with the filter off at its widest and the reverb's Decay
+/// at one second, as these tests were written (Live's panel starts the filter
+/// on at 50 Hz and 5 kHz, in Dotted, with a Decay of 50 %: a test of that is
+/// in `live_panels`).
 fn clean() -> Vec<(ParamId, f64)> {
     vec![
         (echo::DRY_WET, 100.0),
         (echo::FEEDBACK, 0.0),
+        (echo::FILTER, 0.0),
+        (echo::HP_FREQ, 20.0),
+        (echo::LP_FREQ, 20_000.0),
+        (echo::DECAY, echo::decay_percent(1.0)),
+        (line_param(0, echo::SYNC_MODE), 0.0),
+        (line_param(1, echo::SYNC_MODE), 0.0),
         (line_param(0, echo::NOTES), 2.0),
         (line_param(1, echo::NOTES), 2.0),
     ]
@@ -371,7 +380,7 @@ fn the_loop_stays_bounded_at_a_hundred_per_cent_with_every_stage_on() {
         (echo::LP_RES, 100.0),
         (echo::REVERB, 100.0),
         (echo::REVERB_LOCATION, 2.0),
-        (echo::DECAY, 10.0),
+        (echo::DECAY, echo::decay_percent(10.0)),
         (echo::NOISE, 1.0),
         (echo::NOISE_AMOUNT, 100.0),
         (echo::WOBBLE, 1.0),
@@ -872,7 +881,7 @@ fn the_reverb_before_and_after_the_lines_is_the_same_and_in_the_loop_it_diffuses
             (echo::FEEDBACK, 50.0),
             (echo::REVERB, 100.0),
             (echo::REVERB_LOCATION, location),
-            (echo::DECAY, 0.5),
+            (echo::DECAY, echo::decay_percent(0.5)),
         ]);
         render(&params, &click, 512, &tempo(120.0))
     };
@@ -975,7 +984,7 @@ fn everything() -> Vec<(ParamId, f64)> {
         (echo::REPITCH, 1.0),
         (echo::REVERB, 40.0),
         (echo::REVERB_LOCATION, 2.0),
-        (echo::DECAY, 2.0),
+        (echo::DECAY, echo::decay_percent(2.0)),
         (echo::STEREO, 150.0),
         (echo::EQUAL_LOUDNESS, 1.0),
         (echo::DRY_WET, 60.0),
@@ -1033,12 +1042,20 @@ fn marker<'a>(display: &'a bl_model::DeviceDisplay, name: &str) -> &'a bl_model:
         .unwrap_or_else(|| panic!("no marker {name}"))
 }
 
+/// The settings the tunnel's tests were written for: both lines in Notes at
+/// 1/8 and 40 % Feedback (Live's panel starts in Dotted at 50 %).
+const NOTES_AT_FORTY: [(ParamId, f64); 3] = [
+    (echo::FEEDBACK, 40.0),
+    (line_param(0, echo::SYNC_MODE), 0.0),
+    (line_param(1, echo::SYNC_MODE), 0.0),
+];
+
 // Spec: echo R8
 #[test]
 fn the_tunnel_shows_each_lines_echoes_as_the_times_and_feedback_give_them() {
     assert_eq!(echo_type().description.views, ["Tunnel", "Filter"]);
     // 1/8 at 120 BPM is 250 ms; Feedback 40 % makes each echo 40 % of the last.
-    let display = shown(&[], None, None);
+    let display = shown(&NOTES_AT_FORTY, None, None);
     assert_eq!(display.view.as_deref(), Some("Tunnel"));
     assert!(!display.live);
     let (first, second) = (
@@ -1058,7 +1075,15 @@ fn the_tunnel_shows_each_lines_echoes_as_the_times_and_feedback_give_them() {
         .count();
     assert_eq!(left, 8);
     // No feedback, one echo.
-    let none = shown(&[(echo::FEEDBACK, 0.0)], None, None);
+    let none = shown(
+        &[
+            (echo::FEEDBACK, 0.0),
+            (line_param(0, echo::SYNC_MODE), 0.0),
+            (line_param(1, echo::SYNC_MODE), 0.0),
+        ],
+        None,
+        None,
+    );
     assert_eq!(
         none.markers
             .iter()
@@ -1067,12 +1092,14 @@ fn the_tunnel_shows_each_lines_echoes_as_the_times_and_feedback_give_them() {
         1
     );
     // The engine's published times replace the default tempo's.
-    let live = shown(&[], Some(&[300.0, 450.0]), None);
+    let live = shown(&NOTES_AT_FORTY, Some(&[300.0, 450.0]), None);
     assert!(live.live);
     assert_eq!(marker(&live, "Left echo 1").x, 300.0);
     assert_eq!(marker(&live, "Right echo 1").x, 450.0);
     // Ping Pong sends the left line's echoes through the right line.
-    let ping = shown(&[(echo::CHANNEL_MODE, 1.0)], None, None);
+    let mut ping_params = NOTES_AT_FORTY.to_vec();
+    ping_params.push((echo::CHANNEL_MODE, 1.0));
+    let ping = shown(&ping_params, None, None);
     assert_eq!(marker(&ping, "Left echo 2").x, 250.0 * 2.0 + 250.0);
     assert_eq!(marker(&ping, "Right echo 1").x, 500.0);
 }
@@ -1086,7 +1113,12 @@ fn a_tunnel_handle_drags_the_parameter_that_sets_its_lines_time() {
             .expect("a handle")
             .x
     };
-    assert_eq!(handle(&[], "Left Time"), line_param(0, echo::NOTES));
+    // A new Echo is in Dotted.
+    assert_eq!(handle(&[], "Left Time"), line_param(0, echo::DOTTED));
+    assert_eq!(
+        handle(&[(line_param(0, echo::SYNC_MODE), 0.0)], "Left Time"),
+        line_param(0, echo::NOTES)
+    );
     assert_eq!(
         handle(&[(line_param(1, echo::SYNC_MODE), 2.0)], "Right Time"),
         line_param(1, echo::DOTTED)
@@ -1102,7 +1134,7 @@ fn a_tunnel_handle_drags_the_parameter_that_sets_its_lines_time() {
     // With Stereo Link the right handle moves the left line's time too.
     assert_eq!(
         handle(&[(echo::LINK, 1.0)], "Right Time"),
-        line_param(0, echo::NOTES)
+        line_param(0, echo::DOTTED)
     );
 }
 
@@ -1144,7 +1176,11 @@ fn the_filter_view_draws_the_two_filters_response_with_a_handle_on_each_cutoff()
         })
     );
     // Off, the curve is flat.
-    let off = shown(&[(echo::HP_FREQ, 400.0)], None, Some("Filter"));
+    let off = shown(
+        &[(echo::FILTER, 0.0), (echo::HP_FREQ, 400.0)],
+        None,
+        Some("Filter"),
+    );
     assert!(
         off.series("Filter")
             .unwrap()

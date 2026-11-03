@@ -15,8 +15,8 @@ use bl_core::time::TempoMap;
 use bl_dsp::{EnvelopeFollower, Random};
 use bl_engine::{DeviceType, NodeConfig, Registry};
 use bl_model::device_layout::{
-    BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Page, PageStyle, PagesNode, TAB_HEIGHT,
-    Widget,
+    BODY_HEIGHT, BOX_HEIGHT, Control, ControlBand, DisplayCell, Glyph, LayoutNode, Page, PageStyle,
+    PagesNode, Widget,
 };
 use bl_model::{
     Device, DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayHandle,
@@ -163,6 +163,25 @@ const DIVISIONS: [(&str, f64); 11] = [
 ];
 /// How many divisions the LFO's synced rate offers: 1/64 note to 8 bars.
 const RATE_DIVISIONS: usize = 10;
+/// The reverb's shortest and longest reverberation time, in seconds: Decay's
+/// 0 % and 100 %.
+const DECAY_SECONDS: (f64, f64) = (0.2, 10.0);
+
+/// The reverberation time in seconds that a Decay of `percent` sets: the
+/// travel from 0 % to 100 % is logarithmic between [`DECAY_SECONDS`].
+#[must_use]
+pub fn decay_seconds(percent: f64) -> f64 {
+    let (low, high) = DECAY_SECONDS;
+    low * (high / low).powf(percent / 100.0)
+}
+
+/// The Decay in per cent that sets a reverberation time of `seconds`.
+#[must_use]
+pub fn decay_percent(seconds: f64) -> f64 {
+    let (low, high) = DECAY_SECONDS;
+    100.0 * (seconds / low).ln() / (high / low).ln()
+}
+
 /// The LFO's waveforms, in the order of the chooser.
 const WAVES: [(&str, Wave); 6] = [
     ("Sine", Wave::Sine),
@@ -233,7 +252,7 @@ fn line_descriptors(line: usize) -> Vec<ParamDescriptor> {
     vec![
         ParamDescriptor::toggle(id(SYNC), &line_name(line, "Sync"), true)
             .describe("Sets the line's time in beat divisions rather than milliseconds."),
-        ParamDescriptor::choice(id(SYNC_MODE), &line_name(line, "Sync Mode"), &SYNC_MODES, 0)
+        ParamDescriptor::choice(id(SYNC_MODE), &line_name(line, "Sync Mode"), &SYNC_MODES, 2)
             .describe(
                 "Counts the line's synced time in notes, triplets, dotted notes or sixteenths.",
             ),
@@ -291,13 +310,13 @@ pub fn echo_type() -> DeviceType {
         ParamDescriptor::toggle(DRIVE, "Input Drive", false).describe(
             "D: soft-clips the signal after Input, before the lines and on the dry path.",
         ),
-        ParamDescriptor::continuous(FEEDBACK, "Feedback", (0.0, 100.0), 40.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(FEEDBACK, "Feedback", (0.0, 100.0), 50.0, ParamUnit::Percent)
             .describe("How much of each line's output returns to its input."),
         ParamDescriptor::toggle(FEEDBACK_INVERT, "Feedback Invert", false)
             .describe("Ø: inverts the returned signal."),
-        ParamDescriptor::toggle(FILTER, "Filter", false)
+        ParamDescriptor::toggle(FILTER, "Filter", true)
             .describe("Puts a high-pass and a low-pass in the loop."),
-        ParamDescriptor::continuous(HP_FREQ, "HP Freq", (20.0, 20_000.0), 20.0, ParamUnit::Hertz)
+        ParamDescriptor::continuous(HP_FREQ, "HP Freq", (20.0, 20_000.0), 50.0, ParamUnit::Hertz)
             .logarithmic()
             .describe("The high-pass filter's cutoff."),
         ParamDescriptor::continuous(HP_RES, "HP Res", (0.0, 100.0), 0.0, ParamUnit::Percent)
@@ -306,7 +325,7 @@ pub fn echo_type() -> DeviceType {
             LP_FREQ,
             "LP Freq",
             (20.0, 20_000.0),
-            20_000.0,
+            5_000.0,
             ParamUnit::Hertz,
         )
         .logarithmic()
@@ -426,14 +445,16 @@ pub fn echo_type() -> DeviceType {
             .describe("How much of the small reverb is mixed in."),
         ParamDescriptor::choice(REVERB_LOCATION, "Reverb Location", &LOCATIONS, 1)
             .describe("Puts the reverb before the lines, after them, or in the feedback loop."),
-        ParamDescriptor::continuous(DECAY, "Decay", (0.2, 10.0), 1.0, ParamUnit::Seconds)
-            .logarithmic()
-            .describe("The reverb's reverberation time."),
+        ParamDescriptor::continuous(DECAY, "Decay", (0.0, 100.0), 50.0, ParamUnit::Percent)
+            .describe(
+                "The reverb's reverberation time, from 0.2 s at 0 % to 10 s at 100 %, \
+                 evenly in its logarithm.",
+            ),
         ParamDescriptor::continuous(STEREO, "Stereo", (0.0, 200.0), 100.0, ParamUnit::Percent)
             .describe("The width of the wet signal: mono at 0 %, wider above 100 %."),
         ParamDescriptor::gain(OUTPUT, "Output", 12.0, 0.0)
             .describe("The level of the wet signal, down to silence."),
-        ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 100.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 70.0, ParamUnit::Percent)
             .describe("The balance between the dry and the wet signal."),
         ParamDescriptor::toggle(EQUAL_LOUDNESS, "Equal-Loudness", false)
             .describe("Makes Dry/Wet keep the loudness steady across its range."),
@@ -535,48 +556,102 @@ pub fn echo_type() -> DeviceType {
 /// and the saved page name (R1).
 pub const TABS: &str = "Tabs";
 
-/// The layout: the left section, the three tabs (Echo with the display,
-/// Modulation and Character) and the global controls.
+/// The width of the columns either side of the display, in points.
+const SIDE: f32 = 108.0;
+
+/// One line's column of time controls as Live draws them under its name: the
+/// time knob, which reads the time in milliseconds while Sync is off and,
+/// while it is on, the division of the Sync Mode the line is in; then Sync,
+/// Sync Mode and Offset. `x` is the column's left edge.
+fn line(n: usize, x: f32) -> Vec<Control> {
+    let at = Control::new;
+    let sync = line_param(n, SYNC);
+    let mode = line_param(n, SYNC_MODE);
+    let name = ["Left", "Right"][n];
+    let knob = |field, only: Option<i32>| {
+        let control = at(line_param(n, field), Widget::SmallKnob, x + 3.0, 4.0).labelled(name);
+        match only {
+            Some(mode_value) => control
+                .shown_only_while(mode, mode_value)
+                .hidden_while(sync, 0),
+            None => control.shown_only_while(sync, 0),
+        }
+    };
+    vec![
+        knob(TIME, None),
+        knob(NOTES, Some(0)),
+        knob(TRIPLET, Some(1)),
+        knob(DOTTED, Some(2)),
+        knob(SIXTEENTHS, Some(3)),
+        at(sync, Widget::Toggle, x, 57.0)
+            .sized(42.0, BOX_HEIGHT)
+            .labelled("Sync"),
+        at(mode, Widget::Chooser, x, 72.0)
+            .unnamed()
+            .sized(42.0, BOX_HEIGHT),
+        at(line_param(n, OFFSET), Widget::Number, x, 88.0)
+            .unnamed()
+            .sized(42.0, BOX_HEIGHT),
+    ]
+}
+
+/// Echo as Live draws it: the two lines' time knobs with the link between
+/// them and Sync, Sync Mode and Offset under each, Input with D and Ø and
+/// Feedback below; the tunnel display with the filter along its foot; at the
+/// right Reverb, Stereo, the reverb's location and Decay, Output, the channel
+/// mode and Dry/Wet. The tabs Echo, Modulation and Character are in the title
+/// bar, the last two holding Beatlayer's own arrangement of the rest (their
+/// pages are not observed in Live).
 fn layout() -> DeviceLayout {
-    use Widget::{Chooser, Knob, Number, Toggle};
+    use Widget::{Chooser, Knob, Toggle};
+    let at = Control::new;
     let band = |height, controls: &[(ParamId, Widget)]| {
         LayoutNode::Band(ControlBand::stacked(height, controls))
     };
-    let line = |n: usize| {
-        band(
-            BODY_HEIGHT,
-            &[
-                (line_param(n, SYNC), Toggle),
-                (line_param(n, SYNC_MODE), Chooser),
-                (line_param(n, NOTES), Chooser),
-                (line_param(n, TRIPLET), Chooser),
-                (line_param(n, DOTTED), Chooser),
-                (line_param(n, SIXTEENTHS), Number),
-                (line_param(n, TIME), Knob),
-                (line_param(n, OFFSET), Knob),
-            ],
-        )
-    };
-    let tab = BODY_HEIGHT - TAB_HEIGHT;
-    let tabs = PagesNode::new(
+    let mut left = line(0, 4.0);
+    left.extend(line(1, 61.0));
+    left.extend([
+        at(LINK, Widget::IconToggle, 44.0, 20.0)
+            .sized(18.0, BOX_HEIGHT)
+            .with_glyph(Glyph::Link),
+        at(INPUT, Widget::SmallKnob, 7.0, 112.5),
+        at(DRIVE, Toggle, 47.0, 121.5)
+            .sized(14.0, BOX_HEIGHT)
+            .labelled("D"),
+        at(FEEDBACK_INVERT, Toggle, 47.0, 135.0)
+            .sized(14.0, BOX_HEIGHT)
+            .labelled("Ø"),
+        at(FEEDBACK, Widget::SmallKnob, 65.0, 112.5),
+    ]);
+    let foot = ControlBand::free(
+        262.0,
+        18.0,
+        vec![
+            at(FILTER, Widget::Tick, 21.0, 3.0).sized(48.0, BOX_HEIGHT),
+            at(HP_FREQ, Widget::Inline, 58.0, 3.0)
+                .sized(60.0, BOX_HEIGHT)
+                .labelled("HP"),
+            at(HP_RES, Widget::Inline, 116.0, 3.0)
+                .sized(42.0, BOX_HEIGHT)
+                .labelled("Res"),
+            at(LP_FREQ, Widget::Inline, 161.0, 3.0)
+                .sized(70.0, BOX_HEIGHT)
+                .labelled("LP"),
+            at(LP_RES, Widget::Inline, 219.0, 3.0)
+                .sized(42.0, BOX_HEIGHT)
+                .labelled("Res"),
+        ],
+    );
+    let tab = BODY_HEIGHT;
+    let pages = PagesNode::new(
         TABS,
-        PageStyle::Tabs,
+        PageStyle::TitleBar,
         vec![
             Page::new(
                 "Echo",
-                LayoutNode::Row(vec![
-                    LayoutNode::Cell(DisplayCell::new("Echo", 220.0, tab, 1.0)),
-                    band(
-                        tab,
-                        &[
-                            (FILTER, Toggle),
-                            (HP_FREQ, Knob),
-                            (HP_RES, Knob),
-                            (LP_FREQ, Knob),
-                            (LP_RES, Knob),
-                        ],
-                    ),
-                ]),
+                LayoutNode::Cell(
+                    DisplayCell::new("Echo", 262.0, BODY_HEIGHT, 1.0).with_bottom(foot),
+                ),
             ),
             Page::new(
                 "Modulation",
@@ -632,35 +707,24 @@ fn layout() -> DeviceLayout {
             ),
         ],
     );
+    let right = vec![
+        at(REVERB, Widget::SmallKnob, 11.5, 4.0),
+        at(STEREO, Widget::SmallKnob, 61.5, 4.0),
+        at(REVERB_LOCATION, Chooser, 4.0, 59.0)
+            .unnamed()
+            .sized(50.0, BOX_HEIGHT),
+        at(DECAY, Widget::Slider, 4.0, 75.5).sized(50.0, BOX_HEIGHT + 9.0),
+        at(OUTPUT, Widget::SmallKnob, 61.5, 57.5),
+        at(CHANNEL_MODE, Widget::Stack(3), 4.0, 113.0).sized(50.0, 42.0),
+        at(DRY_WET, Widget::SmallKnob, 61.5, 112.5),
+    ];
     DeviceLayout::new(LayoutNode::Row(vec![
-        band(BODY_HEIGHT, &[(CHANNEL_MODE, Chooser), (LINK, Toggle)]),
-        line(0),
-        line(1),
-        band(
-            BODY_HEIGHT,
-            &[
-                (INPUT, Knob),
-                (DRIVE, Toggle),
-                (FEEDBACK, Knob),
-                (FEEDBACK_INVERT, Toggle),
-            ],
-        ),
-        LayoutNode::Pages(tabs),
-        band(
-            BODY_HEIGHT,
-            &[
-                (REVERB, Knob),
-                (REVERB_LOCATION, Chooser),
-                (DECAY, Knob),
-                (STEREO, Knob),
-                (OUTPUT, Knob),
-                (DRY_WET, Knob),
-            ],
-        ),
+        LayoutNode::Band(ControlBand::free(SIDE, BODY_HEIGHT, left)),
+        LayoutNode::Pages(pages),
+        LayoutNode::Band(ControlBand::free(SIDE - 4.0, BODY_HEIGHT, right)),
     ]))
 }
 
-/// Adds Echo to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, echo_type(), Echo::new);
 }
@@ -1154,7 +1218,7 @@ impl Echo {
             }
 
             let reverb = ramp(REVERB) / 100.0;
-            let decay = ramp(DECAY);
+            let decay = decay_seconds(ramp(DECAY));
             if s.location == Location::Pre {
                 [in_0, in_1] = self.verb.process([in_0, in_1], reverb, decay);
             }

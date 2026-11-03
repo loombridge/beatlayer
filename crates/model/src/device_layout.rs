@@ -198,6 +198,16 @@ pub enum Widget {
     /// A row of that many icon buttons, one for each choice of a choice
     /// parameter (the filter types), the chosen one lit.
     IconSegments(u8),
+    /// A name and the value after it on one line, the value in blue, dragged
+    /// or typed (Freq and Width along the foot of Delay's display).
+    Inline,
+    /// A small box that is filled while the switch is on, with the name
+    /// after it (the Filter switch along the foot of a display).
+    Tick,
+    /// A row of that many tabs, one for each choice of a choice parameter,
+    /// outlined in orange while off and filled while on (Chorus-Ensemble's
+    /// Chorus, Ensemble and Vibrato).
+    Tabs(u8),
 }
 
 impl Widget {
@@ -224,10 +234,11 @@ impl Widget {
             Self::Number | Self::Slider | Self::Marked | Self::Chooser => {
                 Size::new(53.0, LABEL_HEIGHT + BOX_HEIGHT)
             }
+            Self::Inline | Self::Tick => Size::new(53.0, BOX_HEIGHT),
             Self::Toggle | Self::Outlined => Size::new(SEGMENT_WIDTH, BOX_HEIGHT),
             Self::IconToggle => Size::new(CELL_WIDTH, BOX_HEIGHT),
             Self::Round => Size::new(BOX_HEIGHT, BOX_HEIGHT),
-            Self::Segments(n) => Size::new(
+            Self::Segments(n) | Self::Tabs(n) => Size::new(
                 f32::from(n) * SEGMENT_WIDTH + f32::from(n.saturating_sub(1)) * BUTTON_GAP,
                 BOX_HEIGHT,
             ),
@@ -248,7 +259,9 @@ impl Widget {
     #[must_use]
     pub fn choice_capacity(self) -> Option<usize> {
         match self {
-            Self::Segments(n) | Self::Stack(n) | Self::IconSegments(n) => Some(usize::from(n)),
+            Self::Segments(n) | Self::Stack(n) | Self::IconSegments(n) | Self::Tabs(n) => {
+                Some(usize::from(n))
+            }
             Self::Grid { columns, rows } => Some(usize::from(columns) * usize::from(rows)),
             _ => None,
         }
@@ -286,6 +299,12 @@ pub enum Glyph {
     Minus,
     /// A flat and a sharp: Use Current Scale.
     FlatSharp,
+    /// Two linked rings: the link between a device's two channels.
+    Link,
+    /// An asterisk: Freeze.
+    Freeze,
+    /// A circle struck through: invert the phase.
+    PhaseInvert,
 }
 
 /// A unit a knob's two parameters read in.
@@ -375,6 +394,37 @@ pub struct Control {
     /// The condition that greys the control.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grey: Option<GreyWhen>,
+    /// The condition that puts the control away, so another control of a
+    /// different kind can take its place (Delay's time grid and its
+    /// millisecond box).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hide: Option<GreyWhen>,
+    /// The condition that puts the control away unless it holds: the control
+    /// shows only while the parameter's value, rounded, is the value (one of
+    /// three modes' boxes in the same place).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub only: Option<GreyWhen>,
+    /// The text the control shows in place of its parameter's name, where
+    /// Live's panel reads differently from the parameter (the two Sync
+    /// buttons of Delay are the left and right channels' parameters). The
+    /// parameter's name stays what a screen reader and the undo history say.
+    #[serde(default, skip_serializing_if = "Option::is_none", skip_deserializing)]
+    pub label: Option<&'static str>,
+    /// For a grid, row or stack of buttons over a whole-number parameter, the
+    /// values its buttons set, in order (Delay's 1 2 3 4 5 6 8 16 of the
+    /// sixteen steps its time takes): the button for the value the parameter
+    /// has is lit, and none is while it has another. Over a choice parameter,
+    /// the indexes of the choices that have a button, in order.
+    #[serde(default, skip_serializing_if = "Option::is_none", skip_deserializing)]
+    pub steps: Option<&'static [i32]>,
+    /// Set for a box drawn without its name above it: its place says what it
+    /// is (Delay's offset under its grid), and the control is its box alone.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub unnamed: bool,
+}
+
+fn is_false(flag: &bool) -> bool {
+    !*flag
 }
 
 impl Control {
@@ -390,7 +440,33 @@ impl Control {
             glyph: None,
             unit: None,
             grey: None,
+            hide: None,
+            only: None,
+            label: None,
+            steps: None,
+            unnamed: false,
         }
+    }
+
+    /// The same box without its name above it.
+    #[must_use]
+    pub const fn unnamed(mut self) -> Self {
+        self.unnamed = true;
+        self
+    }
+
+    /// The same control, its buttons setting `steps`.
+    #[must_use]
+    pub const fn with_steps(mut self, steps: &'static [i32]) -> Self {
+        self.steps = Some(steps);
+        self
+    }
+
+    /// The same control, showing `label` in place of its parameter's name.
+    #[must_use]
+    pub const fn labelled(mut self, label: &'static str) -> Self {
+        self.label = Some(label);
+        self
     }
 
     /// The same control at `width` by `height` points.
@@ -422,12 +498,29 @@ impl Control {
         self
     }
 
+    /// The same control, shown only while `param`'s value rounds to `value`.
+    #[must_use]
+    pub const fn shown_only_while(mut self, param: ParamId, value: i32) -> Self {
+        self.only = Some(GreyWhen { param, value });
+        self
+    }
+
+    /// The same control, put away while `param`'s value rounds to `value`.
+    #[must_use]
+    pub const fn hidden_while(mut self, param: ParamId, value: i32) -> Self {
+        self.hide = Some(GreyWhen { param, value });
+        self
+    }
+
     /// The space it takes: its own size, or its widget's, with the unit
     /// pair to the left of a knob.
     #[must_use]
     pub fn extent(&self) -> Size {
         self.size.unwrap_or_else(|| {
-            let size = self.widget.size();
+            let mut size = self.widget.size();
+            if self.unnamed {
+                size.height -= LABEL_HEIGHT;
+            }
             if self.unit.is_some() {
                 Size::new(size.width + UNIT_PAIR_WIDTH + PADDING, size.height)
             } else {
@@ -473,6 +566,48 @@ pub struct ControlBand {
     /// for the selected slot ([`DeviceLayout::place_for`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slots: Option<SlotGroup>,
+    /// Lines of text among the controls: an L beside a box, an ms after it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub captions: Vec<Caption>,
+}
+
+/// A line of text in a band, which names nothing and sets nothing: the L
+/// beside Align Delay's left box.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Caption {
+    /// The text.
+    pub text: String,
+    /// Its left edge, from the band's.
+    pub x: f32,
+    /// Its top edge, from the band's.
+    pub y: f32,
+    /// The width it is set in: left-aligned in it, or centred.
+    pub width: f32,
+    /// Whether the text is centred in its width.
+    #[serde(default)]
+    pub centered: bool,
+}
+
+impl Caption {
+    /// A caption reading `text` at `x`, `y` in `width` points, left-aligned,
+    /// [`BOX_HEIGHT`] tall.
+    #[must_use]
+    pub fn new(text: &str, x: f32, y: f32, width: f32) -> Self {
+        Self {
+            text: text.to_owned(),
+            x,
+            y,
+            width,
+            centered: false,
+        }
+    }
+
+    /// The same caption, centred in its width.
+    #[must_use]
+    pub fn centered(mut self) -> Self {
+        self.centered = true;
+        self
+    }
 }
 
 impl ControlBand {
@@ -500,6 +635,7 @@ impl ControlBand {
             height,
             controls: placed,
             slots: None,
+            captions: Vec::new(),
         }
     }
 
@@ -513,7 +649,15 @@ impl ControlBand {
             height,
             controls,
             slots: None,
+            captions: Vec::new(),
         }
+    }
+
+    /// The same band, with `captions` among its controls.
+    #[must_use]
+    pub fn with_captions(mut self, captions: Vec<Caption>) -> Self {
+        self.captions = captions;
+        self
     }
 
     /// The same band, showing the selected slot's controls: its controls
@@ -890,6 +1034,18 @@ impl PagesNode {
 }
 
 impl LayoutNode {
+    /// The part with `left`, `top`, `right` and `bottom` points of space
+    /// around it: a display cell inset from its device's frame.
+    #[must_use]
+    pub fn inset(self, left: f32, top: f32, right: f32, bottom: f32) -> Self {
+        let space = |width, height| Self::Band(ControlBand::free(width, height, Vec::new()));
+        Self::Column(vec![
+            space(0.0, top),
+            Self::Row(vec![space(left, 0.0), self, space(right, 0.0)]),
+            space(0.0, bottom),
+        ])
+    }
+
     /// Its docked size.
     fn natural(&self) -> Size {
         match self {
@@ -1057,6 +1213,18 @@ fn place_band(band: &ControlBand, x: f32, y: f32, slot: u32, placed: &mut Placed
     let rect = Rect::new(x, y, band.width, band.height);
     placed.bands.push(rect);
     placed
+        .captions
+        .extend(band.captions.iter().map(|caption| PlacedCaption {
+            text: caption.text.clone(),
+            rect: Rect::new(
+                rect.x + caption.x,
+                rect.y + caption.y,
+                caption.width,
+                BOX_HEIGHT,
+            ),
+            centered: caption.centered,
+        }));
+    placed
         .controls
         .extend(band.controls.iter().map(|control| PlacedControl {
             param: ParamId(control.param.0 + offset),
@@ -1070,6 +1238,11 @@ fn place_band(band: &ControlBand, x: f32, y: f32, slot: u32, placed: &mut Placed
             glyph: control.glyph,
             unit: control.unit,
             grey: control.grey,
+            hide: control.hide,
+            only: control.only,
+            label: control.label,
+            steps: control.steps,
+            unnamed: control.unnamed,
         }));
 }
 
@@ -1169,6 +1342,21 @@ pub struct PlacedControl {
     /// What greys the control.
     #[serde(default)]
     pub grey: Option<GreyWhen>,
+    /// What puts the control away.
+    #[serde(default)]
+    pub hide: Option<GreyWhen>,
+    /// What puts the control away unless it holds.
+    #[serde(default)]
+    pub only: Option<GreyWhen>,
+    /// The text it shows in place of its parameter's name.
+    #[serde(default, skip_serializing_if = "Option::is_none", skip_deserializing)]
+    pub label: Option<&'static str>,
+    /// The values its buttons set, over a whole-number parameter.
+    #[serde(default, skip_serializing_if = "Option::is_none", skip_deserializing)]
+    pub steps: Option<&'static [i32]>,
+    /// Whether it is drawn without its name above it.
+    #[serde(default)]
+    pub unnamed: bool,
 }
 
 /// A section heading where a layout placed it.
@@ -1178,6 +1366,18 @@ pub struct PlacedHeading {
     pub text: String,
     /// Where, from the body's top-left corner: as wide as the group under it.
     pub rect: Rect,
+}
+
+/// A caption where a layout placed it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PlacedCaption {
+    /// Its text.
+    pub text: String,
+    /// Where, from the body's top-left corner.
+    pub rect: Rect,
+    /// Whether the text is centred in the rectangle.
+    #[serde(default)]
+    pub centered: bool,
 }
 
 /// A display cell where a layout placed it.
@@ -1230,6 +1430,9 @@ pub struct Placed {
     /// Its section headings, in the layout's order.
     #[serde(default)]
     pub headings: Vec<PlacedHeading>,
+    /// Its captions, band by band.
+    #[serde(default)]
+    pub captions: Vec<PlacedCaption>,
 }
 
 impl DeviceLayout {
@@ -1543,7 +1746,22 @@ fn check_band(
             (control.widget.choice_capacity(), described(control.param))
         {
             match &descriptor.kind {
-                ParamKind::Choice { choices } if choices.len() <= room => {}
+                // A choice whose buttons are some of its choices, in the order
+                // given: Grain Delay's axes leave out the one the other offers.
+                ParamKind::Choice { choices }
+                    if control.steps.is_some_and(|steps| {
+                        steps.len() <= room
+                            && steps
+                                .iter()
+                                .all(|s| usize::try_from(*s).is_ok_and(|s| s < choices.len()))
+                    }) => {}
+                ParamKind::Choice { choices }
+                    if control.steps.is_none() && choices.len() <= room => {}
+                ParamKind::Integer { min, max, .. }
+                    if control.steps.is_some_and(|steps| {
+                        steps.len() <= room
+                            && steps.iter().all(|s| (*min..=*max).contains(&i64::from(*s)))
+                    }) => {}
                 _ => {
                     *problem = Some(format!(
                         "parameter {}'s buttons need a choice with at most {room} choices",
@@ -1556,6 +1774,17 @@ fn check_band(
             *problem = Some(format!(
                 "parameter {}'s control is greyed by parameter {}, which the device doesn't have",
                 control.param.0, grey.param.0
+            ));
+        }
+        if let Some(hide) = control
+            .hide
+            .into_iter()
+            .chain(control.only)
+            .find(|g| described(g.param).is_none())
+        {
+            *problem = Some(format!(
+                "parameter {}'s control is put away by parameter {}, which the device doesn't have",
+                control.param.0, hide.param.0
             ));
         }
     }
@@ -2210,6 +2439,38 @@ mod tests {
             row(Widget::IconSegments(4)).check(&params(1)).is_err(),
             "a continuous parameter has no choices"
         );
+    }
+
+    // Spec: device-framework R56
+    #[test]
+    fn a_control_is_put_away_by_a_parameter_the_device_has() {
+        let layout = |by| {
+            DeviceLayout::new(LayoutNode::Band(ControlBand::free(
+                100.0,
+                60.0,
+                vec![
+                    Control::new(ParamId(0), Widget::Knob, 4.0, 4.0).hidden_while(ParamId(by), 1),
+                    Control::new(ParamId(1), Widget::Toggle, 50.0, 4.0),
+                ],
+            )))
+        };
+        layout(1).check(&params(2)).unwrap();
+        assert!(
+            layout(9)
+                .check(&params(2))
+                .unwrap_err()
+                .contains("put away by"),
+            "a switch the device doesn't have"
+        );
+        let placed = layout(1).place(layout(1).docked_size());
+        assert_eq!(
+            placed.controls[0].hide,
+            Some(GreyWhen {
+                param: ParamId(1),
+                value: 1
+            })
+        );
+        assert_eq!(placed.controls[1].hide, None);
     }
 
     // Spec: device-framework R56

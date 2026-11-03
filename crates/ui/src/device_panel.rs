@@ -399,6 +399,9 @@ pub fn show(
     for heading in &laid.headings {
         parts::heading(ui, theme, heading, body.min);
     }
+    for caption in &laid.captions {
+        parts::caption(ui, theme, caption, body.min);
+    }
     for placed in pages.iter().filter(|p| !p.buttons.is_empty()) {
         let rects: Vec<Rect> = placed
             .buttons
@@ -554,6 +557,15 @@ pub fn show(
     }
     for (at, (param, widget, whole)) in controls.into_iter().enumerate() {
         let extra = laid.controls.get(at);
+        // A control put away while another's value says so: its place is
+        // another control's.
+        let at_value =
+            |g: bl_model::device_layout::GreyWhen| panel.read(g.param).round() as i32 == g.value;
+        if extra.and_then(|e| e.hide).is_some_and(at_value)
+            || extra.and_then(|e| e.only).is_some_and(|g| !at_value(g))
+        {
+            continue;
+        }
         // A knob with a unit pair beside it keeps the rest of its place.
         let rect = if extra.is_some_and(|e| e.unit.is_some()) {
             Rect::from_min_max(
@@ -633,37 +645,50 @@ pub fn show(
             } else {
                 1
             },
+            label: extra.and_then(|e| e.label),
+            steps: extra.and_then(|e| e.steps),
+            at_left: matches!(
+                widget,
+                Widget::Number | Widget::Slider | Widget::Marked | Widget::Chooser
+            ),
         };
         // Spec: scales R16. A parameter the device takes from its current
         // scale is drawn disabled.
         let locked = panel.locked.contains(&param);
         let glyph = extra.and_then(|e| e.glyph);
+        let named = !extra.is_some_and(|e| e.unnamed);
         let mut draw = |ui: &mut Ui| match widget {
-            Widget::Knob => control.knob(ui, theme, events, false),
-            Widget::SmallKnob => control.knob(ui, theme, events, true),
-            Widget::Number => control.number(ui, theme, events, (false, false)),
-            Widget::Slider => control.number(ui, theme, events, (true, false)),
-            Widget::Marked => control.number(ui, theme, events, (false, true)),
+            Widget::Knob => control.knob(ui, theme, events, (false, named)),
+            Widget::SmallKnob => control.knob(ui, theme, events, (true, named)),
+            Widget::Number => control.number(ui, theme, events, (false, false, named)),
+            Widget::Slider => control.number(ui, theme, events, (true, false, named)),
+            Widget::Marked => control.number(ui, theme, events, (false, true, named)),
+            Widget::Inline => control.inline(ui, theme, events),
+            Widget::Tick => control.tick(ui, theme, events),
             Widget::Toggle => control.toggle(ui, theme, events, false),
             Widget::Outlined => control.toggle(ui, theme, events, true),
             Widget::IconToggle => control.icon_toggle(ui, theme, events, (glyph, false)),
             Widget::Round => control.icon_toggle(ui, theme, events, (glyph, true)),
-            Widget::Chooser => control.chooser(ui, theme, events),
+            Widget::Chooser => control.chooser(ui, theme, events, named),
             Widget::Segments(n) => {
                 let cells = button_cells(rect, usize::from(n), 1);
-                control.choice_buttons(ui, theme, events, (&cells, false));
+                control.choice_buttons(ui, theme, events, (&cells, false, false));
+            }
+            Widget::Tabs(n) => {
+                let cells = button_cells(rect, usize::from(n), 1);
+                control.choice_buttons(ui, theme, events, (&cells, false, true));
             }
             Widget::IconSegments(n) => {
                 let cells = button_cells(rect, usize::from(n), 1);
-                control.choice_buttons(ui, theme, events, (&cells, true));
+                control.choice_buttons(ui, theme, events, (&cells, true, false));
             }
             Widget::Stack(n) => {
                 let cells = button_cells(rect, 1, usize::from(n));
-                control.choice_buttons(ui, theme, events, (&cells, false));
+                control.choice_buttons(ui, theme, events, (&cells, false, false));
             }
             Widget::Grid { columns, rows } => {
                 let cells = button_cells(rect, usize::from(columns), usize::from(rows));
-                control.choice_buttons(ui, theme, events, (&cells, false));
+                control.choice_buttons(ui, theme, events, (&cells, false, false));
             }
         };
         if locked {
@@ -815,6 +840,9 @@ fn display_drag(
         text: None,
         automation: None,
         coarse: 1,
+        label: None,
+        steps: None,
+        at_left: false,
     };
     let response = ui.interact(rect, id.with("drag"), Sense::click_and_drag());
     control.value_input(ui, &response, events);
@@ -1055,9 +1083,22 @@ struct Control<'a> {
     /// How many steps Shift with Up or Down moves it: 12 for Roar's
     /// Feedback Note, an octave (the roar spec, R26), else 1.
     coarse: i32,
+    /// The text the layout gives the control in place of its parameter's name.
+    label: Option<&'static str>,
+    /// The values the buttons of a whole-number parameter set.
+    steps: Option<&'static [i32]>,
+    /// Whether the name above the control is set at its left (a box or a
+    /// chooser) rather than centred (a knob).
+    at_left: bool,
 }
 
 impl Control<'_> {
+    /// The name the control shows: its layout's label, or the parameter's.
+    fn name(&self) -> &str {
+        self.label
+            .unwrap_or_else(|| short_name(&self.descriptor.name))
+    }
+
     fn id(&self) -> Id {
         param_control_id(self.device, self.descriptor.id)
     }

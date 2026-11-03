@@ -147,3 +147,392 @@ fn a_device_with_a_live_panel_is_laid_out_as_live_draws_it_unless_listed() {
         "these have a layout of their own now: take them off STILL_GENERIC"
     );
 }
+
+/// The type of the device Live calls `name`.
+fn device(name: &str) -> bl_engine::DeviceType {
+    device_types()
+        .into_iter()
+        .find(|t| t.name == name)
+        .unwrap_or_else(|| panic!("no device named {name}"))
+}
+
+/// The controls of a device's panel as it draws at its defaults, collapsed,
+/// in the order it places them (band by band, left to right, top to bottom),
+/// each as the text it shows and its kind: a control another's value puts
+/// away isn't there. The device's description must check.
+fn panel(name: &str) -> Vec<String> {
+    let description = device(name).description;
+    description.check().unwrap();
+    let layout = description.layout.shown(false);
+    let default = |id| description.param(id).map_or(0.0, |p| p.default);
+    layout
+        .place(layout.docked_size())
+        .controls
+        .iter()
+        .filter(|c| {
+            let at_value =
+                |g: bl_model::device_layout::GreyWhen| default(g.param).round() as i32 == g.value;
+            !c.hide.is_some_and(at_value) && c.only.is_none_or(at_value)
+        })
+        .map(|c| {
+            let shown = c
+                .label
+                .map_or_else(|| description.param(c.param).unwrap().name.as_str(), |l| l);
+            let kind = if c.unnamed { "unnamed " } else { "" };
+            format!("{shown}: {kind}{:?}", c.widget)
+        })
+        .collect()
+}
+
+/// The default of the parameter `id` of the device Live calls `name`.
+fn default_of(name: &str, id: bl_model::ParamId) -> f64 {
+    device(name).description.param(id).unwrap().default
+}
+
+// Spec: delay R15
+#[test]
+fn delay_holds_lives_controls_in_lives_order() {
+    use bl_devices::delay::*;
+    assert_eq!(
+        panel("Delay"),
+        [
+            "Sync: Toggle",
+            "L Sync: Grid { columns: 2, rows: 4 }",
+            "L Offset: unnamed Number",
+            "Link: IconToggle",
+            "Sync: Toggle",
+            "R Sync: Grid { columns: 2, rows: 4 }",
+            "R Offset: unnamed Number",
+            "Feedback: SmallKnob",
+            "Freeze: IconToggle",
+            "Filter: Tick",
+            "Freq: Inline",
+            "Width: Inline",
+            "Delay: Inline",
+            "Filter: Inline",
+            "Time Mode: Stack(3)",
+            "Ping Pong: Toggle",
+            "Dry/Wet: SmallKnob",
+        ]
+    );
+    // Spec: delay R15. Live's new Delay: Sync on and the dotted eighth's 3
+    // sixteenths each side, the filter on at 8.00, Dry/Wet at 50 %.
+    for (id, value) in [
+        (SYNC, 1.0),
+        (R_SYNC_ON, 1.0),
+        (L_SYNC, 3.0),
+        (R_SYNC, 3.0),
+        (FILTER, 1.0),
+        (FREQ, 1000.0),
+        (WIDTH, 8.0),
+        (FEEDBACK, 50.0),
+        (TIME_MODE, 0.0),
+        (DRY_WET, 50.0),
+        (L_OFFSET, 0.0),
+        (LFO_DELAY, 0.0),
+        (LFO_FILTER, 0.0),
+    ] {
+        assert_eq!(default_of("Delay", id), value, "parameter {}", id.0);
+    }
+}
+
+// Spec: alignment-delay R9
+#[test]
+fn align_delay_holds_lives_controls_in_lives_order() {
+    use bl_devices::alignment_delay::*;
+    assert_eq!(
+        panel("Align Delay"),
+        [
+            "Delay Mode: Chooser",
+            "Left Time: unnamed Number",
+            "Right Time: unnamed Number",
+            "Link: IconToggle",
+        ]
+    );
+    // Live's new Align Delay: Time mode, no delay, the sides unlinked.
+    for (id, value) in [
+        (MODE, 0.0),
+        (LINK, 0.0),
+        (side_param(0, TIME), 0.0),
+        (side_param(1, TIME), 0.0),
+    ] {
+        assert_eq!(default_of("Align Delay", id), value, "parameter {}", id.0);
+    }
+    // The Samples and Distance modes' boxes take the Time boxes' places.
+    let description = device("Align Delay").description;
+    let placed = description.layout.place(description.layout.docked_size());
+    let rect = |param| {
+        placed
+            .controls
+            .iter()
+            .find(|c| c.param == param)
+            .unwrap()
+            .rect
+    };
+    for side in 0..2 {
+        for field in [SAMPLES, METRES, FEET] {
+            assert_eq!(rect(side_param(side, field)), rect(side_param(side, TIME)));
+        }
+    }
+}
+
+// Spec: beat-repeat R15
+#[test]
+fn beat_repeat_holds_lives_controls_in_lives_order() {
+    use bl_devices::beat_repeat::*;
+    assert_eq!(
+        panel("Beat Repeat"),
+        [
+            "Interval: SmallKnob",
+            "Offset: SmallKnob",
+            "Grid: SmallKnob",
+            "Variation: SmallKnob",
+            "Repeat: Toggle",
+            "No Trpl: Toggle",
+            "Variation Mode: unnamed Chooser",
+            "Chance: SmallKnob",
+            "Gate: SmallKnob",
+            "Pitch: SmallKnob",
+            "Pitch Decay: SmallKnob",
+            "Freq: unnamed Number",
+            "Width: unnamed Number",
+            "Filter: Toggle",
+            "Mode: Segments(3)",
+            "Volume: SmallKnob",
+            "Decay: SmallKnob",
+        ]
+    );
+    // Live's new Beat Repeat: every 1 Bar, a 1/16 grid, a gate of 7, Mix.
+    for (id, value) in [
+        (INTERVAL, 5.0),
+        (OFFSET, 0.0),
+        (GRID, 4.0),
+        (VARIATION, 0.0),
+        (VARIATION_MODE, 0.0),
+        (CHANCE, 100.0),
+        (GATE, 7.0),
+        (PITCH, 0.0),
+        (PITCH_DECAY, 0.0),
+        (FILTER, 0.0),
+        (FREQ, 1000.0),
+        (WIDTH, 4.0),
+        (MODE, 0.0),
+        (VOLUME, 1.0), // 0 dB
+        (DECAY, 0.0),
+    ] {
+        assert_eq!(default_of("Beat Repeat", id), value, "parameter {}", id.0);
+    }
+}
+
+// Spec: echo R25
+#[test]
+fn echo_holds_lives_controls_in_lives_order() {
+    use bl_devices::echo::*;
+    assert_eq!(
+        panel("Echo"),
+        [
+            "Left: SmallKnob",
+            "Sync: Toggle",
+            "L Sync Mode: unnamed Chooser",
+            "L Offset: unnamed Number",
+            "Right: SmallKnob",
+            "Sync: Toggle",
+            "R Sync Mode: unnamed Chooser",
+            "R Offset: unnamed Number",
+            "Stereo Link: IconToggle",
+            "Input: SmallKnob",
+            "D: Toggle",
+            "Ø: Toggle",
+            "Feedback: SmallKnob",
+            "Filter: Tick",
+            "HP: Inline",
+            "Res: Inline",
+            "LP: Inline",
+            "Res: Inline",
+            "Reverb: SmallKnob",
+            "Stereo: SmallKnob",
+            "Reverb Location: unnamed Chooser",
+            "Decay: Slider",
+            "Output: SmallKnob",
+            "Channel Mode: Stack(3)",
+            "Dry/Wet: SmallKnob",
+        ]
+    );
+    // The time knob follows Sync and Sync Mode: milliseconds, or the
+    // division of the mode the line is in.
+    let description = device("Echo").description;
+    let knobs = |sync: f64, mode: f64| {
+        let mut values = bl_model::OrdMap::new();
+        values.insert(line_param(0, SYNC), sync);
+        values.insert(line_param(0, SYNC_MODE), mode);
+        let layout = description
+            .layout
+            .shown(false)
+            .with_pages(&Default::default());
+        let placed = layout.place(layout.docked_size());
+        let value = |id| description.value(&values, id).unwrap();
+        placed
+            .controls
+            .iter()
+            .filter(|c| c.label == Some("Left"))
+            .filter(|c| {
+                let at =
+                    |g: bl_model::device_layout::GreyWhen| value(g.param).round() as i32 == g.value;
+                !c.hide.is_some_and(at) && c.only.is_none_or(at)
+            })
+            .map(|c| c.param)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(knobs(0.0, 2.0), [line_param(0, TIME)]);
+    for (mode, field) in [
+        (0.0, NOTES),
+        (1.0, TRIPLET),
+        (2.0, DOTTED),
+        (3.0, SIXTEENTHS),
+    ] {
+        assert_eq!(knobs(1.0, mode), [line_param(0, field)], "mode {mode}");
+    }
+    // Live's new Echo: Sync on in Dotted at 1/8 each side, 50 % Feedback, the
+    // filter on between 50 Hz and 5 kHz, a reverb Decay of 50 %, 70 % wet.
+    for (id, value) in [
+        (line_param(0, SYNC), 1.0),
+        (line_param(1, SYNC), 1.0),
+        (line_param(0, SYNC_MODE), 2.0),
+        (line_param(1, SYNC_MODE), 2.0),
+        (line_param(0, DOTTED), 3.0),
+        (line_param(1, DOTTED), 3.0),
+        (line_param(0, OFFSET), 0.0),
+        (INPUT, 1.0), // 0 dB, a gain's value being linear
+        (FEEDBACK, 50.0),
+        (FILTER, 1.0),
+        (HP_FREQ, 50.0),
+        (HP_RES, 0.0),
+        (LP_FREQ, 5_000.0),
+        (LP_RES, 0.0),
+        (REVERB, 0.0),
+        (REVERB_LOCATION, 1.0),
+        (DECAY, 50.0),
+        (STEREO, 100.0),
+        (OUTPUT, 1.0),
+        (CHANNEL_MODE, 0.0),
+        (DRY_WET, 70.0),
+    ] {
+        assert_eq!(default_of("Echo", id), value, "parameter {}", id.0);
+    }
+    // Decay reads in per cent and sets 0.2 s to 10 s along a logarithmic travel.
+    assert_eq!(decay_seconds(0.0), 0.2);
+    assert!((decay_seconds(100.0) - 10.0).abs() < 1e-9);
+    assert!((decay_percent(decay_seconds(37.0)) - 37.0).abs() < 1e-9);
+}
+
+// Spec: filter-delay R10
+#[test]
+fn filter_delay_holds_lives_controls_in_lives_order() {
+    use bl_devices::filter_delay::*;
+    let grid = "Grid { columns: 4, rows: 2 }";
+    let mut expected = Vec::new();
+    for (line, name) in ["L", "L+R", "R"].into_iter().enumerate() {
+        let n = line + 1;
+        expected.extend([
+            format!("{name}: Toggle"),
+            "On: Toggle".to_owned(),
+            format!("{n} Freq: unnamed Slider"),
+            format!("{n} Width: unnamed Slider"),
+        ]);
+    }
+    for line in 1..=3 {
+        expected.extend([
+            format!("{line} Division: {grid}"),
+            "Sync: Toggle".to_owned(),
+            format!("{line} Time %: unnamed Number"),
+            format!("{line} Feedback: unnamed SmallKnob"),
+            format!("{line} Pan: unnamed SmallKnob"),
+            format!("{line} Volume: unnamed SmallKnob"),
+        ]);
+    }
+    expected.push("Dry: SmallKnob".to_owned());
+    assert_eq!(panel("Filter Delay"), expected);
+    // Live's new Filter Delay: the lines at 704, 449 and 918 Hz four octaves
+    // wide, 3, 1 and 5 sixteenths, panned left, centre and right, with
+    // feedbacks of 21, 46 and 24 %, volumes of 4, -4 and 6 dB and a Dry of -5 dB.
+    let db = bl_model::param::db_to_gain;
+    for (line, (freq, division, pan, volume, feedback)) in [
+        (704.0, 3.0, -50.0, 4.0, 21.0),
+        (449.0, 1.0, 0.0, -4.0, 46.0),
+        (918.0, 5.0, 50.0, 6.0, 24.0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let default = |id| default_of("Filter Delay", id);
+        assert_eq!(default(line_param(line, ON)), 1.0);
+        assert_eq!(default(line_param(line, FILTER)), 1.0);
+        assert_eq!(default(line_param(line, FREQ)), freq);
+        assert_eq!(default(line_param(line, WIDTH)), 4.0);
+        assert_eq!(default(line_param(line, SYNC)), 1.0);
+        assert_eq!(default(line_param(line, DIVISION)), division);
+        assert_eq!(default(line_param(line, PERCENT)), 0.0);
+        assert_eq!(default(line_param(line, PAN)), pan);
+        assert!((default(line_param(line, VOLUME)) - db(volume)).abs() < 1e-12);
+        assert_eq!(default(feedback_param(line)), feedback);
+    }
+    assert!((default_of("Filter Delay", DRY) - db(-5.0)).abs() < 1e-12);
+}
+
+// Spec: grain-delay R10
+#[test]
+fn grain_delay_holds_lives_controls_in_lives_order() {
+    use bl_devices::grain_delay::*;
+    assert_eq!(
+        panel("Grain Delay"),
+        [
+            "Spray: unnamed Slider",
+            "Frequency: unnamed Slider",
+            "Pitch: unnamed Slider",
+            "Random Pitch: unnamed Slider",
+            "Feedback: unnamed Slider",
+            "Dry/Wet: unnamed Slider",
+            "Y Axis: Stack(6)",
+            "Division: Grid { columns: 4, rows: 2 }",
+            "Sync: Toggle",
+            "Time %: unnamed Number",
+            "X Axis: Segments(6)",
+        ]
+    );
+    // Live's new Grain Delay: synced at 2 sixteenths, 60 Hz, fully wet, the
+    // horizontal axis Pitch and the vertical axis Frequency.
+    for (id, value) in [
+        (SYNC, 1.0),
+        (DIVISION, 2.0),
+        (PERCENT, 0.0),
+        (SPRAY, 0.0),
+        (FREQUENCY, 60.0),
+        (PITCH, 0.0),
+        (RANDOM_PITCH, 0.0),
+        (FEEDBACK, 0.0),
+        (DRY_WET, 100.0),
+        (X_AXIS, 2.0),
+        (Y_AXIS, 1.0),
+    ] {
+        assert_eq!(default_of("Grain Delay", id), value, "parameter {}", id.0);
+    }
+    // The axes' buttons read Live's names, and each row leaves out the one
+    // axis the other offers.
+    let description = device("Grain Delay").description;
+    let names = |id| match &description.param(id).unwrap().kind {
+        bl_model::ParamKind::Choice { choices } => choices.clone(),
+        _ => unreachable!(),
+    };
+    assert_eq!(
+        names(X_AXIS),
+        [
+            "Delay Time",
+            "Frequency",
+            "Pitch",
+            "Rand Pitch",
+            "Spray",
+            "Feedback",
+            "DryWet"
+        ]
+    );
+}

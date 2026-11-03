@@ -567,7 +567,7 @@ impl Shell {
             data: ClipData::Midi(midi),
             envelopes: Vec::new(),
             launch: if session {
-                plan.clip.launch.clone()
+                plan.clip.launch
             } else {
                 bl_model::ClipLaunch::default()
             },

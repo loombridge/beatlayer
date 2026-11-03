@@ -251,7 +251,7 @@ fn each_kind_makes_a_track_after_the_clip_s_with_its_instrument_and_notes() {
         let order: Vec<TrackId> = doc.top_level().collect();
         let place = order.iter().position(|t| *t == track).unwrap();
         assert_eq!(order[place + 1], new_track, "{kind}");
-        let name = format!("Clicks {}{}", &kind[..1].to_uppercase(), &kind[1..]);
+        let name = format!("Clicks {}{}", kind[..1].to_uppercase(), &kind[1..]);
         assert_eq!(doc.track(new_track).unwrap().name(), name);
         assert_eq!(doc.track(new_track).unwrap().kind(), TrackKind::Midi);
         assert_eq!(shell.arrangement().selected_tracks(), [new_track]);
@@ -683,7 +683,7 @@ fn render(shell: &Shell, frames: u64, block: usize) -> Vec<f32> {
 fn onsets(interleaved: &[f32], threshold: f32) -> Vec<usize> {
     let mut found = Vec::new();
     let mut quiet = usize::MAX / 2;
-    for (frame, pair) in interleaved.chunks_exact(2).enumerate() {
+    for (frame, pair) in interleaved.as_chunks::<2>().0.iter().enumerate() {
         if pair[0].abs().max(pair[1].abs()) > threshold {
             if quiet >= 4_800 {
                 found.push(frame);

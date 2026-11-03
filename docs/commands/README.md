@@ -7941,6 +7941,10 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
 | `widget` | [`Widget`](#widget) | yes | How it's drawn. |
 | `x` | number | yes | Its left edge, from the band's. |
 | `y` | number | yes | Its top edge, from the band's. |
+| `glyph` | [`Glyph`](#glyph) or null | no | The icon of an icon button or a round button. |
+| `grey` | [`GreyWhen`](#greywhen) or null | no | The condition that greys the control. |
+| `size` | [`Size`](#size) or null | no | Its size where the device sets it, in place of the widget's: the width of a box, a row of buttons or a unit pair's control. |
+| `unit` | [`UnitPair`](#unitpair) or null | no | The unit pair beside a knob, which makes the knob show one of two parameters. |
 
 <details><summary>JSON Schema</summary>
 
@@ -7948,9 +7952,53 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
 {
   "description": "One control in a band: a parameter, drawn by a widget, at a place in the band.",
   "properties": {
+    "glyph": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Glyph"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The icon of an icon button or a round button."
+    },
+    "grey": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/GreyWhen"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The condition that greys the control."
+    },
     "param": {
       "$ref": "#/$defs/ParamId",
       "description": "The parameter."
+    },
+    "size": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Size"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its size where the device sets it, in place of the widget's: the width of a box, a row of buttons or a unit pair's control."
+    },
+    "unit": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UnitPair"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The unit pair beside a knob, which makes the knob show one of two parameters."
     },
     "widget": {
       "$ref": "#/$defs/Widget",
@@ -10136,6 +10184,7 @@ A device's layout (IMP-14): bands of controls and display cells in rows and colu
 |---|---|---|---|
 | `root` | [`LayoutNode`](#layoutnode) | yes | The whole body. |
 | `expanded` | [`LayoutNode`](#layoutnode) or null | no | The part the device adds to its body while it is expanded (L-DEV-004, L-DEV-007), if it has one: placed to the right of [`root`](Self::root). It places its parameters' controls like the rest of the layout. |
+| `title` | array of [`TitlePart`](#titlepart) | no | What the device adds to its title bar. |
 
 <details><summary>JSON Schema</summary>
 
@@ -10157,6 +10206,13 @@ A device's layout (IMP-14): bands of controls and display cells in rows and colu
     "root": {
       "$ref": "#/$defs/LayoutNode",
       "description": "The whole body."
+    },
+    "title": {
+      "description": "What the device adds to its title bar.",
+      "items": {
+        "$ref": "#/$defs/TitlePart"
+      },
+      "type": "array"
     }
   },
   "required": [
@@ -14852,6 +14908,138 @@ A frozen track: the freeze file stretch of each clip, its tail regions, and the 
 
 </details>
 
+### `Glyph`
+
+An icon on an icon button, a round button or a unit pair: drawn by the UI in the button's colour.
+
+One of:
+
+- `"low_pass"`: A low-pass filter's response.
+- `"high_pass"`: A high-pass filter's response.
+- `"band_pass"`: A band-pass filter's response.
+- `"notch"`: A notch filter's response.
+- `"metronome"`: A metronome: the tempo-synced unit.
+- `"play"`: A play triangle.
+- `"down"`: A down triangle.
+- `"info"`: A lower-case i, for a device's information.
+- `"left"`: A left arrow.
+- `"right"`: A right arrow.
+- `"plus"`: A plus sign.
+- `"minus"`: A minus sign.
+- `"flat_sharp"`: A flat and a sharp: Use Current Scale.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An icon on an icon button, a round button or a unit pair: drawn by the UI in the button's colour.",
+  "oneOf": [
+    {
+      "const": "low_pass",
+      "description": "A low-pass filter's response.",
+      "type": "string"
+    },
+    {
+      "const": "high_pass",
+      "description": "A high-pass filter's response.",
+      "type": "string"
+    },
+    {
+      "const": "band_pass",
+      "description": "A band-pass filter's response.",
+      "type": "string"
+    },
+    {
+      "const": "notch",
+      "description": "A notch filter's response.",
+      "type": "string"
+    },
+    {
+      "const": "metronome",
+      "description": "A metronome: the tempo-synced unit.",
+      "type": "string"
+    },
+    {
+      "const": "play",
+      "description": "A play triangle.",
+      "type": "string"
+    },
+    {
+      "const": "down",
+      "description": "A down triangle.",
+      "type": "string"
+    },
+    {
+      "const": "info",
+      "description": "A lower-case i, for a device's information.",
+      "type": "string"
+    },
+    {
+      "const": "left",
+      "description": "A left arrow.",
+      "type": "string"
+    },
+    {
+      "const": "right",
+      "description": "A right arrow.",
+      "type": "string"
+    },
+    {
+      "const": "plus",
+      "description": "A plus sign.",
+      "type": "string"
+    },
+    {
+      "const": "minus",
+      "description": "A minus sign.",
+      "type": "string"
+    },
+    {
+      "const": "flat_sharp",
+      "description": "A flat and a sharp: Use Current Scale.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `GreyWhen`
+
+A condition that greys a control: while parameter `param`'s value, rounded, is `value`. The control stays visible and usable, as one of a device that is off does (L-DEV-011).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `param` | [`ParamId`](#paramid) | yes | The parameter that decides. |
+| `value` | integer | yes | The value, rounded, at which the control is greyed. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A condition that greys a control: while parameter `param`'s value, rounded, is `value`. The control stays visible and usable, as one of a device that is off does (L-DEV-011).",
+  "properties": {
+    "param": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The parameter that decides."
+    },
+    "value": {
+      "description": "The value, rounded, at which the control is greyed.",
+      "format": "int32",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "param",
+    "value"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `GridState`
 
 The editing grid, as the Arrangement View uses it now.
@@ -15675,6 +15863,41 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `Heading`
+
+A section heading: a line of text over a group of controls (Electric's Hammer and Fork).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `text` | string | yes | The text. |
+| `width` | number | yes | The width its text needs, in points: the least it takes. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A section heading: a line of text over a group of controls (Electric's Hammer and Fork).",
+  "properties": {
+    "text": {
+      "description": "The text.",
+      "type": "string"
+    },
+    "width": {
+      "description": "The width its text needs, in points: the least it takes.",
+      "format": "float",
+      "type": "number"
+    }
+  },
+  "required": [
+    "text",
+    "width"
+  ],
+  "type": "object"
 }
 ```
 
@@ -18752,6 +18975,7 @@ One of:
 - an object with `row` (array of [`LayoutNode`](#layoutnode)): Parts left to right.
 - an object with `column` (array of [`LayoutNode`](#layoutnode)): Parts top to bottom.
 - an object with `pages` ([`PagesNode`](#pagesnode)): Named pages, one of which shows at a time (WP-8.1).
+- an object with `heading` ([`Heading`](#heading)): A heading over a group of controls: it takes the width of the group it sits over.
 
 <details><summary>JSON Schema</summary>
 
@@ -18827,6 +19051,19 @@ One of:
       },
       "required": [
         "pages"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A heading over a group of controls: it takes the width of the group it sits over.",
+      "properties": {
+        "heading": {
+          "$ref": "#/$defs/Heading"
+        }
+      },
+      "required": [
+        "heading"
       ],
       "type": "object"
     }
@@ -20176,6 +20413,37 @@ One of:
         "param"
       ],
       "type": "object"
+    }
+  ]
+}
+```
+
+</details>
+
+### `Maker`
+
+A maker's mark in a device's title bar.
+
+One of:
+
+- `"softube"`: Softube, who made Amp.
+- `"cytomic"`: Cytomic, who made Glue Compressor.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A maker's mark in a device's title bar.",
+  "oneOf": [
+    {
+      "const": "softube",
+      "description": "Softube, who made Amp.",
+      "type": "string"
+    },
+    {
+      "const": "cytomic",
+      "description": "Cytomic, who made Glue Compressor.",
+      "type": "string"
     }
   ]
 }
@@ -24313,6 +24581,7 @@ One of:
 - `"tabs"`: A row of tabs along the top of the node's area.
 - `"title_bar"`: Tabs in the device's title bar, after its name, that the device's title bar draws: the node's area is the shown page's alone.
 - `"shell"`: A strip of sections, each its page's main controls under a section button, beside a display area the shown page fills.
+- `"strip"`: A strip down the node's left edge ([`STRIP_WIDTH`] wide) with a ▼ toggle at its top and the node's name written up it; the node's area right of it holds the second page while it is shown and the first, which is empty, while it isn't ([`PagesNode::side_strip`]).
 
 <details><summary>JSON Schema</summary>
 
@@ -24333,6 +24602,11 @@ One of:
     {
       "const": "shell",
       "description": "A strip of sections, each its page's main controls under a section button, beside a display area the shown page fills.",
+      "type": "string"
+    },
+    {
+      "const": "strip",
+      "description": "A strip down the node's left edge ([`STRIP_WIDTH`] wide) with a ▼ toggle at its top and the node's name written up it; the node's area right of it holds the second page while it is shown and the first, which is empty, while it isn't ([`PagesNode::side_strip`]).",
       "type": "string"
     }
   ]
@@ -35693,6 +35967,42 @@ What `device.similar` returns: where a sampler's sample stands in the similar li
 
 </details>
 
+### `Size`
+
+A size in points.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `width` | number | yes | The width. |
+| `height` | number | yes | The height. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A size in points.",
+  "properties": {
+    "height": {
+      "description": "The height.",
+      "format": "float",
+      "type": "number"
+    },
+    "width": {
+      "description": "The width.",
+      "format": "float",
+      "type": "number"
+    }
+  },
+  "required": [
+    "width",
+    "height"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `SkewEdge`
 
 Which edge of the box `automation.skew` tilts.
@@ -39333,6 +39643,123 @@ A timecode input's last whole time.
 
 </details>
 
+### `TitlePart`
+
+A part a device adds to its title bar, besides the activator, the name, its title-bar tabs ([`PageStyle::TitleBar`]), Use Current Scale (the description's title switch) and the three round buttons at the right (L-DEV-004, L-DEV-045). Those on the right are drawn right to left, the last of the list outermost.
+
+One of:
+
+- an object with `heading` (string): A heading across the title bar over its tabs and parts, as Drift's and Meld's.
+- `"mpe"`: The MPE label, for a device that takes MPE.
+- an object with `maker` ([`Maker`](#maker)): A maker's mark.
+- an object with `letter` (pair of string of 1 characters and [`ParamId`](#paramid)): A lettered toggle for the parameter (the A A S buttons).
+- an object with `round` (pair of [`Glyph`](#glyph) and [`ParamId`](#paramid)): A round button with an icon after the activator (▶, ▼, i), lit while the parameter is on.
+- an object with `button` ([`ParamId`](#paramid)): A text button reading the parameter's name (Learn, Send).
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A part a device adds to its title bar, besides the activator, the name, its title-bar tabs ([`PageStyle::TitleBar`]), Use Current Scale (the description's title switch) and the three round buttons at the right (L-DEV-004, L-DEV-045). Those on the right are drawn right to left, the last of the list outermost.",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "description": "A heading across the title bar over its tabs and parts, as Drift's and Meld's.",
+      "properties": {
+        "heading": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "heading"
+      ],
+      "type": "object"
+    },
+    {
+      "const": "mpe",
+      "description": "The MPE label, for a device that takes MPE.",
+      "type": "string"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A maker's mark.",
+      "properties": {
+        "maker": {
+          "$ref": "#/$defs/Maker"
+        }
+      },
+      "required": [
+        "maker"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A lettered toggle for the parameter (the A A S buttons).",
+      "properties": {
+        "letter": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "maxLength": 1,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/ParamId"
+            }
+          ],
+          "type": "array"
+        }
+      },
+      "required": [
+        "letter"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A round button with an icon after the activator (▶, ▼, i), lit while the parameter is on.",
+      "properties": {
+        "round": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/Glyph"
+            },
+            {
+              "$ref": "#/$defs/ParamId"
+            }
+          ],
+          "type": "array"
+        }
+      },
+      "required": [
+        "round"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A text button reading the parameter's name (Learn, Send).",
+      "properties": {
+        "button": {
+          "$ref": "#/$defs/ParamId"
+        }
+      },
+      "required": [
+        "button"
+      ],
+      "type": "object"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `Tone`
 
 How a theme's neutral colours are tinted (themes R4).
@@ -41240,6 +41667,88 @@ What `device.ungroup` returns.
 
 </details>
 
+### `Unit`
+
+A unit a knob's two parameters read in.
+
+One of:
+
+- `"ms"`: Milliseconds.
+- `"hz"`: Hertz.
+- `"sync"`: Synced to the tempo: drawn as a metronome.
+- `"note"`: A musical note.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A unit a knob's two parameters read in.",
+  "oneOf": [
+    {
+      "const": "ms",
+      "description": "Milliseconds.",
+      "type": "string"
+    },
+    {
+      "const": "hz",
+      "description": "Hertz.",
+      "type": "string"
+    },
+    {
+      "const": "sync",
+      "description": "Synced to the tempo: drawn as a metronome.",
+      "type": "string"
+    },
+    {
+      "const": "note",
+      "description": "A musical note.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `UnitPair`
+
+A pair of unit buttons beside a knob that switch which of two parameters the knob shows: Arpeggiator's Rate (ms or sync), Envelope Follower's Delay, LFO's Rate. The knob shows one parameter, never both: the device's description says which two, as an [`Alternate`](crate::param::Alternate) whose switch is `mode`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `mode` | [`ParamId`](#paramid) | yes | The switch that picks the unit: off, the first unit's parameter (the control's own) shows and the first button is lit. |
+| `units` | array of [`Unit`](#unit), at least 2 | yes | The two units, in the order of `mode`'s values. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A pair of unit buttons beside a knob that switch which of two parameters the knob shows: Arpeggiator's Rate (ms or sync), Envelope Follower's Delay, LFO's Rate. The knob shows one parameter, never both: the device's description says which two, as an [`Alternate`](crate::param::Alternate) whose switch is `mode`.",
+  "properties": {
+    "mode": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The switch that picks the unit: off, the first unit's parameter (the control's own) shows and the first button is lit."
+    },
+    "units": {
+      "description": "The two units, in the order of `mode`'s values.",
+      "items": {
+        "$ref": "#/$defs/Unit"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": "array"
+    }
+  },
+  "required": [
+    "mode",
+    "units"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `UnmapResult`
 
 What `remote.unmap` returns.
@@ -42436,29 +42945,54 @@ One of:
 
 ### `Widget`
 
-How a control draws its parameter.
+How a control draws its parameter. Every size is as Live draws it (observed in Live 12.4.16, 2 November 2026; layout L-DEV-042 to L-DEV-046).
 
 One of:
 
-- `"knob"`: A round knob with its name above and its value below: continuous values and gains.
-- `"toggle"`: A switch button with its name above: toggles.
+- `"knob"`: A large round knob with its name above and its value below: the arc runs in the accent from the parameter's default, so a bipolar knob's from the centre, with a small notch at its top.
+- `"small_knob"`: The same knob in Live's second, smaller size.
+- `"number"`: A plain number box, dragged or typed, with its name above.
+- `"slider"`: A number box whose blue fill shows the value's place in its range (a "lit" box), with its name above.
+- `"marked"`: A plain number box with a ◀ marker at its right (the amounts of Chord and Sampler), with its name above.
 - `"chooser"`: A field that opens a menu of choices, with its name above.
-- `"number"`: A number field, dragged or typed, with its name above.
+- `"toggle"`: A text button holding its parameter's name, orange with dark text while on, dark grey with light text while off.
+- `"outlined"`: A text button like [`Toggle`](Self::Toggle) whose off state is outlined in orange.
+- `"icon_toggle"`: A small rectangular button with an icon ([`Control::glyph`]) in place of text, lit while on.
+- `"round"`: A round button with an icon ([`Control::glyph`]), lit while on.
+- an object with `segments` (integer from 0 to 255): A row of that many text buttons, one for each choice of a choice parameter, the chosen one lit (Peak, RMS and Expand).
+- an object with `stack` (integer from 0 to 255): The same as a column of that many buttons.
+- an object with `grid` (object with `columns` (integer from 0 to 255), `rows` (integer from 0 to 255)): The choices of a choice parameter as a grid of small buttons, filled by rows (Note Echo's 1 2 3 4 over 5 6 8 16).
+- an object with `icon_segments` (integer from 0 to 255): A row of that many icon buttons, one for each choice of a choice parameter (the filter types), the chosen one lit.
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "How a control draws its parameter.",
+  "description": "How a control draws its parameter. Every size is as Live draws it (observed in Live 12.4.16, 2 November 2026; layout L-DEV-042 to L-DEV-046).",
   "oneOf": [
     {
       "const": "knob",
-      "description": "A round knob with its name above and its value below: continuous values and gains.",
+      "description": "A large round knob with its name above and its value below: the arc runs in the accent from the parameter's default, so a bipolar knob's from the centre, with a small notch at its top.",
       "type": "string"
     },
     {
-      "const": "toggle",
-      "description": "A switch button with its name above: toggles.",
+      "const": "small_knob",
+      "description": "The same knob in Live's second, smaller size.",
+      "type": "string"
+    },
+    {
+      "const": "number",
+      "description": "A plain number box, dragged or typed, with its name above.",
+      "type": "string"
+    },
+    {
+      "const": "slider",
+      "description": "A number box whose blue fill shows the value's place in its range (a \"lit\" box), with its name above.",
+      "type": "string"
+    },
+    {
+      "const": "marked",
+      "description": "A plain number box with a ◀ marker at its right (the amounts of Chord and Sampler), with its name above.",
       "type": "string"
     },
     {
@@ -42467,9 +43001,105 @@ One of:
       "type": "string"
     },
     {
-      "const": "number",
-      "description": "A number field, dragged or typed, with its name above.",
+      "const": "toggle",
+      "description": "A text button holding its parameter's name, orange with dark text while on, dark grey with light text while off.",
       "type": "string"
+    },
+    {
+      "const": "outlined",
+      "description": "A text button like [`Toggle`](Self::Toggle) whose off state is outlined in orange.",
+      "type": "string"
+    },
+    {
+      "const": "icon_toggle",
+      "description": "A small rectangular button with an icon ([`Control::glyph`]) in place of text, lit while on.",
+      "type": "string"
+    },
+    {
+      "const": "round",
+      "description": "A round button with an icon ([`Control::glyph`]), lit while on.",
+      "type": "string"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A row of that many text buttons, one for each choice of a choice parameter, the chosen one lit (Peak, RMS and Expand).",
+      "properties": {
+        "segments": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "segments"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "The same as a column of that many buttons.",
+      "properties": {
+        "stack": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "stack"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "The choices of a choice parameter as a grid of small buttons, filled by rows (Note Echo's 1 2 3 4 over 5 6 8 16).",
+      "properties": {
+        "grid": {
+          "properties": {
+            "columns": {
+              "description": "How many buttons across.",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "rows": {
+              "description": "How many rows.",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "columns",
+            "rows"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "grid"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A row of that many icon buttons, one for each choice of a choice parameter (the filter types), the chosen one lit.",
+      "properties": {
+        "icon_segments": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "icon_segments"
+      ],
+      "type": "object"
     }
   ]
 }

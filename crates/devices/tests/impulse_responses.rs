@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use bl_devices::impulse::{self, LoadError};
-use bl_devices::testing::{self, CONVOLUTION};
+use bl_devices::testing;
 use bl_engine::{Collector, Node};
 use bl_media::{BitDepth, Dither, MediaStore};
 use bl_model::ContentHash;

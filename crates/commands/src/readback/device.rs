@@ -107,6 +107,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("device.clear_route", query(Device, "matrix")),
     ("device.write_route", query(Device, "matrix")),
     ("device.erase_route", query(Device, "matrix")),
+    ("device.set_impulse_response", query(Device, "impulse_responses")),
     ("device.set_wavetable", query(Device, "wavetables")),
     ("device.set_sample_bpm", query(Device, "warp.bpm")),
     ("device.set_show_preset_name", query(Device, "show_preset_name")),

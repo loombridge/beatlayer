@@ -58,6 +58,7 @@ The commands, by the part of their ID before its first dot:
 - [`keymap`](keymap.md)
 - [`link`](link.md)
 - [`locator`](locator.md)
+- [`meld`](meld.md)
 - [`midi`](midi.md)
 - [`midi_tool`](midi_tool.md)
 - [`mixer`](mixer.md)
@@ -22938,6 +22939,96 @@ A parameter a track's clips or modulators act on.
     "played",
     "sources",
     "modulators"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ModulationCleared`
+
+What `meld.clear_modulation` returns: the Meld, the engine and how many routes it cleared.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `engine` | string | yes | The engine cleared. |
+| `routes` | integer, at least 0 | yes | How many routes were cleared. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `meld.clear_modulation` returns: the Meld, the engine and how many routes it cleared.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "engine": {
+      "description": "The engine cleared.",
+      "type": "string"
+    },
+    "routes": {
+      "description": "How many routes were cleared.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "engine",
+    "routes"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ModulationCopied`
+
+What `meld.copy_modulation` returns: the Meld, the engines it copied between and how many routes it wrote.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `from` | string | yes | The engine copied from, `A` or `B`. |
+| `to` | string | yes | The engine copied to. |
+| `routes` | integer, at least 0 | yes | How many routes the other engine now holds from the copy. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `meld.copy_modulation` returns: the Meld, the engines it copied between and how many routes it wrote.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "from": {
+      "description": "The engine copied from, `A` or `B`.",
+      "type": "string"
+    },
+    "routes": {
+      "description": "How many routes the other engine now holds from the copy.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "to": {
+      "description": "The engine copied to.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "device",
+    "from",
+    "to",
+    "routes"
   ],
   "type": "object"
 }

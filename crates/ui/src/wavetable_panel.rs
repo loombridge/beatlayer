@@ -395,9 +395,21 @@ fn grid(
     (id, rect): (Id, Rect),
     events: &mut Vec<UiEvent>,
 ) {
-    let Some(grid) = &panel.matrix_grid else {
-        return;
-    };
+    if let Some(grid) = &panel.matrix_grid {
+        grid_of(ui, theme, frame, grid, (id, rect), events);
+    }
+}
+
+/// [`grid`] for `grid`, which a device may have narrowed to the columns and
+/// rows it shows (Meld's tabs).
+pub(crate) fn grid_of(
+    ui: &mut Ui,
+    theme: &Theme,
+    frame: &DeviceFrame,
+    grid: &MatrixGrid,
+    (id, rect): (Id, Rect),
+    events: &mut Vec<UiEvent>,
+) {
     let c = &theme.colors;
     let ink = if frame.enabled {
         c.accent.0

@@ -183,6 +183,21 @@ pub const CLEAR_ROUTE: &str = "device.clear_route";
 /// resonators to the other.
 pub const COPY_RESONATOR: &str = "collision.copy_resonator";
 
+/// `device.set_partials`: draws an Operator oscillator's user wave, its
+/// partials, count and Repeat (operator R27).
+pub const SET_PARTIALS: &str = "device.set_partials";
+/// `operator.copy_oscillator`: copies one Operator oscillator's settings to
+/// another (operator R28).
+pub const COPY_OSCILLATOR: &str = "operator.copy_oscillator";
+/// `operator.set_envelope_levels`: sets every level of the envelope shown
+/// to its maximum, minimum or middle (operator R28).
+pub const SET_ENVELOPE_LEVELS: &str = "operator.set_envelope_levels";
+/// `operator.play_by_key`: the filter's Play By Key (operator R28).
+pub const PLAY_BY_KEY: &str = "operator.play_by_key";
+/// `operator.set_harmonics`: the harmonics editor's Even Only, Odd Only and
+/// Normalize (operator R27, R28).
+pub const SET_HARMONICS: &str = "operator.set_harmonics";
+
 /// `articulation.list`: the articulations an Articulation Map holds.
 pub const ARTICULATION_LIST: &str = "articulation.list";
 /// `articulation.learn`: arms a row's Learn button.
@@ -249,6 +264,11 @@ pub const IDS: &[&str] = &[
     SET_ROUTE,
     CLEAR_ROUTE,
     COPY_RESONATOR,
+    SET_PARTIALS,
+    COPY_OSCILLATOR,
+    SET_ENVELOPE_LEVELS,
+    PLAY_BY_KEY,
+    SET_HARMONICS,
     ARTICULATION_LIST,
     ARTICULATION_LEARN,
 ];
@@ -1396,6 +1416,129 @@ pub struct CopyResonatorArgs {
     pub device: Option<DeviceId>,
     /// The resonator to copy from, 1 or 2; its settings go to the other.
     pub from: u8,
+}
+
+/// Arguments of `device.set_partials`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetPartialsArgs {
+    /// The Operator; the selected device if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The oscillator, from 0 for A to 3 for D.
+    pub osc: u8,
+    /// The levels of its first partials, each from 0 to 1: 16, 32 or 64 of
+    /// them, which sets the wave's count.
+    pub levels: Vec<f32>,
+    /// Repeat, from 0 to 100 %, which also switches it on; left as it is if
+    /// left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repeat: Option<f64>,
+    /// Repeat's switch: `false` for Off; left as it is if left out (and
+    /// switched on by `repeat`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repeat_on: Option<bool>,
+}
+
+/// What `device.set_partials` returns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PartialsChanged {
+    /// The device.
+    pub device: DeviceId,
+    /// The oscillator, from 0.
+    pub osc: u8,
+    /// Its partials' count.
+    pub count: usize,
+}
+
+/// Arguments of `operator.copy_oscillator`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CopyOscillatorArgs {
+    /// The Operator; the selected device if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The oscillator to copy from, 0 for A to 3 for D.
+    pub from: u8,
+    /// The oscillator that takes its settings.
+    pub to: u8,
+}
+
+/// What `operator.copy_oscillator` returns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct OscillatorCopied {
+    /// The device.
+    pub device: DeviceId,
+    /// The oscillator copied from.
+    pub from: u8,
+    /// The oscillator copied to.
+    pub to: u8,
+}
+
+/// The level `operator.set_envelope_levels` sets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EnvelopeLevel {
+    Maximum,
+    Minimum,
+    Middle,
+}
+
+/// Arguments of `operator.set_envelope_levels`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetEnvelopeLevelsArgs {
+    /// The Operator; the selected device if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The envelope: `A`, `B`, `C`, `D`, `Filter`, `Pitch` or `LFO`.
+    pub envelope: String,
+    /// Maximum, minimum or middle.
+    pub to: EnvelopeLevel,
+}
+
+/// What `operator.set_envelope_levels` and `operator.play_by_key` return.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct OperatorChanged {
+    /// The device.
+    pub device: DeviceId,
+}
+
+/// Arguments of `operator.play_by_key`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PlayByKeyArgs {
+    /// The Operator; the selected device if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+}
+
+/// Arguments of `operator.set_harmonics`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetHarmonicsArgs {
+    /// The Operator; the selected device if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// Whether a drag sets the even partials only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub even_only: Option<bool>,
+    /// Whether a drag sets the odd partials only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub odd_only: Option<bool>,
+    /// Whether a drag scales the levels so the loudest is 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normalize: Option<bool>,
+}
+
+/// The harmonics editor's options, which `operator.set_harmonics` returns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct HarmonicsView {
+    /// The device.
+    pub device: DeviceId,
+    pub even_only: bool,
+    pub odd_only: bool,
+    pub normalize: bool,
 }
 
 /// What `collision.copy_resonator` returns: the Collision and the
@@ -3061,6 +3204,66 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .args::<CopyResonatorArgs>()
             .result::<ResonatorCopied>(),
+        CommandSpec::new(SET_PARTIALS, "Change Partials")
+            .description(
+                "Draws the user wave of an Operator oscillator, as dragging across its \
+                 harmonics editor does: `osc` from 0 for A, `levels` the levels of its first \
+                 16, 32 or 64 partials from 0 to 1 (the count sets the wave's count), and \
+                 optionally `repeat` from 0 to 100 % (which switches Repeat on) or \
+                 `repeat_on` false for Off. The device's `partials` (in the query tool's \
+                 `device` result) read back the levels, and its `params` Repeat. One undo \
+                 step (Change Partials).",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<SetPartialsArgs>()
+            .result::<PartialsChanged>(),
+        CommandSpec::new(COPY_OSCILLATOR, "Copy Oscillator")
+            .description(
+                "Copies every setting of one Operator oscillator to another, as the menu's \
+                 Copy Oscillator settings does: `from` and `to` from 0 for A to 3 for D. Its \
+                 controls, envelope and drawn partials are copied, and the device's `params` \
+                 and `partials` read back the result. One undo step (Copy Oscillator).",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<CopyOscillatorArgs>()
+            .result::<OscillatorCopied>(),
+        CommandSpec::new(SET_ENVELOPE_LEVELS, "Set All Envelope Levels")
+            .description(
+                "Sets the Initial, Peak, Sustain and, where it has one, End levels of an \
+                 Operator envelope (`A` to `D`, `Filter`, `Pitch` or `LFO`) to `maximum`, \
+                 `minimum` or `middle`, as the menu's Set All Envelope Levels does. An \
+                 oscillator's levels run from silence to 0 dB with the middle at -6 dB; the \
+                 others' from -100 % to 100 % with the middle at 0 %. The device's `params` \
+                 read back the result. One undo step (Set All Envelope Levels).",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<SetEnvelopeLevelsArgs>()
+            .result::<OperatorChanged>(),
+        CommandSpec::new(PLAY_BY_KEY, "Play By Key")
+            .description(
+                "Sets an Operator's filter frequency to 466 Hz and Freq < Key to 100 %, as \
+                 the filter frequency's menu item Play By Key does. The device's `params` \
+                 read back the result. One undo step (Play By Key).",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<PlayByKeyArgs>()
+            .result::<OperatorChanged>(),
+        CommandSpec::new(SET_HARMONICS, "Set Harmonics Editor")
+            .description(
+                "Sets the harmonics editor's options, as the menu's Even Only, Odd Only and \
+                 Normalize do: a drag across the partials sets the even ones only, the odd \
+                 ones only (each switching the other off), and with Normalize on (the \
+                 default) scales the levels so the loudest is 1. Returns the options. It \
+                 changes only the view: it isn't an undo step.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<SetHarmonicsArgs>()
+            .result::<HarmonicsView>(),
         CommandSpec::new(ARTICULATION_LIST, "List Articulations")
             .description(
                 "Reports the articulations an Articulation Map holds, in order: each with its \

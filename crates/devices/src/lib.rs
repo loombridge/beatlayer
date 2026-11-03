@@ -95,6 +95,7 @@ pub mod multisampler;
 mod multisampler_tabs;
 pub mod note_echo;
 pub mod operator;
+pub mod operator_display;
 pub mod operator_envelope;
 pub mod operator_lfo;
 pub mod oscilloscope;

@@ -89,6 +89,13 @@ pub fn carriers(algorithm: usize) -> u8 {
     !modulators & 0b1111
 }
 
+/// The operators that modulate each operator in `algorithm` (0 to 10), as
+/// a mask of operators A to D from bit 0 (R2).
+#[must_use]
+pub fn modulators(algorithm: usize) -> [u8; OPERATORS] {
+    MODULATORS[algorithm.min(MODULATORS.len() - 1)]
+}
+
 /// Spec: operator R1. A modulator at amplitude `a` moves its carrier's
 /// phase by up to `INDEX × a` radians.
 const INDEX: f32 = 4.0;

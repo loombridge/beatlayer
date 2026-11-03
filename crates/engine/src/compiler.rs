@@ -639,6 +639,17 @@ impl Compiler {
             {
                 self.send_device_data(document, id, &mut update);
             }
+            // An Operator whose drawn partials changed, or a parameter its
+            // user waves' tables are built from, gets the tables again, with
+            // no new program (operator R7, R27).
+            if let (Change::Modified, Some(before), Some(after)) =
+                (change, old.device(id), document.device(id))
+                && (before.partials != after.partials
+                    || self.registry.data_params_changed(before, after))
+                && before.media == after.media
+            {
+                self.send_device_data(document, id, &mut update);
+            }
             // A sampler whose sample's edits, warp or slices changed gets the
             // edited sample again as node data, with no new program (R57);
             // so does one that swaps samples in place, for another sample.

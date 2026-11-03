@@ -941,6 +941,49 @@ fn banks() -> Vec<(String, Vec<String>)> {
     banks
 }
 
+/// Oscillator `op`'s envelope as `value` reads its parameters (R12, R14).
+pub(crate) fn osc_shape(value: &impl Fn(ParamId) -> f64, op: usize) -> Shape {
+    let env = |c| value(osc(op, c));
+    let gain = |c| env(c) as f32;
+    Shape {
+        initial: gain(ENV_INITIAL),
+        peak: gain(ENV_PEAK),
+        sustain: gain(ENV_SUSTAIN),
+        end: 0.0,
+        attack: (env(ENV_ATTACK) * 1e-3) as f32,
+        decay: (env(ENV_DECAY) * 1e-3) as f32,
+        release: (env(ENV_RELEASE) * 1e-3) as f32,
+        curve: Curve::Amplitude,
+        mode: Loop::of(env(ENV_LOOP) as usize),
+        loop_secs: (env(ENV_LOOP_TIME) * 1e-3) as f32,
+        repeat: envelope::REPEAT_BEATS[env(ENV_REPEAT) as usize],
+    }
+}
+
+/// The envelope that begins at `base` ([`FILTER_ENV`], [`PITCH_ENV`] or
+/// [`LFO_ENV`]) as `value` reads its parameters (R13, R14).
+pub(crate) fn shaped_shape(value: &impl Fn(ParamId) -> f64, base: u32) -> Shape {
+    let get = |c| value(shaped(base, c));
+    let level = |c| (get(c) / 100.0) as f32;
+    Shape {
+        initial: level(SHAPED_INITIAL),
+        peak: level(SHAPED_PEAK),
+        sustain: level(SHAPED_SUSTAIN),
+        end: level(SHAPED_END),
+        attack: (get(SHAPED_ATTACK) * 1e-3) as f32,
+        decay: (get(SHAPED_DECAY) * 1e-3) as f32,
+        release: (get(SHAPED_RELEASE) * 1e-3) as f32,
+        curve: Curve::Slopes([
+            get(SHAPED_ATTACK_SLOPE) as f32,
+            get(SHAPED_DECAY_SLOPE) as f32,
+            get(SHAPED_RELEASE_SLOPE) as f32,
+        ]),
+        mode: Loop::of(get(SHAPED_LOOP) as usize),
+        loop_secs: (get(SHAPED_LOOP_TIME) * 1e-3) as f32,
+        repeat: envelope::REPEAT_BEATS[get(SHAPED_REPEAT) as usize],
+    }
+}
+
 /// Spec: operator R25. The matrix: the five global sources, each with two
 /// chosen slots (Destination A and B and their amounts), and the
 /// destinations of [`DESTINATIONS`] after Off, each a movement of its own
@@ -998,6 +1041,7 @@ pub fn operator_type() -> DeviceType {
         DeviceDescription::new(params)
             .with_layout(layout)
             .with_menu_options(&[NOTE_PB])
+            .with_views(&crate::operator_display::VIEWS)
             .with_banks(&banks),
     )
     .with_matrix(operator_matrix())
@@ -1098,7 +1142,45 @@ pub fn presets() -> Vec<Preset> {
 
 /// Adds Operator to `registry`.
 pub fn register(registry: &mut Registry) {
-    add_with_data(registry, operator_type(), make, None);
+    add_with_data(
+        registry,
+        operator_type(),
+        make,
+        Some(Arc::new(device_data)),
+    );
+    // Repeat shapes a user wave's table (R7).
+    let repeats: Vec<ParamId> = (0..OPERATORS)
+        .flat_map(|op| [osc(op, OSC_REPEAT), osc(op, OSC_REPEAT_ON)])
+        .collect();
+    registry.rebuilds_data_on(OPERATOR, &repeats);
+}
+
+/// The user waves' tables of `device`'s four oscillators (R7, R27), built
+/// from its drawn partials and Repeat, off the audio thread: a new user
+/// wave is the first partial alone.
+#[must_use]
+pub fn device_data(device: &Device, _file: bl_engine::FileOf<'_>) -> bl_engine::DeviceData {
+    let mut data = bl_engine::DeviceData::default();
+    for op in 0..OPERATORS {
+        let levels = device
+            .partials
+            .iter()
+            .find(|p| usize::from(p.osc) == op)
+            .map_or_else(
+                || {
+                    let mut first = vec![0.0; bl_model::partials::COUNTS[0]];
+                    first[0] = 1.0;
+                    first
+                },
+                |p| p.levels.clone(),
+            );
+        let param = |c| device.params.get(&osc(op, c)).copied().unwrap_or(0.0);
+        let repeat = (param(OSC_REPEAT_ON) >= 0.5).then(|| (param(OSC_REPEAT) / 100.0) as f32);
+        let table = fm::user_table(&levels, repeat);
+        data.items
+            .push(Box::new(move |gc| gc.data(fm::UserWave { op, table })));
+    }
+    data
 }
 
 /// Makes an Operator for `config`'s rate, channels and block size, with
@@ -1523,44 +1605,12 @@ impl Synth {
             }
         }
         for op in 0..OPERATORS {
-            let env = |c| value(osc(op, c));
-            let gain = |c| env(c) as f32;
-            self.shapes[op] = Shape {
-                initial: gain(ENV_INITIAL),
-                peak: gain(ENV_PEAK),
-                sustain: gain(ENV_SUSTAIN),
-                end: 0.0,
-                attack: (env(ENV_ATTACK) * 1e-3) as f32,
-                decay: (env(ENV_DECAY) * 1e-3) as f32,
-                release: (env(ENV_RELEASE) * 1e-3) as f32,
-                curve: Curve::Amplitude,
-                mode: Loop::of(env(ENV_LOOP) as usize),
-                loop_secs: (env(ENV_LOOP_TIME) * 1e-3) as f32,
-                repeat: envelope::REPEAT_BEATS[env(ENV_REPEAT) as usize],
-            };
-            self.time_vel[op] = (env(ENV_TIME_VEL) / 100.0) as f32;
+            self.shapes[op] = osc_shape(&value, op);
+            self.time_vel[op] = (value(osc(op, ENV_TIME_VEL)) / 100.0) as f32;
         }
         for (index, base) in [(PITCH, PITCH_ENV), (FILTER, FILTER_ENV), (LFO, LFO_ENV)] {
-            let get = |c| value(shaped(base, c));
-            let level = |c| (get(c) / 100.0) as f32;
-            self.shapes[index] = Shape {
-                initial: level(SHAPED_INITIAL),
-                peak: level(SHAPED_PEAK),
-                sustain: level(SHAPED_SUSTAIN),
-                end: level(SHAPED_END),
-                attack: (get(SHAPED_ATTACK) * 1e-3) as f32,
-                decay: (get(SHAPED_DECAY) * 1e-3) as f32,
-                release: (get(SHAPED_RELEASE) * 1e-3) as f32,
-                curve: Curve::Slopes([
-                    get(SHAPED_ATTACK_SLOPE) as f32,
-                    get(SHAPED_DECAY_SLOPE) as f32,
-                    get(SHAPED_RELEASE_SLOPE) as f32,
-                ]),
-                mode: Loop::of(get(SHAPED_LOOP) as usize),
-                loop_secs: (get(SHAPED_LOOP_TIME) * 1e-3) as f32,
-                repeat: envelope::REPEAT_BEATS[get(SHAPED_REPEAT) as usize],
-            };
-            self.time_vel[index] = (get(SHAPED_TIME_VEL) / 100.0) as f32;
+            self.shapes[index] = shaped_shape(&value, base);
+            self.time_vel[index] = (value(shaped(base, SHAPED_TIME_VEL)) / 100.0) as f32;
         }
         self.pitch_on = value(PITCH_ON) >= 0.5;
         self.pitch_amount = (value(PITCH_AMOUNT) / 100.0) as f32;

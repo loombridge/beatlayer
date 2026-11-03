@@ -86,6 +86,8 @@ fn steady(bpm: f64) -> TempoMap {
 /// What a run plays and where.
 struct Run {
     params: Vec<(ParamId, f64)>,
+    /// The partials drawn on the device, whose user waves' tables it is sent.
+    partials: Vec<bl_model::Partials>,
     notes: Vec<NoteEvent>,
     events: Vec<NodeEvent>,
     tempo: TempoMap,
@@ -97,6 +99,7 @@ struct Run {
 fn run(params: Vec<(ParamId, f64)>, notes: Vec<NoteEvent>) -> Run {
     Run {
         params,
+        partials: Vec::new(),
         notes,
         events: Vec::new(),
         tempo: steady(120.0),
@@ -117,9 +120,22 @@ impl Run {
         self
     }
 
+    fn partials(mut self, osc: u8, levels: Vec<f32>) -> Self {
+        self.partials.push(bl_model::Partials { osc, levels });
+        self
+    }
+
     /// `frames` frames in blocks of `block`, left and right.
     fn render(&self, frames: usize, block: usize) -> [Vec<f32>; 2] {
-        let mut node = make_node(&self.params, block);
+        // The tables the device's partials and Repeat build, sent as the
+        // compiler sends them.
+        let mut device = common::device(&operator_type(), &self.params);
+        device.partials.clone_from(&self.partials);
+        let mut node = common::node(&common::registry(), &device, block);
+        let collector = bl_engine::Collector::new();
+        for item in operator::device_data(&device, &|_| None).items {
+            node.receive_data(item(&collector.handle()));
+        }
         let mut out = [Vec::with_capacity(frames), Vec::with_capacity(frames)];
         let mut at = 0;
         while at < frames {
@@ -1881,4 +1897,33 @@ fn part_two_renders_the_same_at_block_sizes_1_to_4096() {
             assert!(worst < 3e-5, "block {block}: {worst}");
         }
     }
+}
+
+// Spec: operator R7, R27 (a drawn wave's partials and Repeat build its table)
+#[test]
+fn a_drawn_waves_partials_and_repeat_build_the_table_the_device_plays() {
+    let mut levels = vec![0.0f32; 16];
+    levels[0] = 1.0;
+    levels[2] = 0.5;
+    let user = [(osc(0, OSC_WAVE), 22.0)];
+    let heard = |extra: &[(ParamId, f64)]| {
+        let mut params = user.to_vec();
+        params.extend_from_slice(extra);
+        let signal = run(patch(&params), vec![on(0, A3, 0.8)])
+            .partials(0, levels.clone())
+            .left(48_000);
+        move |partial: f64| amplitude_at(&signal[4_800..], partial * F0)
+    };
+    let off = heard(&[]);
+    assert!((off(1.0) - 1.0).abs() < 0.01 && (off(3.0) - 0.5).abs() < 0.01);
+    assert!(off(2.0) < 0.001 && off(17.0) < 0.001);
+    // Repeat at 50 % goes on with the pattern a copy fainter: partial 17 is
+    // the first again, at half.
+    let repeating = heard(&[(osc(0, OSC_REPEAT_ON), 1.0), (osc(0, OSC_REPEAT), 50.0)]);
+    assert!((repeating(17.0) - 0.5).abs() < 0.01, "{}", repeating(17.0));
+    assert!((repeating(19.0) - 0.25).abs() < 0.01);
+    // A new user wave is the first partial alone.
+    let new = run(patch(&user), vec![on(0, A3, 0.8)]).left(48_000);
+    assert!((amplitude_at(&new[4_800..], F0) - 1.0).abs() < 0.01);
+    assert!(amplitude_at(&new[4_800..], 3.0 * F0) < 0.001);
 }

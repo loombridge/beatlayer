@@ -9,8 +9,9 @@ use bl_devices::operator::{
 };
 use bl_model::{Command, Device, DeviceId, DeviceKind, Document, Editor, ParamId};
 use bl_shell_spec::devices::{
-    CopyOscillatorArgs, EnvelopeLevel, HarmonicsView, OperatorChanged, OscillatorCopied,
-    PartialsChanged, PlayByKeyArgs, SetEnvelopeLevelsArgs, SetHarmonicsArgs, SetPartialsArgs,
+    CopyOscillatorArgs, EnvelopeLevel, HarmonicsView, OperatorChanged, OperatorEnvelope,
+    OscillatorCopied, PartialsChanged, PlayByKeyArgs, SetEnvelopeLevelsArgs, SetHarmonicsArgs,
+    SetPartialsArgs,
 };
 
 use super::{DeviceError, DeviceView, parse};
@@ -107,7 +108,7 @@ impl DeviceView {
     ) -> Result<OscillatorCopied, DeviceError> {
         let args: CopyOscillatorArgs = parse(args)?;
         let device = self.operator(editor.document(), args.device)?;
-        let (from, to) = (oscillator(args.from)?, oscillator(args.to)?);
+        let (from, to) = (oscillator(args.from)?, oscillator(args.into)?);
         let current = editor.document().device(device).expect("the target exists");
         let description = &self
             .device_type(&current.kind)
@@ -137,7 +138,7 @@ impl DeviceView {
                 }
                 editor.apply(Command::SetPartials {
                     device,
-                    osc: args.to,
+                    osc: args.into,
                     levels,
                 })?;
                 Ok::<(), bl_model::EditError>(())
@@ -146,7 +147,7 @@ impl DeviceView {
         Ok(OscillatorCopied {
             device,
             from: args.from,
-            to: args.to,
+            into: args.into,
         })
     }
 
@@ -159,7 +160,6 @@ impl DeviceView {
     ) -> Result<OperatorChanged, DeviceError> {
         let args: SetEnvelopeLevelsArgs = parse(args)?;
         let device = self.operator(editor.document(), args.device)?;
-        let name = args.envelope.to_ascii_lowercase();
         // An oscillator's levels are amplitudes; the others' run from -100
         // % to 100 %.
         let amplitude = |top, bottom, middle| match args.to {
@@ -167,19 +167,11 @@ impl DeviceView {
             EnvelopeLevel::Minimum => bottom,
             EnvelopeLevel::Middle => middle,
         };
-        let moves: Vec<(ParamId, f64)> = match name.as_str() {
-            "a" | "b" | "c" | "d" => {
-                let op = usize::from(name.as_bytes()[0] - b'a');
-                let level = amplitude(1.0, 0.0, 0.5);
-                [ENV_INITIAL, ENV_PEAK, ENV_SUSTAIN]
-                    .into_iter()
-                    .map(|c| (osc(op, c), level))
-                    .collect()
-            }
-            "filter" | "pitch" | "lfo" => {
-                let base = match name.as_str() {
-                    "filter" => FILTER_ENV,
-                    "pitch" => PITCH_ENV,
+        let moves: Vec<(ParamId, f64)> = match args.envelope {
+            OperatorEnvelope::Filter | OperatorEnvelope::Pitch | OperatorEnvelope::Lfo => {
+                let base = match args.envelope {
+                    OperatorEnvelope::Filter => FILTER_ENV,
+                    OperatorEnvelope::Pitch => PITCH_ENV,
                     _ => LFO_ENV,
                 };
                 let level = amplitude(100.0, -100.0, 0.0);
@@ -188,11 +180,13 @@ impl DeviceView {
                     .map(|c| (shaped(base, c), level))
                     .collect()
             }
-            _ => {
-                return Err(DeviceError::InvalidArgs(format!(
-                    "`envelope` is A, B, C, D, Filter, Pitch or LFO, not {:?}",
-                    args.envelope
-                )));
+            oscillator => {
+                let op = oscillator as usize;
+                let level = amplitude(1.0, 0.0, 0.5);
+                [ENV_INITIAL, ENV_PEAK, ENV_SUSTAIN]
+                    .into_iter()
+                    .map(|c| (osc(op, c), level))
+                    .collect()
             }
         };
         editor

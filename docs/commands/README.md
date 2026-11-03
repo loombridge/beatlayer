@@ -23890,6 +23890,32 @@ What `operator.set_envelope_levels` and `operator.play_by_key` return.
 
 </details>
 
+### `OperatorEnvelope`
+
+The Operator envelope `operator.set_envelope_levels` sets.
+
+Type: one of `"A"`, `"B"`, `"C"`, `"D"`, `"Filter"`, `"Pitch"`, `"LFO"`.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Operator envelope `operator.set_envelope_levels` sets.",
+  "enum": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "Filter",
+    "Pitch",
+    "LFO"
+  ],
+  "type": "string"
+}
+```
+
+</details>
+
 ### `Origin`
 
 Where a shortcut's keys come from.
@@ -23935,7 +23961,7 @@ What `operator.copy_oscillator` returns.
 |---|---|---|---|
 | `device` | [`DeviceId`](#deviceid) | yes | The device. |
 | `from` | integer from 0 to 255 | yes | The oscillator copied from. |
-| `to` | integer from 0 to 255 | yes | The oscillator copied to. |
+| `into` | integer from 0 to 255 | yes | The oscillator copied to. |
 
 <details><summary>JSON Schema</summary>
 
@@ -23954,7 +23980,7 @@ What `operator.copy_oscillator` returns.
       "minimum": 0,
       "type": "integer"
     },
-    "to": {
+    "into": {
       "description": "The oscillator copied to.",
       "format": "uint8",
       "maximum": 255,
@@ -23965,7 +23991,7 @@ What `operator.copy_oscillator` returns.
   "required": [
     "device",
     "from",
-    "to"
+    "into"
   ],
   "type": "object"
 }

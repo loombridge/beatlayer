@@ -1706,7 +1706,7 @@ impl DeviceViewUi {
                             invoke(
                                 events,
                                 ids::COPY_OSCILLATOR,
-                                json!({ "device": frame.id, "from": from, "to": to }),
+                                json!({ "device": frame.id, "from": from, "into": to }),
                             );
                             ui.close();
                         }

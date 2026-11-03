@@ -348,10 +348,10 @@ fn copy_oscillator_sends_every_setting_and_the_partials_to_another_in_one_undo_s
     let copied = shell
         .run(
             "operator.copy_oscillator",
-            json!({ "device": device, "from": 0, "to": 2 }),
+            json!({ "device": device, "from": 0, "into": 2 }),
         )
         .unwrap();
-    assert_eq!(copied, json!({ "device": device, "from": 0, "to": 2 }));
+    assert_eq!(copied, json!({ "device": device, "from": 0, "into": 2 }));
     assert_eq!(value(&shell, device, osc(2, OSC_FINE)), 321.0);
     assert_eq!(value(&shell, device, osc(2, ENV_ATTACK)), 777.0);
     assert_eq!(partials(&shell, device, 2), Some(vec![0.25; 16]));
@@ -362,7 +362,7 @@ fn copy_oscillator_sends_every_setting_and_the_partials_to_another_in_one_undo_s
         shell
             .run(
                 "operator.copy_oscillator",
-                json!({ "device": device, "from": 0, "to": 4 })
+                json!({ "device": device, "from": 0, "into": 4 })
             )
             .is_err()
     );

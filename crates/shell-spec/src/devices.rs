@@ -1494,7 +1494,7 @@ pub struct CopyOscillatorArgs {
     /// The oscillator to copy from, 0 for A to 3 for D.
     pub from: u8,
     /// The oscillator that takes its settings.
-    pub to: u8,
+    pub into: u8,
 }
 
 /// What `operator.copy_oscillator` returns.
@@ -1505,7 +1505,7 @@ pub struct OscillatorCopied {
     /// The oscillator copied from.
     pub from: u8,
     /// The oscillator copied to.
-    pub to: u8,
+    pub into: u8,
 }
 
 /// The level `operator.set_envelope_levels` sets.
@@ -1517,6 +1517,19 @@ pub enum EnvelopeLevel {
     Middle,
 }
 
+/// The Operator envelope `operator.set_envelope_levels` sets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub enum OperatorEnvelope {
+    A,
+    B,
+    C,
+    D,
+    Filter,
+    Pitch,
+    #[serde(rename = "LFO")]
+    Lfo,
+}
+
 /// Arguments of `operator.set_envelope_levels`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -1525,7 +1538,7 @@ pub struct SetEnvelopeLevelsArgs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device: Option<DeviceId>,
     /// The envelope: `A`, `B`, `C`, `D`, `Filter`, `Pitch` or `LFO`.
-    pub envelope: String,
+    pub envelope: OperatorEnvelope,
     /// Maximum, minimum or middle.
     pub to: EnvelopeLevel,
 }
@@ -3254,7 +3267,7 @@ fn specs() -> Vec<CommandSpec> {
         CommandSpec::new(COPY_OSCILLATOR, "Copy Oscillator")
             .description(
                 "Copies every setting of one Operator oscillator to another, as the menu's \
-                 Copy Oscillator settings does: `from` and `to` from 0 for A to 3 for D. Its \
+                 Copy Oscillator settings does: `from` and `into` from 0 for A to 3 for D. Its \
                  controls, envelope and drawn partials are copied, and the device's `params` \
                  and `partials` read back the result. One undo step (Copy Oscillator).",
             )

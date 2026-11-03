@@ -140,7 +140,7 @@ fn an_agent_draws_partials_runs_the_menus_commands_and_reads_the_displays() {
     run(
         &mut client,
         "operator.copy_oscillator",
-        json!({ "device": device, "from": 1, "to": 3 }),
+        json!({ "device": device, "from": 1, "into": 3 }),
     );
     let result = device_result(&mut client, device);
     let partials = result["partials"].as_array().expect("partials");

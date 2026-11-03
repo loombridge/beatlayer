@@ -51,15 +51,19 @@ pub enum Loop {
     /// Runs Attack, Decay and Release to Final and starts again, until the
     /// note ends.
     Loop,
+    /// Runs Attack and Decay and starts again from where Decay ended, while
+    /// the note lasts, then releases (Meld's AD Loop).
+    AdLoop,
 }
 
 impl Loop {
-    /// The mode at `index` of [`LOOP_MODES`].
+    /// The mode at `index` of [`LOOP_MODES`], or of Meld's four.
     #[must_use]
     pub fn of(index: usize) -> Self {
         match index {
             1 => Self::Trigger,
             2 => Self::Loop,
+            3 => Self::AdLoop,
             _ => Self::None,
         }
     }
@@ -191,10 +195,12 @@ impl Envelope {
                 self.x += p.step[1];
                 if self.x >= 1.0 {
                     self.level = to;
-                    if p.mode == Loop::None {
-                        self.stage = Stage::Sustain;
-                    } else {
-                        self.begin_release();
+                    match p.mode {
+                        Loop::None => self.stage = Stage::Sustain,
+                        Loop::AdLoop if !self.released => {
+                            (self.from, self.x, self.stage) = (to, 0.0, Stage::Attack);
+                        }
+                        _ => self.begin_release(),
                     }
                 } else {
                     self.level = p.peak + (to - p.peak) * self.x.powf(p.power[1]);

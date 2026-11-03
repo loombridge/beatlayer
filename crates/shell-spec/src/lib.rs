@@ -112,6 +112,7 @@ pub mod assistant;
 pub mod audio;
 pub mod audio_editing;
 pub mod audio_panel;
+pub mod audio_to_midi;
 pub mod automation;
 pub mod autosampler;
 pub mod bounce;
@@ -225,6 +226,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     modulation::register(registry)?;
     perception::register(registry)?;
     stems::register(registry)?;
+    audio_to_midi::register(registry)?;
     packages::register(registry)?;
     extensions::register(registry)?;
     sample_editor::register(registry)?;

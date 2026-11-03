@@ -163,7 +163,7 @@ fn difference(ours: &[i32], reference: &[i32]) -> (usize, f64) {
 /// song up with song time by dropping the main output's leading latency (the
 /// delay compensation spec, R10), and the golden render keeps it.
 fn exports_as_rendered(fixture: &Fixture) -> bool {
-    const REPORTS_LATENCY: [&str; 1] = ["electric"];
+    const REPORTS_LATENCY: [&str; 2] = ["electric", "auto-shift"];
     let scene = fixture.scene();
     scene.plays_as_saved()
         && !scene.document().settings().arrangement_loop.enabled

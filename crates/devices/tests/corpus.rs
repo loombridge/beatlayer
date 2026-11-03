@@ -10,9 +10,10 @@ use crate::common;
 use bl_core::time::{Bpm, Frames, SampleRate, TempoMap};
 use bl_devices::corpus::{
     self, BLEED, BRIGHT, DECAY, DRY_WET, FILTER_FREQ, FILTER_ON, FILTER_WIDTH, FINE, FREQUENCY,
-    GAIN, HIT, INHARM, LFO_AMOUNT, LFO_DIVISION, LFO_HZ, LFO_MODE, LFO_PHASE, LFO_SPIN, LFO_STEREO,
-    LFO_WAVE, MATERIAL, OFF_AMOUNT, OFF_DECAY, OPENING, PB_RANGE, POS_L, POS_R, PRIORITY, QUALITY,
-    RADIUS, RATIO, SPREAD, TUNE, TUNE_SEMITONES, TYPE, WIDTH, corpus_type, unused,
+    GAIN, HIT, INHARM, LFO_AMOUNT, LFO_DIVISION, LFO_HZ, LFO_MODE, LFO_ON, LFO_PHASE, LFO_SPIN,
+    LFO_STEREO, LFO_WAVE, MATERIAL, OFF_AMOUNT, OFF_DECAY, OPENING, PB_RANGE, POS_L, POS_R,
+    PRIORITY, QUALITY, RADIUS, RATIO, SPREAD, TUNE, TUNE_SEMITONES, TYPE, WIDTH, corpus_type,
+    unused,
 };
 use bl_dsp::physical::{
     Kind, ModalBank, ModalParams, ModalTable, Quality, Shape, WaveguideBank, WaveguideParams,
@@ -25,6 +26,12 @@ use common::CHANNELS;
 
 const BLOCKS: [usize; 4] = [1, 64, 512, 4096];
 
+/// The seconds a Decay of `percent` of the old law meant: 50 ms to 30 s,
+/// logarithmically.
+fn decay_value(percent: f64) -> f64 {
+    0.05 * (30.0f64 / 0.05).powf(percent / 100.0)
+}
+
 fn registry() -> Registry {
     let mut registry = Registry::empty();
     corpus::register(&mut registry);
@@ -32,7 +39,11 @@ fn registry() -> Registry {
 }
 
 fn node_at(rate: SampleRate, params: &[(ParamId, f64)], max_frames: usize) -> Box<dyn Node> {
-    let device = common::device(&corpus_type(), params);
+    // Dry/Wet starts at 50 %; the tests look at the resonators alone unless
+    // they say otherwise.
+    let mut all = vec![(DRY_WET, 100.0)];
+    all.extend_from_slice(params);
+    let device = common::device(&corpus_type(), &all);
     registry()
         .create(
             &device,
@@ -201,9 +212,9 @@ fn corpus_is_a_tapped_midi_sidechain_audio_effect_with_the_xy_cell_and_its_banks
     );
     let description = &device_type.description;
     let layout = &description.layout;
-    layout
-        .check(&description.params)
-        .expect("every control is placed");
+    // The description's own check knows the alternates, whose second halves
+    // have no control of their own.
+    description.check().expect("every control is placed");
     let drawn = serde_json::to_string(layout).unwrap();
     assert!(
         drawn.contains(&format!("\"{}\"", corpus::XY_CELL)),
@@ -325,7 +336,7 @@ fn each_modal_type_drives_its_shared_model_with_the_controls_through_the_specs_m
             &[
                 (TYPE, kind as f64),
                 (QUALITY, 1.0),
-                (DECAY, 40.0),
+                (DECAY, decay_value(40.0)),
                 (MATERIAL, 30.0),
                 (BRIGHT, 20.0),
                 (INHARM, 25.0),
@@ -413,7 +424,7 @@ fn each_waveguide_type_drives_its_shared_model_with_the_controls_through_the_spe
         let mut node = corpus(
             &[
                 (TYPE, kind as f64),
-                (DECAY, 40.0),
+                (DECAY, decay_value(40.0)),
                 (MATERIAL, 30.0),
                 (INHARM, 25.0),
                 (HIT, 60.0),
@@ -464,7 +475,7 @@ fn ring(rate: SampleRate, params: &[(ParamId, f64)], seconds: f64) -> Vec<Vec<f3
 #[test]
 fn tune_and_fine_set_the_fundamental_within_a_cent_from_40_hz_to_4_khz_at_three_rates() {
     let long = [
-        (DECAY, 100.0),
+        (DECAY, decay_value(100.0)),
         (MATERIAL, 100.0),
         (HIT, 30.0),
         (POS_L, 30.0),
@@ -505,7 +516,7 @@ fn tune_and_fine_set_the_fundamental_within_a_cent_from_40_hz_to_4_khz_at_three_
 #[test]
 fn spread_detunes_the_resonators_and_width_mixes_them() {
     let base = [
-        (DECAY, 100.0),
+        (DECAY, decay_value(100.0)),
         (MATERIAL, 100.0),
         (HIT, 30.0),
         (POS_L, 30.0),
@@ -553,12 +564,13 @@ fn the_lfo_moves_the_tuning_at_its_rate_free_and_synced() {
     // A Square LFO of 50 % moves the tuning an octave up for the first half
     // of its cycle and an octave down for the second.
     let body = [
-        (DECAY, 100.0),
+        (DECAY, decay_value(100.0)),
         (MATERIAL, 100.0),
         (HIT, 30.0),
         (POS_L, 30.0),
         (LFO_WAVE, 1.0),
         (LFO_AMOUNT, 50.0),
+        (LFO_ON, 1.0),
         (TUNE, 440.0),
     ];
     let check = |out: &[Vec<f32>], cycle: f64, what: &str| {
@@ -607,12 +619,13 @@ fn the_lfo_moves_the_tuning_at_its_rate_free_and_synced() {
 #[test]
 fn phase_and_spin_move_the_resonators_lfos_apart_and_not_the_noise_waves() {
     let body = [
-        (DECAY, 100.0),
+        (DECAY, decay_value(100.0)),
         (MATERIAL, 100.0),
         (HIT, 30.0),
         (POS_L, 30.0),
         (POS_R, 30.0),
         (LFO_AMOUNT, 50.0),
+        (LFO_ON, 1.0),
         (LFO_WAVE, 1.0),
         (LFO_HZ, 2.0),
         (TUNE, 440.0),
@@ -660,7 +673,7 @@ fn the_input_filter_passes_its_band_and_cuts_the_rest_before_the_resonators() {
     let input = vec![sine.clone(), sine];
     // Gain is low enough that the limiter holds nothing back.
     let base = [
-        (DECAY, 100.0),
+        (DECAY, decay_value(100.0)),
         (MATERIAL, 100.0),
         (TUNE, 1_000.0),
         (GAIN, 0.02),
@@ -696,7 +709,7 @@ fn the_input_filter_passes_its_band_and_cuts_the_rest_before_the_resonators() {
 fn bleed_mixes_the_input_in_and_dry_wet_balances_it_and_neither_touches_a_pipe() {
     let input = vec![common::noise(4_096), common::noise(4_096)];
     let play = |kind: f64, extra: &[(ParamId, f64)]| {
-        let mut params = vec![(TYPE, kind)];
+        let mut params = vec![(TYPE, kind), (DRY_WET, 100.0)];
         params.extend_from_slice(extra);
         let mut node = corpus(&params, 4_096);
         stream(node.as_mut(), &input, 4_096, &Extras::default())
@@ -725,7 +738,10 @@ fn bleed_mixes_the_input_in_and_dry_wet_balances_it_and_neither_touches_a_pipe()
 fn the_limiter_holds_the_resonators_at_zero_dbfs_and_its_lamp_lights_while_it_reduces() {
     let input = vec![common::noise(9_600), common::noise(9_600)];
     let loud = |gain: f64| {
-        let mut node = corpus(&[(GAIN, gain), (DECAY, 100.0), (MATERIAL, 100.0)], 512);
+        let mut node = corpus(
+            &[(GAIN, gain), (DECAY, decay_value(100.0)), (MATERIAL, 100.0)],
+            512,
+        );
         let out = stream(node.as_mut(), &input, 512, &Extras::default());
         (out, node.gain_reduction())
     };
@@ -781,7 +797,7 @@ fn key_hz(key: f64) -> f64 {
 fn played(params: &[(ParamId, f64)], notes: &[NoteEvent], seconds: f64, block: usize) -> Vec<f32> {
     let mut all = vec![
         (FREQUENCY, 1.0),
-        (DECAY, 100.0),
+        (DECAY, decay_value(100.0)),
         (MATERIAL, 100.0),
         (HIT, 30.0),
         (POS_L, 30.0),
@@ -931,7 +947,7 @@ fn off_decay_damps_the_body_on_a_note_off_and_without_it_the_body_rings_on() {
     let mut node = corpus(
         &[
             (FREQUENCY, 1.0),
-            (DECAY, 100.0),
+            (DECAY, decay_value(100.0)),
             (MATERIAL, 100.0),
             (HIT, 30.0),
             (POS_L, 30.0),
@@ -984,7 +1000,7 @@ fn changing_the_type_ratio_inharm_or_quality_while_it_runs_allocates_nothing_and
         .iter()
         .map(|&(at, param, value)| common::set(at, param, value))
         .collect();
-    let mut node = corpus(&[(DECAY, 70.0)], 512);
+    let mut node = corpus(&[(DECAY, decay_value(70.0))], 512);
     let out = stream(
         node.as_mut(),
         &input,
@@ -1019,6 +1035,7 @@ fn renders_are_the_same_at_every_block_size_and_every_run() {
             (FREQUENCY, 1.0),
             (SPREAD, 40.0),
             (LFO_AMOUNT, 30.0),
+            (LFO_ON, 1.0),
             (LFO_WAVE, 5.0),
             (FILTER_ON, 1.0),
             (BLEED, 20.0),
@@ -1051,8 +1068,8 @@ fn renders_are_the_same_at_every_block_size_and_every_run() {
 fn gains_make_up_follows_decays_glide_the_same_at_every_block_size() {
     let input = vec![common::noise(24_000), common::noise(24_000)];
     let events = [
-        common::set(7_000, DECAY, 90.0),
-        common::set(15_003, DECAY, 10.0),
+        common::set(7_000, DECAY, decay_value(90.0)),
+        common::set(15_003, DECAY, decay_value(10.0)),
     ];
     let mut first: Option<Vec<Vec<f32>>> = None;
     for block in BLOCKS.into_iter().chain([512]) {
@@ -1196,7 +1213,7 @@ fn song(block: usize, with_note: bool, tap: &str, up: Option<i64>, frames: usize
         corpus::CORPUS,
         &[
             (FREQUENCY, 1.0),
-            (DECAY, 100.0),
+            (DECAY, decay_value(100.0)),
             (MATERIAL, 100.0),
             (HIT, 30.0),
             (POS_L, 30.0),

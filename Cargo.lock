@@ -3397,7 +3397,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 [[package]]
 name = "lspk-agent"
 version = "0.0.0"
-source = "git+https://github.com/loombridge/plugin-kit?rev=ff69c752b6d3990b33bf01ceed561ed63ef9c4b8#ff69c752b6d3990b33bf01ceed561ed63ef9c4b8"
+source = "git+https://github.com/loombridge/plugin-kit?rev=d5a9a75de01b6dd51338bab64a04b401b7381ce8#d5a9a75de01b6dd51338bab64a04b401b7381ce8"
 dependencies = [
  "getrandom 0.3.4",
  "lspk-commands",
@@ -3408,7 +3408,7 @@ dependencies = [
 [[package]]
 name = "lspk-commands"
 version = "0.0.0"
-source = "git+https://github.com/loombridge/plugin-kit?rev=ff69c752b6d3990b33bf01ceed561ed63ef9c4b8#ff69c752b6d3990b33bf01ceed561ed63ef9c4b8"
+source = "git+https://github.com/loombridge/plugin-kit?rev=d5a9a75de01b6dd51338bab64a04b401b7381ce8#d5a9a75de01b6dd51338bab64a04b401b7381ce8"
 dependencies = [
  "schemars",
  "serde",
@@ -3418,16 +3418,17 @@ dependencies = [
 [[package]]
 name = "lspk-dsp"
 version = "0.0.0"
-source = "git+https://github.com/loombridge/plugin-kit?rev=ff69c752b6d3990b33bf01ceed561ed63ef9c4b8#ff69c752b6d3990b33bf01ceed561ed63ef9c4b8"
+source = "git+https://github.com/loombridge/plugin-kit?rev=d5a9a75de01b6dd51338bab64a04b401b7381ce8#d5a9a75de01b6dd51338bab64a04b401b7381ce8"
 dependencies = [
  "lspk-params",
+ "realfft",
  "serde",
 ]
 
 [[package]]
 name = "lspk-example-gain"
 version = "0.0.0"
-source = "git+https://github.com/loombridge/plugin-kit?rev=ff69c752b6d3990b33bf01ceed561ed63ef9c4b8#ff69c752b6d3990b33bf01ceed561ed63ef9c4b8"
+source = "git+https://github.com/loombridge/plugin-kit?rev=d5a9a75de01b6dd51338bab64a04b401b7381ce8#d5a9a75de01b6dd51338bab64a04b401b7381ce8"
 dependencies = [
  "lspk-commands",
  "lspk-params",
@@ -3438,7 +3439,7 @@ dependencies = [
 [[package]]
 name = "lspk-example-sine"
 version = "0.0.0"
-source = "git+https://github.com/loombridge/plugin-kit?rev=ff69c752b6d3990b33bf01ceed561ed63ef9c4b8#ff69c752b6d3990b33bf01ceed561ed63ef9c4b8"
+source = "git+https://github.com/loombridge/plugin-kit?rev=d5a9a75de01b6dd51338bab64a04b401b7381ce8#d5a9a75de01b6dd51338bab64a04b401b7381ce8"
 dependencies = [
  "lspk-params",
  "lspk-plugin",
@@ -3447,7 +3448,7 @@ dependencies = [
 [[package]]
 name = "lspk-params"
 version = "0.0.0"
-source = "git+https://github.com/loombridge/plugin-kit?rev=ff69c752b6d3990b33bf01ceed561ed63ef9c4b8#ff69c752b6d3990b33bf01ceed561ed63ef9c4b8"
+source = "git+https://github.com/loombridge/plugin-kit?rev=d5a9a75de01b6dd51338bab64a04b401b7381ce8#d5a9a75de01b6dd51338bab64a04b401b7381ce8"
 dependencies = [
  "schemars",
  "serde",
@@ -3456,7 +3457,7 @@ dependencies = [
 [[package]]
 name = "lspk-plugin"
 version = "0.0.0"
-source = "git+https://github.com/loombridge/plugin-kit?rev=ff69c752b6d3990b33bf01ceed561ed63ef9c4b8#ff69c752b6d3990b33bf01ceed561ed63ef9c4b8"
+source = "git+https://github.com/loombridge/plugin-kit?rev=d5a9a75de01b6dd51338bab64a04b401b7381ce8#d5a9a75de01b6dd51338bab64a04b401b7381ce8"
 dependencies = [
  "clack-common",
  "clack-extensions",
@@ -3472,7 +3473,7 @@ dependencies = [
 [[package]]
 name = "lspk-plugin-agent"
 version = "0.0.0"
-source = "git+https://github.com/loombridge/plugin-kit?rev=ff69c752b6d3990b33bf01ceed561ed63ef9c4b8#ff69c752b6d3990b33bf01ceed561ed63ef9c4b8"
+source = "git+https://github.com/loombridge/plugin-kit?rev=d5a9a75de01b6dd51338bab64a04b401b7381ce8#d5a9a75de01b6dd51338bab64a04b401b7381ce8"
 dependencies = [
  "lspk-agent",
  "lspk-commands",
@@ -3487,7 +3488,7 @@ dependencies = [
 [[package]]
 name = "lspk-rt"
 version = "0.0.0"
-source = "git+https://github.com/loombridge/plugin-kit?rev=ff69c752b6d3990b33bf01ceed561ed63ef9c4b8#ff69c752b6d3990b33bf01ceed561ed63ef9c4b8"
+source = "git+https://github.com/loombridge/plugin-kit?rev=d5a9a75de01b6dd51338bab64a04b401b7381ce8#d5a9a75de01b6dd51338bab64a04b401b7381ce8"
 dependencies = [
  "libc",
  "rtrb",
@@ -3497,7 +3498,7 @@ dependencies = [
 [[package]]
 name = "lspk-test"
 version = "0.0.0"
-source = "git+https://github.com/loombridge/plugin-kit?rev=ff69c752b6d3990b33bf01ceed561ed63ef9c4b8#ff69c752b6d3990b33bf01ceed561ed63ef9c4b8"
+source = "git+https://github.com/loombridge/plugin-kit?rev=d5a9a75de01b6dd51338bab64a04b401b7381ce8#d5a9a75de01b6dd51338bab64a04b401b7381ce8"
 dependencies = [
  "claxon",
  "flacenc",
@@ -3506,6 +3507,7 @@ dependencies = [
  "lspk-params",
  "lspk-plugin",
  "lspk-rt",
+ "png",
  "realfft",
  "rtrb",
  "serde",
@@ -3515,7 +3517,7 @@ dependencies = [
 [[package]]
 name = "lspk-voice"
 version = "0.0.0"
-source = "git+https://github.com/loombridge/plugin-kit?rev=ff69c752b6d3990b33bf01ceed561ed63ef9c4b8#ff69c752b6d3990b33bf01ceed561ed63ef9c4b8"
+source = "git+https://github.com/loombridge/plugin-kit?rev=d5a9a75de01b6dd51338bab64a04b401b7381ce8#d5a9a75de01b6dd51338bab64a04b401b7381ce8"
 dependencies = [
  "lspk-dsp",
  "lspk-plugin",
@@ -3524,7 +3526,7 @@ dependencies = [
 [[package]]
 name = "lspk-wavetable"
 version = "0.0.0"
-source = "git+https://github.com/loombridge/plugin-kit?rev=ff69c752b6d3990b33bf01ceed561ed63ef9c4b8#ff69c752b6d3990b33bf01ceed561ed63ef9c4b8"
+source = "git+https://github.com/loombridge/plugin-kit?rev=d5a9a75de01b6dd51338bab64a04b401b7381ce8#d5a9a75de01b6dd51338bab64a04b401b7381ce8"
 dependencies = [
  "lspk-dsp",
  "realfft",

@@ -493,7 +493,10 @@ fn compiled_code_is_reused_after_a_restart_and_rebuilt_when_the_component_change
     assert_eq!(add(&mut instance).unwrap(), vec![Val::U32(5)]);
     assert_eq!(restarted.compiled(), 0, "nothing was compiled again");
 
-    // Code that won't load is compiled again, and kept.
+    // Code that won't load is compiled again, and kept. The instance maps
+    // the file, so it goes first: Windows refuses to write a mapped file,
+    // and Linux faults on a truncated one.
+    drop(instance);
     std::fs::write(s.path("Cache").join(&before[0]), b"damaged").unwrap();
     restarted
         .instantiate("org.example.tools", "tools.wasm")

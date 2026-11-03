@@ -69,6 +69,8 @@ pub mod analysed_media;
 pub mod arrangement;
 pub mod assistant;
 pub mod audio;
+pub mod audio_to_midi;
+mod audio_to_midi_racks;
 pub mod auto_warp;
 mod automation_record;
 pub mod autosample;
@@ -132,6 +134,9 @@ pub use bl_shell_spec::arrangement as arrangement_commands;
 /// The Audio Utilities panel's command IDs and their argument and result
 /// types (WP-4.10b).
 pub use bl_shell_spec::audio_panel as audio_panel_commands;
+/// Convert Harmony, Melody and Drums to New MIDI Track's command IDs and
+/// their argument and result types (IMP-06).
+pub use bl_shell_spec::audio_to_midi as audio_to_midi_commands;
 /// The automation editing command IDs and their argument and result types
 /// (WP-6.25).
 pub use bl_shell_spec::automation as automation_commands;

@@ -280,3 +280,123 @@ fn wavetable_routes_modulators_unison_modes_and_hi_quality_changing_during_playb
     assert_eq!(state.counters.events_overflowed, 0);
     assert!(state.counters.events_applied > 100);
 }
+
+// Spec: meld R71
+#[test]
+fn meld_routes_envelopes_lfos_and_their_effects_changing_during_playback_pass_under_rtsan() {
+    use bl_devices::meld::{
+        self, ENV_MODE, FX1_TYPE, FX2_TYPE, LFO1_RETRIGGER, LFO1_SYNC, LFO1_TYPE, LFO2_TYPE, LINK,
+        MELD, MOD_MODE, ON, param, route_amount,
+    };
+    let config = EngineConfig::new(SampleRate::HZ_48000, 128);
+    let mut collector = Collector::new();
+    let mut registry = testing::registry();
+    meld::register(&mut registry);
+    let mut compiler = Compiler::new(config, registry, collector.handle());
+    let (mut sender, mut processor, mut monitor) = channel(&config);
+
+    let mut editor = Editor::new();
+    let device = instrument(&mut editor, MELD);
+    sender.send_update(compiler.sync(editor.document()));
+    sender.transport(TransportCommand::Play);
+
+    let set = |param: ParamId, value: f64| Command::SetDeviceParam {
+        device,
+        param,
+        value,
+    };
+    let sources = [
+        "A Amp Env",
+        "A Mod Env",
+        "A LFO 1",
+        "A LFO 1 FX",
+        "A LFO 2",
+        "B Mod Env",
+        "B LFO 1 FX",
+        "Velocity",
+        "Pitch",
+        "Random",
+        "Pitch Bend",
+        "Press",
+        "Mod Wheel",
+        "MPE Pitch Bend",
+        "MPE Slide",
+        "MPE Press",
+        "Spread",
+    ];
+    let destinations = [
+        "A Semitones",
+        "A Pitch Quant",
+        "A Macro 1",
+        "A Filter Frequency",
+        "A Filter Macro 2",
+        "A Decay",
+        "A Mod Release",
+        "A LFO 1 Rate",
+        "A LFO 1 FX 1 Amount",
+        "A Volume",
+        "A Pan",
+        "A Tone",
+        "B Cents",
+        "B LFO 2 Rate",
+        "Mixer Drive",
+        "Volume",
+    ];
+    for round in 0..2_000u64 {
+        let step = (round / 20) as usize;
+        let command = match round % 20 {
+            1 => {
+                // A source of engine B only reaches engine B.
+                let source = sources[step % sources.len()];
+                let destination = destinations[step % destinations.len()];
+                let source = if source.starts_with('B') && destination.starts_with('A') {
+                    "Velocity"
+                } else {
+                    source
+                };
+                Some(Command::SetModRoute {
+                    device,
+                    slot: (step % 64) as u8,
+                    source: source.to_owned(),
+                    destination: destination.to_owned(),
+                })
+            }
+            2 => Some(set(
+                route_amount(step % 64),
+                (step % 5) as f64 * 40.0 - 80.0,
+            )),
+            3 => Some(Command::ClearModRoute {
+                device,
+                slot: ((step + 7) % 64) as u8,
+            }),
+            4 => Some(set(param(0, ENV_MODE), (step % 4) as f64)),
+            5 => Some(set(param(0, MOD_MODE), (step % 4) as f64)),
+            6 => Some(set(param(0, LINK), (step % 2) as f64)),
+            7 => Some(set(param(0, LFO1_TYPE), (step % 6) as f64)),
+            8 => Some(set(param(0, LFO2_TYPE), (step % 6) as f64)),
+            9 => Some(set(param(0, FX1_TYPE), (step % 18) as f64)),
+            10 => Some(set(param(0, FX2_TYPE), ((step + 5) % 18) as f64)),
+            11 => Some(set(param(0, LFO1_SYNC), (step % 2) as f64)),
+            12 => Some(set(param(0, LFO1_RETRIGGER), (step % 2) as f64)),
+            13 => Some(set(param(1, ON), (step % 2) as f64)),
+            _ => None,
+        };
+        if let Some(command) = command {
+            editor.apply(command).unwrap();
+            sender.send_update(compiler.sync(editor.document()));
+        }
+        if round % 400 == 399 {
+            sender.transport(TransportCommand::Locate(Ticks::ZERO));
+        }
+        assert!(sender.flush());
+        bl_rt::rt_test!({
+            processor.process(128);
+        });
+        if round % 50 == 0 {
+            collector.collect();
+        }
+    }
+    let state = monitor.state().clone();
+    assert_eq!(state.counters.events_overflowed, 0);
+    assert!(state.counters.events_applied > 100);
+}

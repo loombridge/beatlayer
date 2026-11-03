@@ -43,24 +43,24 @@ bl-agent = { path = "crates/agent" }
 bl-assistant = { path = "crates/assistant" }
 # The plug-in kit, by git revision until its API settles: a merge commit on
 # its main branch, so the revision stays reachable.
-lspk-rt = { git = "https://github.com/loombridge/plugin-kit", rev = "ff69c752b6d3990b33bf01ceed561ed63ef9c4b8" }
-lspk-params = { git = "https://github.com/loombridge/plugin-kit", rev = "ff69c752b6d3990b33bf01ceed561ed63ef9c4b8" }
-lspk-commands = { git = "https://github.com/loombridge/plugin-kit", rev = "ff69c752b6d3990b33bf01ceed561ed63ef9c4b8" }
-lspk-agent = { git = "https://github.com/loombridge/plugin-kit", rev = "ff69c752b6d3990b33bf01ceed561ed63ef9c4b8" }
+lspk-rt = { git = "https://github.com/loombridge/plugin-kit", rev = "d5a9a75de01b6dd51338bab64a04b401b7381ce8" }
+lspk-params = { git = "https://github.com/loombridge/plugin-kit", rev = "d5a9a75de01b6dd51338bab64a04b401b7381ce8" }
+lspk-commands = { git = "https://github.com/loombridge/plugin-kit", rev = "d5a9a75de01b6dd51338bab64a04b401b7381ce8" }
+lspk-agent = { git = "https://github.com/loombridge/plugin-kit", rev = "d5a9a75de01b6dd51338bab64a04b401b7381ce8" }
 # The format layer: kit plug-ins compiled in as native devices (bl-devices),
 # and the host side of its agent-commands CLAP extension (bl-plugin-host).
-lspk-plugin = { git = "https://github.com/loombridge/plugin-kit", rev = "ff69c752b6d3990b33bf01ceed561ed63ef9c4b8", default-features = false }
-lspk-plugin-agent = { git = "https://github.com/loombridge/plugin-kit", rev = "ff69c752b6d3990b33bf01ceed561ed63ef9c4b8" }
+lspk-plugin = { git = "https://github.com/loombridge/plugin-kit", rev = "d5a9a75de01b6dd51338bab64a04b401b7381ce8", default-features = false }
+lspk-plugin-agent = { git = "https://github.com/loombridge/plugin-kit", rev = "d5a9a75de01b6dd51338bab64a04b401b7381ce8" }
 # The kit's DSP, voice management and wavetables, for the native polysynth
 # (WP-2.17): zero-delay-feedback filters and envelopes, polyphonic voices,
 # and band-limited oscillators.
-lspk-dsp = { git = "https://github.com/loombridge/plugin-kit", rev = "ff69c752b6d3990b33bf01ceed561ed63ef9c4b8" }
-lspk-voice = { git = "https://github.com/loombridge/plugin-kit", rev = "ff69c752b6d3990b33bf01ceed561ed63ef9c4b8" }
-lspk-wavetable = { git = "https://github.com/loombridge/plugin-kit", rev = "ff69c752b6d3990b33bf01ceed561ed63ef9c4b8" }
+lspk-dsp = { git = "https://github.com/loombridge/plugin-kit", rev = "d5a9a75de01b6dd51338bab64a04b401b7381ce8" }
+lspk-voice = { git = "https://github.com/loombridge/plugin-kit", rev = "d5a9a75de01b6dd51338bab64a04b401b7381ce8" }
+lspk-wavetable = { git = "https://github.com/loombridge/plugin-kit", rev = "d5a9a75de01b6dd51338bab64a04b401b7381ce8" }
 # The kit's example plug-ins, as native devices behind bl-devices' `kit-examples`
 # feature, without their own exports.
-lspk-example-gain = { git = "https://github.com/loombridge/plugin-kit", rev = "ff69c752b6d3990b33bf01ceed561ed63ef9c4b8", default-features = false }
-lspk-example-sine = { git = "https://github.com/loombridge/plugin-kit", rev = "ff69c752b6d3990b33bf01ceed561ed63ef9c4b8", default-features = false }
+lspk-example-gain = { git = "https://github.com/loombridge/plugin-kit", rev = "d5a9a75de01b6dd51338bab64a04b401b7381ce8", default-features = false }
+lspk-example-sine = { git = "https://github.com/loombridge/plugin-kit", rev = "d5a9a75de01b6dd51338bab64a04b401b7381ce8", default-features = false }
 
 [workspace.lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }
@@ -95,6 +95,13 @@ debug = false
 # the converter's sample adapters are compiled where they're used, there.
 [profile.dev.package.bl-media]
 opt-level = 3
+# The devices and the DSP under them too: their sixteen-voice budget tests
+# judge a debug build against real time, and optimised, they play 25 to 30
+# percent faster on CI's runners.
+[profile.dev.package.bl-devices]
+opt-level = 3
+[profile.dev.package.bl-dsp]
+opt-level = 3
 # Analysis (WP-1.16) too: the agent API's tests measure minutes of audio,
 # and its true-peak interpolator and FFTs are a hundred times slower
 # unoptimised.
@@ -112,8 +119,15 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.lspk-voice]
 opt-level = 3
+# Its wavetable oscillator keeps three functions out of line when debug
+# assertions are on, to keep a debug build's stack frame small. Compiled out
+# of line, they lose the AVX2 or AVX-512 features of the kernel that calls
+# them, and each vector instruction in them becomes a call: sixteen voices of
+# eight copies played at 0.06x real time on a CI runner. Optimised here,
+# the oscillator needs no such precaution.
 [profile.dev.package.lspk-wavetable]
 opt-level = 3
+debug-assertions = false
 [profile.dev.package.symphonia]
 opt-level = 3
 [profile.dev.package.symphonia-core]

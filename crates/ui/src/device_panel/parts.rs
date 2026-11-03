@@ -94,9 +94,9 @@ impl Control<'_> {
     }
 
     /// The name the control shows: its caption where the layout gives one.
-    pub(super) fn name(&self) -> &str {
+    pub(super) fn name(&self) -> std::borrow::Cow<'_, str> {
         self.caption
-            .unwrap_or_else(|| short_name(&self.descriptor.name))
+            .map_or_else(|| short_name(&self.descriptor.name), Into::into)
     }
 
     /// Whether the value is a lit (on) one of a switch.
@@ -625,6 +625,7 @@ impl Control<'_> {
         let look = if outlined { Look::Outlined } else { Look::Dark };
         let on = self.on();
         let name = self.name();
+        let name = &*name;
         let name = chars.map_or(name, |n| {
             name.char_indices()
                 .nth(n)
@@ -652,7 +653,7 @@ impl Control<'_> {
         let c = &theme.colors;
         let painter = ui.painter();
         let name = self.name();
-        let width = text_width(painter, name, c.text.0);
+        let width = text_width(painter, &name, c.text.0);
         let left = pos2(self.rect.left(), self.rect.center().y);
         painter.text(left, Align2::LEFT_CENTER, name, font(), c.text.0);
         painter.text(
@@ -778,7 +779,7 @@ impl Control<'_> {
         } else if let Some(glyph) = glyph {
             Face::Glyph(glyph)
         } else {
-            Face::Text(self.name())
+            Face::Text(&self.name())
         };
         let response = self.button(ui, theme, (self.rect, self.id()), (Look::Dark, on), face);
         if Self::chosen(ui, &response) {

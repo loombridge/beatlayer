@@ -679,3 +679,97 @@ fn a_ratio_that_is_not_a_number_is_no_change() {
         shift(80.0, &input, 1.0, 1.0)
     );
 }
+
+/// What a caller that shares one tracker between shifters does with a sample:
+/// the shifter hears it, takes the tracker's measurements, and is stepped.
+fn follow(
+    shifter: &mut VoiceShifter,
+    tracker: &mut Tracker,
+    x: f32,
+    ask: Ask,
+    steer: &mut impl FnMut(&Grain, &Ask) -> [f32; 2],
+) -> f32 {
+    shifter.push(x, ask);
+    tracker.feed(x);
+    while let Some(found) = tracker.pop() {
+        shifter.take(found);
+    }
+    shifter.next(steer)
+}
+
+// Plan: WP-8.46 (Auto Shift). A shifter that follows a tracker of the
+// caller's makes what one with its own makes.
+#[test]
+fn a_shifter_that_follows_a_shared_tracker_makes_what_one_with_its_own_does() {
+    let input = voice(|i| 140.0 + i as f64 * 0.002, A, 24_000);
+    let mut own = VoiceShifter::new(RATE, 80.0, 2000.0);
+    let mut shared = VoiceShifter::following(RATE, 80.0, 2000.0);
+    let mut tracker = Tracker::new(&Config::for_range(RATE, 80.0, 2000.0));
+    for (i, &x) in input.iter().enumerate() {
+        let ratio = 1.0 + 0.3 * (i as f32 * 0.0004).sin();
+        let a = own.process(x, ratio, 1.0);
+        let b = follow(
+            &mut shared,
+            &mut tracker,
+            x,
+            [ratio, 1.0, 0.0, 0.0],
+            &mut |_, ask| [ask[0], ask[1]],
+        );
+        assert_eq!(a, b, "sample {i}");
+    }
+}
+
+// Plan: WP-8.46 (Auto Shift, R6). A grain is steered from the voice's own
+// pitch where it was measured: asked for 200 Hz, a voice at 150 Hz comes out
+// at 200 Hz within 5 cents, and each grain's frequency is the voice's.
+#[test]
+fn a_grain_steered_to_a_frequency_comes_out_at_it() {
+    let input = voice(|_| 150.0, A, 48_000);
+    let mut shifter = VoiceShifter::following(RATE, 80.0, 2000.0);
+    let mut tracker = Tracker::new(&Config::for_range(RATE, 80.0, 2000.0));
+    let latency = shifter.latency();
+    let (mut heard, mut onsets) = (Vec::new(), 0);
+    let mut out: Vec<f32> = input
+        .iter()
+        .chain(std::iter::repeat_n(&0.0, latency))
+        .map(|&x| {
+            follow(&mut shifter, &mut tracker, x, [0.0; 4], &mut |grain, _| {
+                heard.push(grain.frequency);
+                onsets += usize::from(grain.onset);
+                [(200.0 / grain.frequency) as f32, 1.0]
+            })
+        })
+        .collect();
+    out.drain(..latency);
+    assert!(
+        heard.iter().all(|f| cents(*f, 150.0).abs() < 25.0),
+        "a grain was measured away from 150 Hz"
+    );
+    assert_eq!(onsets, 1, "one voice, one onset");
+    let got = pitch_of(&out);
+    assert!(cents(got, 200.0).abs() < 5.0, "came out at {got:.2} Hz");
+}
+
+// Plan: WP-8.46 (Auto Shift, R3). A shorter latency delays the output less
+// and keeps the pitch of a voice that is well inside its range.
+#[test]
+fn a_shorter_latency_delays_the_output_less() {
+    let input = voice(|_| 200.0, A, 48_000);
+    let mut shifter = VoiceShifter::new(RATE, 80.0, 2000.0);
+    let full = shifter.full_latency();
+    assert_eq!(shifter.latency(), full);
+    shifter.set_latency(full / 2);
+    assert_eq!(shifter.latency(), full / 2);
+    shifter.set_latency(10 * full);
+    assert_eq!(shifter.latency(), full, "no more than the full latency");
+    shifter.set_latency(full / 2);
+    let latency = shifter.latency();
+    let mut out: Vec<f32> = input
+        .iter()
+        .chain(std::iter::repeat_n(&0.0, latency))
+        .map(|&x| shifter.process(x, 1.5, 1.0))
+        .collect();
+    out.drain(..latency);
+    let got = pitch_of(&out);
+    assert!(cents(got, 300.0).abs() < 10.0, "came out at {got:.2} Hz");
+}

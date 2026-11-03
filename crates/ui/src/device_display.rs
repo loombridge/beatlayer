@@ -152,7 +152,7 @@ pub fn draw(
         step_row(&painter, area, ink, display);
     } else if !collapsed {
         plot(&painter, theme, area, ink, display);
-        partials(ui, theme, area, (id, enabled), display, panel, events);
+        partials(ui, area, id, display, panel, events);
         algorithm(&painter, theme, area, ink, display);
         crate::particles::draw(ui, theme, area, (id, enabled), display, panel, events);
         handles(ui, theme, area, (id, enabled), display, panel, events);
@@ -359,9 +359,8 @@ fn algorithm(painter: &Painter, theme: &Theme, area: Rect, ink: Color32, display
 /// editor's Even Only, Odd Only and Normalize applied.
 fn partials(
     ui: &mut Ui,
-    _theme: &Theme,
     area: Rect,
-    (id, _enabled): (Id, bool),
+    id: Id,
     display: &DeviceDisplay,
     panel: &DevicePanel,
     events: &mut Vec<UiEvent>,

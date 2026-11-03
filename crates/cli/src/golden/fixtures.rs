@@ -581,6 +581,13 @@ pub(super) const FIXTURES: &[Fixture] = &[
         build: electric,
     },
     Fixture {
+        name: "auto-shift",
+        about: "A tone a little over C2 through Auto Shift in Mid at full strength with a natural \
+                vibrato and a slow LFO on the pitch: the tracker, the correction to C major's \
+                nearest note, the grains and the latency, at every block size (auto-shift R19).",
+        build: auto_shift,
+    },
+    Fixture {
         name: "tension",
         about: "A bowed line with vibrato, the body and a filter, and a plucked chord with its \
                 damper, on Tension: the exciters, the string, the pickup and the termination.",
@@ -1289,6 +1296,39 @@ fn resonators() -> Scene {
         device,
     });
     song.finish(1.5)
+}
+
+/// Spec: auto-shift R19. A tone through Auto Shift at full strength.
+fn auto_shift() -> Scene {
+    use bl_devices::auto_shift::{
+        self, AUTO_SHIFT, LFO_PITCH, LFO_RATE, NATURAL_VIBRATO, SMOOTH, VIBRATO_AMOUNT,
+    };
+    let mut song = Song::new();
+    let track = song.track(TrackKind::Audio, "Voice", None);
+    song.tone(track, 134.0, -12.0);
+    let mut device = Device::new(
+        song.editor.new_id(),
+        "Auto Shift",
+        DeviceKind::Native {
+            device_type: AUTO_SHIFT.to_owned(),
+        },
+    );
+    for (param, value) in [
+        (SMOOTH, 0.0),
+        (VIBRATO_AMOUNT, 40.0),
+        (NATURAL_VIBRATO, 1.0),
+        (LFO_PITCH, 5.0),
+        (LFO_RATE, 900.0),
+        (auto_shift::DRY_WET, 100.0),
+    ] {
+        device.params.insert(param, value);
+    }
+    song.apply(Command::InsertDevice {
+        track,
+        index: 1,
+        device,
+    });
+    song.finish(2.0)
 }
 
 /// A phrase through CV Instrument and CV Triggers, captured on the device

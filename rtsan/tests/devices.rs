@@ -636,6 +636,146 @@ fn spectral_resonator_passes_under_rtsan() {
     );
 }
 
+// Spec: auto-shift R20
+#[test]
+fn auto_shift_passes_under_rtsan() {
+    use bl_core::time::{TICKS_PER_QUARTER, Ticks};
+    use bl_devices::auto_shift::{
+        AUTO_SHIFT, LFO_PITCH, LFO_RESET, LFO_SYNC, LFO_VOLUME, LFO_WAVE, LIVE_MODE, MIDI_ON,
+        MONO_POLY, NATURAL_VIBRATO, PITCH_RANGE, SMOOTH, USE_SCALE, VIBRATO_AMOUNT, VOICE_COUNT,
+    };
+    use bl_model::{Clip, ClipData, MidiData, Note};
+
+    let config = EngineConfig::new(SampleRate::HZ_48000, 256);
+    let mut collector = Collector::new();
+    let mut registry = testing::registry();
+    bl_devices::register(&mut registry);
+    let mut compiler = Compiler::new(config, registry, collector.handle());
+    let (mut sender, mut processor, mut monitor) = channel(&config);
+
+    let mut editor = Editor::new();
+    let new_track = |editor: &mut Editor, kind| {
+        let id = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id,
+                kind,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        id
+    };
+    let (audio, keys) = (
+        new_track(&mut editor, TrackKind::Audio),
+        new_track(&mut editor, TrackKind::Midi),
+    );
+    // Notes every half beat for the length of the run, overlapping so that
+    // Poly takes voices from one another.
+    let beat = Ticks(TICKS_PER_QUARTER);
+    let notes = (0..40).map(|n| Note::new(36 + (n * 5 % 36) as u8, beat * n / 2, beat * 3, 100));
+    let clip = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track: keys,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                beat * 20,
+                ClipData::Midi(MidiData::new(notes)),
+            ),
+        })
+        .unwrap();
+    let mut tone = Device::new(
+        editor.new_id(),
+        "",
+        DeviceKind::Native {
+            device_type: TEST_TONE.to_owned(),
+        },
+    );
+    tone.params.insert(test_tone::LEVEL, -20.0);
+    let mut shift = Device::new(
+        editor.new_id(),
+        "",
+        DeviceKind::Native {
+            device_type: AUTO_SHIFT.to_owned(),
+        },
+    )
+    .with_midi_sidechain_tap();
+    shift.params.insert(VIBRATO_AMOUNT, 60.0);
+    shift.params.insert(NATURAL_VIBRATO, 1.0);
+    shift.params.insert(LFO_PITCH, 20.0);
+    let shift_id = shift.id;
+    for (index, device) in [tone, shift].into_iter().enumerate() {
+        editor
+            .apply(Command::InsertDevice {
+                track: audio,
+                index,
+                device,
+            })
+            .unwrap();
+    }
+    editor
+        .apply(Command::SetMidiSidechainSource {
+            device: shift_id,
+            track: Some(keys),
+            tap: None,
+        })
+        .unwrap();
+    sender.send_update(compiler.sync(editor.document()));
+    sender.transport(TransportCommand::Play);
+
+    let set = |param: ParamId, value: f64| Command::SetDeviceParam {
+        device: shift_id,
+        param,
+        value,
+    };
+    for round in 0..2_000u64 {
+        // A new setting every few blocks, so changes land mid-stream: the
+        // range and Live Mode (and so the latency), MIDI On and the voices,
+        // the scale, Smooth, the LFO and its reset.
+        let step = round / 12;
+        let command = match round % 12 {
+            0 => Some(set(PITCH_RANGE, (step % 3) as f64)),
+            1 => Some(set(LIVE_MODE, (step % 2) as f64)),
+            2 => Some(set(MIDI_ON, (step % 3 != 0) as u8 as f64)),
+            3 => Some(set(MONO_POLY, (step % 4 < 2) as u8 as f64)),
+            4 => Some(set(VOICE_COUNT, (step % 3) as f64)),
+            5 => Some(set(USE_SCALE, (step % 3 == 0) as u8 as f64)),
+            6 => Some(set(SMOOTH, (step % 2) as f64)),
+            7 => Some(set(LFO_WAVE, (step % 9) as f64)),
+            8 => Some(set(LFO_SYNC, (step % 2) as f64)),
+            9 => Some(set(LFO_RESET, (step % 2) as f64)),
+            10 => Some(set(LFO_VOLUME, (step % 5) as f64 * 25.0 - 50.0)),
+            _ => None,
+        };
+        if let Some(command) = command {
+            editor.apply(command).unwrap();
+            sender.send_update(compiler.sync(editor.document()));
+        }
+        assert!(sender.flush());
+
+        bl_rt::rt_test!({
+            processor.process(256);
+        });
+        if round % 50 == 0 {
+            collector.collect();
+        }
+    }
+
+    let state = monitor.state().clone();
+    assert_eq!(state.counters.events_overflowed, 0);
+    assert_eq!(state.counters.events_unrouted, 0);
+    assert!(state.counters.events_applied > 100);
+    eprintln!(
+        "2,000 blocks of Auto Shift under RealtimeSanitizer: {} parameter changes, \
+         peak engine load {:.1}%",
+        state.counters.events_applied,
+        state.cpu_load_max * 100.0
+    );
+}
+
 /// The channel EQ, the three-band EQ, the gate and the bus compressor on a
 /// track of a test tone, with the gate's and the compressor's sidechain
 /// keyed from a second track, while their parameters move between two

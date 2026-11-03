@@ -2127,3 +2127,88 @@ fn meld_draws_its_macros_under_the_types_names_one_engine_at_a_time() {
     let fourth = labels(&mut h);
     assert!(has(&fourth, "B Type") && !has(&fourth, "A Type"));
 }
+
+// Spec: auto-shift R1, R8, R24. Auto Shift's tabs are view state: choosing
+// one is no undo step and the set is unchanged; the Quantizer's included-note
+// keys are controls in the tree, and clicking one is a single undo step.
+#[test]
+fn auto_shift_s_tabs_are_view_state_and_an_included_note_key_is_one_undo_step() {
+    use bl_devices::auto_shift::{KEY_C, TABS};
+
+    let mut h = harness();
+    let t = bl_devices::auto_shift_type();
+    let device = add(
+        &mut h,
+        json!({ "kind": t.kind, "name": t.name, "role": t.role }),
+    );
+    let labels = |h: &mut Harness| -> Vec<String> {
+        Harness::nodes(&h.settle())
+            .iter()
+            .map(|n| n.label.clone())
+            .collect()
+    };
+    let has = |labels: &[String], name: &str| labels.iter().any(|l| l == name);
+    // The Quantizer tab shows first, with the input, pitch and vibrato sections.
+    let first = labels(&mut h);
+    for name in [
+        "Correction Strength",
+        "Smoothing Time",
+        "Root",
+        "Scale",
+        "Key C#",
+    ] {
+        assert!(has(&first, name), "{name} is on the Quantizer tab");
+    }
+    for name in [
+        "Input Gain",
+        "Pitch Shift",
+        "Formant Shift",
+        "Vibrato Amount",
+        "Dry/Wet",
+    ] {
+        assert!(has(&first, name), "{name} is always drawn");
+    }
+    assert!(!has(&first, "Attack Time") && !has(&first, "LFO Waveform"));
+    // Choosing the MIDI and LFO tabs: no undo step, nothing to save.
+    let steps = h.shell.editor().undo_history().len();
+    let dirty = h.shell.is_dirty();
+    for (page, shown, hidden) in [
+        ("MIDI", "Attack Time", "Correction Strength"),
+        ("LFO", "LFO Waveform", "Attack Time"),
+        ("Quantizer", "Correction Strength", "LFO Waveform"),
+    ] {
+        h.shell
+            .run(
+                "device.set_page",
+                json!({ "device": device, "node": TABS, "page": page }),
+            )
+            .unwrap();
+        let now = labels(&mut h);
+        assert!(has(&now, shown) && !has(&now, hidden), "{page}: {now:?}");
+    }
+    assert_eq!(h.shell.editor().undo_history().len(), steps);
+    assert_eq!(h.shell.is_dirty(), dirty);
+    // An included-note key is a switch; a click is one undo step.
+    let nodes = Harness::nodes(&h.settle());
+    let key = Harness::node(&nodes, "Key C#");
+    assert_eq!(key.role, Role::Switch);
+    assert_eq!(key.toggled, Some(false));
+    let b = key.bounds.unwrap();
+    h.click(pos2(
+        ((b.x0 + b.x1) / 2.0) as f32,
+        ((b.y0 + b.y1) / 2.0) as f32,
+    ));
+    let value = h
+        .shell
+        .editor()
+        .document()
+        .device(device)
+        .unwrap()
+        .params
+        .get(&bl_model::ParamId(KEY_C.0 + 1))
+        .copied();
+    assert_eq!(value, Some(1.0));
+    assert_eq!(h.shell.editor().undo_history().len(), steps + 1);
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(Harness::node(&nodes, "Key C#").toggled, Some(true));
+}

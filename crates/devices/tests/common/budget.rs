@@ -3,7 +3,7 @@
 //! GitHub's AMD EPYC 7763 runners (Zen 3) run Wavetable's eight copies and
 //! Meld's Swarm Saw short of their budgets in a debug build, while every other
 //! CI processor passes (beatlayer#801). Until that gap is closed, the budget
-//! tests there print their speed and don't fail (Kit, 3 November 2026).
+//! tests there print their speed and don't fail (a maintainer decision, 3 November 2026).
 
 /// Whether this processor is the EPYC 7763 the budgets aren't judged on.
 fn zen3_runner() -> bool {

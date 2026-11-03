@@ -1957,7 +1957,9 @@ impl DeviceView {
                     })
             }
             ids::LOAD_PRESET => has_target() && args.get("path").is_some(),
-            ids::SET_ROUTE | ids::CLEAR_ROUTE | ids::COPY_RESONATOR => has_target(),
+            ids::SET_ROUTE | ids::CLEAR_ROUTE | ids::COPY_RESONATOR | ids::QUICK_ROUTING => {
+                has_target()
+            }
             ids::PARAMETERS
             | ids::DISPLAY
             | ids::PREVIEW_HIT
@@ -2779,6 +2781,12 @@ impl DeviceView {
                 outcome.value = to_value(&copied);
                 return Ok(outcome);
             }
+            ids::QUICK_ROUTING => {
+                let set = self.quick_routing(args, editor)?;
+                outcome.document_changed = true;
+                outcome.value = to_value(&set);
+                return Ok(outcome);
+            }
             ids::ARTICULATION_LIST => {
                 let ArticulationListArgs { device } = parse(args)?;
                 let device = self.target(editor.document(), device)?;
@@ -3032,6 +3040,83 @@ impl DeviceView {
             device,
             from: args.from,
             to: if args.from == 1 { 2 } else { 1 },
+        })
+    }
+
+    /// Sets Analog's filters, amplifiers and balances to one of Quick
+    /// Routing's routings (`analog.quick_routing`; analog R22), in one undo
+    /// step. No oscillator's level or tuning is among the parameters set.
+    fn quick_routing(
+        &self,
+        args: Value,
+        editor: &mut Editor,
+    ) -> Result<ids::QuickRoutingSet, DeviceError> {
+        use bl_devices::analog::{ANALOG, amp, filter, noise, osc};
+        use ids::QuickRouting::{Filter1Only, Parallel, Serial, Split};
+        let args: ids::QuickRoutingArgs = parse(args)?;
+        let device = self.target(editor.document(), args.device)?;
+        let current = editor.document().device(device).expect("the target exists");
+        if !matches!(&current.kind, DeviceKind::Native { device_type } if device_type == ANALOG) {
+            return Err(DeviceError::Unavailable(format!("{device} isn't an Analog")));
+        }
+        let (on, off) = (1.0, 0.0);
+        let (f1, f2) = (filter::id(0, filter::ON), filter::id(1, filter::ON));
+        let (a1, a2) = (amp::id(0, amp::ON), amp::id(1, amp::ON));
+        let to_f2 = filter::id(0, filter::EXTRA);
+        let (pan1, pan2) = (amp::id(0, amp::PAN), amp::id(1, amp::PAN));
+        // Where each source goes: Oscillator 1, Oscillator 2 and the noise,
+        // from Filter 1 at 0 % to Filter 2 at 100 %.
+        let balances = |osc_2: f64| {
+            [
+                (osc::id(0, osc::BALANCE), 0.0),
+                (osc::id(1, osc::BALANCE), osc_2),
+                (noise::id(noise::BALANCE), 0.0),
+            ]
+        };
+        let moves: Vec<(ParamId, f64)> = match args.routing {
+            Parallel | Split => {
+                let pans = if args.routing == Split {
+                    (-100.0, 100.0)
+                } else {
+                    (0.0, 0.0)
+                };
+                [
+                    (f1, on),
+                    (f2, on),
+                    (a1, on),
+                    (a2, on),
+                    (to_f2, 0.0),
+                    (pan1, pans.0),
+                    (pan2, pans.1),
+                ]
+                .into_iter()
+                .chain(balances(100.0))
+                .collect()
+            }
+            Filter1Only => [(f1, on), (a1, on), (f2, off), (a2, off)]
+                .into_iter()
+                .chain(balances(0.0))
+                .collect(),
+            Serial => [(f1, on), (f2, on), (a1, off), (a2, on), (to_f2, 100.0)]
+                .into_iter()
+                .chain(balances(0.0))
+                .collect(),
+        };
+        editor
+            .transact("Quick Routing", |editor| {
+                for (param, value) in moves {
+                    editor.apply(Command::SetDeviceParam {
+                        device,
+                        param,
+                        value,
+                    })?;
+                }
+                Ok::<(), bl_model::EditError>(())
+            })
+            .map_err(|e| DeviceError::Failed(e.to_string()))?;
+        Ok(ids::QuickRoutingSet {
+            device,
+            routing: args.routing,
         })
     }
 

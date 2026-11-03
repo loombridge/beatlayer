@@ -9,6 +9,7 @@ bl_rt::install_trap!();
 
 mod alignment_delay;
 mod analog;
+mod analog_global;
 mod arpeggiator;
 mod articulation_map;
 mod auto_filter;

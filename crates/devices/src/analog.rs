@@ -1,21 +1,31 @@
-//! Analog, part 1 (WP-8.14; spec: Analog R1 to R17): two oscillators and a
-//! noise generator into two multimode filters and two amplifiers, four
-//! envelopes with loop modes, and the shell-and-display panel's pages for
-//! them. The LFOs, the global section and MPE are part 2's (WP-8.15): their
-//! parameter IDs are reserved here and the per-voice LFO value every
-//! modulation amount reads is a placeholder that part 2 fills.
+//! Analog (WP-8.14 and WP-8.15; spec: Analog): two oscillators and a noise
+//! generator into two multimode filters and two amplifiers, four envelopes
+//! with loop modes, two LFOs, the global section (volume, vibrato, unison,
+//! glide, the keyboard, voices and priority), the MPE section, and the
+//! shell-and-display panel with its displays.
 //!
 //! The voices are the instruments' voice section's ([`crate::instrument`]),
 //! the oscillators the plug-in kit's band-limited wavetable oscillators and
 //! the filters its zero-delay-feedback filters. The mix, the drive stage,
-//! the envelopes and the amplifiers are this module's.
+//! the envelopes, the LFOs, the vibrato and the amplifiers are this
+//! module's. Each voice's unison copies are lanes of its own, `voice ×
+//! COPIES + copy`, in every per-lane array below.
+
+pub mod display;
+mod global;
+mod waves;
+
+pub use display::display;
+pub use global::*;
 
 use core::f32::consts::{FRAC_PI_2, TAU};
 use std::ops::Range;
 
+use bl_dsp::random::Random;
 use bl_engine::{DeviceType, NodeConfig, NodeData, NodeEvent, Registry};
 use bl_model::device_layout::{
-    BODY_HEIGHT, ControlBand, LayoutNode, Page, PageStyle, PagesNode, TAB_HEIGHT, Widget,
+    BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Page, PageStyle, PagesNode, TAB_HEIGHT,
+    Widget,
 };
 use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 use lspk_dsp::filter::{FilterBank, FilterType, VoiceParams, pitch_of};
@@ -26,17 +36,36 @@ use lspk_wavetable::shaper::{Mode, ShapedOscillator, ShaperInputs, Slot};
 use lspk_wavetable::{Cache, FRAME_SIZE, SharedTable, Wavetable};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
-use crate::instrument::{Instrument, Parts, Section, Sources, State};
+use crate::instrument::matrix::Matrix;
+use crate::instrument::{self, Instrument, Section, Sources, State};
+use waves::{Lfo, Vibrato};
 
 /// Analog's device type.
 pub const ANALOG: &str = "beatlayer.analog";
 
-/// Voices, and the lanes of every per-voice buffer.
-const VOICES: usize = 16;
+/// Voices at most, the copies each has at most, and the lanes of every
+/// per-lane buffer: a voice's copies side by side (R2, R20, R23).
+const VOICES: usize = global::MAX_VOICES;
+const LANES: usize = VOICES * COPIES;
+
+/// Frames rendered in one go, so the per-lane buffers stay small however
+/// long a block is.
+const CHUNK: usize = 512;
+
+/// Spec: analog R20. Unison's reach at Detune 100 %, in cents, and at Delay
+/// 100 %, in milliseconds.
+const UNISON_CENTS: f32 = 50.0;
+const UNISON_MS: f32 = 20.0;
+
+/// Spec: analog R24. A pitch destination's reach at an amount of 100 % and
+/// a source of 1, in semitones: an octave, as Pitch Mod's.
+const MPE_PITCH_SEMITONES: f64 = 12.0;
+
+/// The seed of the voice section's random draws.
+const SEED: u64 = 0x00A4_A106;
 
 /// The parameter IDs: each section a block of them, with the LFOs
-/// (190 to 229), the global section (230 to 259) and MPE (260 to 289)
-/// left for part 2.
+/// (190 to 229), the global section (230 to 259) and MPE (260 to 289).
 const OSC_BASE: [u32; 2] = [0, 20];
 const NOISE_BASE: u32 = 40;
 const FILTER_BASE: [u32; 2] = [50, 70];
@@ -194,7 +223,7 @@ const ADR_R: usize = 2;
 const ADS_R: usize = 3;
 
 /// The sections' names: the pages of the shell (R16).
-pub const SECTIONS: [&str; 8] = [
+pub const SECTIONS: [&str; 10] = [
     "Oscillator 1",
     "Oscillator 2",
     "Noise",
@@ -202,6 +231,8 @@ pub const SECTIONS: [&str; 8] = [
     "Filter 2",
     "Amplifier 1",
     "Amplifier 2",
+    "LFO 1",
+    "LFO 2",
     "Global",
 ];
 
@@ -484,6 +515,7 @@ pub fn analog_type() -> DeviceType {
             .decimals(0)
             .describe("Sets the instrument's pitch bend range, in semitones."),
     );
+    params.extend(global::descriptors());
     let banks = bank_lists();
     let named: Vec<(&str, Vec<&str>)> = banks
         .iter()
@@ -498,7 +530,12 @@ pub fn analog_type() -> DeviceType {
             .with_layout(layout())
             .with_banks(&slices),
     )
+    .with_matrix(global::matrix_layout())
 }
+
+/// The width of a display cell docked, in points at 100 %. (Beatlayer's own
+/// size.)
+const CELL_WIDTH: f32 = 110.0;
 
 /// The shell: a section for each page, each its main controls under a
 /// button, beside the display that holds the page's further controls
@@ -514,22 +551,30 @@ fn layout() -> DeviceLayout {
     let number = |id| (id, Widget::Number);
     let envelope = |n: usize| {
         let at = |offset| env::id(n, offset);
-        band(
-            BODY_HEIGHT,
-            &[
-                knob(at(env::ATTACK)),
-                knob(at(env::DECAY)),
-                knob(at(env::SUSTAIN)),
-                knob(at(env::RELEASE)),
-                chooser(at(env::SLOPE)),
-                knob(at(env::ATT_VEL)),
-                knob(at(env::ENV_VEL)),
-                knob(at(env::S_TIME)),
-                toggle(at(env::LEGATO)),
-                toggle(at(env::FREE)),
-                chooser(at(env::LOOP)),
-            ],
-        )
+        [
+            band(
+                BODY_HEIGHT,
+                &[
+                    knob(at(env::ATTACK)),
+                    knob(at(env::DECAY)),
+                    knob(at(env::SUSTAIN)),
+                    knob(at(env::RELEASE)),
+                    chooser(at(env::SLOPE)),
+                    knob(at(env::ATT_VEL)),
+                    knob(at(env::ENV_VEL)),
+                    knob(at(env::S_TIME)),
+                    toggle(at(env::LEGATO)),
+                    toggle(at(env::FREE)),
+                    chooser(at(env::LOOP)),
+                ],
+            ),
+            LayoutNode::Cell(DisplayCell::new(
+                display::ENVELOPES[n],
+                CELL_WIDTH,
+                BODY_HEIGHT,
+                1.0,
+            )),
+        ]
     };
     let mut pages = Vec::new();
     for (n, name) in SECTIONS.iter().take(2).enumerate() {
@@ -578,6 +623,7 @@ fn layout() -> DeviceLayout {
     );
     for n in 0..2 {
         let at = |offset| filter::id(n, offset);
+        let [controls, cell] = envelope(n);
         pages.push(
             Page::new(
                 SECTIONS[3 + n],
@@ -593,7 +639,14 @@ fn layout() -> DeviceLayout {
                             knob(at(filter::RES_ENV)),
                         ],
                     ),
-                    envelope(n),
+                    controls,
+                    LayoutNode::Cell(DisplayCell::new(
+                        display::RESPONSES[n],
+                        CELL_WIDTH,
+                        BODY_HEIGHT,
+                        1.0,
+                    )),
+                    cell,
                 ]),
             )
             .with_section(band(
@@ -615,6 +668,7 @@ fn layout() -> DeviceLayout {
     }
     for n in 0..2 {
         let at = |offset| amp::id(n, offset);
+        let [controls, cell] = envelope(2 + n);
         pages.push(
             Page::new(
                 SECTIONS[5 + n],
@@ -630,7 +684,8 @@ fn layout() -> DeviceLayout {
                             knob(at(amp::PAN_ENV)),
                         ],
                     ),
-                    envelope(2 + n),
+                    controls,
+                    cell,
                 ]),
             )
             .with_section(band(
@@ -643,10 +698,7 @@ fn layout() -> DeviceLayout {
             )),
         );
     }
-    pages.push(
-        Page::new(SECTIONS[7], band(BODY_HEIGHT, &[]))
-            .with_section(band(SECTION, &[number(PB_RANGE)])),
-    );
+    pages.extend(global::pages());
     DeviceLayout::new(LayoutNode::Pages(PagesNode::new(
         PAGES,
         PageStyle::Shell,
@@ -773,7 +825,74 @@ fn bank_lists() -> Vec<(String, Vec<String>)> {
             list(owner, &["Legato", "Free", "Loop"]),
         ));
     }
-    banks.push(bank("Global".to_owned(), vec!["PB Range".to_owned()]));
+    for n in 1..=2 {
+        let prefix = format!("LFO {n}");
+        let mut main = vec![prefix.clone()];
+        main.extend(list(
+            &prefix,
+            &["Wave", "Rate", "Sync", "Division", "Width", "Delay", "Attack"],
+        ));
+        banks.push(bank(format!("LFO {n}"), main));
+        banks.push(bank(
+            format!("LFO {n} Phase"),
+            list(&prefix, &["Retrig", "Offset"]),
+        ));
+    }
+    let names = |what: &[&str]| what.iter().map(|w| (*w).to_owned()).collect::<Vec<_>>();
+    banks.push(bank("Global".to_owned(), names(&["Volume", "Voices", "Priority"])));
+    banks.push(bank(
+        "Vibrato".to_owned(),
+        names(&[
+            "Vibrato",
+            "Vibrato Amount",
+            "Vibrato Rate",
+            "Vibrato Delay",
+            "Vibrato Attack",
+            "Vibrato Error",
+            "Vibrato Amt < MW",
+        ]),
+    ));
+    banks.push(bank(
+        "Unison and Glide".to_owned(),
+        names(&[
+            "Unison",
+            "Unison Voices",
+            "Unison Detune",
+            "Unison Delay",
+            "Glide",
+            "Glide Time",
+            "Glide Legato",
+            "Glide Mode",
+        ]),
+    ));
+    banks.push(bank(
+        "Keyboard".to_owned(),
+        names(&[
+            "PB Range",
+            "Keyboard Octave",
+            "Keyboard Semi",
+            "Keyboard Detune",
+            "Keyboard Stretch",
+            "Keyboard Error",
+        ]),
+    ));
+    banks.push(bank(
+        "MPE".to_owned(),
+        names(&[
+            "MPE",
+            "Pressure Dest 1",
+            "Pressure Amount 1",
+            "Pressure Dest 2",
+            "Pressure Amount 2",
+            "Slide Dest 1",
+            "Slide Amount 1",
+            "Slide Dest 2",
+        ]),
+    ));
+    banks.push(bank(
+        "MPE Slide".to_owned(),
+        names(&["Slide Amount 2", "Note PB"]),
+    ));
     banks
 }
 
@@ -817,24 +936,11 @@ pub struct Analog {
 impl Analog {
     fn new(config: &NodeConfig) -> Self {
         let rate = config.sample_rate.as_f64();
+        let ty = analog_type();
         Self {
-            section: Section::new(
-                Parts {
-                    pb_range: Some(PB_RANGE),
-                    ..Parts::default()
-                },
-                VOICES,
-                1,
-                rate,
-                0x00A4_A106,
-            ),
-            synth: Synth::new(rate, config.max_frames),
-            ids: analog_type()
-                .description
-                .params
-                .iter()
-                .map(|p| p.id)
-                .collect(),
+            section: Section::new(global::parts(), VOICES, COPIES, rate, SEED),
+            synth: Synth::new(rate, config.max_frames, &ty),
+            ids: ty.description.params.iter().map(|p| p.id).collect(),
         }
     }
 }
@@ -846,6 +952,14 @@ impl NativeDevice for Analog {
             return;
         }
         self.synth.snapshot(frames, params, &self.ids);
+        // Spec: analog R24. With the MPE switch off, Pressure and Slide do
+        // nothing.
+        let mpe = params
+            .index(global::MPE_ON)
+            .is_some_and(|at| params.value(at) >= 0.5);
+        self.synth.matrix.set_amount(if mpe { 1.0 } else { 0.0 });
+        self.synth.matrix.begin(params);
+        self.synth.bpm = audio.bpm();
         self.section.process(audio, params, &mut self.synth);
         let channels = audio.channels();
         audio
@@ -866,6 +980,19 @@ impl NativeDevice for Analog {
     fn flush(&mut self, _events: &[NodeEvent], _params: &ParamBank) {
         self.section.reset();
         self.synth.silence();
+    }
+
+    /// Spec: instrument modulation R12. What the newest voice plays for each
+    /// parameter the matrix moves.
+    fn matrix_played(&self, report: &mut dyn FnMut(ParamId, f64)) {
+        let matrix = &self.synth.matrix;
+        for (dest, def) in matrix.layout().dests.iter().enumerate() {
+            if let (Some(param), Some(descriptor), Some(position)) =
+                (def.param, &self.synth.dests[dest], matrix.shown(dest))
+            {
+                report(param, descriptor.denormalize(position));
+            }
+        }
     }
 
     fn receive_data(&mut self, data: NodeData) {
@@ -904,28 +1031,28 @@ struct EnvSettings {
 
 /// One envelope's voices (R13 to R15).
 struct Envelope {
-    stage: [Stage; VOICES],
-    level: [f32; VOICES],
-    from: [f32; VOICES],
+    stage: [Stage; LANES],
+    level: [f32; LANES],
+    from: [f32; LANES],
     /// How many frames `voice` has spent in its stage.
-    elapsed: [f32; VOICES],
-    held: [bool; VOICES],
+    elapsed: [f32; LANES],
+    held: [bool; LANES],
     /// How many times faster velocity made this note's attack.
-    faster: [f32; VOICES],
+    faster: [f32; LANES],
     /// This note's level scale, from Env < Vel.
-    scale: [f32; VOICES],
+    scale: [f32; LANES],
 }
 
 impl Envelope {
     fn new() -> Self {
         Self {
-            stage: [Stage::Idle; VOICES],
-            level: [0.0; VOICES],
-            from: [0.0; VOICES],
-            elapsed: [0.0; VOICES],
-            held: [false; VOICES],
-            faster: [1.0; VOICES],
-            scale: [1.0; VOICES],
+            stage: [Stage::Idle; LANES],
+            level: [0.0; LANES],
+            from: [0.0; LANES],
+            elapsed: [0.0; LANES],
+            held: [false; LANES],
+            faster: [1.0; LANES],
+            scale: [1.0; LANES],
         }
     }
 
@@ -1137,11 +1264,11 @@ impl Values {
     }
 
     /// Spec: analog R10. Filter `k`'s resonance at `at`, from 0 to 1: the
-    /// knob, the LFO, the key (−1 to 1) and the envelope's level moving it by
+    /// knob's value `knob` (in per cent, as the matrix may have moved it), the LFO, the key (−1 to 1) and the envelope's level moving it by
     /// up to its whole travel.
-    fn resonance(&self, k: usize, at: usize, lfo: f32, key: f32, env: f32) -> f32 {
+    fn resonance(&self, k: usize, at: usize, knob: f32, lfo: f32, key: f32, env: f32) -> f32 {
         let get = |offset| self.at(filter::id(k, offset), at);
-        (get(filter::RESO) / 100.0
+        (knob / 100.0
             + lfo * get(filter::RES_LFO) / 100.0
             + key * get(filter::RES_KEY) / 100.0
             + env * get(filter::RES_ENV) / 100.0)
@@ -1158,21 +1285,22 @@ impl Values {
     }
 }
 
-/// The per-voice LFO value, from −1 to 1, that every LFO amount reads.
-// shortcut: no LFOs until part 2 (WP-8.15), so every LFO amount reads 0; its LFOs
-// replace this with the voice's LFO of the section's side.
-fn lfo(_side: usize, _voice: usize, _frame: usize) -> f32 {
-    0.0
-}
-
 /// The engine behind the voice section.
 struct Synth {
     rate: f32,
+    /// The tempo of the block being played, for synced LFOs.
+    bpm: f64,
     values: Values,
     /// Where each parameter is in the bank, in description order.
     index: Vec<usize>,
     mapped: bool,
     block_frames: usize,
+    /// Frames rendered in one go: a block's, up to [`CHUNK`].
+    chunk: usize,
+    matrix: Matrix,
+    /// The descriptor of the parameter each matrix destination moves, if it
+    /// moves one.
+    dests: Vec<Option<ParamDescriptor>>,
     tables: [SharedTable; 3],
     pulses: SharedTable,
     shape_of: [usize; 2],
@@ -1181,13 +1309,28 @@ struct Synth {
     filters: [FilterBank; 2],
     seconds: [FilterBank; 2],
     mode_of: [usize; 2],
-    resonance_of: [[f32; VOICES]; 2],
+    resonance_of: [[f32; LANES]; 2],
     envelopes: [Envelope; 4],
-    noise: [u32; VOICES],
-    noise_low: [f32; VOICES],
-    wild: [[u32; VOICES]; 2],
-    dc: [[[f32; 2]; VOICES]; 2],
-    /// The per-voice buffers of a stretch, `frames × VOICES` each.
+    noise: [u32; LANES],
+    noise_low: [f32; LANES],
+    wild: [[u32; LANES]; 2],
+    dc: [[[f32; 2]; LANES]; 2],
+    /// How many notes have started: each note's randomness is seeded from it.
+    notes: u64,
+    /// How many unison copies each voice's note started with.
+    copies_of: [usize; VOICES],
+    lfos: [[Lfo; VOICES]; 2],
+    vibratos: [Vibrato; VOICES],
+    /// The frame each lane's copy starts to sound (unison's Delay), and
+    /// whether its envelopes still wait to start, from what velocity and
+    /// whether continuing the level they had (R20).
+    audible: [u64; LANES],
+    pending: [bool; LANES],
+    pending_velocity: [f32; LANES],
+    pending_legato: [bool; LANES],
+    /// Where each lane's pitch is at the start of the chunk being rendered.
+    lane_base: Vec<f32>,
+    /// The per-lane buffers of a chunk, `frames × LANES` each.
     pitch: [Vec<f32>; 2],
     width: [Vec<f32>; 2],
     sync: [Vec<f32>; 2],
@@ -1199,15 +1342,27 @@ struct Synth {
     cutoff_second: [Vec<f32>; 2],
     follow: Vec<f32>,
     envelope_out: [Vec<f32>; 4],
+    /// The per-voice buffers of a chunk, `frames × VOICES` each: the note's
+    /// pitch, the vibrato's move and the two LFOs.
+    note_out: Vec<f32>,
+    vibrato_out: Vec<f32>,
+    lfo_out: [Vec<f32>; 2],
     left: Vec<f32>,
     right: Vec<f32>,
 }
 
 impl Synth {
-    fn new(rate: f64, max_frames: usize) -> Self {
+    fn new(rate: f64, max_frames: usize, ty: &DeviceType) -> Self {
         let max_frames = max_frames.max(1);
+        let chunk = max_frames.min(CHUNK);
         let rate = rate as f32;
-        let description = analog_type().description;
+        let description = &ty.description;
+        let matrix = ty.matrix.clone().expect("Analog has a matrix");
+        let dests = matrix
+            .dests
+            .iter()
+            .map(|dest| dest.param.and_then(|id| description.param(id).cloned()))
+            .collect();
         let tables = [
             table(1, |_, p| (f64::from(TAU) * p).sin()),
             table(1, |_, p| 2.0 * p - 1.0),
@@ -1216,13 +1371,13 @@ impl Synth {
         let pulses = table(PULSE_FRAMES, pulse);
         let layout = OscLayout {
             voices: VOICES,
-            lanes_per_voice: 1,
+            lanes_per_voice: COPIES,
         };
         // The kit's oversampled Sync works in chunks of at least four frames,
         // so its oscillators are sized for blocks of at least 128 whatever the
         // engine's.
         let oscillator = |table: &SharedTable, seed: u64, octave: i32| {
-            let mut osc = Oscillator::new(table.clone(), layout, rate, max_frames.max(128), seed);
+            let mut osc = Oscillator::new(table.clone(), layout, rate, chunk.max(128), seed);
             let params = osc.params_mut();
             params.level = 100.0;
             params.phase = 0.0;
@@ -1231,14 +1386,19 @@ impl Synth {
             params.octave = octave;
             osc
         };
-        let buffer = || vec![0.0; max_frames * VOICES];
+        let buffer = || vec![0.0; chunk * LANES];
         let both = || [buffer(), buffer()];
+        let per_voice = || vec![0.0; chunk * VOICES];
         Self {
             rate,
-            values: Values::new(&description, max_frames),
+            bpm: 120.0,
+            values: Values::new(description, max_frames),
             index: vec![0; description.params.len()],
             mapped: false,
             block_frames: 0,
+            chunk,
+            matrix: Matrix::new(matrix),
+            dests,
             shape_of: [SAW; 2],
             osc: [
                 ShapedOscillator::new(oscillator(&tables[SAW], 0xA4A1, 0)),
@@ -1251,26 +1411,35 @@ impl Synth {
             tables,
             pulses,
             filters: [0, 1].map(|_| {
-                let mut bank = FilterBank::new(rate, VOICES, 1);
+                let mut bank = FilterBank::new(rate, LANES, 1);
                 bank.set_type(FilterType::Lp12);
                 bank
             }),
             seconds: [0, 1].map(|_| {
-                let mut bank = FilterBank::new(rate, VOICES, 1);
+                let mut bank = FilterBank::new(rate, LANES, 1);
                 bank.set_type(FilterType::Lp12);
                 bank
             }),
             mode_of: [0; 2],
-            resonance_of: [[0.0; VOICES]; 2],
+            resonance_of: [[0.0; LANES]; 2],
             envelopes: [0, 1, 2, 3].map(|_| Envelope::new()),
-            noise: core::array::from_fn(|v| 0x9E37_79B9u32.wrapping_mul(v as u32 + 1) | 1),
-            noise_low: [0.0; VOICES],
+            noise: core::array::from_fn(|l| 0x9E37_79B9u32.wrapping_mul(l as u32 + 1) | 1),
+            noise_low: [0.0; LANES],
             wild: [0, 1].map(|n| {
-                core::array::from_fn(|v| {
-                    0x85EB_CA6Bu32.wrapping_mul((v + VOICES * n) as u32 + 1) | 1
+                core::array::from_fn(|l| {
+                    0x85EB_CA6Bu32.wrapping_mul((l + LANES * n) as u32 + 1) | 1
                 })
             }),
-            dc: [[[0.0; 2]; VOICES]; 2],
+            dc: [[[0.0; 2]; LANES]; 2],
+            notes: 0,
+            copies_of: [1; VOICES],
+            lfos: [0, 1].map(|_| core::array::from_fn(|_| Lfo::new())),
+            vibratos: [Vibrato::new(); VOICES],
+            audible: [0; LANES],
+            pending: [false; LANES],
+            pending_velocity: [0.0; LANES],
+            pending_legato: [false; LANES],
+            lane_base: vec![0.0; LANES],
             pitch: both(),
             width: both(),
             sync: both(),
@@ -1282,6 +1451,9 @@ impl Synth {
             cutoff_second: both(),
             follow: buffer(),
             envelope_out: [buffer(), buffer(), buffer(), buffer()],
+            note_out: per_voice(),
+            vibrato_out: per_voice(),
+            lfo_out: [per_voice(), per_voice()],
             left: vec![0.0; max_frames],
             right: vec![0.0; max_frames],
         }
@@ -1308,23 +1480,63 @@ impl Synth {
         for env in &mut self.envelopes {
             *env = Envelope::new();
         }
-        self.noise_low = [0.0; VOICES];
-        self.dc = [[[0.0; 2]; VOICES]; 2];
+        self.noise_low = [0.0; LANES];
+        self.dc = [[[0.0; 2]; LANES]; 2];
+        self.pending = [false; LANES];
+        self.copies_of = [1; VOICES];
+        self.notes = 0;
         for bank in self.filters.iter_mut().chain(&mut self.seconds) {
             bank.reset();
         }
         self.left.fill(0.0);
         self.right.fill(0.0);
     }
+
+    /// Spec: analog R24. `base`, the value of the parameter that matrix
+    /// destination `dest` moves, as `voice` plays it at `frame` of the
+    /// chunk: moved by the routes into it, and `base` itself where none
+    /// reach it.
+    fn moved(
+        &self,
+        dest: usize,
+        base: f32,
+        voice: usize,
+        (frame, due): (usize, bool),
+        read: &impl Fn(usize, usize, usize) -> f64,
+    ) -> f32 {
+        let Some(descriptor) = &self.dests[dest] else {
+            return base;
+        };
+        if !self.matrix.has(dest) {
+            return base;
+        }
+        let position = self.matrix.position(
+            dest,
+            descriptor.normalize(f64::from(base)),
+            voice,
+            frame,
+            due,
+            read,
+        );
+        descriptor.denormalize(position) as f32
+    }
+
+    /// Spec: analog R18, R19, R20, R29. A note's randomness: the seed of
+    /// its LFOs' and vibrato's random values, from how many notes have
+    /// started.
+    fn seed(&self) -> u64 {
+        SEED ^ self.notes.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+    }
 }
 
 impl Instrument for Synth {
-    fn voice_event(&mut self, voices: &mut VoiceBlock, _state: &State, event: VoiceEvent) {
+    fn voice_event(&mut self, voices: &mut VoiceBlock, state: &State, event: VoiceEvent) {
         let voice = event.voice;
         let at = (event.time as usize).min(self.block_frames.saturating_sub(1));
+        let first = voice * COPIES;
         match event.kind {
             VoiceEventKind::Start { start, .. } => {
-                let key = voices.pitch()[voice];
+                let key = voices.pitch()[first];
                 let onset = match start {
                     Start::Fresh => Onset::Fresh,
                     Start::Steal => Onset::Steal,
@@ -1332,73 +1544,275 @@ impl Instrument for Synth {
                     Start::Legato => Onset::Legato,
                     Start::Join { .. } => Onset::Join,
                 };
+                let velocity = voices.velocity()[first];
+                let fresh = matches!(start, Start::Fresh | Start::Join { .. });
+                let legato = matches!(start, Start::Legato);
+                let now = state.clock(event.time as usize);
+                let copies = state.config().copies.clamp(1, COPIES);
+                let delay_ms = self.values.at(global::UNI_DELAY, at) / 100.0 * UNISON_MS;
+                self.matrix.start(voice);
+                self.copies_of[voice] = copies;
                 for k in 0..2 {
                     self.osc[k].start(voice, key, onset);
                     self.sub[k].start(voice, key, onset);
                 }
-                let velocity = voices.velocity()[voice];
-                let fresh = matches!(start, Start::Fresh | Start::Join { .. });
-                for n in 0..4 {
-                    let set = self.values.envelope(n, at, self.rate);
-                    self.envelopes[n].trigger(voice, &set, !fresh && set.legato, velocity);
-                }
-                if fresh {
-                    self.noise_low[voice] = 0.0;
-                    self.dc[0][voice] = [0.0; 2];
-                    self.dc[1][voice] = [0.0; 2];
-                    for k in 0..2 {
-                        let formant = self.mode_of[k] >= FIRST_FORMANT;
-                        let resonance = if formant {
-                            FORMANT_RESONANCE
-                        } else {
-                            self.values.at(filter::id(k, filter::RESO), at) / 100.0
-                        };
-                        self.resonance_of[k][voice] = resonance;
-                        let params = VoiceParams {
-                            resonance,
-                            ..VoiceParams::default()
-                        };
-                        self.filters[k].reset_voice(voice, &params);
-                        self.seconds[k].reset_voice(voice, &params);
+                for copy in 0..COPIES {
+                    let lane = first + copy;
+                    if copy >= copies {
+                        self.pending[lane] = false;
+                        for env in &mut self.envelopes {
+                            env.reset(lane);
+                        }
+                        continue;
                     }
+                    // Spec: analog R20, instrument voices R12. A copy starts
+                    // a share of the Delay after the first.
+                    let wait = if legato {
+                        0
+                    } else {
+                        instrument::copy_delay_frames(copy, copies, delay_ms, f64::from(self.rate))
+                    };
+                    self.audible[lane] = now + wait;
+                    if wait == 0 {
+                        self.pending[lane] = false;
+                        for n in 0..4 {
+                            let set = self.values.envelope(n, at, self.rate);
+                            self.envelopes[n].trigger(lane, &set, !fresh && set.legato, velocity);
+                        }
+                    } else {
+                        self.pending[lane] = true;
+                        self.pending_velocity[lane] = velocity;
+                        self.pending_legato[lane] = !fresh;
+                        for env in &mut self.envelopes {
+                            env.reset(lane);
+                        }
+                    }
+                    if fresh {
+                        self.noise_low[lane] = 0.0;
+                        self.dc[0][lane] = [0.0; 2];
+                        self.dc[1][lane] = [0.0; 2];
+                        for k in 0..2 {
+                            let formant = self.mode_of[k] >= FIRST_FORMANT;
+                            let resonance = if formant {
+                                FORMANT_RESONANCE
+                            } else {
+                                self.values.at(filter::id(k, filter::RESO), at) / 100.0
+                            };
+                            self.resonance_of[k][lane] = resonance;
+                            let params = VoiceParams {
+                                resonance,
+                                ..VoiceParams::default()
+                            };
+                            self.filters[k].reset_voice(lane, &params);
+                            self.seconds[k].reset_voice(lane, &params);
+                        }
+                    }
+                }
+                // Spec: analog R18, R19, instrument voices R7. A note starts
+                // its LFOs and vibrato afresh, unless it is a legato one,
+                // which only moves the voice's pitch.
+                if !legato {
+                    self.notes += 1;
+                    let seed = self.seed();
+                    let rate = f64::from(self.rate);
+                    for k in 0..2 {
+                        let (hz, offset) = self.lfo_start(k, at);
+                        let free = if self.values.at(lfo::id(k, lfo::RETRIG), at) >= 0.5 {
+                            0.0
+                        } else {
+                            now as f64 * hz / rate
+                        };
+                        self.lfos[k][voice].start(seed ^ (k as u64 + 1), free + offset);
+                    }
+                    let error = f64::from(self.values.at(global::VIB_ERROR, at)) / 100.0;
+                    self.vibratos[voice].start(error, &mut Random::seeded(seed ^ 0x5B));
                 }
             }
             VoiceEventKind::Release => {
-                for n in 0..4 {
-                    let set = self.values.envelope(n, at, self.rate);
-                    self.envelopes[n].release(voice, &set);
+                for lane in first..first + COPIES {
+                    // A copy that hasn't begun to sound never will.
+                    if self.pending[lane] {
+                        self.pending[lane] = false;
+                        continue;
+                    }
+                    for n in 0..4 {
+                        let set = self.values.envelope(n, at, self.rate);
+                        self.envelopes[n].release(lane, &set);
+                    }
                 }
             }
             VoiceEventKind::End { .. } => {
-                for env in &mut self.envelopes {
-                    env.reset(voice);
+                self.copies_of[voice] = 1;
+                for lane in first..first + COPIES {
+                    self.pending[lane] = false;
+                    for env in &mut self.envelopes {
+                        env.reset(lane);
+                    }
                 }
             }
         }
     }
 
     fn render(&mut self, voices: &mut VoiceBlock, state: &State, frames: Range<usize>) {
-        let (from, to) = (frames.start, frames.end);
+        let mut from = frames.start;
+        while from < frames.end {
+            let to = (from + self.chunk).min(frames.end);
+            self.render_chunk(voices, state, &frames, (from, to));
+            from = to;
+        }
+    }
+}
+
+impl Synth {
+    /// Spec: analog R18. LFO `k`'s rate in hertz at `at` (a division of the
+    /// tempo when synced, the knob's setting otherwise) and its offset in
+    /// cycles.
+    fn lfo_start(&self, k: usize, at: usize) -> (f64, f64) {
+        let v = &self.values;
+        let hz = if v.at(lfo::id(k, lfo::SYNC), at) >= 0.5 {
+            let division = (v.at(lfo::id(k, lfo::DIVISION), at) as usize).min(DIVISIONS.len() - 1);
+            self.bpm / 60.0 / DIVISION_BEATS[division]
+        } else {
+            f64::from(v.at(lfo::id(k, lfo::RATE), at))
+        };
+        (hz, f64::from(v.at(lfo::id(k, lfo::OFFSET), at)) / 360.0)
+    }
+
+    /// Renders frames `from` to `to` of the stretch, a piece of the render
+    /// call `frames`.
+    fn render_chunk(
+        &mut self,
+        voices: &mut VoiceBlock,
+        state: &State,
+        frames: &Range<usize>,
+        (from, to): (usize, usize),
+    ) {
         let count = to - from;
         let span = voices.span(16);
         if count == 0 || span == 0 {
             return;
         }
-        let len = count * VOICES;
+        // How far into the call the chunk starts.
+        let skip = from - frames.start;
+        let len = count * LANES;
         let active = voices.active_mask();
-        let live = |voice: usize| active & (1 << voice) != 0;
         let sources = Sources::of(voices);
         let keys: [f32; VOICES] = core::array::from_fn(|v| sources.key(v) as f32);
-        let key_of = |voice: usize| keys[voice];
+        let pressure: [f64; VOICES] = core::array::from_fn(|v| sources.pressure(v));
+        let slide: [f64; VOICES] = core::array::from_fn(|v| sources.slide(v));
+        let wheel = sources.mod_wheel() as f32;
+        let read = |source: usize, voice: usize, _frame: usize| {
+            if source == 0 {
+                pressure[voice]
+            } else {
+                slide[voice]
+            }
+        };
+        self.matrix.set_oldest(state.oldest(voices));
+        self.matrix.set_newest(state.newest(voices));
+        let copies = self.copies_of;
+        let live_voice = |voice: usize| active & (1 << voice) != 0;
+        let live = |lane: usize| live_voice(lane / COPIES) && lane % COPIES < copies[lane / COPIES];
+        let clock = |frame: usize| state.clock(from + frame);
+        let key_of = |lane: usize| keys[lane / COPIES];
         let v = &self.values;
 
-        // The envelopes.
+        // Every sounding voice's note, LFOs and vibrato, frame by frame.
+        let rate = f64::from(self.rate);
+        let one = 1.0 / rate;
+        let mut voice_list = [0usize; VOICES];
+        let mut sounding = 0;
+        for voice in 0..VOICES {
+            if live_voice(voice) {
+                voice_list[sounding] = voice;
+                sounding += 1;
+            }
+        }
+        let mpe_pitch: [bool; 2] =
+            core::array::from_fn(|k| self.matrix.has(global::DEST_OSC_PITCH + k));
+        for frame in 0..count {
+            let at = from + frame;
+            let due = state.control_due(at);
+            let keyboard = v.at(global::OCTAVE, at).round() * 12.0
+                + v.at(global::SEMI, at).round()
+                + v.at(global::DETUNE, at) / 100.0;
+            let lfo_on: [bool; 2] = core::array::from_fn(|k| v.at(lfo::id(k, lfo::ON), at) >= 0.5);
+            let vibrato_on = v.at(global::VIB_ON, at) >= 0.5;
+            for &voice in &voice_list[..sounding] {
+                let i = frame * VOICES + voice;
+                let note = state.pitch(voices, voice, frames, skip + frame) as f32 + keyboard;
+                self.note_out[i] = note;
+                let seconds = state.frames_since_start(voice, at) as f64 * one;
+                for k in 0..2 {
+                    self.lfo_out[k][i] = if lfo_on[k] {
+                        let (width, delay, attack) = (
+                            v.at(lfo::id(k, lfo::WIDTH), at) / 100.0,
+                            f64::from(v.at(lfo::id(k, lfo::DELAY), at)) * 1e-3,
+                            f64::from(v.at(lfo::id(k, lfo::ATTACK), at)) * 1e-3,
+                        );
+                        let synced = v.at(lfo::id(k, lfo::SYNC), at) >= 0.5;
+                        let hz = if synced {
+                            self.lfo_start(k, at).0
+                        } else {
+                            f64::from(self.moved(
+                                global::DEST_LFO_RATE + k,
+                                v.at(lfo::id(k, lfo::RATE), at),
+                                voice,
+                                (frame, due),
+                                &read,
+                            ))
+                        };
+                        let kind = v.at(lfo::id(k, lfo::WAVE), at) as usize;
+                        self.lfos[k][voice].step(kind, width, hz * one)
+                            * waves::fade(seconds, delay, attack)
+                    } else {
+                        0.0
+                    };
+                }
+                self.vibrato_out[i] = if vibrato_on {
+                    let amount = self.moved(
+                        global::DEST_VIBRATO,
+                        v.at(global::VIB_AMOUNT, at),
+                        voice,
+                        (frame, due),
+                        &read,
+                    ) / 100.0
+                        + v.at(global::VIB_MOD_WHEEL, at) / 100.0 * wheel;
+                    let (delay, attack) = (
+                        f64::from(v.at(global::VIB_DELAY, at)) * 1e-3,
+                        f64::from(v.at(global::VIB_ATTACK, at)) * 1e-3,
+                    );
+                    self.vibratos[voice].step(
+                        amount * waves::fade(seconds, delay, attack),
+                        f64::from(v.at(global::VIB_RATE, at)),
+                        one,
+                    )
+                } else {
+                    0.0
+                };
+            }
+        }
+
+        // The envelopes, a lane at a time: a copy that waited for unison's
+        // Delay starts its own when its time comes.
         let sets: [EnvSettings; 4] = core::array::from_fn(|n| v.envelope(n, from, self.rate));
-        for (n, set) in sets.iter().enumerate() {
-            for frame in 0..count {
-                for voice in 0..span {
-                    self.envelope_out[n][frame * VOICES + voice] = if live(voice) {
-                        self.envelopes[n].step(voice, set)
+        for frame in 0..count {
+            for lane in 0..span {
+                if self.pending[lane] && clock(frame) >= self.audible[lane] {
+                    self.pending[lane] = false;
+                    for n in 0..4 {
+                        self.envelopes[n].trigger(
+                            lane,
+                            &sets[n],
+                            self.pending_legato[lane] && sets[n].legato,
+                            self.pending_velocity[lane],
+                        );
+                    }
+                }
+                let on = live(lane);
+                for n in 0..4 {
+                    self.envelope_out[n][frame * LANES + lane] = if on {
+                        self.envelopes[n].step(lane, &sets[n])
                     } else {
                         0.0
                     };
@@ -1406,9 +1820,12 @@ impl Instrument for Synth {
             }
         }
 
-        // The oscillators' pitch, width and sync, per voice and frame.
+        // The oscillators' pitch, width and sync, per lane and frame.
         let step = voices.pitch_step();
         let lane_pitch = voices.pitch();
+        for lane in 0..LANES {
+            self.lane_base[lane] = lane_pitch[lane] + step[lane] * skip as f32;
+        }
         let modes: [usize; 2] =
             core::array::from_fn(|k| v.at(osc::id(k, osc::SUB_SYNC), from) as usize);
         let shapes: [usize; 2] =
@@ -1416,31 +1833,61 @@ impl Instrument for Synth {
         for k in 0..2 {
             for frame in 0..count {
                 let at = |offset| v.at(osc::id(k, offset), from + frame);
+                let due = state.control_due(from + frame);
                 let tune = at(osc::OCTAVE).round() * 12.0
                     + at(osc::SEMI).round()
                     + at(osc::DETUNE) / 100.0;
                 let key = at(osc::KEY) / 100.0;
                 let (initial, time) = (at(osc::ENV_INITIAL), at(osc::ENV_TIME) * 1e-3);
-                let base = (at(osc::PULSE_WIDTH) / 100.0).clamp(0.01, 0.99) * 100.0 - 1.0;
                 let width_mod = at(osc::WIDTH_MOD) / 100.0;
                 let pitch_mod = at(osc::PITCH_MOD) / 100.0;
                 let sync = at(osc::SUB_SYNC_AMOUNT) / 100.0;
-                for voice in 0..span {
-                    let note = state.pitch(voices, voice, &frames, frame) as f32;
-                    let carried = note - (lane_pitch[voice] + step[voice] * frame as f32);
+                let unison = v.at(global::UNI_DETUNE, from + frame) / 100.0 * UNISON_CENTS;
+                for lane in 0..span {
+                    let (voice, copy) = (lane / COPIES, lane % COPIES);
+                    let i = frame * LANES + lane;
+                    if !live(lane) {
+                        self.pitch[k][i] = 0.0;
+                        continue;
+                    }
+                    let vi = frame * VOICES + voice;
+                    let note = self.note_out[vi];
+                    let carried = note - (lane_pitch[lane] + step[lane] * (skip + frame) as f32);
                     let seconds = state.frames_since_start(voice, from + frame) as f32 / self.rate;
                     let glide = if time > 0.0 {
                         initial * (1.0 - seconds / time).max(0.0)
                     } else {
                         0.0
                     };
-                    let wave = lfo(k, voice, frame);
-                    let i = frame * VOICES + voice;
+                    let wave = self.lfo_out[k][vi];
+                    let moved_pitch = if mpe_pitch[k] {
+                        (self.matrix.add(
+                            global::DEST_OSC_PITCH + k,
+                            0.0,
+                            voice,
+                            frame,
+                            &read,
+                        ) * MPE_PITCH_SEMITONES) as f32
+                    } else {
+                        0.0
+                    };
+                    let spread = instrument::copy_cents(copy, copies[voice], unison) / 100.0;
+                    let pulse = self.moved(
+                        4 + k,
+                        at(osc::PULSE_WIDTH),
+                        voice,
+                        (frame, due),
+                        &read,
+                    );
+                    let base = (pulse / 100.0).clamp(0.01, 0.99) * 100.0 - 1.0;
                     self.pitch[k][i] = carried
                         + tune
                         + (key - 1.0) * (note - MIDDLE_C)
                         + glide
-                        + wave * pitch_mod * PITCH_MOD_SEMITONES;
+                        + wave * pitch_mod * PITCH_MOD_SEMITONES
+                        + self.vibrato_out[vi]
+                        + moved_pitch
+                        + spread;
                     self.width[k][i] = (base + wave * width_mod * WIDTH_FRAMES)
                         .clamp(0.0, (PULSE_FRAMES - 1) as f32);
                     // Spec: analog R5. The ratio 1 to 8 on the kit's scale of 1 to 16.
@@ -1463,9 +1910,9 @@ impl Instrument for Synth {
             }
             if shape == WHITE_NOISE {
                 for frame in 0..count {
-                    for voice in 0..span {
-                        self.oscs[k][frame * VOICES + voice] = if live(voice) {
-                            noise_sample(&mut self.wild[k][voice])
+                    for lane in 0..span {
+                        self.oscs[k][frame * LANES + lane] = if live(lane) {
+                            noise_sample(&mut self.wild[k][lane])
                         } else {
                             0.0
                         };
@@ -1487,7 +1934,7 @@ impl Instrument for Synth {
             };
             let inputs = Inputs {
                 lanes: span,
-                pitch: lane_pitch,
+                pitch: &self.lane_base,
                 pitch_step: Some(step),
                 pitch_mod: Some(&self.pitch[k][..len]),
                 frame_mod: rectangle.then(|| &self.width[k][..len]),
@@ -1516,6 +1963,7 @@ impl Instrument for Synth {
         };
         for frame in 0..count {
             let at = from + frame;
+            let due = state.control_due(at);
             let level = |k: usize| {
                 if v.at(osc::id(k, osc::ON), at) >= 0.5 {
                     v.at(osc::id(k, osc::LEVEL), at)
@@ -1533,19 +1981,32 @@ impl Instrument for Synth {
             };
             let noise_split = split(v.at(noise::id(noise::BALANCE), at));
             let low = coefficient(v.at(noise::id(noise::COLOR), at));
-            for voice in 0..span {
-                let i = frame * VOICES + voice;
+            for lane in 0..span {
+                let i = frame * LANES + lane;
+                // A copy that waits for unison's Delay is silent.
+                if !live(lane) || clock(frame) < self.audible[lane] {
+                    self.audio[0][i] = 0.0;
+                    self.audio[1][i] = 0.0;
+                    continue;
+                }
+                let voice = lane / COPIES;
                 let (mut one, mut two) = (0.0, 0.0);
                 for k in 0..2 {
                     let sub = if modes[k] == SUB { subs[k] } else { 0.0 };
-                    let signal = (self.oscs[k][i] + sub * self.subs[k][i]) * osc_levels[k];
+                    let gain = if osc_levels[k] > 0.0 {
+                        self.moved(2 + k, osc_levels[k], voice, (frame, due), &read)
+                    } else {
+                        0.0
+                    };
+                    let signal = (self.oscs[k][i] + sub * self.subs[k][i]) * gain;
                     one += signal * osc_splits[k].0;
                     two += signal * osc_splits[k].1;
                 }
-                if noise_level > 0.0 && live(voice) {
-                    let white = noise_sample(&mut self.noise[voice]);
-                    self.noise_low[voice] += low * (white - self.noise_low[voice]);
-                    let signal = self.noise_low[voice] * noise_level;
+                if noise_level > 0.0 {
+                    let white = noise_sample(&mut self.noise[lane]);
+                    self.noise_low[lane] += low * (white - self.noise_low[lane]);
+                    let gain = self.moved(6, noise_level, voice, (frame, due), &read);
+                    let signal = self.noise_low[lane] * gain;
                     one += signal * noise_split.0;
                     two += signal * noise_split.1;
                 }
@@ -1559,12 +2020,23 @@ impl Instrument for Synth {
         if following {
             for frame in 0..count {
                 let at = from + frame;
-                let freq = pitch_of(v.at(filter::id(0, filter::FREQ), at), REFERENCE);
-                for voice in 0..span {
-                    let i = frame * VOICES + voice;
-                    let note = state.pitch(voices, voice, &frames, frame) as f32;
+                let due = state.control_due(at);
+                let knob = v.at(filter::id(0, filter::FREQ), at);
+                for lane in 0..span {
+                    let (voice, i) = (lane / COPIES, frame * LANES + lane);
+                    let freq = pitch_of(
+                        self.moved(7, knob, voice, (frame, due), &read),
+                        REFERENCE,
+                    );
+                    let vi = frame * VOICES + voice;
                     self.follow[i] = freq
-                        + v.cutoff_move(0, at, lfo(0, voice, frame), note, self.envelope_out[0][i]);
+                        + v.cutoff_move(
+                            0,
+                            at,
+                            self.lfo_out[0][vi],
+                            self.note_out[vi],
+                            self.envelope_out[0][i],
+                        );
                 }
             }
         }
@@ -1591,26 +2063,33 @@ impl Instrument for Synth {
                     if v.at(filter::id(0, filter::ON), from + frame) < 0.5 {
                         continue;
                     }
-                    for voice in 0..span {
-                        let i = frame * VOICES + voice;
+                    for lane in 0..span {
+                        let i = frame * LANES + lane;
                         self.audio[1][i] += to_f2 * self.audio[0][i];
                     }
                 }
             }
-            // The cutoff, per voice and frame; for a formant, the two
+            // The cutoff, per lane and frame; for a formant, the two
             // resonators' frequencies.
             for frame in 0..count {
                 let at = from + frame;
-                let freq = v.at(filter::id(k, filter::FREQ), at);
-                let follow = k == 1 && following;
-                for voice in 0..span {
-                    let i = frame * VOICES + voice;
-                    let note = state.pitch(voices, voice, &frames, frame) as f32;
-                    let wave = lfo(k, voice, frame);
+                let due = state.control_due(at);
+                let knob = v.at(filter::id(k, filter::FREQ), at);
+                let (reso_knob, follow) = (
+                    v.at(filter::id(k, filter::RESO), at),
+                    k == 1 && following,
+                );
+                for lane in 0..span {
+                    let (voice, i) = (lane / COPIES, frame * LANES + lane);
+                    let vi = frame * VOICES + voice;
+                    let note = self.note_out[vi];
+                    let wave = self.lfo_out[k][vi];
                     let env = self.envelope_out[k][i];
+                    let freq = self.moved(7 + 2 * k, knob, voice, (frame, due), &read);
                     let moved = v.cutoff_move(k, at, wave, note, env);
                     let (low, high) = if formant {
-                        let reso = v.resonance(k, at, wave, key_of(voice), env);
+                        let reso = self.moved(8 + 2 * k, reso_knob, voice, (frame, due), &read);
+                        let reso = v.resonance(k, at, reso, wave, key_of(lane), env);
                         let (f1, f2) = formants(reso, freq);
                         (
                             pitch_of(f1, REFERENCE) + moved,
@@ -1631,12 +2110,12 @@ impl Instrument for Synth {
             // The drive in front of the filter.
             if drive_mode > 0 {
                 for frame in 0..count {
-                    for voice in 0..span {
-                        let i = frame * VOICES + voice;
+                    for lane in 0..span {
+                        let i = frame * LANES + lane;
                         self.audio[k][i] = drive(
                             drive_mode,
                             self.audio[k][i],
-                            &mut self.dc[k][voice],
+                            &mut self.dc[k][lane],
                             dc_pole,
                         );
                     }
@@ -1646,7 +2125,7 @@ impl Instrument for Synth {
                 self.second[k][..len].copy_from_slice(&self.audio[k][..len]);
             }
             // The filters, in chunks that start on the control grid, where each
-            // voice's resonance is set.
+            // lane's resonance is set.
             let mut start = 0;
             while start < count {
                 let mut end = start + 1;
@@ -1654,26 +2133,35 @@ impl Instrument for Synth {
                     end += 1;
                 }
                 if state.control_due(from + start) {
-                    for voice in 0..span {
+                    for lane in 0..span {
                         let target = if formant {
                             FORMANT_RESONANCE
                         } else {
                             let at = from + start;
-                            let env = self.envelope_out[k][start * VOICES + voice];
-                            v.resonance(k, at, lfo(k, voice, start), key_of(voice), env)
+                            let voice = lane / COPIES;
+                            let vi = start * VOICES + voice;
+                            let env = self.envelope_out[k][start * LANES + lane];
+                            let knob = self.moved(
+                                8 + 2 * k,
+                                v.at(filter::id(k, filter::RESO), at),
+                                voice,
+                                (start, true),
+                                &read,
+                            );
+                            v.resonance(k, at, knob, self.lfo_out[k][vi], key_of(lane), env)
                         };
-                        if (target - self.resonance_of[k][voice]).abs() > f32::EPSILON {
-                            self.resonance_of[k][voice] = target;
+                        if (target - self.resonance_of[k][lane]).abs() > f32::EPSILON {
+                            self.resonance_of[k][lane] = target;
                             let params = VoiceParams {
                                 resonance: target,
                                 ..VoiceParams::default()
                             };
-                            self.filters[k].set_params(voice, &params);
-                            self.seconds[k].set_params(voice, &params);
+                            self.filters[k].set_params(lane, &params);
+                            self.seconds[k].set_params(lane, &params);
                         }
                     }
                 }
-                let (a, b) = (start * VOICES, end * VOICES);
+                let (a, b) = (start * LANES, end * LANES);
                 self.filters[k].process_voices(
                     span,
                     &self.cutoff[k][a..b],
@@ -1695,9 +2183,12 @@ impl Instrument for Synth {
             }
         }
 
-        // The amplifiers, panned into the output (R12).
+        // The amplifiers, panned into the output (R12). A voice's copies
+        // keep its level between them (instrument voices R13).
+        let share: [f32; VOICES] = core::array::from_fn(|n| (copies[n] as f32).sqrt().recip());
         for frame in 0..count {
             let at = from + frame;
+            let due = state.control_due(at);
             for k in 0..2 {
                 if v.at(amp::id(k, amp::ON), at) < 0.5 {
                     continue;
@@ -1715,13 +2206,14 @@ impl Instrument for Synth {
                     get(amp::PAN_KEY) / 100.0,
                     get(amp::PAN_ENV) / 100.0,
                 );
-                for voice in 0..span {
-                    if !live(voice) {
+                for lane in 0..span {
+                    if !live(lane) || clock(frame) < self.audible[lane] {
                         continue;
                     }
-                    let i = frame * VOICES + voice;
+                    let voice = lane / COPIES;
+                    let i = frame * LANES + lane;
                     let env = self.envelope_out[2 + k][i];
-                    let wave = lfo(k, voice, frame);
+                    let wave = self.lfo_out[k][frame * VOICES + voice];
                     // Spec: analog R12. Positive envelope amounts bring the
                     // level in from a flat one; negative ones turn it over.
                     let shaped = if level_env >= 0.0 {
@@ -1729,9 +2221,10 @@ impl Instrument for Synth {
                     } else {
                         1.0 + level_env * env
                     };
-                    let db = LEVEL_KEY_DB * (level_key * key_of(voice) + level_lfo * wave);
-                    let gain = level * shaped * 10f32.powf(db / 20.0);
-                    let position = (pan + pan_lfo * wave + pan_key * key_of(voice) + pan_env * env)
+                    let level = self.moved(11 + k, level, voice, (frame, due), &read);
+                    let db = LEVEL_KEY_DB * (level_key * key_of(lane) + level_lfo * wave);
+                    let gain = level * shaped * 10f32.powf(db / 20.0) * share[voice];
+                    let position = (pan + pan_lfo * wave + pan_key * key_of(lane) + pan_env * env)
                         .clamp(-1.0, 1.0);
                     let (l, r) = pan_gains(position);
                     let signal = self.audio[k][i] * gain;
@@ -1741,12 +2234,23 @@ impl Instrument for Synth {
             }
         }
 
-        // A voice whose amplifier envelopes have ended is silent.
+        // Spec: analog R19. Volume is the device's output.
+        for frame in 0..count {
+            let volume = v.at(global::VOLUME, from + frame);
+            self.left[from + frame] *= volume;
+            self.right[from + frame] *= volume;
+        }
+
+        // A voice whose amplifier envelopes have ended in every copy is silent.
         let mut mask = active;
         while mask != 0 {
             let voice = mask.trailing_zeros() as usize;
             mask &= mask - 1;
-            if self.envelopes[2].idle(voice) && self.envelopes[3].idle(voice) {
+            let first = voice * COPIES;
+            let done = (first..first + copies[voice]).all(|lane| {
+                !self.pending[lane] && self.envelopes[2].idle(lane) && self.envelopes[3].idle(lane)
+            });
+            if done {
                 voices.end(voice);
             }
         }

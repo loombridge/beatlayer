@@ -341,6 +341,56 @@ struct Drag {
     moved: f64,
 }
 
+/// Spec: analog R22. Quick Routing's buttons, one above the other in `cell`:
+/// each runs `analog.quick_routing` for its routing.
+fn quick_routing(
+    ui: &mut Ui,
+    theme: &Theme,
+    frame: &DeviceFrame,
+    (id, cell): (Id, Rect),
+    events: &mut Vec<UiEvent>,
+) {
+    let c = &theme.colors;
+    let routings = ["parallel", "split", "filter_1_only", "serial"];
+    let gap = 4.0;
+    let height = (cell.height() - gap * (routings.len() as f32 + 1.0)) / routings.len() as f32;
+    for (n, (routing, label)) in routings
+        .into_iter()
+        .zip(bl_devices::analog::QUICK_ROUTINGS)
+        .enumerate()
+    {
+        let top = cell.top() + gap + n as f32 * (height + gap);
+        let button = Rect::from_min_size(
+            pos2(cell.left() + gap, top),
+            vec2(cell.width() - 2.0 * gap, height),
+        );
+        let button_id = id.with(("quick-routing", routing));
+        let response = ui.interact(button, button_id, Sense::click());
+        crate::focus::register(ui.ctx(), button_id, bl_shell::Area::Detail, None);
+        if response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))) {
+            events.push(UiEvent::Invoke(Invocation::new(
+                "analog.quick_routing",
+                json!({ "device": frame.id, "routing": routing }),
+            )));
+        }
+        let face = if response.is_pointer_button_down_on() {
+            theme.colors.accent.0
+        } else {
+            c.control.0
+        };
+        ui.painter().rect_filled(button, theme.sizes.corner, face);
+        ui.painter().text(
+            button.center(),
+            Align2::CENTER_CENTER,
+            label,
+            theme.small_font(),
+            c.text.0,
+        );
+        focus_ring(ui, theme, button, &response);
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, label));
+    }
+}
+
 /// Draws a device's panel in `body`, and turns what the person does into
 /// `device.set_param` invocations. `display` is what the device's display
 /// shows now, if its type draws one. `played` gives the base and the played
@@ -418,6 +468,13 @@ pub fn show(
                     json!({ "device": frame.id }),
                 )));
             }
+        }
+        // Spec: analog R22. Quick Routing's four buttons fill its cell.
+        if name == bl_devices::analog::QUICK_ROUTING
+            && matches!(&frame.kind, bl_model::DeviceKind::Native { device_type }
+                if device_type == bl_devices::analog::ANALOG)
+        {
+            quick_routing(ui, theme, frame, (id, rect), events);
         }
         // Spec: modulation R15, R23. A modulator's cells show its slots'
         // mappings and, for the Shaper, its shape.

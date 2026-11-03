@@ -29,6 +29,7 @@ Each command has:
 The commands, by the part of their ID before its first dot:
 
 - [`agent`](agent.md)
+- [`analog`](analog.md)
 - [`app`](app.md)
 - [`ara`](ara.md)
 - [`arrangement`](arrangement.md)
@@ -29149,6 +29150,83 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `QuickRouting`
+
+One of Analog's Quick Routing buttons (analog R22).
+
+One of:
+
+- `"parallel"`: Both filters and amplifiers on, Oscillator 1 and the noise to Filter 1, Oscillator 2 to Filter 2, the amplifiers centred.
+- `"split"`: As Parallel, with the amplifiers panned hard left and right.
+- `"filter_1_only"`: Filter 2 and Amplifier 2 off, every source to Filter 1.
+- `"serial"`: Every source to Filter 1, which feeds all of Filter 2; Amplifier 1 off and Amplifier 2 on.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One of Analog's Quick Routing buttons (analog R22).",
+  "oneOf": [
+    {
+      "const": "parallel",
+      "description": "Both filters and amplifiers on, Oscillator 1 and the noise to Filter 1, Oscillator 2 to Filter 2, the amplifiers centred.",
+      "type": "string"
+    },
+    {
+      "const": "split",
+      "description": "As Parallel, with the amplifiers panned hard left and right.",
+      "type": "string"
+    },
+    {
+      "const": "filter_1_only",
+      "description": "Filter 2 and Amplifier 2 off, every source to Filter 1.",
+      "type": "string"
+    },
+    {
+      "const": "serial",
+      "description": "Every source to Filter 1, which feeds all of Filter 2; Amplifier 1 off and Amplifier 2 on.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `QuickRoutingSet`
+
+What `analog.quick_routing` returns: the Analog and the routing set.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `routing` | [`QuickRouting`](#quickrouting) | yes | The routing set. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `analog.quick_routing` returns: the Analog and the routing set.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "routing": {
+      "$ref": "#/$defs/QuickRouting",
+      "description": "The routing set."
+    }
+  },
+  "required": [
+    "device",
+    "routing"
+  ],
+  "type": "object"
 }
 ```
 

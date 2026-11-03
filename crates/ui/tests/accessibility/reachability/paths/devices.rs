@@ -437,6 +437,12 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             "device.preview_hit",
             main(a_drum_synth, device_view, "Preview Hit", Key::Enter),
         ),
+        // Analog's Quick Routing buttons (analog R22): Tab to one, then
+        // Enter sets the routing.
+        (
+            "analog.quick_routing",
+            main(an_analog_on_its_global_page, device_view, "Parallel", Key::Enter),
+        ),
         // A device's sidechain strip and section (routing R29): Enter on
         // its buttons, Up and Down on its chooser and number boxes.
         (

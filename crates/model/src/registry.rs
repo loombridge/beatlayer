@@ -3105,6 +3105,18 @@ const ENTRIES: &[Entry] = &[
             (Clear Modulation Route).",
     },
     Entry {
+        id: "device.write_partials",
+        action: Action::Apply("set_partials"),
+        label: "Change Partials",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Writes the partials of the user wave an Operator oscillator plays: \
+            `osc` from 0 for A and `levels`, 16, 32 or 64 values from 0 to 1, whose count is \
+            the wave's count. It sets the levels only; `device.set_partials` also sets \
+            Repeat in the same undo step. One undo step (Change Partials).",
+    },
+    Entry {
         id: "device.compare_switch",
         action: Action::Apply("compare_switch"),
         label: "Compare: Switch",

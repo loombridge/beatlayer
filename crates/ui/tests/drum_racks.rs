@@ -603,3 +603,69 @@ fn a_pads_menu_lists_lives_rows_and_an_empty_pad_opens_none() {
         ],
     );
 }
+
+// Spec: drum-racks R11, R21; layout L-DEV-049.
+#[test]
+fn the_pad_view_is_lives_grid_beside_a_column_of_round_buttons() {
+    let mut h = harness();
+    let (rack, _) = kit(&mut h, &[]);
+    let layout = layout_of(&mut h, rack);
+    let at = layout.pads.as_ref().unwrap();
+    let near = |a: f32, b: f32| (a - b).abs() < 0.05;
+    // The overview: 18.2 points wide, 4 in from the view's edge, over eight
+    // groups; the pads 2.9 beyond it, 47.6 by 35.2 on a pitch of 50.7 by 37.7.
+    assert!(near(at.overview.width(), 18.2));
+    assert!(near(at.overview.left() - at.area.left(), 4.0));
+    let (first, right, above) = (&at.pads[0].pad, &at.pads[1].pad, &at.pads[4].pad);
+    assert!(near(first.left() - at.overview.right(), 2.9));
+    assert!(near(first.width(), 47.6) && near(first.height(), 35.2));
+    assert!(near(right.left() - first.left(), 50.7));
+    assert!(near(first.top() - above.top(), 37.7));
+    assert_eq!(at.groups.len(), 8);
+    // The view column's buttons are round, 12 across, 15.85 apart; Live's
+    // four views come first, and the switches that act on the chain list
+    // come with it.
+    let buttons: Vec<_> = layout.selectors.iter().map(|(_, r)| *r).collect();
+    for r in &buttons {
+        assert!(near(r.width(), 12.0) && near(r.height(), 12.0));
+    }
+    for pair in buttons[..8].windows(2) {
+        let gap = pair[1].center().y - pair[0].center().y;
+        assert!(near(gap, 15.85) || near(gap, 15.85 + 5.0), "{gap}");
+    }
+    h.shell
+        .run(
+            "rack.set_view",
+            json!({ "rack": rack, "view": "chain_list", "shown": false }),
+        )
+        .unwrap();
+    h.settle();
+    let compact = layout_of(&mut h, rack);
+    let order: Vec<RackView> = compact.selectors.iter().map(|(v, _)| *v).collect();
+    assert_eq!(
+        order,
+        [
+            RackView::Macros,
+            RackView::Variations,
+            RackView::Pads,
+            RackView::ChainList,
+            RackView::AutoSelect
+        ],
+        "the four views, and Auto Select at the foot"
+    );
+    let last = compact.selectors.last().unwrap().1;
+    let first = compact.selectors[0].1;
+    assert!(last.center().y - first.center().y > 100.0, "at the foot");
+}
+
+// Spec: drum-racks R11; layout L-DEV-049.
+#[test]
+fn an_empty_drum_rack_asks_for_an_instrument_or_a_sample() {
+    let mut h = harness();
+    let (_, _) = kit(&mut h, &[]);
+    let nodes = Harness::nodes(&h.settle());
+    let note = nodes
+        .iter()
+        .find(|n| n.label == "Drop an Instrument or Sample Here");
+    assert!(note.is_some(), "the empty devices view says what it takes");
+}

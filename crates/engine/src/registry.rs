@@ -362,6 +362,10 @@ pub struct Registry {
     /// [`DataFn`], not as decoded samples, and change without a new node
     /// (impulse-response slots).
     media_as_data: Vec<String>,
+    /// The native device types whose node data is built from some of their
+    /// parameters, and which: a change to one sends the data again
+    /// ([`Registry::rebuilds_data_on`]).
+    data_params: Vec<(String, Vec<bl_model::ParamId>)>,
 }
 
 impl Registry {
@@ -385,7 +389,32 @@ impl Registry {
             media: None,
             swaps_samples: Vec::new(),
             media_as_data: Vec::new(),
+            data_params: Vec::new(),
         }
+    }
+
+    /// Says that the data of the native device type `device_type` (see
+    /// [`add_device_with_data`](Self::add_device_with_data)) is built from
+    /// the values of `params`, so a change to one of them sends it again
+    /// with no new program (the Operator spec, R7: Repeat shapes a user
+    /// wave's table).
+    pub fn rebuilds_data_on(&mut self, device_type: &str, params: &[bl_model::ParamId]) {
+        self.data_params
+            .push((device_type.to_owned(), params.to_vec()));
+    }
+
+    /// Whether a change from `before` to `after` changes a parameter their
+    /// type's data is built from ([`rebuilds_data_on`](Self::rebuilds_data_on)).
+    #[must_use]
+    pub fn data_params_changed(&self, before: &Device, after: &Device) -> bool {
+        let DeviceKind::Native { device_type } = &after.kind else {
+            return false;
+        };
+        self.data_params
+            .iter()
+            .filter(|(kind, _)| kind == device_type)
+            .flat_map(|(_, params)| params)
+            .any(|id| before.params.get(id) != after.params.get(id))
     }
 
     /// Says that the node of the native device type `device_type` takes a

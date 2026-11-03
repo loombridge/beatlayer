@@ -518,6 +518,11 @@ fn fixture() -> Project {
             name: "Odd Rise".to_owned(),
         }),
     ];
+    // An Operator oscillator's drawn user wave (operator R27).
+    device.partials = vec![bl_model::Partials {
+        osc: 1,
+        levels: vec![0.5; 16],
+    }];
     // The flags that bound what a Simpler plays (sampler R22).
     device.region = Some(bl_model::SampleRegion::Frames {
         start: 500,
@@ -1259,6 +1264,7 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "media",
                 "similarity_reference",
                 "wavetables",
+                "partials",
                 "layers",
                 "layers.ram_mode",
                 "layers.snap",

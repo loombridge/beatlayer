@@ -22,7 +22,9 @@
 use bl_dsp::Oversampler;
 use bl_engine::{DeviceType, NodeConfig, Registry};
 use bl_model::Device;
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{
+    BODY_HEIGHT, Control, ControlBand, DisplayCell, LayoutNode, Maker, TitlePart, Widget,
+};
 use bl_model::param::db_to_gain;
 use bl_model::{
     DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayReading, OrdMap,
@@ -137,7 +139,7 @@ pub fn bus_compressor_type() -> DeviceType {
         ParamDescriptor::toggle(AUTO_RELEASE, "Auto", false).describe(
             "Lets the release follow the audio: a fast part for transients and a slow one.",
         ),
-        ParamDescriptor::continuous(RANGE, "Range", (-70.0, 0.0), -60.0, ParamUnit::Decibels)
+        ParamDescriptor::continuous(RANGE, "Range", (0.0, 70.0), 70.0, ParamUnit::Decibels)
             .describe("The most the compressor can turn the gain down; 0 dB is no compression."),
         ParamDescriptor::gain(MAKEUP, "Makeup", 24.0, 0.0)
             .describe("Adds gain to offset the compression."),
@@ -187,42 +189,54 @@ pub fn bus_compressor_type() -> DeviceType {
         )
 }
 
-/// Threshold and Ratio, the times, the gain reduction's display, the
-/// output stage, and the SC EQ.
+/// The device's layout as Live draws it (L-DEV-051): the SC EQ's column, the
+/// times and ratio as a column of small knobs, the needle meter over
+/// Threshold and Makeup, and Soft Clip, Range and Dry/Wet at the right.
 fn layout() -> DeviceLayout {
+    let at = Control::new;
     DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Band(ControlBand::stacked(
+        LayoutNode::Band(ControlBand::free(
+            62.0,
             BODY_HEIGHT,
-            &[(THRESHOLD, Widget::Knob), (RATIO, Widget::Knob)],
-        )),
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (ATTACK, Widget::Knob),
-                (RELEASE, Widget::Knob),
-                (AUTO_RELEASE, Widget::Toggle),
+            vec![
+                at(SC_EQ, Widget::Toggle, 4.0, 4.0).sized(54.0, 12.0),
+                at(SC_TYPE, Widget::Chooser, 4.0, 27.0),
+                at(SC_FREQ, Widget::Knob, 11.0, 56.0),
+                at(SC_RES, Widget::Slider, 4.0, 134.0),
             ],
         )),
-        LayoutNode::Cell(DisplayCell::new("Gain Reduction", 60.0, BODY_HEIGHT, 1.0)),
-        LayoutNode::Band(ControlBand::stacked(
+        LayoutNode::Band(ControlBand::free(
+            56.0,
             BODY_HEIGHT,
-            &[
-                (RANGE, Widget::Knob),
-                (MAKEUP, Widget::Knob),
-                (SOFT_CLIP, Widget::Toggle),
-                (DRY_WET, Widget::Knob),
+            vec![
+                at(ATTACK, Widget::SmallKnob, 4.0, 4.0),
+                at(RELEASE, Widget::SmallKnob, 4.0, 45.0),
+                at(AUTO_RELEASE, Widget::Toggle, 38.0, 60.0).sized(18.0, 12.0),
+                at(RATIO, Widget::SmallKnob, 4.0, 86.0),
             ],
         )),
-        LayoutNode::Band(ControlBand::stacked(
+        LayoutNode::Column(vec![
+            LayoutNode::Cell(DisplayCell::new("Gain Reduction", 126.0, 72.0, 1.0)),
+            LayoutNode::Band(ControlBand::free(
+                126.0,
+                86.0,
+                vec![
+                    at(THRESHOLD, Widget::Knob, 18.0, 12.0),
+                    at(MAKEUP, Widget::Knob, 70.0, 12.0),
+                ],
+            )),
+        ]),
+        LayoutNode::Band(ControlBand::free(
+            52.0,
             BODY_HEIGHT,
-            &[
-                (SC_EQ, Widget::Toggle),
-                (SC_TYPE, Widget::Chooser),
-                (SC_FREQ, Widget::Knob),
-                (SC_RES, Widget::Knob),
+            vec![
+                at(SOFT_CLIP, Widget::Toggle, 6.0, 19.0).sized(40.0, 12.0),
+                at(RANGE, Widget::Knob, 6.0, 46.0),
+                at(DRY_WET, Widget::Knob, 6.0, 103.0),
             ],
         )),
     ]))
+    .with_title(vec![TitlePart::Maker(Maker::Cytomic)])
 }
 
 /// Adds Glue Compressor to `registry`.
@@ -361,7 +375,7 @@ impl NativeDevice for Bond {
                 self.settings = Settings {
                     threshold: f64::from(threshold[i]),
                     ratio: f64::from(ratio[i]).clamp(RATIO_RANGE.0, RATIO_RANGE.1),
-                    cap: -f64::from(range[i]).min(0.0),
+                    cap: f64::from(range[i]).max(0.0),
                     attack: step_of(f64::from(attack[i]), self.rate),
                     release: step_of(f64::from(release[i]) * 1_000.0, self.rate),
                     fast: step_of(AUTO_FAST_MS, self.rate),

@@ -46,17 +46,34 @@ pub struct Bank {
 pub struct Alternate {
     /// The switch.
     pub switch: ParamId,
+    /// For a switch that is a choice: the choice, by its number, that puts
+    /// `on` in place (the Drum Sampler's Res is its Peak filter's gain while
+    /// the type is Peak). Left out, the switch is a toggle and `on` takes
+    /// over while it is on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<u32>,
     /// The parameter the control is while the switch is off.
     pub off: ParamId,
     /// The parameter the control is while the switch is on.
     pub on: ParamId,
 }
 
+impl Alternate {
+    /// Whether `on` has the control while the switch reads `value`.
+    #[must_use]
+    pub fn is_on(&self, value: f64) -> bool {
+        match self.at {
+            Some(choice) => value.round() as i64 == i64::from(choice),
+            None => value >= 0.5,
+        }
+    }
+}
+
 /// A parameter whose name, and the unit its value reads in, follow a choice
 /// or switch of the same device: Meld's macros are named by their oscillator's
 /// type, and its Semitones read in scale degrees while Use Current Scale is
 /// on. The parameter keeps its ID, value, lane and place.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Relabel {
     /// The parameter relabelled.
     pub param: ParamId,
@@ -67,13 +84,46 @@ pub struct Relabel {
 }
 
 /// What a [`Relabel`] gives a parameter.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ParamLabel {
     /// Its name.
     pub name: String,
     /// The unit its number reads in instead of its own, as text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unit: Option<String>,
+    /// The scale its number reads on instead of its own, where the label
+    /// gives the parameter's travel a range of its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub law: Option<LabelLaw>,
+}
+
+/// The range a [`ParamLabel`] reads a parameter's travel as: the Drum
+/// Sampler's FX1 is Stretch's Factor, 0.25 to 4 across its travel.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LabelLaw {
+    /// The value at the bottom of the travel.
+    pub min: f64,
+    /// The value at the top of the travel.
+    pub max: f64,
+    /// Whether each doubling takes the same travel (the range is above 0).
+    pub logarithmic: bool,
+    /// How many decimals the value shows.
+    pub decimals: u8,
+    /// The text after it, with its space, or none.
+    pub unit: String,
+}
+
+impl LabelLaw {
+    /// How the label reads a parameter at `travel`, from 0 to 1.
+    #[must_use]
+    pub fn text(&self, travel: f64) -> String {
+        let value = if self.logarithmic {
+            self.min * (self.max / self.min).powf(travel)
+        } else {
+            self.min + (self.max - self.min) * travel
+        };
+        format!("{value:.0$}{1}", usize::from(self.decimals), self.unit)
+    }
 }
 
 impl ParamLabel {
@@ -83,6 +133,7 @@ impl ParamLabel {
         Self {
             name: name.to_owned(),
             unit: None,
+            law: None,
         }
     }
 }
@@ -233,7 +284,34 @@ impl DeviceDescription {
     #[must_use]
     pub fn with_alternate(mut self, switch: ParamId, off: ParamId, on: ParamId) -> Self {
         let generic = self.layout == DeviceLayout::generic(&self.placed());
-        self.alternates.push(Alternate { switch, off, on });
+        self.alternates.push(Alternate {
+            switch,
+            at: None,
+            off,
+            on,
+        });
+        if generic {
+            self.layout = DeviceLayout::generic(&self.placed());
+        }
+        self
+    }
+
+    /// The same, with `on`'s parameter taking `off`'s control while the choice
+    /// `switch` is its choice number `at`.
+    #[must_use]
+    pub fn with_alternate_at(
+        mut self,
+        (switch, at): (ParamId, u32),
+        off: ParamId,
+        on: ParamId,
+    ) -> Self {
+        let generic = self.layout == DeviceLayout::generic(&self.placed());
+        self.alternates.push(Alternate {
+            switch,
+            at: Some(at),
+            off,
+            on,
+        });
         if generic {
             self.layout = DeviceLayout::generic(&self.placed());
         }
@@ -284,6 +362,9 @@ impl DeviceDescription {
         param: &ParamDescriptor,
         number: f64,
     ) -> String {
+        if let Some(law) = self.label(value, param.id).and_then(|l| l.law.as_ref()) {
+            return law.text(param.normalize(number));
+        }
         match self.label(value, param.id).and_then(|l| l.unit.as_deref()) {
             Some(unit) => {
                 let mut plain = param.clone();
@@ -306,7 +387,7 @@ impl DeviceDescription {
     pub fn drawn(&self, values: &OrdMap<ParamId, f64>, id: ParamId) -> ParamId {
         self.alternates
             .iter()
-            .find(|a| a.off == id && self.value(values, a.switch).is_some_and(|v| v >= 0.5))
+            .find(|a| a.off == id && self.value(values, a.switch).is_some_and(|v| a.is_on(v)))
             .map_or(id, |a| a.on)
     }
 
@@ -479,9 +560,11 @@ impl DeviceDescription {
             ));
         }
         for a in &self.alternates {
-            let toggle = self
-                .param(a.switch)
-                .is_some_and(|p| matches!(p.kind, ParamKind::Toggle));
+            let toggle = self.param(a.switch).is_some_and(|p| match &p.kind {
+                ParamKind::Toggle => a.at.is_none(),
+                ParamKind::Choice { choices } => a.at.is_some_and(|n| (n as usize) < choices.len()),
+                _ => false,
+            });
             if !toggle
                 || a.off == a.on
                 || self.param(a.off).is_none()
@@ -641,6 +724,73 @@ mod tests {
         }
     }
 
+    // Spec: device-framework R60
+    #[test]
+    fn a_label_reads_a_parameters_travel_on_its_own_scale() {
+        let params = vec![
+            ParamDescriptor::choice(id(0), "Type", &["A", "B"], 0),
+            ParamDescriptor::continuous(id(1), "FX1", (0.0, 100.0), 50.0, ParamUnit::Percent),
+        ];
+        let law = |min, max, decimals, unit: &str| LabelLaw {
+            min,
+            max,
+            logarithmic: true,
+            decimals,
+            unit: unit.to_owned(),
+        };
+        let described = DeviceDescription::new(params.clone()).with_relabels(vec![Relabel {
+            param: id(1),
+            by: id(0),
+            labels: vec![
+                ParamLabel {
+                    name: "Factor".to_owned(),
+                    unit: None,
+                    law: Some(law(0.25, 4.0, 2, "")),
+                },
+                ParamLabel::named("FX1"),
+            ],
+        }]);
+        described.check().unwrap();
+        let reads = |type_: f64| move |param: ParamId| if param.0 == 0 { type_ } else { 0.0 };
+        // Half the travel of a logarithmic 0.25 to 4 is 1, and a plain
+        // label keeps the parameter's own reading.
+        assert_eq!(described.text(&reads(0.0), &params[1], 50.0), "1.00");
+        assert_eq!(described.text(&reads(0.0), &params[1], 100.0), "4.00");
+        assert_eq!(described.text(&reads(1.0), &params[1], 50.0), "50 %");
+        let ms = law(10.0, 200.0, 0, " ms");
+        assert_eq!(ms.text(0.0), "10 ms");
+        let linear = LabelLaw {
+            logarithmic: false,
+            ..law(-1.0, 1.0, 1, "")
+        };
+        assert_eq!(linear.text(0.75), "0.5");
+    }
+
+    // Spec: device-framework R60
+    #[test]
+    fn a_choice_can_put_another_parameter_in_a_controls_place() {
+        let params = vec![
+            ParamDescriptor::choice(id(0), "Type", &["A", "B", "C", "Peak"], 0),
+            ParamDescriptor::continuous(id(1), "Res", (0.0, 100.0), 0.0, ParamUnit::Percent),
+            ParamDescriptor::continuous(id(2), "Gain", (-24.0, 24.0), 0.0, ParamUnit::Decibels),
+        ];
+        let described =
+            DeviceDescription::new(params.clone()).with_alternate_at((id(0), 3), id(1), id(2));
+        described.check().unwrap();
+        let at = |type_: f64| OrdMap::from_iter([(id(0), type_)]);
+        assert_eq!(described.drawn(&at(1.0), id(1)), id(1));
+        assert_eq!(described.drawn(&at(3.0), id(1)), id(2));
+        assert!(described.shown(&at(3.0), id(2)) && !described.shown(&at(3.0), id(1)));
+        assert!(described.shown(&at(0.0), id(1)) && !described.shown(&at(0.0), id(2)));
+        // A choice number past its choices, or a plain switch that is a
+        // choice, is refused.
+        let past =
+            DeviceDescription::new(params.clone()).with_alternate_at((id(0), 4), id(1), id(2));
+        assert!(past.check().is_err());
+        let toggle_with_choice = DeviceDescription::new(params).with_alternate(id(0), id(1), id(2));
+        assert!(toggle_with_choice.check().is_err());
+    }
+
     // Spec: device-framework R51
     #[test]
     fn a_relabelled_parameter_reads_under_its_labels_name_and_unit() {
@@ -669,6 +819,7 @@ mod tests {
                     ParamLabel {
                         name: "Steps".to_owned(),
                         unit: Some("sd".to_owned()),
+                        law: None,
                     },
                 ],
             ),

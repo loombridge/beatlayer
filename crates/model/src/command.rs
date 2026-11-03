@@ -2124,6 +2124,16 @@ pub enum Command {
         /// The slot's number.
         slot: u8,
     },
+    /// Sets the partials of the user wave an Operator oscillator plays (the
+    /// Operator spec, R27): 16, 32 or 64 levels from 0 to 1.
+    SetPartials {
+        /// The device.
+        device: DeviceId,
+        /// The oscillator, from 0 for A.
+        osc: u8,
+        /// The levels of its first partials.
+        levels: Vec<f32>,
+    },
     /// Sets the media a device plays, by content hash (WP-2.16): the
     /// sampler's sample, which the media store holds like a clip's audio.
     SetDeviceSample {
@@ -3316,6 +3326,7 @@ impl Command {
             // WP-8.4: Beatlayer's own names.
             Self::SetModRoute { .. } => "Change Modulation Route",
             Self::ClearModRoute { .. } => "Clear Modulation Route",
+            Self::SetPartials { .. } => "Change Partials",
             Self::SetDeviceSample { media: Some(_), .. } => "Load Sample",
             Self::SetDeviceSample { media: None, .. } => "Clear Sample",
             // Spec: impulse-responses R2. Beatlayer's own names.
@@ -5236,6 +5247,11 @@ impl Document {
                 destination,
             } => self.set_mod_route(*device, *slot, source, destination),
             Command::ClearModRoute { device, slot } => self.clear_mod_route(*device, *slot),
+            Command::SetPartials {
+                device,
+                osc,
+                levels,
+            } => self.set_partials(*device, *osc, levels),
             Command::CompareSwitch { device } => {
                 if !self.device_ref(*device)?.can_compare() {
                     return Err(ModelError::NoCompare(*device));
@@ -9812,6 +9828,7 @@ fn check_one_device(device: &Device) -> Result<(), ModelError> {
     // Spec: instrument modulation R10. A saved device whose routes repeat a
     // slot or name nothing doesn't load.
     crate::matrix::check_routes(&device.routes)?;
+    crate::partials::check_partials(&device.partials)?;
     if !device.can_compare() && (device.b_active || device.other_params.is_some()) {
         return Err(ModelError::NoCompare(device.id));
     }

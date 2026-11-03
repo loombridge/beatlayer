@@ -657,12 +657,16 @@ fn synth_kit(size: usize, types: [&str; 2], choked: bool, second_volume: f64) ->
 // without the group it rings on.
 #[test]
 fn a_drum_synth_plays_from_its_pad_and_its_choke_group_cuts_it() {
-    use bl_devices::{ds_clap, ds_kick, ds_snare, ds_tom};
+    use bl_devices::{ds_clang, ds_clap, ds_cymbal, ds_fm, ds_hh, ds_kick, ds_snare, ds_tom};
     let types = [
         ds_kick::DS_KICK,
         ds_snare::DS_SNARE,
         ds_tom::DS_TOM,
         ds_clap::DS_CLAP,
+        ds_hh::DS_HH,
+        ds_cymbal::DS_CYMBAL,
+        ds_fm::DS_FM,
+        ds_clang::DS_CLANG,
     ];
     for first in types {
         let mut golden: Option<(Vec<f32>, Vec<f32>)> = None;

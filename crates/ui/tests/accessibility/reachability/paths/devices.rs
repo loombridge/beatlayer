@@ -710,6 +710,45 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                  button control (WP-8.21)",
             )),
         ),
+        // Operator's title bar menu items (operator R28) and the partials'
+        // drag (R27): the title bar menu isn't opened from the keyboard yet.
+        (
+            "operator.copy_oscillator",
+            Exception(Gap(
+                "the device's title bar menu isn't opened from the keyboard (operator R28)",
+            )),
+        ),
+        (
+            "operator.set_envelope_levels",
+            Exception(Gap(
+                "the device's title bar menu isn't opened from the keyboard (operator R28)",
+            )),
+        ),
+        (
+            "operator.play_by_key",
+            Exception(Gap(
+                "the device's title bar menu isn't opened from the keyboard (operator R28)",
+            )),
+        ),
+        (
+            "operator.set_harmonics",
+            Exception(Gap(
+                "the device's title bar menu isn't opened from the keyboard (operator R28)",
+            )),
+        ),
+        (
+            "device.set_partials",
+            Exception(Gap(
+                "dragging across the partials has no keyboard form yet; arrow keys that step \
+                 each partial would close it (operator R27)",
+            )),
+        ),
+        (
+            "device.write_partials",
+            Exception(Equivalent(
+                "`device.set_partials`, which also sets Repeat in the same undo step",
+            )),
+        ),
         (
             "device.set_route",
             Exception(LaterView(

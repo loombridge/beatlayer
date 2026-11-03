@@ -20,9 +20,21 @@ fn registry() -> Registry {
     registry
 }
 
+/// A Gate of `params` over the settings these tests were written against,
+/// not the defaults a new Gate has (which are Live's, and tested on their
+/// own): `params` override them.
 fn shutter(params: &[(ParamId, f64)], max_frames: usize) -> Box<dyn Node> {
     let device_type: DeviceType = gate_type();
-    node(&registry(), &device(&device_type, params), max_frames)
+    let mut all = vec![
+        (THRESHOLD, -30.0),
+        (RETURN, 6.0),
+        (ATTACK, 1.0),
+        (HOLD, 20.0),
+        (RELEASE, 100.0),
+        (FLOOR, 0.0),
+    ];
+    all.extend_from_slice(params);
+    node(&registry(), &device(&device_type, &all), max_frames)
 }
 
 /// Runs one block of `input` (on both channels) with `key` (also on both)
@@ -102,7 +114,11 @@ fn the_gate_is_described_and_declares_a_sidechain() {
     device_type.description.check().unwrap();
     assert!(device_type.sidechain, "a sidechain input");
     let floor = device_type.description.param(FLOOR).unwrap();
-    assert!(floor.is_gain() && floor.default == 0.0 && floor.max() == 1.0);
+    assert!(floor.is_gain() && floor.max() == 1.0);
+    assert!(
+        (floor.default - db_to_gain(-40.0)).abs() < 1e-9,
+        "-40 dB at first"
+    );
     let look = device_type.description.param(LOOKAHEAD).unwrap();
     assert_eq!(look.format(2.0), "10 ms");
 }

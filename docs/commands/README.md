@@ -63,6 +63,7 @@ The commands, by the part of their ID before its first dot:
 - [`modulation`](modulation.md)
 - [`modulator`](modulator.md)
 - [`note`](note.md)
+- [`operator`](operator.md)
 - [`packages`](packages.md)
 - [`pad`](pad.md)
 - [`perception`](perception.md)
@@ -338,6 +339,7 @@ Two parameters that share one control, which a switch turns between: while `swit
 | `switch` | [`ParamId`](#paramid) | yes | The switch. |
 | `off` | [`ParamId`](#paramid) | yes | The parameter the control is while the switch is off. |
 | `on` | [`ParamId`](#paramid) | yes | The parameter the control is while the switch is on. |
+| `at` | integer or null | no | For a switch that is a choice: the choice, by its number, that puts `on` in place (the Drum Sampler's Res is its Peak filter's gain while the type is Peak). Left out, the switch is a toggle and `on` takes over while it is on. |
 
 <details><summary>JSON Schema</summary>
 
@@ -345,6 +347,15 @@ Two parameters that share one control, which a switch turns between: while `swit
 {
   "description": "Two parameters that share one control, which a switch turns between: while `switch` is on the control is `on`'s, and otherwise `off`'s. The layout places `off`'s control only (Limiter's Maximize turns Ceiling into Threshold).",
   "properties": {
+    "at": {
+      "description": "For a switch that is a choice: the choice, by its number, that puts `on` in place (the Drum Sampler's Res is its Peak filter's gain while the type is Peak). Left out, the switch is a toggle and `on` takes over while it is on.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "off": {
       "$ref": "#/$defs/ParamId",
       "description": "The parameter the control is while the switch is off."
@@ -3160,6 +3171,55 @@ What `set.backups` returns.
   },
   "required": [
     "backups"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `BandLabel`
+
+A line of text in a band that names a control or a pair of them: centred in `width` points from `x`, in a row of [`LABEL_HEIGHT`] at `y`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `text` | string | yes | The text. |
+| `x` | number | yes | Its left edge, from the band's. |
+| `y` | number | yes | Its top edge, from the band's. |
+| `width` | number | yes | The width it is centred in. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A line of text in a band that names a control or a pair of them: centred in `width` points from `x`, in a row of [`LABEL_HEIGHT`] at `y`.",
+  "properties": {
+    "text": {
+      "description": "The text.",
+      "type": "string"
+    },
+    "width": {
+      "description": "The width it is centred in.",
+      "format": "float",
+      "type": "number"
+    },
+    "x": {
+      "description": "Its left edge, from the band's.",
+      "format": "float",
+      "type": "number"
+    },
+    "y": {
+      "description": "Its top edge, from the band's.",
+      "format": "float",
+      "type": "number"
+    }
+  },
+  "required": [
+    "text",
+    "x",
+    "y",
+    "width"
   ],
   "type": "object"
 }
@@ -8035,6 +8095,7 @@ A band of controls, of a fixed size.
 | `width` | number | yes | Its width. |
 | `height` | number | yes | Its height. |
 | `controls` | array of [`Control`](#control) | yes | Its controls. |
+| `labels` | array of [`BandLabel`](#bandlabel) | no | Its text labels, drawn beside the controls they name. |
 | `slots` | [`SlotGroup`](#slotgroup) or null | no | Set for a band that shows the selected sample slot's controls: its controls name the first slot's parameters, and the band is placed for the selected slot ([`DeviceLayout::place_for`]). |
 
 <details><summary>JSON Schema</summary>
@@ -8054,6 +8115,13 @@ A band of controls, of a fixed size.
       "description": "Its height.",
       "format": "float",
       "type": "number"
+    },
+    "labels": {
+      "description": "Its text labels, drawn beside the controls they name.",
+      "items": {
+        "$ref": "#/$defs/BandLabel"
+      },
+      "type": "array"
     },
     "slots": {
       "anyOf": [
@@ -9220,6 +9288,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `mpe` | [`PluginMpe`](#pluginmpe) | no | A plug-in's MPE Mode and the MPE/Multi-channel Settings its MPE MIDI goes out on (the MPE spec, R14, R18). Off in a new device, and left out of the saved set until changed. Native devices never set it. |
 | `other_params` | array or null | no | The values of the state that isn't active, in the same form as [`params`](Self::params) (device compare R1, R10). `None` while the two states are equal, as a new device's are, and left out of the saved set then. Use [`other_params`](Self::other_params) to read it. |
 | `own_name` | string | no | The device's own name, such as `Auto Filter`, which the title bar shows while Show Preset Name is off. Empty while it's the same as [`name`](Self::name), and left out of the saved set then. |
+| `partials` | array of [`Partials`](#partials) | no | The partials of the user waves an Operator's oscillators play (the Operator spec, R27), by oscillator; one that isn't listed has the first partial alone. Empty for a device without drawn waves, and left out of the saved set then. |
 | `plugin` | [`PluginState`](#pluginstate) or null | no | A plug-in's own state and where it was loaded from (WP-2.6), as last saved with the set. Left out of the saved set for a native device, and for a plug-in until the set is first saved with it. |
 | `preset_name` | string or null | no | The name of the preset the device holds (the plug-in list spec, R5): the Beatlayer device preset last loaded into it or saved from it, or else the program name the plug-in's format reported. Left out of the saved set while there is none, so a device saved before this package loads with none. |
 | `region` | [`SampleRegion`](#sampleregion) or null | no | The part of slot 0's sample a Simpler plays, between its Start and End flags (the sampler spec, R22): `None` for the whole sample. Loading another sample clears it; an edit that changes the sample's length moves it. Left out of the saved set while it is the whole sample. |
@@ -9387,6 +9456,13 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
           }
         ],
         "type": "array"
+      },
+      "type": "array"
+    },
+    "partials": {
+      "description": "The partials of the user waves an Operator's oscillators play (the Operator spec, R27), by oscillator; one that isn't listed has the first partial alone. Empty for a device without drawn waves, and left out of the saved set then.",
+      "items": {
+        "$ref": "#/$defs/Partials"
       },
       "type": "array"
     },
@@ -10498,6 +10574,7 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
 | `selected_slot` | integer, at least 0 | yes | For a device with sample slots (WP-5.17): the slot whose controls the panel shows, a view setting that isn't saved with the set. |
 | `articulations` | array of [`Articulation`](#articulation) | no | An Articulation Map's articulations, in order: the list its panel shows. Empty for every other device. |
 | `configured` | array of [`ConfiguredParam`](#configuredparam) | no | The parameters a plug-in device's panel can show, in configured order (clap-hosting R5, configure mode): a knob's context menu offers them, each over the knob it is right-clicked on. Empty for a native device. |
+| `harmonics` | [`HarmonicsOptions`](#harmonicsoptions) or null | no | An Operator's harmonics editor options, which a drag across its partials follows (operator R27): view state. |
 | `knobs` | array of integer, at least 0 | no | The knob each of the panel's parameters is drawn on, 0 to 7, parallel to `description`'s parameters (clap-hosting R5, WP-5.40): a knob's context menu remaps the knob it is right-clicked on. Empty for a device that isn't a plug-in. |
 | `learning` | integer or null | no | The articulation whose Learn button is lit, counted from 0: the panel's state, not the set's. |
 | `loaded_slots` | array of boolean | no | For a device with sample slots: whether each slot holds a sample. |
@@ -10529,6 +10606,17 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
     "description": {
       "$ref": "#/$defs/DeviceDescription",
       "description": "Its parameters' descriptors and its layout."
+    },
+    "harmonics": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HarmonicsOptions"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "An Operator's harmonics editor options, which a drag across its partials follows (operator R27): view state."
     },
     "knobs": {
       "description": "The knob each of the panel's parameters is drawn on, 0 to 7, parallel to `description`'s parameters (clap-hosting R5, WP-5.40): a knob's context menu remaps the knob it is right-clicked on. Empty for a device that isn't a plug-in.",
@@ -11161,6 +11249,7 @@ A display cell: a graph, a spectrum, a waveform, or an envelope editor, which gr
 | `height` | number | yes | Its docked height, the least it has. |
 | `weight` | number | yes | Its share of extra room, against the other cells it shares with. |
 | `bottom` | [`ControlBand`](#controlband) or null | no | Controls inside its bottom edge, from its left. |
+| `inset` | number | no | The space left clear around the cell inside the room it is given, as Live leaves round a Drum Synth's display (L-DEV-047): the cell's size and growth are inside it. |
 | `slot` | integer or null | no | The sample slot the cell stands for, if it does: it shows the slot and takes a click that selects it, and a sample dropped on it (WP-5.17). |
 | `top` | [`ControlBand`](#controlband) or null | no | Controls inside its top edge, from its left. |
 
@@ -11183,6 +11272,11 @@ A display cell: a graph, a spectrum, a waveform, or an envelope editor, which gr
     },
     "height": {
       "description": "Its docked height, the least it has.",
+      "format": "float",
+      "type": "number"
+    },
+    "inset": {
+      "description": "The space left clear around the cell inside the room it is given, as Live leaves round a Drum Synth's display (L-DEV-047): the cell's size and growth are inside it.",
       "format": "float",
       "type": "number"
     },
@@ -12522,6 +12616,28 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `EnvelopeLevel`
+
+The level `operator.set_envelope_levels` sets.
+
+Type: one of `"maximum"`, `"minimum"`, `"middle"`.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The level `operator.set_envelope_levels` sets.",
+  "enum": [
+    "maximum",
+    "minimum",
+    "middle"
+  ],
+  "type": "string"
 }
 ```
 
@@ -14934,6 +15050,10 @@ One of:
 - `"plus"`: A plus sign.
 - `"minus"`: A minus sign.
 - `"flat_sharp"`: A flat and a sharp: Use Current Scale.
+- `"low_pass24"`: A low-pass filter's response at 24 dB per octave.
+- `"high_pass24"`: A high-pass filter's response at 24 dB per octave.
+- `"peak"`: A peak filter's response.
+- `"headphones"`: Headphones: a device's audition button (Boom Audition, Utility's Bass Mono, EQ Eight's Audition).
 
 <details><summary>JSON Schema</summary>
 
@@ -15004,6 +15124,26 @@ One of:
     {
       "const": "flat_sharp",
       "description": "A flat and a sharp: Use Current Scale.",
+      "type": "string"
+    },
+    {
+      "const": "low_pass24",
+      "description": "A low-pass filter's response at 24 dB per octave.",
+      "type": "string"
+    },
+    {
+      "const": "high_pass24",
+      "description": "A high-pass filter's response at 24 dB per octave.",
+      "type": "string"
+    },
+    {
+      "const": "peak",
+      "description": "A peak filter's response.",
+      "type": "string"
+    },
+    {
+      "const": "headphones",
+      "description": "Headphones: a device's audition button (Boom Audition, Utility's Bass Mono, EQ Eight's Audition).",
       "type": "string"
     }
   ]
@@ -15870,6 +16010,86 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `HarmonicsOptions`
+
+The harmonics editor's options in a device's panel (operator R27).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `even_only` | boolean | yes |  |
+| `odd_only` | boolean | yes |  |
+| `normalize` | boolean | yes |  |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The harmonics editor's options in a device's panel (operator R27).",
+  "properties": {
+    "even_only": {
+      "type": "boolean"
+    },
+    "normalize": {
+      "type": "boolean"
+    },
+    "odd_only": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "even_only",
+    "odd_only",
+    "normalize"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `HarmonicsView`
+
+The harmonics editor's options, which `operator.set_harmonics` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `even_only` | boolean | yes |  |
+| `odd_only` | boolean | yes |  |
+| `normalize` | boolean | yes |  |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The harmonics editor's options, which `operator.set_harmonics` returns.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "even_only": {
+      "type": "boolean"
+    },
+    "normalize": {
+      "type": "boolean"
+    },
+    "odd_only": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "device",
+    "even_only",
+    "odd_only",
+    "normalize"
+  ],
+  "type": "object"
 }
 ```
 
@@ -17933,6 +18153,63 @@ A label as the sidebar lists it.
     "section",
     "available",
     "shown"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `LabelLaw`
+
+The range a [`ParamLabel`] reads a parameter's travel as: the Drum Sampler's FX1 is Stretch's Factor, 0.25 to 4 across its travel.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `min` | number | yes | The value at the bottom of the travel. |
+| `max` | number | yes | The value at the top of the travel. |
+| `logarithmic` | boolean | yes | Whether each doubling takes the same travel (the range is above 0). |
+| `decimals` | integer from 0 to 255 | yes | How many decimals the value shows. |
+| `unit` | string | yes | The text after it, with its space, or none. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The range a [`ParamLabel`] reads a parameter's travel as: the Drum Sampler's FX1 is Stretch's Factor, 0.25 to 4 across its travel.",
+  "properties": {
+    "decimals": {
+      "description": "How many decimals the value shows.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "logarithmic": {
+      "description": "Whether each doubling takes the same travel (the range is above 0).",
+      "type": "boolean"
+    },
+    "max": {
+      "description": "The value at the top of the travel.",
+      "format": "double",
+      "type": "number"
+    },
+    "min": {
+      "description": "The value at the bottom of the travel.",
+      "format": "double",
+      "type": "number"
+    },
+    "unit": {
+      "description": "The text after it, with its space, or none.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "min",
+    "max",
+    "logarithmic",
+    "decimals",
+    "unit"
   ],
   "type": "object"
 }
@@ -24043,6 +24320,60 @@ One of:
 
 </details>
 
+### `OperatorChanged`
+
+What `operator.set_envelope_levels` and `operator.play_by_key` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `operator.set_envelope_levels` and `operator.play_by_key` return.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    }
+  },
+  "required": [
+    "device"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `OperatorEnvelope`
+
+The Operator envelope `operator.set_envelope_levels` sets.
+
+Type: one of `"A"`, `"B"`, `"C"`, `"D"`, `"Filter"`, `"Pitch"`, `"LFO"`.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Operator envelope `operator.set_envelope_levels` sets.",
+  "enum": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "Filter",
+    "Pitch",
+    "LFO"
+  ],
+  "type": "string"
+}
+```
+
+</details>
+
 ### `Origin`
 
 Where a shortcut's keys come from.
@@ -24075,6 +24406,52 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `OscillatorCopied`
+
+What `operator.copy_oscillator` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `from` | integer from 0 to 255 | yes | The oscillator copied from. |
+| `into` | integer from 0 to 255 | yes | The oscillator copied to. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `operator.copy_oscillator` returns.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "from": {
+      "description": "The oscillator copied from.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "into": {
+      "description": "The oscillator copied to.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "from",
+    "into"
+  ],
+  "type": "object"
 }
 ```
 
@@ -25485,6 +25862,7 @@ What a [`Relabel`] gives a parameter.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | yes | Its name. |
+| `law` | [`LabelLaw`](#labellaw) or null | no | The scale its number reads on instead of its own, where the label gives the parameter's travel a range of its own. |
 | `unit` | string or null | no | The unit its number reads in instead of its own, as text. |
 
 <details><summary>JSON Schema</summary>
@@ -25493,6 +25871,17 @@ What a [`Relabel`] gives a parameter.
 {
   "description": "What a [`Relabel`] gives a parameter.",
   "properties": {
+    "law": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LabelLaw"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The scale its number reads on instead of its own, where the label gives the parameter's travel a range of its own."
+    },
     "name": {
       "description": "Its name.",
       "type": "string"
@@ -25733,6 +26122,92 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `Partials`
+
+One oscillator's drawn partials.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `osc` | integer from 0 to 255 | yes | The oscillator, from 0 for A. |
+| `levels` | array of number | yes | The levels of the first partials, each from 0 to 1; there are 16, 32 or 64 of them. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One oscillator's drawn partials.",
+  "properties": {
+    "levels": {
+      "description": "The levels of the first partials, each from 0 to 1; there are 16, 32 or 64 of them.",
+      "items": {
+        "format": "float",
+        "type": "number"
+      },
+      "type": "array"
+    },
+    "osc": {
+      "description": "The oscillator, from 0 for A.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "osc",
+    "levels"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PartialsChanged`
+
+What `device.set_partials` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `osc` | integer from 0 to 255 | yes | The oscillator, from 0. |
+| `count` | integer, at least 0 | yes | Its partials' count. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.set_partials` returns.",
+  "properties": {
+    "count": {
+      "description": "Its partials' count.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "osc": {
+      "description": "The oscillator, from 0.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "osc",
+    "count"
+  ],
+  "type": "object"
 }
 ```
 
@@ -43189,6 +43664,14 @@ One of:
 - an object with `stack` (integer from 0 to 255): The same as a column of that many buttons.
 - an object with `grid` (object with `columns` (integer from 0 to 255), `rows` (integer from 0 to 255)): The choices of a choice parameter as a grid of small buttons, filled by rows (Note Echo's 1 2 3 4 over 5 6 8 16).
 - an object with `icon_segments` (integer from 0 to 255): A row of that many icon buttons, one for each choice of a choice parameter (the filter types), the chosen one lit.
+- `"large"`: The Drum Synths' large display numbers: the name above, the value in large figures in the accent, and its unit under them.
+- `"bare"`: A number box with no name row: the device's own label sits beside or above it ([`BandLabel`]).
+- `"bare_slider"`: A [`Bare`](Self::Bare) box whose blue fill shows the value's place in its range, as [`Slider`](Self::Slider)'s does.
+- `"framed"`: A [`Bare`](Self::Bare) box outlined in the accent: the Drum Synths' display boxes.
+- an object with `abbreviated` (integer from 0 to 255): A text button like [`Toggle`](Self::Toggle) that holds only the first that many characters of its parameter's name (Impulse's M, S and Sat).
+- `"bare_chooser"`: A [`Chooser`](Self::Chooser) with no name row: the device's own label is beside it, or it needs none (the Drum Sampler's effect type).
+- `"cycle"`: A lit text button holding the chosen name of a two-choice parameter, which a press switches to the other (the Drum Sampler's modulation source).
+- `"inline"`: The name and the value on one line, the value in the accent, dragged or typed (the Drum Sampler's Start, Length and Gain under its sample).
 
 <details><summary>JSON Schema</summary>
 
@@ -43326,6 +43809,57 @@ One of:
         "icon_segments"
       ],
       "type": "object"
+    },
+    {
+      "const": "large",
+      "description": "The Drum Synths' large display numbers: the name above, the value in large figures in the accent, and its unit under them.",
+      "type": "string"
+    },
+    {
+      "const": "bare",
+      "description": "A number box with no name row: the device's own label sits beside or above it ([`BandLabel`]).",
+      "type": "string"
+    },
+    {
+      "const": "bare_slider",
+      "description": "A [`Bare`](Self::Bare) box whose blue fill shows the value's place in its range, as [`Slider`](Self::Slider)'s does.",
+      "type": "string"
+    },
+    {
+      "const": "framed",
+      "description": "A [`Bare`](Self::Bare) box outlined in the accent: the Drum Synths' display boxes.",
+      "type": "string"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A text button like [`Toggle`](Self::Toggle) that holds only the first that many characters of its parameter's name (Impulse's M, S and Sat).",
+      "properties": {
+        "abbreviated": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "abbreviated"
+      ],
+      "type": "object"
+    },
+    {
+      "const": "bare_chooser",
+      "description": "A [`Chooser`](Self::Chooser) with no name row: the device's own label is beside it, or it needs none (the Drum Sampler's effect type).",
+      "type": "string"
+    },
+    {
+      "const": "cycle",
+      "description": "A lit text button holding the chosen name of a two-choice parameter, which a press switches to the other (the Drum Sampler's modulation source).",
+      "type": "string"
+    },
+    {
+      "const": "inline",
+      "description": "The name and the value on one line, the value in the accent, dragged or typed (the Drum Sampler's Start, Length and Gain under its sample).",
+      "type": "string"
     }
   ]
 }

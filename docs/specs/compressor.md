@@ -22,7 +22,7 @@ The detector hears what the engine hands the device on its sidechain (WP-2.19b: 
 
 ## Rules
 
-- **R1.** Beatlayer ships Compressor, an audio-effect device type with a sidechain input, of its own layout: every parameter has a descriptor and a place in the layout. (S3, device-framework)
+- **R1.** Beatlayer ships Compressor, an audio-effect device type with a sidechain input, laid out as Live's panel is: every parameter has a descriptor and a place in the layout. A new Compressor starts in RMS mode with the Log envelope, with the SC Filter on at 80 Hz, Auto off, Threshold at 0 dB, Ratio 4 : 1, Attack 1 ms, Release 30 ms, Knee 6 dB, Look-ahead 0 ms and Dry/Wet 100 %. Auto is the parameter's name for the Auto Release switch. (S3, device-framework)
 - **R2.** Threshold sets the level above which the curve turns the gain down, over the Knee: none below the threshold less half the knee, all of it by the threshold plus half, and gradually between, as the manual's example describes. (S1)
 - **R3.** Ratio is the input's dB per the output's dB above the threshold, from 1 : 1 to ∞ : 1: at the top of the control nothing above the threshold gets through. The framework's ratio values are finite, so Beatlayer's tops at 100, where the gain computer's slope is 1 and the control reads `100 : 1`. (S1, S4)
 - **R4.** Expand mode turns the gain up above the threshold: a ratio of 1 to 2 raises a dB over the threshold to two. The expansion stops at +24 dB (Beatlayer's limit). Both channels share one gain, taken from the louder one. (S1)

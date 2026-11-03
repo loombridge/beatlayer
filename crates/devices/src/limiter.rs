@@ -21,7 +21,7 @@ use bl_engine::{DeviceType, NodeConfig, Registry};
 
 use crate::dynamics::level_db;
 use bl_model::Device;
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{BODY_HEIGHT, Control, ControlBand, DisplayCell, LayoutNode, Widget};
 use bl_model::param::db_to_gain;
 use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 
@@ -141,22 +141,40 @@ pub fn limiter_type() -> DeviceType {
         ParamDescriptor::gain(OUTPUT, "Output", 0.0, -0.3)
             .describe("With Maximize on, the level the output is limited at."),
     ];
+    // As Live lays it out (L-DEV-052): Gain over Maximize and Release over
+    // Auto, the Ceiling and gain reduction meters with Link under them, and
+    // the look-ahead, the ceiling mode and the routing at the right.
+    let at = Control::new;
     let layout = DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, &[(GAIN, Widget::Knob)])),
-        LayoutNode::Cell(
-            DisplayCell::new("Gain Reduction", 150.0, BODY_HEIGHT, 1.0)
-                .with_bottom(ControlBand::stacked(60.0, &[(CEILING, Widget::Knob)])),
-        ),
-        LayoutNode::Band(ControlBand::stacked(
+        LayoutNode::Band(ControlBand::free(
+            48.0,
             BODY_HEIGHT,
-            &[
-                (RELEASE, Widget::Knob),
-                (LINK, Widget::Knob),
-                (AUTO, Widget::Toggle),
-                (MAXIMIZE, Widget::Toggle),
-                (LOOKAHEAD, Widget::Chooser),
-                (CEILING_MODE, Widget::Chooser),
-                (ROUTING, Widget::Chooser),
+            vec![
+                at(GAIN, Widget::Knob, 4.0, 4.0),
+                at(MAXIMIZE, Widget::Toggle, 4.0, 60.0).sized(40.0, 12.0),
+                at(RELEASE, Widget::Knob, 4.0, 84.0),
+                at(AUTO, Widget::Toggle, 4.0, 142.0).sized(40.0, 12.0),
+            ],
+        )),
+        LayoutNode::Cell(
+            DisplayCell::new("Gain Reduction", 137.0, BODY_HEIGHT, 1.0).with_bottom(
+                ControlBand::free(
+                    137.0,
+                    29.0,
+                    vec![
+                        at(CEILING, Widget::Number, 4.0, 4.0),
+                        at(LINK, Widget::Slider, 80.0, 4.0),
+                    ],
+                ),
+            ),
+        ),
+        LayoutNode::Band(ControlBand::free(
+            60.0,
+            BODY_HEIGHT,
+            vec![
+                at(LOOKAHEAD, Widget::Chooser, 4.0, 20.0),
+                at(CEILING_MODE, Widget::Stack(3), 4.0, 76.0).sized(52.0, 42.0),
+                at(ROUTING, Widget::Segments(2), 4.0, 142.0).sized(52.0, 12.0),
             ],
         )),
     ]));

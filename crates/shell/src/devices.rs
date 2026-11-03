@@ -3057,7 +3057,9 @@ impl DeviceView {
         let device = self.target(editor.document(), args.device)?;
         let current = editor.document().device(device).expect("the target exists");
         if !matches!(&current.kind, DeviceKind::Native { device_type } if device_type == ANALOG) {
-            return Err(DeviceError::Unavailable(format!("{device} isn't an Analog")));
+            return Err(DeviceError::Unavailable(format!(
+                "{device} isn't an Analog"
+            )));
         }
         let (on, off) = (1.0, 0.0);
         let (f1, f2) = (filter::id(0, filter::ON), filter::id(1, filter::ON));

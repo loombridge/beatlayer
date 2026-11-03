@@ -130,12 +130,20 @@ fn each_lfo_moves_the_controls_of_its_own_side() {
         (amp::id(0, amp::LEVEL_LFO), 100.0),
     ] {
         let first = render(
-            &[(lfo::id(0, lfo::ON), 1.0), (lfo::id(0, lfo::RATE), 8.0), control],
+            &[
+                (lfo::id(0, lfo::ON), 1.0),
+                (lfo::id(0, lfo::RATE), 8.0),
+                control,
+            ],
             9_600,
             &notes,
         );
         let second = render(
-            &[(lfo::id(1, lfo::ON), 1.0), (lfo::id(1, lfo::RATE), 8.0), control],
+            &[
+                (lfo::id(1, lfo::ON), 1.0),
+                (lfo::id(1, lfo::RATE), 8.0),
+                control,
+            ],
             9_600,
             &notes,
         );
@@ -207,9 +215,18 @@ fn a_rectangle_lfo_switches_the_level_at_its_rate_and_width() {
     let level = |from: usize, to: usize| db(rms(&signal[from..to]));
     let plain = render(&[], 19_200, &[on(0, 57)]);
     let base = db(rms(&plain[2_000..4_000]));
-    assert!((level(200, 2_200) - base - 12.0).abs() < 1.0, "up for the first quarter");
-    assert!((level(2_800, 9_400) - base + 12.0).abs() < 1.0, "down for the rest");
-    assert!((level(9_800, 11_800) - base - 12.0).abs() < 1.0, "up again in the next cycle");
+    assert!(
+        (level(200, 2_200) - base - 12.0).abs() < 1.0,
+        "up for the first quarter"
+    );
+    assert!(
+        (level(2_800, 9_400) - base + 12.0).abs() < 1.0,
+        "down for the rest"
+    );
+    assert!(
+        (level(9_800, 11_800) - base - 12.0).abs() < 1.0,
+        "up again in the next cycle"
+    );
 }
 
 // Spec: analog R18. Every wave moves its destination, each its own way.
@@ -282,7 +299,10 @@ fn delay_and_attack_shape_the_lfo_and_offset_sets_its_start() {
     };
     let early = depth(&signal, 24_000);
     let late = depth(&signal, 36_000);
-    assert!(late > 1.5 * early, "the attack brings it in: {early} then {late}");
+    assert!(
+        late > 1.5 * early,
+        "the attack brings it in: {early} then {late}"
+    );
     // A quarter cycle in at the start, the sine is at its peak: +12 dB.
     let mut offset = level_lfo("Sine", 1.0, 100.0);
     offset.push((lfo::id(0, lfo::OFFSET), 90.0));
@@ -322,10 +342,18 @@ fn vibrato_moves_the_pitch_a_semitone_after_its_delay_and_attack() {
     let signal = render(&params, 96_000, &[on(0, 69)]);
     let a4 = frequency(69);
     // During the delay the pitch holds.
-    assert!(cents(pitch(&signal, 2_400, 22_000), a4).abs() < 3.0, "steady in the delay");
+    assert!(
+        cents(pitch(&signal, 2_400, 22_000), a4).abs() < 3.0,
+        "steady in the delay"
+    );
     // Once faded in, the pitch swings to a semitone either way.
     let swings: Vec<f64> = (0..24)
-        .map(|n| cents(pitch(&signal, 60_000 + n * 1_000, 60_000 + n * 1_000 + 1_800), a4))
+        .map(|n| {
+            cents(
+                pitch(&signal, 60_000 + n * 1_000, 60_000 + n * 1_000 + 1_800),
+                a4,
+            )
+        })
         .collect();
     let (high, low) = swings
         .iter()
@@ -334,10 +362,19 @@ fn vibrato_moves_the_pitch_a_semitone_after_its_delay_and_attack() {
     assert!((low + 100.0).abs() < 12.0, "down {low} cents");
     // During the attack the swing is part-way.
     let early: Vec<f64> = (0..8)
-        .map(|n| cents(pitch(&signal, 26_000 + n * 800, 26_000 + n * 800 + 1_800), a4).abs())
+        .map(|n| {
+            cents(
+                pitch(&signal, 26_000 + n * 800, 26_000 + n * 800 + 1_800),
+                a4,
+            )
+            .abs()
+        })
         .collect();
     let part = early.iter().copied().fold(0.0, f64::max);
-    assert!(part > 5.0 && part < 60.0, "a part of the swing: {part} cents");
+    assert!(
+        part > 5.0 && part < 60.0,
+        "a part of the swing: {part} cents"
+    );
 }
 
 // Spec: analog R19. Amt < MW adds the mod wheel's share to the amount.
@@ -351,12 +388,21 @@ fn the_mod_wheel_adds_to_the_vibratos_amount() {
     let swing = |notes: &[NoteEvent]| {
         let signal = render(&params, 48_000, notes);
         (0..16)
-            .map(|n| cents(pitch(&signal, 12_000 + n * 1_000, 12_000 + n * 1_000 + 1_800), frequency(69)).abs())
+            .map(|n| {
+                cents(
+                    pitch(&signal, 12_000 + n * 1_000, 12_000 + n * 1_000 + 1_800),
+                    frequency(69),
+                )
+                .abs()
+            })
             .fold(0.0, f64::max)
     };
     assert!(swing(&[on(0, 69)]) < 3.0, "the wheel down: no vibrato");
     let wheel_up = swing(&[mod_wheel(0, 1.0), on(0, 69)]);
-    assert!((wheel_up - 100.0).abs() < 12.0, "the wheel up: {wheel_up} cents");
+    assert!(
+        (wheel_up - 100.0).abs() < 12.0,
+        "the wheel up: {wheel_up} cents"
+    );
 }
 
 // Spec: analog R19, R29. Error varies each voice's rate and amount from the
@@ -374,7 +420,11 @@ fn error_varies_each_notes_vibrato_and_a_render_repeats() {
     let b = render(&params, 60_000, &notes);
     assert!(same(&a, &b), "the same seed, the same render");
     let flat = render(
-        &[(analog::VIB_ON, 1.0), (analog::VIB_AMOUNT, 60.0), (analog::VIB_RATE, 5.0)],
+        &[
+            (analog::VIB_ON, 1.0),
+            (analog::VIB_AMOUNT, 60.0),
+            (analog::VIB_RATE, 5.0),
+        ],
         60_000,
         &notes,
     );
@@ -397,7 +447,10 @@ fn volume_sets_the_output_down_to_silence() {
 fn unison_stacks_detuned_copies_at_the_voices_level() {
     let one = render(&[], 32_768, &[on(0, 69)]);
     let level = rms(&one[8_192..]);
-    for (voices, spread) in [("2", [-50.0, 50.0].as_slice()), ("4", &[-50.0, -50.0 / 3.0, 50.0 / 3.0, 50.0])] {
+    for (voices, spread) in [
+        ("2", [-50.0, 50.0].as_slice()),
+        ("4", &[-50.0, -50.0 / 3.0, 50.0 / 3.0, 50.0]),
+    ] {
         let signal = render(
             &[
                 (analog::UNI_ON, 1.0),
@@ -418,7 +471,10 @@ fn unison_stacks_detuned_copies_at_the_voices_level() {
             );
         }
         let kept = db(rms(&signal[8_192..]) / level);
-        assert!(kept.abs() < 1.5, "{voices} copies keep the level: {kept} dB");
+        assert!(
+            kept.abs() < 1.5,
+            "{voices} copies keep the level: {kept} dB"
+        );
     }
 }
 
@@ -456,8 +512,14 @@ fn a_voice_with_unison_counts_as_one_voice() {
     ];
     let signal = render(&params, 16_384, &[on(0, 57), on(0, 64)]);
     let both = &signal[4_096..];
-    assert!(synth::amplitude_at(both, frequency(57)) > 0.05, "the first sounds");
-    assert!(synth::amplitude_at(both, frequency(64)) > 0.05, "the second sounds");
+    assert!(
+        synth::amplitude_at(both, frequency(57)) > 0.05,
+        "the first sounds"
+    );
+    assert!(
+        synth::amplitude_at(both, frequency(64)) > 0.05,
+        "the second sounds"
+    );
 }
 
 // Spec: analog R21. Glide runs from the pitch before over Time, Const taking
@@ -477,17 +539,35 @@ fn glide_slides_between_notes_in_const_or_prop_time() {
     };
     let wide = glide("Const", 69, &[]);
     let hz = |signal: &[f32], at: usize| pitch(signal, at, at + 1_000);
-    assert!((hz(&wide, 16_200) / frequency(57) - 1.0).abs() < 0.12, "starts from the first note");
-    assert!((hz(&wide, 16_000 + 19_800) / frequency(69) - 1.0).abs() < 0.02, "arrives after Time");
+    assert!(
+        (hz(&wide, 16_200) / frequency(57) - 1.0).abs() < 0.12,
+        "starts from the first note"
+    );
+    assert!(
+        (hz(&wide, 16_000 + 19_800) / frequency(69) - 1.0).abs() < 0.02,
+        "arrives after Time"
+    );
     let mid = hz(&wide, 16_000 + 9_000);
-    assert!(mid > frequency(57) * 1.2 && mid < frequency(69) * 0.9, "on its way: {mid}");
+    assert!(
+        mid > frequency(57) * 1.2 && mid < frequency(69) * 0.9,
+        "on its way: {mid}"
+    );
     // Prop: a fifth takes 7/12 of the time an octave does.
     let fifth = glide("Prop", 64, &[]);
     let octave = glide("Prop", 69, &[]);
-    assert!((hz(&fifth, 16_000 + 12_000) / frequency(64) - 1.0).abs() < 0.02, "a fifth has arrived");
+    assert!(
+        (hz(&fifth, 16_000 + 12_000) / frequency(64) - 1.0).abs() < 0.02,
+        "a fifth has arrived"
+    );
     let early = hz(&octave, 16_000 + 12_000);
-    assert!(early < frequency(69) * 0.95, "the octave is still on its way: {early}");
-    assert!((hz(&octave, 16_000 + 19_800) / frequency(69) - 1.0).abs() < 0.02, "and arrives after Time");
+    assert!(
+        early < frequency(69) * 0.95,
+        "the octave is still on its way: {early}"
+    );
+    assert!(
+        (hz(&octave, 16_000 + 19_800) / frequency(69) - 1.0).abs() < 0.02,
+        "and arrives after Time"
+    );
     // Glide off, or at 0 ms, starts a note at its pitch.
     let off_glide = render(
         &[(analog::VOICE_COUNT, 1.0), (analog::GLIDE_TIME, 400.0)],
@@ -507,13 +587,20 @@ fn glide_legato_glides_only_into_a_held_key() {
         (analog::GLIDE_LEGATO, 1.0),
     ];
     let hz = |signal: &[f32], at: usize| pitch(signal, at, at + 1_000);
-    let released = render(&params, 40_000, &[on(0, 57), off(8_000, 57), on(16_000, 69)]);
+    let released = render(
+        &params,
+        40_000,
+        &[on(0, 57), off(8_000, 57), on(16_000, 69)],
+    );
     assert!(
         (hz(&released, 16_400) / frequency(69) - 1.0).abs() < 0.02,
         "a note after the key was let go starts at its pitch"
     );
     let held = render(&params, 40_000, &[on(0, 57), on(16_000, 69)]);
-    assert!(hz(&held, 16_400) < frequency(69) * 0.9, "a note over a held key glides");
+    assert!(
+        hz(&held, 16_400) < frequency(69) * 0.9,
+        "a note over a held key glides"
+    );
 }
 
 // Spec: analog R23. The keyboard's Octave, Semi and Detune transpose every
@@ -526,11 +613,18 @@ fn the_keyboard_transposes_and_stretches_the_notes() {
     };
     let a4 = frequency(69);
     let moved = at(
-        &[(analog::OCTAVE, 1.0), (analog::SEMI, -5.0), (analog::DETUNE, 50.0)],
+        &[
+            (analog::OCTAVE, 1.0),
+            (analog::SEMI, -5.0),
+            (analog::DETUNE, 50.0),
+        ],
         69,
     );
     let expected = a4 * 2f64.powf((12.0 - 5.0 + 0.5) / 12.0);
-    assert!((moved / expected - 1.0).abs() < 0.003, "{moved} against {expected}");
+    assert!(
+        (moved / expected - 1.0).abs() < 0.003,
+        "{moved} against {expected}"
+    );
     // Stretch 100 %: C3 stays and each octave above is 12 cents wider.
     assert!((at(&[(analog::STRETCH, 100.0)], 60) / frequency(60) - 1.0).abs() < 0.002);
     let wide = at(&[(analog::STRETCH, 100.0)], 84);
@@ -552,7 +646,10 @@ fn pb_range_sets_how_far_the_wheel_bends() {
         );
         let bent = pitch(&signal, 20_000, 30_000);
         let expected = frequency(57) * 2f64.powf(range / 12.0);
-        assert!((bent / expected - 1.0).abs() < 0.01, "range {range}: {bent} against {expected}");
+        assert!(
+            (bent / expected - 1.0).abs() < 0.01,
+            "range {range}: {bent} against {expected}"
+        );
     }
 }
 
@@ -560,7 +657,10 @@ fn pb_range_sets_how_far_the_wheel_bends() {
 #[test]
 fn the_keyboards_error_detunes_notes_from_the_seed() {
     let render_error = |value: f64| render(&[(analog::ERROR, value)], 16_384, &[on(0, 57)]);
-    assert!(same(&render_error(100.0), &render_error(100.0)), "repeatable");
+    assert!(
+        same(&render_error(100.0), &render_error(100.0)),
+        "repeatable"
+    );
     let off_pitch = pitch(&render_error(100.0), 4_000, 16_000);
     let by = cents(off_pitch, frequency(57));
     assert!(by.abs() <= 50.5 && by.abs() > 0.1, "off by {by} cents");
@@ -574,7 +674,8 @@ fn the_keyboards_error_detunes_notes_from_the_seed() {
 // which a new note takes.
 #[test]
 fn voices_and_priority_decide_which_notes_sound() {
-    let sounds = |signal: &[f32], key: u8| synth::amplitude_at(&signal[8_192..], frequency(key)) > 0.03;
+    let sounds =
+        |signal: &[f32], key: u8| synth::amplitude_at(&signal[8_192..], frequency(key)) > 0.03;
     let play_three = |voices: f64, priority: &str, keys: [u8; 3]| {
         render(
             &[
@@ -587,16 +688,28 @@ fn voices_and_priority_decide_which_notes_sound() {
     };
     // Last: the new note takes the oldest voice.
     let last = play_three(2.0, "Last", [57, 64, 69]);
-    assert!(!sounds(&last, 57) && sounds(&last, 64) && sounds(&last, 69), "Last");
+    assert!(
+        !sounds(&last, 57) && sounds(&last, 64) && sounds(&last, 69),
+        "Last"
+    );
     // High keeps the highest notes: a lower new note isn't played.
     let high = play_three(2.0, "High", [57, 64, 50]);
-    assert!(sounds(&high, 57) && sounds(&high, 64) && !sounds(&high, 50), "High");
+    assert!(
+        sounds(&high, 57) && sounds(&high, 64) && !sounds(&high, 50),
+        "High"
+    );
     // Low keeps the lowest.
     let low = play_three(2.0, "Low", [57, 64, 71]);
-    assert!(sounds(&low, 57) && sounds(&low, 64) && !sounds(&low, 71), "Low");
+    assert!(
+        sounds(&low, 57) && sounds(&low, 64) && !sounds(&low, 71),
+        "Low"
+    );
     // One voice plays Mono: the last note alone.
     let mono = play_three(1.0, "Last", [57, 64, 69]);
-    assert!(!sounds(&mono, 57) && !sounds(&mono, 64) && sounds(&mono, 69), "Mono");
+    assert!(
+        !sounds(&mono, 57) && !sounds(&mono, 64) && sounds(&mono, 69),
+        "Mono"
+    );
 }
 
 const PRIORITY_NAMES: [&str; 3] = ["High", "Low", "Last"];
@@ -642,11 +755,17 @@ fn pressure_and_slide_move_their_destinations_while_mpe_is_on() {
             "slot {slot} takes the level away"
         );
         assert!(
-            same(&routed(slot, "Osc 1 Level", -100.0, 0.0, &[on(0, 57), source]), &plain),
+            same(
+                &routed(slot, "Osc 1 Level", -100.0, 0.0, &[on(0, 57), source]),
+                &plain
+            ),
             "with MPE off, nothing moves"
         );
         assert!(
-            same(&routed(slot, "Osc 1 Level", 0.0, 1.0, &[on(0, 57), source]), &plain),
+            same(
+                &routed(slot, "Osc 1 Level", 0.0, 1.0, &[on(0, 57), source]),
+                &plain
+            ),
             "at 0 %, nothing moves"
         );
     }
@@ -689,7 +808,10 @@ fn pressure_and_slide_move_their_destinations_while_mpe_is_on() {
             )
         };
         let moved = rich(&[on(0, 57), pressure(1, 57, 1.0)]);
-        assert!(!same(&moved, &rich(&[on(0, 57)])), "destination {n}, {name}, moves the sound");
+        assert!(
+            !same(&moved, &rich(&[on(0, 57)])),
+            "destination {n}, {name}, moves the sound"
+        );
     }
 }
 
@@ -701,17 +823,31 @@ fn note_pb_bends_one_note_alone_over_its_range() {
         on_id(0, 69, 2),
         expression(12_000, 57, 1, NoteExpression::Bend, 0.5),
     ];
-    let signal = render(&[(analog::MPE_ON, 1.0), (analog::NOTE_PB, 12.0)], 32_768, &notes);
+    let signal = render(
+        &[(analog::MPE_ON, 1.0), (analog::NOTE_PB, 12.0)],
+        32_768,
+        &notes,
+    );
     let after = &signal[20_000..30_000];
     let bent = frequency(57) * 2f64.powf(6.0 / 12.0);
-    assert!(synth::amplitude_at(after, bent) > 5.0 * synth::amplitude_at(after, frequency(57)), "the first bent six semitones");
-    assert!(synth::amplitude_at(after, frequency(69)) > 0.05, "the second didn't move");
+    assert!(
+        synth::amplitude_at(after, bent) > 5.0 * synth::amplitude_at(after, frequency(57)),
+        "the first bent six semitones"
+    );
+    assert!(
+        synth::amplitude_at(after, frequency(69)) > 0.05,
+        "the second didn't move"
+    );
     // With MPE off a per-note bend does nothing.
     let flat = render(&[(analog::NOTE_PB, 12.0)], 32_768, &notes);
     let still = &flat[20_000..30_000];
     assert!(synth::amplitude_at(still, frequency(57)) > 5.0 * synth::amplitude_at(still, bent));
     // The range sets the bend: 24 semitones at half is a octave.
-    let wide = render(&[(analog::MPE_ON, 1.0), (analog::NOTE_PB, 24.0)], 32_768, &notes);
+    let wide = render(
+        &[(analog::MPE_ON, 1.0), (analog::NOTE_PB, 24.0)],
+        32_768,
+        &notes,
+    );
     let octave = frequency(57) * 2.0;
     assert!(synth::amplitude_at(&wide[20_000..30_000], octave) > 0.05);
 }
@@ -731,7 +867,12 @@ fn the_activity_lights_show_the_values_for_the_newest_note() {
     let mut seen = Vec::new();
     node.matrix_played(&mut |param, base, played| seen.push((param, base, played)));
     assert!(seen.is_empty(), "with no voice nothing is published");
-    synth::render(node.as_mut(), 4_096, 4_096, &[on(0, 57), pressure(1, 57, 1.0)]);
+    synth::render(
+        node.as_mut(),
+        4_096,
+        4_096,
+        &[on(0, 57), pressure(1, 57, 1.0)],
+    );
     node.matrix_played(&mut |param, base, played| seen.push((param, base, played)));
     assert_eq!(seen.len(), 1, "{seen:?}");
     assert_eq!(seen[0].0, osc::id(0, osc::LEVEL));
@@ -760,7 +901,13 @@ const RANDOM_PARTS: [(ParamId, f64); 16] = [
 ];
 
 fn phrase() -> [NoteEvent; 5] {
-    [on(0, 48), on(3_000, 55), off(9_000, 48), on(11_000, 60), off(14_000, 55)]
+    [
+        on(0, 48),
+        on(3_000, 55),
+        off(9_000, 48),
+        on(11_000, 60),
+        off(14_000, 55),
+    ]
 }
 
 // Spec: analog R29, R17. Every random value comes from the device's seed, so
@@ -771,9 +918,15 @@ fn lfos_vibrato_and_unison_render_the_same_run_after_run_and_at_any_block_size()
     let notes = phrase();
     let reference = play(&RANDOM_PARTS, 18_000, 4_096, &notes);
     assert!(rms(&reference) > 0.01, "it plays");
-    assert!(same(&reference, &play(&RANDOM_PARTS, 18_000, 4_096, &notes)), "run after run");
+    assert!(
+        same(&reference, &play(&RANDOM_PARTS, 18_000, 4_096, &notes)),
+        "run after run"
+    );
     for block in BLOCKS {
-        assert!(same(&play(&RANDOM_PARTS, 18_000, block, &notes), &reference), "block {block}");
+        assert!(
+            same(&play(&RANDOM_PARTS, 18_000, block, &notes), &reference),
+            "block {block}"
+        );
     }
 }
 
@@ -790,9 +943,15 @@ fn a_pitch_an_lfo_and_glide_move_renders_the_same_at_blocks_of_64_and_more() {
     ]);
     let notes = phrase();
     let reference = play(&params, 18_000, 4_096, &notes);
-    assert!(same(&reference, &play(&params, 18_000, 4_096, &notes)), "run after run");
+    assert!(
+        same(&reference, &play(&params, 18_000, 4_096, &notes)),
+        "run after run"
+    );
     for block in [64, 512] {
-        assert!(same(&play(&params, 18_000, block, &notes), &reference), "block {block}");
+        assert!(
+            same(&play(&params, 18_000, block, &notes), &reference),
+            "block {block}"
+        );
     }
 }
 
@@ -846,8 +1005,12 @@ fn pressure_moves_one_note_alone() {
     );
     let after = &signal[8_192..];
     assert!(
-        synth::amplitude_at(after, frequency(57)) < 0.05 * synth::amplitude_at(after, frequency(69)),
+        synth::amplitude_at(after, frequency(57))
+            < 0.05 * synth::amplitude_at(after, frequency(69)),
         "the pressed note lost its level"
     );
-    assert!(synth::amplitude_at(after, frequency(69)) > 0.05, "the other kept it");
+    assert!(
+        synth::amplitude_at(after, frequency(69)) > 0.05,
+        "the other kept it"
+    );
 }

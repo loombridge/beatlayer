@@ -159,11 +159,18 @@ fn an_agent_sets_quick_routing_and_reads_the_parameters_back() {
         json!({ "device": device, "routing": "serial" }),
     );
     assert_eq!(reply["results"][0]["result"]["routing"], "serial");
-    assert_eq!(value(&mut client, device, filter::id(0, filter::EXTRA)), 100.0);
+    assert_eq!(
+        value(&mut client, device, filter::id(0, filter::EXTRA)),
+        100.0
+    );
     assert_eq!(value(&mut client, device, amp::id(0, amp::ON)), 0.0);
     assert_eq!(value(&mut client, device, amp::id(1, amp::ON)), 1.0);
     // The readback the command names: the device's parameters.
-    let described = run(&mut client, "device.parameters", json!({ "device": device }));
+    let described = run(
+        &mut client,
+        "device.parameters",
+        json!({ "device": device }),
+    );
     let to_f2 = described["results"][0]["result"]["params"]
         .as_array()
         .unwrap()
@@ -180,7 +187,10 @@ fn an_agent_sets_quick_routing_and_reads_the_parameters_back() {
         )
         .unwrap();
     assert!(refused.ok().is_err(), "an unknown routing is refused");
-    assert_eq!(value(&mut client, device, filter::id(0, filter::EXTRA)), 100.0);
+    assert_eq!(
+        value(&mut client, device, filter::id(0, filter::EXTRA)),
+        100.0
+    );
 }
 
 // Spec: analog R24, R25 (the MPE routings are chosen slots of the matrix)
@@ -201,11 +211,18 @@ fn an_agent_routes_pressure_and_slide_and_reads_the_matrix_back() {
     assert_eq!(before["slots"].as_array().unwrap().len(), 4);
     assert_eq!(before["sources"][0]["name"], "Pressure");
     assert_eq!(before["sources"][1]["name"], "Slide");
-    assert_eq!(before["destinations"].as_array().unwrap().len(), DESTINATIONS.len());
+    assert_eq!(
+        before["destinations"].as_array().unwrap().len(),
+        DESTINATIONS.len()
+    );
     assert_eq!(before["slots"][0]["kind"], "chosen");
     assert_eq!(before["slots"][0]["destination"], Value::Null, "Off");
     // Slide's second slot to Amp 2 Level at -40 %, by its choosers.
-    let dest = 1.0 + DESTINATIONS.iter().position(|d| *d == "Amp 2 Level").unwrap() as f64;
+    let dest = 1.0
+        + DESTINATIONS
+            .iter()
+            .position(|d| *d == "Amp 2 Level")
+            .unwrap() as f64;
     for (param, to) in [(MPE[3].0, dest), (MPE[3].1, -40.0)] {
         run(
             &mut client,

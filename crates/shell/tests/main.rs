@@ -8,8 +8,8 @@
 bl_rt::install_trap!();
 
 mod agent_settings;
-mod apcs;
 mod analog;
+mod apcs;
 mod ara;
 mod arrangement;
 mod arranger;

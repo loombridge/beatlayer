@@ -162,12 +162,23 @@ mod tests {
         assert_eq!(wave(TRIANGLE, 0.0, 0.5, 0.0, 0.0), -1.0);
         assert_eq!(wave(TRIANGLE, 0.5, 0.5, 0.0, 0.0), 1.0);
         assert!((wave(TRIANGLE, 0.25, 0.5, 0.0, 0.0)).abs() < 1e-6);
-        assert_eq!(wave(TRIANGLE, 0.1, 0.1, 0.0, 0.0), 1.0, "width moves the peak");
+        assert_eq!(
+            wave(TRIANGLE, 0.1, 0.1, 0.0, 0.0),
+            1.0,
+            "width moves the peak"
+        );
         assert_eq!(wave(RECTANGLE, 0.2, 0.25, 0.0, 0.0), 1.0);
-        assert_eq!(wave(RECTANGLE, 0.3, 0.25, 0.0, 0.0), -1.0, "width is the duty cycle");
+        assert_eq!(
+            wave(RECTANGLE, 0.3, 0.25, 0.0, 0.0),
+            -1.0,
+            "width is the duty cycle"
+        );
         assert_eq!(wave(SAMPLE_AND_HOLD, 0.9, 0.5, 0.3, -0.7), 0.3);
         assert_eq!(wave(NOISE, 0.0, 0.5, 0.3, -0.7), 0.3);
-        assert!((wave(NOISE, 0.5, 0.5, 0.3, -0.7) + 0.2).abs() < 1e-6, "ramps between");
+        assert!(
+            (wave(NOISE, 0.5, 0.5, 0.3, -0.7) + 0.2).abs() < 1e-6,
+            "ramps between"
+        );
     }
 
     // Spec: analog R18
@@ -206,7 +217,10 @@ mod tests {
         for _ in 0..99 {
             lfo.step(SINE, 0.5, 0.01);
         }
-        assert!((lfo.phase() - 0.25).abs() < 1e-9, "a cycle in a hundred frames");
+        assert!(
+            (lfo.phase() - 0.25).abs() < 1e-9,
+            "a cycle in a hundred frames"
+        );
     }
 
     // Spec: analog R19, R29
@@ -225,6 +239,10 @@ mod tests {
         let mut random = Random::seeded(3);
         let mut steady = Vibrato::new();
         steady.start(0.0, &mut random);
-        assert_eq!((steady.rate, steady.amount), (1.0, 1.0), "no error, no variation");
+        assert_eq!(
+            (steady.rate, steady.amount),
+            (1.0, 1.0),
+            "no error, no variation"
+        );
     }
 }

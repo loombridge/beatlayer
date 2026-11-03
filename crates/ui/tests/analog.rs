@@ -158,9 +158,10 @@ fn quick_routings_four_buttons_each_run_their_command() {
         .run("device_view.scroll", json!({ "x": 2_000.0 }))
         .unwrap();
     h.settle();
-    for (button, routing) in QUICK_ROUTINGS
-        .into_iter()
-        .zip(["parallel", "split", "filter_1_only", "serial"])
+    for (button, routing) in
+        QUICK_ROUTINGS
+            .into_iter()
+            .zip(["parallel", "split", "filter_1_only", "serial"])
     {
         let nodes = Harness::nodes(&h.settle());
         let b = nodes
@@ -170,8 +171,14 @@ fn quick_routings_four_buttons_each_run_their_command() {
             .bounds
             .unwrap();
         h.take_events();
-        assert!(b.x1 < f64::from(h.size.x), "{button} is in the window: {b:?}");
-        h.click(pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32));
+        assert!(
+            b.x1 < f64::from(h.size.x),
+            "{button} is in the window: {b:?}"
+        );
+        h.click(pos2(
+            ((b.x0 + b.x1) / 2.0) as f32,
+            ((b.y0 + b.y1) / 2.0) as f32,
+        ));
         h.settle();
         let wanted = bl_shell::Invocation::new(
             "analog.quick_routing",

@@ -4,9 +4,7 @@
 //! step; and `device.display` reports each section's drawing. Driven through
 //! `Shell::invoke`, as an agent drives it.
 
-use bl_devices::analog::{
-    self, ANALOG, SECTIONS, amp, env, filter, lfo, noise, osc,
-};
+use bl_devices::analog::{self, ANALOG, SECTIONS, amp, env, filter, lfo, noise, osc};
 use bl_model::{DeviceDisplay, DeviceId, DeviceKind, DeviceRole, ParamId, TrackKind};
 use bl_shell::device_commands::{DeviceAdded, DeviceParameters};
 use bl_shell::{Area, Shell};
@@ -232,13 +230,21 @@ fn each_quick_routing_button_sets_its_routing_as_one_undo_step() {
             })
             .collect();
         assert_eq!(after, wanted, "{name}");
-        assert_eq!(tuning(&mut shell, device), tuned, "{name} changes no level or tuning");
+        assert_eq!(
+            tuning(&mut shell, device),
+            tuned,
+            "{name} changes no level or tuning"
+        );
         // One undo step, named for the button.
         let now = history(&shell);
         assert_eq!(now.len(), steps.len() + 1, "{name}: {now:?}");
         assert_eq!(now[0], "Quick Routing");
         shell.invoke("edit.undo", json!({})).unwrap();
-        assert_eq!(state(&mut shell, device), before, "{name}: one undo puts it back");
+        assert_eq!(
+            state(&mut shell, device),
+            before,
+            "{name}: one undo puts it back"
+        );
         assert_eq!(history(&shell), steps);
         shell.invoke("edit.redo", json!({})).unwrap();
     }
@@ -301,19 +307,33 @@ fn an_agent_reads_every_sections_drawing_headless() {
     };
     let before = attack(&mut shell);
     set(&mut shell, device, env::id(2, env::ATTACK), 2_000.0);
-    assert!(attack(&mut shell) > before, "a longer attack draws a longer rise");
+    assert!(
+        attack(&mut shell) > before,
+        "a longer attack draws a longer rise"
+    );
     let cutoff = |shell: &mut Shell| {
         let d = display(shell, device);
         let series = d.series("Filter 1 Response").unwrap();
-        series.values.iter().position(|&v| v < -3.0).unwrap_or(series.values.len())
+        series
+            .values
+            .iter()
+            .position(|&v| v < -3.0)
+            .unwrap_or(series.values.len())
     };
     set(&mut shell, device, filter::id(0, filter::FREQ), 200.0);
     let low = cutoff(&mut shell);
     set(&mut shell, device, filter::id(0, filter::FREQ), 5_000.0);
-    assert!(cutoff(&mut shell) > low, "a higher cutoff draws the response further right");
+    assert!(
+        cutoff(&mut shell) > low,
+        "a higher cutoff draws the response further right"
+    );
     set(&mut shell, device, lfo::id(0, lfo::WAVE), 2.0);
     let wave = display(&mut shell, device);
-    assert_eq!(wave.series("LFO 1 Wave").unwrap().values[0], 1.0, "a rectangle starts high");
+    assert_eq!(
+        wave.series("LFO 1 Wave").unwrap().values[0],
+        1.0,
+        "a rectangle starts high"
+    );
 }
 
 // Spec: analog R27
@@ -352,7 +372,10 @@ fn selecting_a_section_switches_the_display_and_is_no_undo_step() {
     assert_eq!(history(&shell), steps, "no undo step");
     assert_eq!(shell.is_dirty(), dirty, "the set is unchanged");
     let cells = |section: &str| &shown.iter().find(|(n, _)| *n == section).unwrap().1;
-    assert_eq!(cells("Filter 2"), &["Filter 2 Envelope", "Filter 2 Response"]);
+    assert_eq!(
+        cells("Filter 2"),
+        &["Filter 2 Envelope", "Filter 2 Response"]
+    );
     assert_eq!(cells("Amplifier 1"), &["Amp 1 Envelope"]);
     assert_eq!(cells("LFO 2"), &["LFO 2 Wave"]);
     assert_eq!(cells("Global"), &["Quick Routing"]);

@@ -525,12 +525,13 @@ pub fn analog_type() -> DeviceType {
         .iter()
         .map(|(name, list)| (*name, list.as_slice()))
         .collect();
-    DeviceType::native(ANALOG, "Analog", DeviceRole::Instrument).with_description(
-        DeviceDescription::new(params)
-            .with_layout(layout())
-            .with_banks(&slices),
-    )
-    .with_matrix(global::matrix_layout())
+    DeviceType::native(ANALOG, "Analog", DeviceRole::Instrument)
+        .with_description(
+            DeviceDescription::new(params)
+                .with_layout(layout())
+                .with_banks(&slices),
+        )
+        .with_matrix(global::matrix_layout())
 }
 
 /// The width of a display cell docked, in points at 100 %. (Beatlayer's own
@@ -830,7 +831,9 @@ fn bank_lists() -> Vec<(String, Vec<String>)> {
         let mut main = vec![prefix.clone()];
         main.extend(list(
             &prefix,
-            &["Wave", "Rate", "Sync", "Division", "Width", "Delay", "Attack"],
+            &[
+                "Wave", "Rate", "Sync", "Division", "Width", "Delay", "Attack",
+            ],
         ));
         banks.push(bank(format!("LFO {n}"), main));
         banks.push(bank(
@@ -839,7 +842,10 @@ fn bank_lists() -> Vec<(String, Vec<String>)> {
         ));
     }
     let names = |what: &[&str]| what.iter().map(|w| (*w).to_owned()).collect::<Vec<_>>();
-    banks.push(bank("Global".to_owned(), names(&["Volume", "Voices", "Priority"])));
+    banks.push(bank(
+        "Global".to_owned(),
+        names(&["Volume", "Voices", "Priority"]),
+    ));
     banks.push(bank(
         "Vibrato".to_owned(),
         names(&[
@@ -1285,6 +1291,19 @@ impl Values {
     }
 }
 
+/// The number a lane's noise source is seeded from, `n` telling its sources
+/// apart: the first copy of each of the first sixteen voices keeps the number
+/// it had before unison, so a render without unison is as it was; every other
+/// lane has numbers of its own.
+fn seed_index(lane: usize, n: usize) -> u32 {
+    let (voice, copy) = (lane / COPIES, lane % COPIES);
+    if copy == 0 && voice < 16 {
+        (voice + 16 * n) as u32
+    } else {
+        (64 + 2 * lane + n) as u32
+    }
+}
+
 /// The engine behind the voice section.
 struct Synth {
     rate: f32,
@@ -1423,12 +1442,10 @@ impl Synth {
             mode_of: [0; 2],
             resonance_of: [[0.0; LANES]; 2],
             envelopes: [0, 1, 2, 3].map(|_| Envelope::new()),
-            noise: core::array::from_fn(|l| 0x9E37_79B9u32.wrapping_mul(l as u32 + 1) | 1),
+            noise: core::array::from_fn(|l| 0x9E37_79B9u32.wrapping_mul(seed_index(l, 0) + 1) | 1),
             noise_low: [0.0; LANES],
             wild: [0, 1].map(|n| {
-                core::array::from_fn(|l| {
-                    0x85EB_CA6Bu32.wrapping_mul((l + LANES * n) as u32 + 1) | 1
-                })
+                core::array::from_fn(|l| 0x85EB_CA6Bu32.wrapping_mul(seed_index(l, n) + 1) | 1)
             }),
             dc: [[[0.0; 2]; LANES]; 2],
             notes: 0,
@@ -1743,8 +1760,8 @@ impl Synth {
                 let note = state.pitch(voices, voice, frames, skip + frame) as f32 + keyboard;
                 self.note_out[i] = note;
                 let seconds = state.frames_since_start(voice, at) as f64 * one;
-                for k in 0..2 {
-                    self.lfo_out[k][i] = if lfo_on[k] {
+                for (k, &running) in lfo_on.iter().enumerate() {
+                    self.lfo_out[k][i] = if running {
                         let (width, delay, attack) = (
                             v.at(lfo::id(k, lfo::WIDTH), at) / 100.0,
                             f64::from(v.at(lfo::id(k, lfo::DELAY), at)) * 1e-3,
@@ -1800,19 +1817,19 @@ impl Synth {
             for lane in 0..span {
                 if self.pending[lane] && clock(frame) >= self.audible[lane] {
                     self.pending[lane] = false;
-                    for n in 0..4 {
-                        self.envelopes[n].trigger(
+                    for (envelope, set) in self.envelopes.iter_mut().zip(&sets) {
+                        envelope.trigger(
                             lane,
-                            &sets[n],
-                            self.pending_legato[lane] && sets[n].legato,
+                            set,
+                            self.pending_legato[lane] && set.legato,
                             self.pending_velocity[lane],
                         );
                     }
                 }
                 let on = live(lane);
-                for n in 0..4 {
+                for (n, set) in sets.iter().enumerate() {
                     self.envelope_out[n][frame * LANES + lane] = if on {
-                        self.envelopes[n].step(lane, &sets[n])
+                        self.envelopes[n].step(lane, set)
                     } else {
                         0.0
                     };
@@ -1830,7 +1847,7 @@ impl Synth {
             core::array::from_fn(|k| v.at(osc::id(k, osc::SUB_SYNC), from) as usize);
         let shapes: [usize; 2] =
             core::array::from_fn(|k| v.at(osc::id(k, osc::SHAPE), from) as usize);
-        for k in 0..2 {
+        for (k, &mpe_moves) in mpe_pitch.iter().enumerate() {
             for frame in 0..count {
                 let at = |offset| v.at(osc::id(k, offset), from + frame);
                 let due = state.control_due(from + frame);
@@ -1860,25 +1877,16 @@ impl Synth {
                         0.0
                     };
                     let wave = self.lfo_out[k][vi];
-                    let moved_pitch = if mpe_pitch[k] {
-                        (self.matrix.add(
-                            global::DEST_OSC_PITCH + k,
-                            0.0,
-                            voice,
-                            frame,
-                            &read,
-                        ) * MPE_PITCH_SEMITONES) as f32
+                    let moved_pitch = if mpe_moves {
+                        (self
+                            .matrix
+                            .add(global::DEST_OSC_PITCH + k, 0.0, voice, frame, &read)
+                            * MPE_PITCH_SEMITONES) as f32
                     } else {
                         0.0
                     };
                     let spread = instrument::copy_cents(copy, copies[voice], unison) / 100.0;
-                    let pulse = self.moved(
-                        4 + k,
-                        at(osc::PULSE_WIDTH),
-                        voice,
-                        (frame, due),
-                        &read,
-                    );
+                    let pulse = self.moved(4 + k, at(osc::PULSE_WIDTH), voice, (frame, due), &read);
                     let base = (pulse / 100.0).clamp(0.01, 0.99) * 100.0 - 1.0;
                     self.pitch[k][i] = carried
                         + tune
@@ -2024,10 +2032,7 @@ impl Synth {
                 let knob = v.at(filter::id(0, filter::FREQ), at);
                 for lane in 0..span {
                     let (voice, i) = (lane / COPIES, frame * LANES + lane);
-                    let freq = pitch_of(
-                        self.moved(7, knob, voice, (frame, due), &read),
-                        REFERENCE,
-                    );
+                    let freq = pitch_of(self.moved(7, knob, voice, (frame, due), &read), REFERENCE);
                     let vi = frame * VOICES + voice;
                     self.follow[i] = freq
                         + v.cutoff_move(
@@ -2075,10 +2080,8 @@ impl Synth {
                 let at = from + frame;
                 let due = state.control_due(at);
                 let knob = v.at(filter::id(k, filter::FREQ), at);
-                let (reso_knob, follow) = (
-                    v.at(filter::id(k, filter::RESO), at),
-                    k == 1 && following,
-                );
+                let (reso_knob, follow) =
+                    (v.at(filter::id(k, filter::RESO), at), k == 1 && following);
                 for lane in 0..span {
                     let (voice, i) = (lane / COPIES, frame * LANES + lane);
                     let vi = frame * VOICES + voice;
@@ -2112,12 +2115,8 @@ impl Synth {
                 for frame in 0..count {
                     for lane in 0..span {
                         let i = frame * LANES + lane;
-                        self.audio[k][i] = drive(
-                            drive_mode,
-                            self.audio[k][i],
-                            &mut self.dc[k][lane],
-                            dc_pole,
-                        );
+                        self.audio[k][i] =
+                            drive(drive_mode, self.audio[k][i], &mut self.dc[k][lane], dc_pole);
                     }
                 }
             }

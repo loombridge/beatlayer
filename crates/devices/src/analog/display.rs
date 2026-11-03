@@ -7,14 +7,12 @@
 use core::f64::consts::PI;
 
 use bl_dsp::random::Random;
-use bl_model::{
-    DeviceDescription, DeviceDisplay, DeviceId, DisplaySeries, OrdMap, ParamId,
-};
+use bl_model::{DeviceDescription, DeviceDisplay, DeviceId, DisplaySeries, OrdMap, ParamId};
 
 use super::waves;
 use super::{
-    EnvSettings, Envelope, FORMANT_RESONANCE, FIRST_FORMANT, SEED, env, filter, formants,
-    kit_type, lfo,
+    EnvSettings, Envelope, FIRST_FORMANT, FORMANT_RESONANCE, SEED, env, filter, formants, kit_type,
+    lfo,
 };
 
 /// The series and cells of each envelope: Filter 1, Filter 2, Amplifier 1
@@ -269,7 +267,11 @@ mod tests {
 
     fn shown(changes: &[(ParamId, f64)]) -> DeviceDisplay {
         let (description, values) = values(changes);
-        display(DeviceId(bl_core::id::Id::new(1).unwrap()), &description, &values)
+        display(
+            DeviceId(bl_core::id::Id::new(1).unwrap()),
+            &description,
+            &values,
+        )
     }
 
     // Spec: analog R26
@@ -293,11 +295,24 @@ mod tests {
         ]);
         let series = shown.series(ENVELOPES[2]).unwrap();
         let peak = series.values.iter().copied().fold(0.0, f32::max);
-        assert!((peak - 1.0).abs() < 0.01, "full at the end of the attack: {peak}");
-        let held = series.values.iter().copied().find(|&x| (x - 0.4).abs() < 1e-4);
+        assert!(
+            (peak - 1.0).abs() < 0.01,
+            "full at the end of the attack: {peak}"
+        );
+        let held = series
+            .values
+            .iter()
+            .copied()
+            .find(|&x| (x - 0.4).abs() < 1e-4);
         assert!(held.is_some(), "it holds its sustain");
-        assert!(series.values.last().unwrap().abs() < 0.05, "and ends at silence");
-        assert!(series.x_range[1] > 900.0, "it spans the stages and a held note");
+        assert!(
+            series.values.last().unwrap().abs() < 0.05,
+            "and ends at silence"
+        );
+        assert!(
+            series.x_range[1] > 900.0,
+            "it spans the stages and a held note"
+        );
     }
 
     // Spec: analog R26
@@ -312,7 +327,10 @@ mod tests {
             (filter_ids::id(0, filter::RESO), 0.0),
         ]);
         let plain = plain.series(RESPONSES[0]).unwrap();
-        assert!(at(plain, 100.0).abs() < 0.3, "a low-pass passes below its cutoff");
+        assert!(
+            at(plain, 100.0).abs() < 0.3,
+            "a low-pass passes below its cutoff"
+        );
         assert!((at(plain, 1_000.0) + 3.0).abs() < 1.5, "3 dB down at it");
         assert!(at(plain, 8_000.0) < -30.0, "and falls above it");
         let resonant = shown(&[
@@ -320,13 +338,19 @@ mod tests {
             (filter_ids::id(0, filter::RESO), 90.0),
         ]);
         let resonant = resonant.series(RESPONSES[0]).unwrap();
-        assert!(at(resonant, 1_000.0) > at(plain, 1_000.0) + 6.0, "resonance peaks it");
+        assert!(
+            at(resonant, 1_000.0) > at(plain, 1_000.0) + 6.0,
+            "resonance peaks it"
+        );
         let high = shown(&[
             (filter_ids::id(0, filter::MODE), 6.0),
             (filter_ids::id(0, filter::FREQ), 1_000.0),
         ]);
         let high = high.series(RESPONSES[0]).unwrap();
-        assert!(at(high, 100.0) < -30.0 && at(high, 8_000.0).abs() < 0.5, "a high-pass");
+        assert!(
+            at(high, 100.0) < -30.0 && at(high, 8_000.0).abs() < 0.5,
+            "a high-pass"
+        );
     }
 
     // Spec: analog R26
@@ -348,10 +372,7 @@ mod tests {
     // Spec: analog R18, R26
     #[test]
     fn an_lfos_wave_draws_two_cycles_of_its_shape() {
-        let shown = shown(&[
-            (lfo::id(0, lfo::WAVE), 2.0),
-            (lfo::id(0, lfo::WIDTH), 50.0),
-        ]);
+        let shown = shown(&[(lfo::id(0, lfo::WAVE), 2.0), (lfo::id(0, lfo::WIDTH), 50.0)]);
         let series = shown.series(WAVES[0]).unwrap();
         assert_eq!(series.x_range, [0.0, 2.0]);
         assert_eq!(series.values[0], 1.0, "a rectangle starts high");

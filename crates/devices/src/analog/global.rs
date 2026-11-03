@@ -503,7 +503,12 @@ pub(super) fn pages() -> Vec<Page> {
                     ],
                 ),
                 band(BODY_HEIGHT, &mpe),
-                LayoutNode::Cell(DisplayCell::new(QUICK_ROUTING, CELL_WIDTH, BODY_HEIGHT, 1.0)),
+                LayoutNode::Cell(DisplayCell::new(
+                    QUICK_ROUTING,
+                    CELL_WIDTH,
+                    BODY_HEIGHT,
+                    1.0,
+                )),
             ]),
         )
         .with_section(band(

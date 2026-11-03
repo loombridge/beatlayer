@@ -2,7 +2,7 @@
 //! every note by a number of semitones, and keeps the result inside a window
 //! of keys by blocking, folding or limiting what falls outside it.
 //!
-//! Its panel is laid out as Live draws it (layout L-DEV-049): the Pitch knob
+//! Its panel is laid out as Live draws it (layout L-DEV-064): the Pitch knob
 //! over its stepper, then the window's Lowest and Range, and Mode.
 
 use bl_engine::{DeviceType, NoteBuffer, NoteEvent, NoteKind, Registry};

@@ -2,7 +2,7 @@
 //! notes above or below each note that comes in, each with its own velocity
 //! and chance, and can strum them.
 //!
-//! Its panel is laid out as Live draws it (layout L-DEV-053): six small knobs
+//! Its panel is laid out as Live draws it (layout L-DEV-068): six small knobs
 //! with an amount box under each, which the Velocity and Chance buttons turn
 //! between the shifts' velocities and their chances, and Strum, Tension and
 //! Crescendo at the right.
@@ -186,7 +186,7 @@ pub fn stack_type() -> DeviceType {
         .with_title_switch(USE_SCALE)
         .with_menu_options(&[DUPLICATES, PER_NOTE]);
     for n in 0..SHIFTS {
-        description = description.with_alternate(AMOUNTS, velocity(n), chance(n));
+        description = description.with_alternate_at((AMOUNTS, 1), velocity(n), chance(n));
     }
     DeviceType::native(STACK, "Chord", DeviceRole::MidiEffect).with_description(
         description.with_layout(layout()).with_banks(&[

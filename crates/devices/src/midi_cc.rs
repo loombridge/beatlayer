@@ -11,7 +11,7 @@
 //! sending its message beside it (the MIDI controller data spec, R3): both
 //! reach the next device, and the one that arrives last wins.
 //!
-//! Its panel is laid out as Live draws it (layout L-DEV-054): two rows of
+//! Its panel is laid out as Live draws it (layout L-DEV-069): two rows of
 //! four controls on each of the two pages its title-bar tabs show, with Learn
 //! and Send in the title bar.
 

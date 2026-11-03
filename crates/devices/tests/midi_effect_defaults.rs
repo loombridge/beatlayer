@@ -1,5 +1,5 @@
 //! A new MIDI effect starts as Live's panel reads in a new set (observed in
-//! Live 12.4.16 on 2 November 2026; layout L-DEV-048 to L-DEV-058): each
+//! Live 12.4.16 on 2 November 2026; layout L-DEV-063 to L-DEV-073): each
 //! parameter's default, as its control reads it. Live writes a few of these
 //! with a sign (`+12 st`) or with `∞`, which the parameter formats don't.
 

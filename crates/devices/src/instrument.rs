@@ -73,6 +73,10 @@ pub struct Parts {
     pub voices_one_is_mono: bool,
     /// Poly or Mono ([`voice_mode`]).
     pub voice_mode: Option<ParamId>,
+    /// Whether the Voice Mode is the four-way [`voice_modes`] chooser, where
+    /// Voices counts copies and a note takes one voice per copy it plays
+    /// (Drift).
+    pub copy_modes: bool,
     /// Priority ([`priority`]).
     pub priority: Option<ParamId>,
     /// Legato in Mono ([`legato`]).
@@ -136,6 +140,18 @@ pub fn voice_mode(id: ParamId, default: bool) -> ParamDescriptor {
     ParamDescriptor::choice(id, "Voice Mode", &["Poly", "Mono"], usize::from(default))
         .describe("Poly plays every note on a voice of its own; Mono plays one note at a time.")
 }
+
+/// Voice Mode, Drift's four: Poly, Mono, Stereo or Unison.
+#[must_use]
+pub fn voice_modes(id: ParamId) -> ParamDescriptor {
+    ParamDescriptor::choice(id, "Voice Mode", &["Poly", "Mono", "Stereo", "Unison"], 0).describe(
+        "Poly plays every note on a voice of its own; Mono plays one note at a time on four voices; Stereo plays two voices per note, left and right; Unison plays four detuned voices per note.",
+    )
+}
+
+/// How many copies of a note each [`voice_modes`] choice plays: Poly one, Mono
+/// four, Stereo two, Unison four.
+pub const MODE_COPIES: [usize; 4] = [1, 4, 2, 4];
 
 /// Priority: which notes a new note past Voices keeps (R3).
 #[must_use]
@@ -386,9 +402,29 @@ impl Config {
                 params.value(params.index(id).expect("the device describes its parts"))
             })
         };
-        let voices = (get(parts.voices, capacity as f64) as usize).clamp(1, capacity);
-        let mono = get(parts.voice_mode, 0.0) >= 0.5
-            || (parts.voice_mode.is_none() && parts.voices_one_is_mono && voices == 1);
+        let mut voices = (get(parts.voices, capacity as f64) as usize).clamp(1, capacity);
+        let raw_mode = get(parts.voice_mode, 0.0);
+        let mode = raw_mode as usize;
+        let mono = if parts.copy_modes {
+            mode == 1
+        } else {
+            raw_mode >= 0.5
+                || (parts.voice_mode.is_none() && parts.voices_one_is_mono && voices == 1)
+        };
+        let copies = if parts.copy_modes {
+            let copies = MODE_COPIES[mode.min(3)];
+            // Spec: polysynth R26. A Stereo or Unison note takes a voice
+            // per copy, so Voices counts copies.
+            if mode >= 2 {
+                voices = (voices / copies).max(1);
+            }
+            copies
+        } else if get(parts.unison_on, 1.0) < 0.5 {
+            1
+        } else {
+            let n = get(parts.unison_voices, 1.0) as usize;
+            (if parts.unison_choice { 2 + 2 * n } else { n }).clamp(1, copies_max)
+        };
         let pb_range = get(parts.pb_range, f64::from(MPE_RANGE)) as f32;
         Self {
             voices,
@@ -411,12 +447,7 @@ impl Config {
             poly_glide: parts.poly_glide,
             scale_aware: get(parts.use_scale, 0.0) >= 0.5,
             glide_scale: get(parts.use_scale, 0.0) >= 0.5 && get(parts.scale_and, 1.0) >= 0.5,
-            copies: if get(parts.unison_on, 1.0) < 0.5 {
-                1
-            } else {
-                let n = get(parts.unison_voices, 1.0) as usize;
-                (if parts.unison_choice { 2 + 2 * n } else { n }).clamp(1, copies_max)
-            },
+            copies,
             detune: get(parts.unison_detune, 0.0) as f32,
             spread: (get(parts.unison_spread, 0.0) / 100.0) as f32,
             delay_ms: get(parts.unison_delay, 0.0) as f32,
@@ -582,6 +613,16 @@ impl State {
     pub fn oldest(&self, voices: &VoiceBlock) -> Option<usize> {
         voices
             .active_voices()
+            .min_by_key(|&voice| self.started[voice])
+    }
+
+    /// The oldest of the voices in `mask`: a device that knows sooner than the
+    /// section which voices still sound picks the one a global destination
+    /// reads from itself.
+    #[must_use]
+    pub fn oldest_of(&self, mask: u32) -> Option<usize> {
+        (0..MAX_VOICES)
+            .filter(|&voice| mask >> voice & 1 == 1)
             .min_by_key(|&voice| self.started[voice])
     }
 

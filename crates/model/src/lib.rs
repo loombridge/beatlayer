@@ -100,6 +100,7 @@ pub mod note_expression;
 pub mod note_ops;
 mod pad_layout;
 pub mod param;
+pub mod partials;
 pub mod rack;
 mod record_quantization;
 pub mod registry;
@@ -162,6 +163,7 @@ pub use matrix::{FreeRoutes, MatrixError, MatrixLayout, ModRoute};
 pub use mpe_settings::{MAX_NOTE_CHANNELS, MpeMode, MpeSettings, MpeZone, PluginMpe};
 pub use mpe_view::{DEFAULT_LANE_HEIGHT, MpeLane, MpeView};
 pub use note_expression::Expression;
+pub use partials::Partials;
 pub mod freeze;
 pub use chord_lane::{ChordRegion, MAX_TRANSPOSE};
 pub use colour::{Colour, DEFAULT_TRACK_PALETTE, SWATCHES, TRACK_COLOURS, id_swatch, swatch_rgb};
@@ -194,8 +196,8 @@ pub use locator::{Locator, SongStart};
 pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound};
 pub use pad_layout::{PadDirection, PadLayout, PadSpacing};
 pub use param::{
-    BANK_SIZE, Bank, DeviceDescription, ParamDescriptor, ParamKind, ParamLabel, ParamUnit, Relabel,
-    numbered,
+    BANK_SIZE, Bank, DeviceDescription, LabelLaw, ParamDescriptor, ParamKind, ParamLabel,
+    ParamUnit, Relabel, numbered,
 };
 pub use rack::{
     CHAIN_COLOURS, CHAIN_SELECTOR, Chain, ChainMixer, ChainSend, ChainZones, DEFAULT_PLAY,

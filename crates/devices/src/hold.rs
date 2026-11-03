@@ -3,7 +3,7 @@
 //! notes when keys are released instead of when they are pressed, or
 //! latches them.
 //!
-//! Its panel is laid out as Live draws it (layout L-DEV-052): Trigger over
+//! Its panel is laid out as Live draws it (layout L-DEV-067): Trigger over
 //! Gate and Length, and the three release controls greyed while Trigger is
 //! Note On.
 

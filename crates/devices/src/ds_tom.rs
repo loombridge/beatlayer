@@ -6,21 +6,21 @@
 use std::f64::consts::TAU;
 
 use bl_engine::{DeviceType, Registry};
-use bl_model::ParamUnit;
-use bl_model::device_layout::Widget;
 use bl_model::{
     DeviceDescription, DeviceDisplay, DeviceId, DeviceRole, OrdMap, ParamDescriptor, ParamId,
+    ParamUnit,
 };
 
 use crate::drum_synth::{
-    DECAY, DrumSynth, Filter, Hit, Pass, Preset, VOLUME, decay, layout, master_at, percent, volume,
+    DECAY, DrumSynth, Filter, Hit, Pass, Preset, VOLUME, decay, decay_ms, large, master_at,
+    note_reading, panel, percent, reading, volume,
 };
 use crate::framework::{ParamBank, add};
 
 /// DS Tom's device type id.
 pub const DS_TOM: &str = "beatlayer.ds_tom";
 
-/// The tom's tuning in hertz.
+/// The tom's tuning, 0 to 100: [`pitch_hz`] gives its hertz.
 pub const PITCH: ParamId = ParamId(2);
 /// The low-pass's cutoff and gain.
 pub const COLOR: ParamId = ParamId(3);
@@ -28,6 +28,17 @@ pub const COLOR: ParamId = ParamId(3);
 pub const TONE: ParamId = ParamId(4);
 /// How far above its pitch the sine starts.
 pub const BEND: ParamId = ParamId(5);
+
+/// The tom's tuning at Pitch 0, in hertz, and the factor Pitch 100 raises it
+/// by (ten times: 43.1 Hz to 431 Hz).
+const PITCH_HZ: f64 = 43.1;
+const PITCH_RANGE: f64 = 10.0;
+
+/// What Pitch's `value` tunes the tom to, in hertz, on a logarithmic travel.
+#[must_use]
+pub fn pitch_hz(value: f64) -> f64 {
+    PITCH_HZ * PITCH_RANGE.powf(value / 100.0)
+}
 
 /// The next four modes of a circular membrane, as multiples of the pitch
 /// (the physical models spec, R1).
@@ -52,41 +63,44 @@ const BEND_OCTAVES: f64 = 1.0;
 #[must_use]
 pub fn ds_tom_type() -> DeviceType {
     let params = vec![
-        decay(500.0),
+        decay(56.0),
         volume(),
-        ParamDescriptor::continuous(PITCH, "Pitch", (40.0, 400.0), 110.0, ParamUnit::Hertz)
-            .logarithmic()
-            .describe("The tom's tuning in hertz, whatever key plays it."),
+        ParamDescriptor::continuous(PITCH, "Pitch", (0.0, 100.0), 29.0, ParamUnit::None)
+            .decimals(0)
+            .describe(
+                "The tom's tuning, from 43.1 Hz at 0 to 431 Hz at 100 on a logarithmic travel, \
+                 whatever key plays it; the panel reads its hertz under it.",
+            ),
         percent(
             COLOR,
             "Color",
-            50.0,
+            43.0,
             "Raises the low-pass's cutoff from 1 kHz to 10 kHz and its gain by up to 6 dB.",
         ),
         percent(
             TONE,
             "Tone",
-            30.0,
+            100.0,
             "The level of four resonant band-passes at a membrane's overtones.",
         ),
         percent(
             BEND,
             "Bend",
-            50.0,
+            31.0,
             "How far above its pitch the sine starts, up to an octave, falling to the pitch \
              over half of Decay.",
-        ),
+        )
+        .decimals(1),
     ];
     DeviceType::native(DS_TOM, "DS Tom", DeviceRole::Instrument).with_description(
         DeviceDescription::new(params)
-            .with_layout(layout(&[
-                (PITCH, Widget::Knob),
-                (COLOR, Widget::Knob),
-                (TONE, Widget::Knob),
-                (BEND, Widget::Knob),
-                (DECAY, Widget::Knob),
-                (VOLUME, Widget::Knob),
-            ]))
+            .with_layout(panel(
+                (
+                    vec![large(PITCH, 0), large(COLOR, 1), large(TONE, 2)],
+                    Vec::new(),
+                ),
+                [BEND, DECAY, VOLUME],
+            ))
             .with_banks(&[
                 ("Tone", &["Pitch", "Color", "Tone", "Bend"]),
                 ("Level", &["Decay", "Volume"]),
@@ -99,31 +113,31 @@ pub const PRESETS: [Preset; 3] = [
     Preset {
         name: "Floor",
         params: &[
-            (PITCH, 80.0),
+            (PITCH, 27.0),
             (COLOR, 35.0),
             (TONE, 40.0),
             (BEND, 40.0),
-            (DECAY, 700.0),
+            (DECAY, 70.9),
         ],
     },
     Preset {
         name: "Rack",
         params: &[
-            (PITCH, 160.0),
+            (PITCH, 57.1),
             (COLOR, 60.0),
             (TONE, 30.0),
             (BEND, 60.0),
-            (DECAY, 450.0),
+            (DECAY, 63.5),
         ],
     },
     Preset {
         name: "Electro",
         params: &[
-            (PITCH, 220.0),
+            (PITCH, 70.9),
             (COLOR, 85.0),
             (TONE, 0.0),
             (BEND, 100.0),
-            (DECAY, 300.0),
+            (DECAY, 56.8),
         ],
     },
 ];
@@ -144,9 +158,16 @@ pub fn display(
     description: &DeviceDescription,
     values: &OrdMap<ParamId, f64>,
 ) -> DeviceDisplay {
-    crate::drum_synth::display(device, description, values, |value, ms| {
-        master_at(ms, value(DECAY))
-    })
+    crate::drum_synth::display(
+        device,
+        description,
+        values,
+        |value| {
+            let hz = pitch_hz(value(PITCH));
+            vec![note_reading(hz), reading("Pitch", format!("{hz:.1} Hz"))]
+        },
+        |value, ms| master_at(ms, decay_ms(value(DECAY))),
+    )
 }
 
 /// One tom hit.
@@ -181,8 +202,8 @@ impl Hit for Tom {
     fn frame(&mut self, bank: &ParamBank, frame: usize, master: f32) -> (f32, f32) {
         let at = |id: ParamId| f64::from(bank.ramp(id.0 as usize)[frame]);
         let t = f64::from(self.age) / self.rate;
-        let pitch = at(PITCH);
-        let half_decay = at(DECAY) / 2000.0;
+        let pitch = pitch_hz(at(PITCH));
+        let half_decay = decay_ms(at(DECAY)) / 2000.0;
         // The sine starts Bend up and falls to its pitch over half of Decay.
         let octaves = BEND_OCTAVES * at(BEND) / 100.0 * (1.0 - t / half_decay).max(0.0);
         self.phase = (self.phase + pitch * 2f64.powf(octaves) / self.rate).fract();

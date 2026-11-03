@@ -3,7 +3,7 @@
 //! notes that come in to the notes that go out, then transposes the result.
 //! Notes mapped to nothing play nothing.
 //!
-//! Its panel is laid out as Live draws it (layout L-DEV-051): the 13 by 13
+//! Its panel is laid out as Live draws it (layout L-DEV-066): the 13 by 13
 //! grid, which the Map parameters are the columns of, beside the choosers,
 //! Transpose, Fold, Lowest and Range.
 

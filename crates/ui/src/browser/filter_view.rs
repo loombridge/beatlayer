@@ -12,7 +12,7 @@ use egui::{Align2, Id, Key, Rect, Sense, Stroke, StrokeKind, Ui, UiBuilder, pos2
 use serde_json::json;
 
 use super::{BrowserUi, Glyph, bounds, command, glyph, invoke};
-use crate::layout::{BROWSER_ROW, BrowserLayout};
+use crate::layout::{BrowserLayout, list_row};
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
 
@@ -165,10 +165,10 @@ impl BrowserUi {
         let groups = state.groups.clone();
         let width = area.width();
         let lines = self.filter_lines(ui, theme, &groups, width).to_vec();
-        let content = lines.len() as f32 * BROWSER_ROW;
+        let content = lines.len() as f32 * list_row();
         self.filter_scroll = super::scrolled(ui, area, self.filter_scroll, content);
-        let first = (self.filter_scroll / BROWSER_ROW).floor() as usize;
-        let visible = ((area.height() / BROWSER_ROW).ceil() as usize + 1)
+        let first = (self.filter_scroll / list_row()).floor() as usize;
+        let visible = ((area.height() / list_row()).ceil() as usize + 1)
             .min(lines.len().saturating_sub(first));
 
         // The tag buttons in the order the arrow keys walk them.
@@ -186,8 +186,8 @@ impl BrowserUi {
         clip_ui.set_clip_rect(area);
         let mut noted: Vec<usize> = Vec::new();
         for (offset, line) in lines.iter().enumerate().skip(first).take(visible) {
-            let top = area.top() + offset as f32 * BROWSER_ROW - self.filter_scroll;
-            let row = Rect::from_min_size(pos2(area.left(), top), vec2(area.width(), BROWSER_ROW));
+            let top = area.top() + offset as f32 * list_row() - self.filter_scroll;
+            let row = Rect::from_min_size(pos2(area.left(), top), vec2(area.width(), list_row()));
             let group = &groups[line.group];
             let group_id = filter_group_id(&group.name);
             if !noted.contains(&line.group) {
@@ -550,7 +550,7 @@ impl BrowserUi {
             );
             ui.close();
         }
-        ui.separator();
+        crate::menus::separator(ui);
         if item(ui, "Show All Filter Groups", false, true).clicked() {
             invoke(events, ids::SET_FILTER_GROUPS, json!({ "show_all": true }));
             ui.close();
@@ -570,7 +570,7 @@ impl BrowserUi {
             invoke(events, ids::SET_FILTER_GROUPS, json!({ "reset": true }));
             ui.close();
         }
-        ui.separator();
+        crate::menus::separator(ui);
         for group in &state.menu {
             if item(ui, &group.name, group.shown, true).clicked() {
                 invoke(

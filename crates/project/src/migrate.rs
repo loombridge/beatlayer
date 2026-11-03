@@ -18,7 +18,7 @@ use serde_json::{Map, Value};
 use crate::error::LoadError;
 
 /// The schema version this build writes, and the newest it can read.
-pub const SCHEMA_VERSION: u32 = 14;
+pub const SCHEMA_VERSION: u32 = 15;
 
 /// The oldest schema version this build can read, through [`MIGRATIONS`].
 pub const OLDEST_SCHEMA_VERSION: u32 = SCHEMA_VERSION - MIGRATIONS.len() as u32;
@@ -139,6 +139,22 @@ pub const MIGRATIONS: &[Migration] = &[
                   video spec, R5); a set saved before them holds none, so the saved JSON \
                   itself needs nothing",
         apply: Ok,
+    },
+    Migration {
+        from: 14,
+        summary: "Glue Compressor's Range, and Drum Buss's Damp, Decay and Transients, read in \
+                  Live's units, and Compressor, Glue Compressor, Gate, Multiband Dynamics, Drum \
+                  Buss, Channel EQ, EQ Three and Spectrum start at Live's values (the \
+                  device specs); each of those devices names every parameter whose start moved \
+                  at the value it had, the four parameters' values, automation points, \
+                  automation envelopes of clips, and macro ranges are converted, and Multiband \
+                  Dynamics' highest boost is 18 dB where it was 24 dB. A conversion between \
+                  breakpoints is taken point by point, which bends the curve a little where \
+                  Damp's and Decay's units aren't linear in each other",
+        apply: |mut value| {
+            dynamics_panels(&mut value);
+            Ok(value)
+        },
     },
 ];
 
@@ -317,6 +333,210 @@ fn pin_settings(owner: &mut Map<String, Value>, key: &str) {
         beats
             .entry("transient_loop_mode")
             .or_insert_with(|| Value::from("loop_forward"));
+    }
+}
+
+/// The device types the version 14 to 15 step changes (`bl-devices` names
+/// them; this crate can't depend on it).
+const SQUEEZE: &str = "beatlayer.squeeze";
+const BOND: &str = "beatlayer.bond";
+const SHUTTER: &str = "beatlayer.shutter";
+const TRIBAND: &str = "beatlayer.triband";
+const BUSS: &str = "beatlayer.buss";
+const STRIP: &str = "beatlayer.strip";
+const TRIAD: &str = "beatlayer.triad";
+const SPECTRUM: &str = "beatlayer.spectrum";
+
+/// Glue Compressor's Range and Drum Buss's Damp, Decay and Transients, by
+/// their device type and parameter ID.
+const RANGE: u64 = 5;
+const DAMP: u64 = 5;
+const TRANSIENTS: u64 = 6;
+const DECAY: u64 = 10;
+
+/// Drum Buss's Damp in Hz for `percent`, the corner it set before it was
+/// read in Hz (20 kHz at 0 %, 200 Hz at 100 %, even in octaves).
+fn damp_hz(percent: f64) -> f64 {
+    20_000.0 * (200.0 / 20_000.0_f64).powf(percent / 100.0)
+}
+
+/// Drum Buss's Decay in per cent for `ms`, the ring-down it set before it
+/// was read in per cent (10 ms at 0 %, 2 s at 100 %, even in octaves).
+fn decay_percent(ms: f64) -> f64 {
+    (100.0 * (ms.max(10.0) / 10.0).ln() / 200.0_f64.ln()).min(100.0)
+}
+
+/// The conversion from the old unit to the new, for a parameter that
+/// changed its unit.
+fn reunited(device_type: &str, param: u64) -> Option<fn(f64) -> f64> {
+    match (device_type, param) {
+        (BOND, RANGE) => Some(|range| -range),
+        (BUSS, DAMP) => Some(damp_hz),
+        (BUSS, DECAY) => Some(decay_percent),
+        (BUSS, TRANSIENTS) => Some(|percent| percent / 100.0),
+        _ => None,
+    }
+}
+
+/// Whether the parameter's travel runs the other way than it did, so a share
+/// of it (a modulation envelope's value, a macro's range) turns over.
+fn reversed(device_type: &str, param: u64) -> bool {
+    matches!((device_type, param), (BOND, RANGE) | (BUSS, DAMP))
+}
+
+/// The values the parameters of `device_type` started at before version 15,
+/// as (parameter ID, value) in the units of version 15, for the ones whose
+/// start moved.
+fn started_at(device_type: &str) -> Vec<(u64, f64)> {
+    match device_type {
+        SQUEEZE => vec![(6, 0.0), (7, 0.0), (12, 0.0), (13, 0.0), (14, 500.0)],
+        BOND => vec![(RANGE, 60.0)],
+        // Floor was a linear gain, 0 for −∞ dB.
+        SHUTTER => vec![
+            (0, -30.0),
+            (1, 6.0),
+            (2, 1.0),
+            (3, 20.0),
+            (4, 100.0),
+            (5, 0.0),
+        ],
+        TRIBAND => {
+            let mut started = vec![(2, 500.0), (3, 2_000.0), (5, 0.0)];
+            for band in 0..3 {
+                let first = 16 + 16 * band;
+                started.extend([
+                    (first + 4, -12.0),
+                    (first + 6, 10.0),
+                    (first + 7, 100.0),
+                    (first + 8, -48.0),
+                    (first + 10, 10.0),
+                    (first + 11, 100.0),
+                ]);
+            }
+            started
+        }
+        BUSS => vec![
+            (3, 0.0),
+            (DAMP, damp_hz(0.0)),
+            (8, 60.0),
+            (DECAY, decay_percent(200.0)),
+        ],
+        STRIP => vec![(3, 1_000.0)],
+        TRIAD => vec![(8, 0.0)],
+        SPECTRUM => vec![(0, 3.0), (2, 50.0), (5, 0.0), (7, 0.0)],
+        _ => Vec::new(),
+    }
+}
+
+/// Calls `visit` on every object in the saved JSON `value`, outside in.
+fn each_object(value: &mut Value, visit: &mut impl FnMut(&mut Map<String, Value>)) {
+    match value {
+        Value::Object(fields) => {
+            visit(fields);
+            fields
+                .values_mut()
+                .for_each(|child| each_object(child, visit));
+        }
+        Value::Array(items) => items.iter_mut().for_each(|item| each_object(item, visit)),
+        _ => {}
+    }
+}
+
+/// Version 14 to 15 (T658): the parameters of the eight devices whose panels
+/// took Live's units and starting values. In `value`, each such device's
+/// saved values (both states) are converted where the unit changed, and
+/// every parameter whose start moved and that the device doesn't list is
+/// listed at the value it started at. The envelopes and macro ranges that
+/// name those parameters follow: breakpoints of an automation envelope
+/// are in the parameter's units, and a share of a reversed travel turns over.
+pub(crate) fn dynamics_panels(value: &mut Value) {
+    let mut devices = std::collections::HashMap::new();
+    each_object(value, &mut |device| {
+        let Some(device_type) = device
+            .get("kind")
+            .and_then(|kind| kind.get("native"))
+            .and_then(|native| native.get("device_type"))
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+        else {
+            return;
+        };
+        if let Some(id) = device.get("id").and_then(Value::as_u64) {
+            devices.insert(id, device_type.clone());
+        }
+        for key in ["params", "other_params"] {
+            if let Some(Value::Array(pairs)) = device.get_mut(key) {
+                restate_params(pairs, &device_type);
+            }
+        }
+    });
+    each_object(value, &mut |object| {
+        let Some(target) = object.get("target") else {
+            return;
+        };
+        let (Some(device), Some(param)) = (
+            target.get("device").and_then(Value::as_u64),
+            target.get("param").and_then(Value::as_u64),
+        ) else {
+            return;
+        };
+        let Some(device_type) = devices.get(&device) else {
+            return;
+        };
+        let convert = reunited(device_type, param);
+        let reversed = reversed(device_type, param);
+        let automation = object.get("kind").and_then(Value::as_str) == Some("automation");
+        if let Some(points) = object.get_mut("points") {
+            // A track's automation.
+            map_values(points, convert);
+        } else if let Some(points) = object
+            .get_mut("envelope")
+            .and_then(|envelope| envelope.get_mut("points"))
+        {
+            // A clip's envelope: automation in the parameter's units,
+            // modulation in shares of its travel.
+            if automation {
+                map_values(points, convert);
+            } else if reversed {
+                map_values(points, Some(|share| -share));
+            }
+        } else if object.contains_key("macro_number") && reversed {
+            for key in ["min", "max"] {
+                if let Some(position) = object.get(key).and_then(Value::as_f64) {
+                    object.insert(key.to_owned(), Value::from(1.0 - position));
+                }
+            }
+        }
+    });
+}
+
+/// Converts the values of a device's `[parameter, value]` pairs where the
+/// unit changed, then lists the parameters whose start moved that aren't
+/// there, in parameter order.
+fn restate_params(pairs: &mut Vec<Value>, device_type: &str) {
+    for pair in pairs.iter_mut() {
+        if let Some([param, value]) = pair.as_array_mut().map(Vec::as_mut_slice)
+            && let (Some(param), Some(old)) = (param.as_u64(), value.as_f64())
+            && let Some(convert) = reunited(device_type, param)
+        {
+            *value = Value::from(convert(old));
+        }
+    }
+    for (param, started) in started_at(device_type) {
+        if !pairs.iter().any(|pair| pair[0].as_u64() == Some(param)) {
+            pairs.push(Value::from(vec![Value::from(param), Value::from(started)]));
+        }
+    }
+    pairs.sort_by_key(|pair| pair[0].as_u64());
+}
+
+/// Sets each breakpoint's value in `points` to `convert` of it.
+fn map_values(points: &mut Value, convert: Option<fn(f64) -> f64>) {
+    let Some(convert) = convert else { return };
+    for point in points.as_array_mut().into_iter().flatten() {
+        if let Some(old) = point.get("value").and_then(Value::as_f64) {
+            point["value"] = Value::from(convert(old));
+        }
     }
 }
 
@@ -876,5 +1096,79 @@ mod tests {
             ]),
             "no pressure before the first point, as it played"
         );
+    }
+
+    // Spec: bus-compressor R1, drum-buss R7
+    #[test]
+    fn the_dynamics_panels_step_converts_units_and_names_the_old_starts() {
+        let device = |id: u64, device_type: &str, params: Value| json!({ "id": id, "kind": { "native": { "device_type": device_type } }, "params": params });
+        let target =
+            |device: u64, param: u64| json!({ "type": "device", "device": device, "param": param });
+        let mut glue = device(10, BOND, json!([[2, 4.0], [5, -40.0]]));
+        glue["other_params"] = json!([[5, -10.0]]);
+        let mut value = json!({
+            "tracks": [{
+                "devices": [
+                    glue,
+                    device(11, BUSS, json!([[5, 100.0], [6, 50.0], [10, 10.0]])),
+                    device(12, BOND, json!([])),
+                    device(13, "beatlayer.utility", json!([[5, 3.0]])),
+                    device(14, SPECTRUM, json!([[2, 10.0]])),
+                ],
+                "automation": [
+                    { "target": target(10, 5), "points": [{ "at": 0, "value": -20.0 }] },
+                    { "target": target(13, 5), "points": [{ "at": 0, "value": 3.0 }] },
+                ],
+                "clips": [{ "envelopes": [
+                    { "target": target(10, 5), "envelope": { "points": [{ "at": 0, "value": 0.25 }] } },
+                    { "target": target(11, 10), "kind": "automation",
+                      "envelope": { "points": [{ "at": 0, "value": 2000.0 }] } },
+                ] }],
+                "macros": [{ "macro_number": 1, "target": target(11, 5), "min": 0.25, "max": 1.0 }],
+            }]
+        });
+        dynamics_panels(&mut value);
+        let track = &value["tracks"][0];
+        let devices = &track["devices"];
+        assert_eq!(devices[0]["params"], json!([[2, 4.0], [5, 40.0]]));
+        assert_eq!(devices[0]["other_params"], json!([[5, 10.0]]));
+        // Listed in parameter order, with the parameters whose start moved
+        // at the old one (Drive 0 %, Freq 60 Hz).
+        let buss = devices[1]["params"].as_array().unwrap();
+        assert_eq!(
+            buss.iter()
+                .map(|pair| pair[0].as_u64().unwrap())
+                .collect::<Vec<_>>(),
+            [3, 5, 6, 8, 10]
+        );
+        assert_eq!(buss[0], json!([3, 0.0]));
+        assert!(
+            (buss[1][1].as_f64().unwrap() - 200.0).abs() < 1e-9,
+            "Damp 100 % is 200 Hz"
+        );
+        assert_eq!(buss[2], json!([6, 0.5]));
+        assert_eq!(buss[3], json!([8, 60.0]));
+        assert_eq!(buss[4], json!([10, 0.0]), "Decay 10 ms is 0 %");
+        assert_eq!(devices[2]["params"], json!([[5, 60.0]]));
+        assert_eq!(
+            devices[3]["params"],
+            json!([[5, 3.0]]),
+            "Utility is left alone"
+        );
+        assert_eq!(
+            devices[4]["params"],
+            json!([[0, 3.0], [2, 10.0], [5, 0.0], [7, 0.0]])
+        );
+        assert_eq!(track["automation"][0]["points"][0]["value"], json!(20.0));
+        assert_eq!(track["automation"][1]["points"][0]["value"], json!(3.0));
+        let envelopes = &track["clips"][0]["envelopes"];
+        assert_eq!(
+            envelopes[0]["envelope"]["points"][0]["value"],
+            json!(-0.25),
+            "a share of Range's travel turns over"
+        );
+        assert_eq!(envelopes[1]["envelope"]["points"][0]["value"], json!(100.0));
+        assert_eq!(track["macros"][0]["min"], json!(0.75));
+        assert_eq!(track["macros"][0]["max"], json!(0.0));
     }
 }

@@ -3,7 +3,7 @@
 //! styles, with synced or free rate, gate, hold, offset, retrigger, repeats,
 //! progressive transposition steps, and velocity decay.
 //!
-//! Its panel is laid out as Live draws it (layout L-DEV-058): the pattern's
+//! Its panel is laid out as Live draws it (layout L-DEV-073): the pattern's
 //! display cell over Rate, Distance, Steps and Gate, then Retrigger,
 //! Interval and Repeats, Velocity's Decay and Target, and Root and Scale.
 

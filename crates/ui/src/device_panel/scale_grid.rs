@@ -1,4 +1,4 @@
-//! Scale's grid (layout L-DEV-051): 13 columns for the notes that come in and
+//! Scale's grid (layout L-DEV-066): 13 columns for the notes that come in and
 //! 13 rows for the notes that go out, counted from Base, the bottom left cell
 //! the root. A column's mapped cell is lit; the black keys' cells are darker.
 //! A click on a cell of a User grid sends that column's note to that row, and

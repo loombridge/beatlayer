@@ -2,7 +2,7 @@
 //! the velocity of each note, or its release velocity, along a curve from an
 //! input window to an output range.
 //!
-//! Its panel is laid out as Live draws it (layout L-DEV-048): the curve's
+//! Its panel is laid out as Live draws it (layout L-DEV-063): the curve's
 //! display cell over Operation and Mode, with the knobs and boxes beside it.
 
 use bl_engine::midi_clips::Rng;

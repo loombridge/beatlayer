@@ -2,7 +2,7 @@
 //! moves some notes by a random number of steps up, down or both, chosen
 //! from a fixed set, or cycling through the set in order.
 //!
-//! Its panel is laid out as Live draws it (layout L-DEV-050): three small
+//! Its panel is laid out as Live draws it (layout L-DEV-065): three small
 //! knobs down the left, Mode and Sign as stacks of buttons at the right.
 
 use bl_engine::midi_clips::Rng;

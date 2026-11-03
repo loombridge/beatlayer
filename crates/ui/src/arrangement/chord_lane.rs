@@ -371,7 +371,7 @@ fn menu(ui: &mut Ui, region: &ChordRegion, events: &mut Vec<UiEvent>) {
             }
         }
     });
-    ui.separator();
+    crate::menus::separator(ui);
     if ui.button("Delete").clicked() {
         invoke(events, ids::DELETE_REGION, json!({ "region": region.id }));
         ui.close();

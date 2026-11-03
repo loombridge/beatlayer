@@ -1474,7 +1474,7 @@ fn menu(
     // Manage Sample opens the File Manager, which isn't built yet.
     ui.add_enabled(false, egui::Button::new("Manage Sample"))
         .on_disabled_hover_text("Not built yet: arrives with WP-2.25 (the File Manager).");
-    ui.separator();
+    crate::menus::separator(ui);
     let range = selection.map(|(from, to)| json!({ "from": from, "to": to }));
     let edit = |kind: &str| {
         let mut args = target.clone();
@@ -1524,7 +1524,7 @@ fn menu(
     );
     // Spec: sound-similarity R25. Simpler's similar sample items.
     if snapshot {
-        ui.separator();
+        crate::menus::separator(ui);
         crate::sample_swap::menu_items(ui, shell, device, events);
     }
 }

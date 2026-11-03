@@ -630,7 +630,7 @@ impl Run<'_> {
     /// Runs `voices` over `high`, the channel at 4 times the rate, from base
     /// frame `first` of the stretch.
     fn channel(&self, voices: &mut [Voice; 2], high: &mut [f32], first: usize) {
-        for (j, quad) in high.chunks_exact_mut(FACTOR).enumerate() {
+        for (j, quad) in high.as_chunks_mut::<FACTOR>().0.iter_mut().enumerate() {
             let i = first + j;
             let refresh = (self.ticks + i as u64).is_multiple_of(REFRESH_FRAMES);
             let fade = self.fade_done + i as u64;

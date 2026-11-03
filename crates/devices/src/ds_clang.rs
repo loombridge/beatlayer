@@ -6,15 +6,15 @@
 use core::f64::consts::TAU;
 
 use bl_engine::{DeviceType, Registry};
-use bl_model::device_layout::Widget;
+use bl_model::device_layout::{Control, Widget};
 use bl_model::{
     DeviceDescription, DeviceDisplay, DeviceId, DeviceRole, OrdMap, ParamDescriptor, ParamId,
     ParamUnit,
 };
 
 use crate::drum_synth::{
-    DECAY, DrumSynth, Filter, Hit, Pass, Preset, VOLUME, decay, layout, master_at, percent, tune,
-    volume,
+    DECAY, DrumSynth, Filter, Hit, Pass, Preset, VOLUME, decay, decay_ms, framed, label, master_at,
+    panel, percent, tune, tune_semitones, volume,
 };
 use crate::ds_hh::base_hz;
 use crate::ds_metal::{Noise, Squares};
@@ -34,7 +34,7 @@ pub const NOISE: ParamId = ParamId(5);
 pub const CLAVE: ParamId = ParamId(6);
 /// How many times the clave sounds.
 pub const REPEAT: ParamId = ParamId(7);
-/// The pitch, in semitones.
+/// The pitch, in per cent of two octaves each way (spec R5).
 pub const PITCH: ParamId = ParamId(8);
 
 /// The squares' frequencies at Pitch 0.
@@ -60,7 +60,7 @@ const OUT_GAIN: f64 = 2.0;
 #[must_use]
 pub fn ds_clang_type() -> DeviceType {
     let params = vec![
-        decay(250.0),
+        decay(53.7),
         volume(),
         percent(
             TONE_A,
@@ -88,21 +88,28 @@ pub fn ds_clang_type() -> DeviceType {
             .describe("Makes the hit a clave instead: a 2.5 kHz sine burst, sounded Repeat times."),
         ParamDescriptor::integer(REPEAT, "Repeat", (1, REPEAT_MAX), 1, ParamUnit::None)
             .describe("How many times the clave sounds, 25 ms apart, with Clave on."),
-        tune(PITCH, "Pitch"),
+        tune(PITCH, "Pitch", 50.0),
     ];
     DeviceType::native(DS_CLANG, "DS Clang", DeviceRole::Instrument).with_description(
         DeviceDescription::new(params)
-            .with_layout(layout(&[
-                (TONE_A, Widget::Knob),
-                (TONE_B, Widget::Knob),
-                (FILTER, Widget::Knob),
-                (NOISE, Widget::Knob),
-                (CLAVE, Widget::Toggle),
-                (REPEAT, Widget::Knob),
-                (PITCH, Widget::Knob),
-                (DECAY, Widget::Knob),
-                (VOLUME, Widget::Knob),
-            ]))
+            .with_layout(panel(
+                (
+                    vec![
+                        framed(TONE_A, 0, 0),
+                        framed(TONE_B, 0, 1),
+                        framed(FILTER, 1, 0),
+                        framed(NOISE, 1, 1),
+                        framed(REPEAT, 2, 0),
+                        Control::new(CLAVE, Widget::Toggle, 92.0, 85.0).sized(41.0, 12.0),
+                    ],
+                    vec![
+                        label("Tone A/B", 0),
+                        label("Filter/Noise", 1),
+                        label("Repeat", 2),
+                    ],
+                ),
+                [PITCH, DECAY, VOLUME],
+            ))
             .with_banks(&[
                 ("Clang", &["Tone A", "Tone B", "Filter", "Noise", "Pitch"]),
                 ("Clave", &["Clave", "Repeat"]),
@@ -115,7 +122,7 @@ pub fn ds_clang_type() -> DeviceType {
 pub const PRESETS: [Preset; 3] = [
     Preset {
         name: "Cowbell",
-        params: &[(TONE_B, 100.0), (FILTER, 900.0), (DECAY, 300.0)],
+        params: &[(TONE_B, 100.0), (FILTER, 900.0), (DECAY, 56.8)],
     },
     Preset {
         name: "Clank",
@@ -123,13 +130,13 @@ pub const PRESETS: [Preset; 3] = [
             (TONE_A, 70.0),
             (FILTER, 2_500.0),
             (NOISE, 30.0),
-            (PITCH, 7.0),
-            (DECAY, 120.0),
+            (PITCH, 64.6),
+            (DECAY, 41.5),
         ],
     },
     Preset {
         name: "Clave Roll",
-        params: &[(CLAVE, 1.0), (REPEAT, 4.0), (PITCH, -2.0)],
+        params: &[(CLAVE, 1.0), (REPEAT, 4.0), (PITCH, 45.8)],
     },
 ];
 
@@ -149,16 +156,22 @@ pub fn display(
     description: &DeviceDescription,
     values: &OrdMap<ParamId, f64>,
 ) -> DeviceDisplay {
-    crate::drum_synth::display(device, description, values, |value, ms| {
-        if value(CLAVE) < 0.5 {
-            return master_at(ms, value(DECAY));
-        }
-        (0..value(REPEAT) as usize)
-            .map(|k| ms - k as f64 * REPEAT_MS)
-            .filter(|into| (0.0..CLAVE_LENGTH_MS).contains(into))
-            .map(|into| 10f64.powf(-3.0 * into / CLAVE_DECAY_MS))
-            .fold(0.0, f64::max)
-    })
+    crate::drum_synth::display(
+        device,
+        description,
+        values,
+        |_| Vec::new(),
+        |value, ms| {
+            if value(CLAVE) < 0.5 {
+                return master_at(ms, decay_ms(value(DECAY)));
+            }
+            (0..value(REPEAT) as usize)
+                .map(|k| ms - k as f64 * REPEAT_MS)
+                .filter(|into| (0.0..CLAVE_LENGTH_MS).contains(into))
+                .map(|into| 10f64.powf(-3.0 * into / CLAVE_DECAY_MS))
+                .fold(0.0, f64::max)
+        },
+    )
 }
 
 /// The frame a clave repeat `k` starts on, counted from the hit's start: a
@@ -226,12 +239,13 @@ impl Hit for Clang {
         let at = |id: ParamId| f64::from(bank.ramp(id.0 as usize)[frame]);
         let out = if bank.value(CLAVE.0 as usize) >= 0.5 {
             let repeats = (bank.value(REPEAT.0 as usize) as i64).clamp(1, REPEAT_MAX) as usize;
-            self.clave(repeats, base_hz(CLAVE_HZ, at(PITCH)))
+            self.clave(repeats, base_hz(CLAVE_HZ, tune_semitones(at(PITCH))))
         } else {
             self.clave_ends = 0;
-            let tones = self
-                .squares
-                .tick(SQUARES_HZ.map(|hz| base_hz(hz, at(PITCH))), self.rate);
+            let tones = self.squares.tick(
+                SQUARES_HZ.map(|hz| base_hz(hz, tune_semitones(at(PITCH)))),
+                self.rate,
+            );
             let mix = SQUARE_GAIN
                 * (at(TONE_A) / 100.0 * f64::from(tones[0])
                     + at(TONE_B) / 100.0 * f64::from(tones[1]))

@@ -4,13 +4,12 @@
 //! no ranges or curves, so the laws here are Beatlayer's own.
 
 use bl_engine::{DeviceType, Registry};
-use bl_model::device_layout::Widget;
 use bl_model::{
     DeviceDescription, DeviceDisplay, DeviceId, DeviceRole, OrdMap, ParamDescriptor, ParamId,
     ParamUnit,
 };
 
-use crate::drum_synth::{DECAY, DrumSynth, Preset, VOLUME, decay, layout, tune, volume};
+use crate::drum_synth::{DECAY, DrumSynth, Preset, VOLUME, decay, large, panel, tune, volume};
 use crate::ds_hh::Hat;
 use crate::framework::add;
 
@@ -19,7 +18,7 @@ pub const DS_CYMBAL: &str = "beatlayer.ds_cymbal";
 
 /// The high-pass's cutoff, in hertz.
 pub const TONE: ParamId = crate::ds_hh::TONE;
-/// The pitch of the squares, in semitones.
+/// The pitch of the squares, in per cent of two octaves each way (spec R5).
 pub const PITCH: ParamId = crate::ds_hh::PITCH;
 
 /// The base at Pitch 0.
@@ -29,21 +28,19 @@ const BASE_HZ: f64 = 500.0;
 #[must_use]
 pub fn ds_cymbal_type() -> DeviceType {
     let params = vec![
-        decay(1_500.0),
+        decay(83.6),
         volume(),
         ParamDescriptor::continuous(TONE, "Tone", (1_000.0, 12_000.0), 4_000.0, ParamUnit::Hertz)
             .logarithmic()
             .describe("The high-pass's cutoff: higher values leave a thinner, brighter cymbal."),
-        tune(PITCH, "Pitch"),
+        tune(PITCH, "Pitch", 50.0),
     ];
     DeviceType::native(DS_CYMBAL, "DS Cymbal", DeviceRole::Instrument).with_description(
         DeviceDescription::new(params)
-            .with_layout(layout(&[
-                (TONE, Widget::Knob),
-                (PITCH, Widget::Knob),
-                (DECAY, Widget::Knob),
-                (VOLUME, Widget::Knob),
-            ]))
+            .with_layout(panel(
+                (vec![large(TONE, 0)], Vec::new()),
+                [PITCH, DECAY, VOLUME],
+            ))
             .with_banks(&[
                 ("Cymbal", &["Tone", "Pitch"]),
                 ("Level", &["Decay", "Volume"]),
@@ -55,15 +52,15 @@ pub fn ds_cymbal_type() -> DeviceType {
 pub const PRESETS: [Preset; 3] = [
     Preset {
         name: "Crash",
-        params: &[(TONE, 3_000.0), (DECAY, 2_200.0)],
+        params: &[(TONE, 3_000.0), (DECAY, 90.0)],
     },
     Preset {
         name: "Ride",
-        params: &[(TONE, 5_500.0), (PITCH, 4.0), (DECAY, 1_200.0)],
+        params: &[(TONE, 5_500.0), (PITCH, 58.3), (DECAY, 79.9)],
     },
     Preset {
         name: "Splash",
-        params: &[(TONE, 7_000.0), (PITCH, 7.0), (DECAY, 500.0)],
+        params: &[(TONE, 7_000.0), (PITCH, 64.6), (DECAY, 65.3)],
     },
 ];
 

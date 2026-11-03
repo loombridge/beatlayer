@@ -976,7 +976,7 @@ fn ds_clap_has_four_bursts_a_tail_a_spread_and_a_sloppy() {
 #[test]
 fn ds_hh_noise_colour_slope_tone_pitch_and_attack() {
     let tilt = |params: &[(ParamId, f64)]| {
-        let mut all = vec![(ds_hh::TONE, 2_000.0), (DECAY, 1_000.0)];
+        let mut all = vec![(ds_hh::TONE, 2_000.0), (DECAY, decay_for(1_000.0))];
         all.extend_from_slice(params);
         let part = hit(KINDS[4], &all, 12_000)[0][1_000..9_192].to_vec();
         band(&part, 10_000.0, 16_000.0) / band(&part, 2_500.0, 4_000.0)
@@ -988,7 +988,7 @@ fn ds_hh_noise_colour_slope_tone_pitch_and_attack() {
 
     // The high-pass: 24 dB per octave takes more below its cutoff than 12.
     let below = |params: &[(ParamId, f64)]| {
-        let mut all = vec![(ds_hh::TONE, 8_000.0), (DECAY, 1_000.0)];
+        let mut all = vec![(ds_hh::TONE, 8_000.0), (DECAY, decay_for(1_000.0))];
         all.extend_from_slice(params);
         let part = hit(KINDS[4], &all, 12_000)[0][1_000..9_192].to_vec();
         band(&part, 1_000.0, 2_000.0) / band(&part, 10_000.0, 14_000.0)
@@ -998,7 +998,11 @@ fn ds_hh_noise_colour_slope_tone_pitch_and_attack() {
 
     // Tone sets the cutoff.
     let low_mids = |tone: f64| {
-        let part = hit(KINDS[4], &[(ds_hh::TONE, tone), (DECAY, 1_000.0)], 12_000)[0][1_000..9_192]
+        let part = hit(
+            KINDS[4],
+            &[(ds_hh::TONE, tone), (DECAY, decay_for(1_000.0))],
+            12_000,
+        )[0][1_000..9_192]
             .to_vec();
         band(&part, 3_000.0, 5_000.0)
     };
@@ -1006,7 +1010,7 @@ fn ds_hh_noise_colour_slope_tone_pitch_and_attack() {
 
     // Attack fades the squares in over 20 ms and leaves the noise alone:
     // what it changes is the squares, and only until the fade is over.
-    let params = [(ds_hh::TONE, 2_000.0), (DECAY, 500.0)];
+    let params = [(ds_hh::TONE, 2_000.0), (DECAY, decay_for(500.0))];
     let snappy = hit(KINDS[4], &params, 4_800);
     let slow = hit(
         KINDS[4],
@@ -1032,8 +1036,8 @@ fn ds_hh_noise_colour_slope_tone_pitch_and_attack() {
             KINDS[4],
             &[
                 (ds_hh::TONE, 2_000.0),
-                (ds_hh::PITCH, pitch),
-                (DECAY, 4_000.0),
+                (ds_hh::PITCH, tune_for(pitch)),
+                (DECAY, decay_for(4_000.0)),
             ],
             72_000,
         )[0][..65_536]
@@ -1054,14 +1058,11 @@ fn ds_hh_noise_colour_slope_tone_pitch_and_attack() {
 #[test]
 fn ds_cymbal_tone_pitch_and_its_long_decay() {
     let device_type = ds_cymbal::ds_cymbal_type();
-    assert_eq!(
-        device_type.description.param(DECAY).unwrap().default,
-        1_500.0
-    );
+    assert_eq!(device_type.description.param(DECAY).unwrap().default, 83.6);
     let low_mids = |tone: f64| {
         let part = hit(
             KINDS[5],
-            &[(ds_cymbal::TONE, tone), (DECAY, 1_000.0)],
+            &[(ds_cymbal::TONE, tone), (DECAY, decay_for(1_000.0))],
             12_000,
         )[0][1_000..9_192]
             .to_vec();
@@ -1074,8 +1075,8 @@ fn ds_cymbal_tone_pitch_and_its_long_decay() {
             KINDS[5],
             &[
                 (ds_cymbal::TONE, 1_000.0),
-                (ds_cymbal::PITCH, pitch),
-                (DECAY, 4_000.0),
+                (ds_cymbal::PITCH, tune_for(pitch)),
+                (DECAY, decay_for(4_000.0)),
             ],
             72_000,
         )[0][..65_536]
@@ -1096,7 +1097,11 @@ fn ds_fm_pitch_amount_feedback_mod_tone_and_the_modulators_envelope() {
     let sine = |pitch: f64| {
         hit(
             KINDS[6],
-            &[(ds_fm::AMNT, 0.0), (ds_fm::PITCH, pitch), (DECAY, 4_000.0)],
+            &[
+                (ds_fm::AMNT, 0.0),
+                (ds_fm::PITCH, tune_for(pitch)),
+                (DECAY, decay_for(4_000.0)),
+            ],
             24_000,
         )
     };
@@ -1115,7 +1120,7 @@ fn ds_fm_pitch_amount_feedback_mod_tone_and_the_modulators_envelope() {
                 (ds_fm::MOD, 0.0),
                 (ds_fm::FEEDB, 0.0),
                 (ds_fm::TONE, 20_000.0),
-                (DECAY, 4_000.0),
+                (DECAY, decay_for(4_000.0)),
             ],
             72_000,
         );
@@ -1150,7 +1155,7 @@ fn ds_fm_pitch_amount_feedback_mod_tone_and_the_modulators_envelope() {
                 (ds_fm::MOD, mod_percent),
                 (ds_fm::FEEDB, 0.0),
                 (ds_fm::TONE, 20_000.0),
-                (DECAY, 4_000.0),
+                (DECAY, decay_for(4_000.0)),
             ],
             24_000,
         );
@@ -1178,7 +1183,7 @@ fn ds_fm_pitch_amount_feedback_mod_tone_and_the_modulators_envelope() {
                 (ds_fm::MOD, 33.0),
                 (ds_fm::FEEDB, feedb),
                 (ds_fm::TONE, 20_000.0),
-                (DECAY, 4_000.0),
+                (DECAY, decay_for(4_000.0)),
             ],
             24_000,
         );
@@ -1195,7 +1200,11 @@ fn ds_fm_pitch_amount_feedback_mod_tone_and_the_modulators_envelope() {
     let top = |tone: f64| {
         let signal = hit(
             KINDS[6],
-            &[(ds_fm::AMNT, 80.0), (ds_fm::TONE, tone), (DECAY, 4_000.0)],
+            &[
+                (ds_fm::AMNT, 80.0),
+                (ds_fm::TONE, tone),
+                (DECAY, decay_for(4_000.0)),
+            ],
             24_000,
         );
         band(&signal[0][..4_800], 2_000.0, 8_000.0)
@@ -1209,7 +1218,7 @@ fn ds_clang_tones_filter_noise_and_the_claves_repeats() {
     let square_only = [
         (ds_clang::NOISE, 0.0),
         (ds_clang::FILTER, 1_000.0),
-        (DECAY, 4_000.0),
+        (DECAY, decay_for(4_000.0)),
     ];
     let lines = |a: f64, b: f64| {
         let mut all = square_only.to_vec();
@@ -1238,7 +1247,7 @@ fn ds_clang_tones_filter_noise_and_the_claves_repeats() {
                 (ds_clang::TONE_B, 0.0),
                 (ds_clang::NOISE, 100.0),
                 (ds_clang::FILTER, filter),
-                (DECAY, 1_000.0),
+                (DECAY, decay_for(1_000.0)),
             ],
             12_000,
         );
@@ -1274,8 +1283,8 @@ fn ds_clang_tones_filter_noise_and_the_claves_repeats() {
             &[
                 (ds_clang::CLAVE, 1.0),
                 (ds_clang::REPEAT, repeat),
-                (ds_clang::PITCH, pitch),
-                (DECAY, 10.0),
+                (ds_clang::PITCH, tune_for(pitch)),
+                (DECAY, decay_for(10.0)),
             ],
             14_400,
         )
@@ -1316,7 +1325,7 @@ fn the_claves_repeats_land_on_the_same_frames_at_any_block_size() {
         let mut node = synth(
             KINDS[7],
             &[
-                (DECAY, 10.0),
+                (DECAY, decay_for(10.0)),
                 (ds_clang::CLAVE, 1.0),
                 (ds_clang::REPEAT, 8.0),
             ],
@@ -1347,8 +1356,8 @@ fn ds_clang_at_its_highest_pitch_folds_back_nothing_above_minus_80_db() {
         &[
             (ds_clang::NOISE, 0.0),
             (ds_clang::FILTER, 10_000.0),
-            (ds_clang::PITCH, 24.0),
-            (DECAY, 4_000.0),
+            (ds_clang::PITCH, tune_for(24.0)),
+            (DECAY, decay_for(4_000.0)),
         ],
         24_000,
     );
@@ -1468,9 +1477,12 @@ fn each_device_renders_its_golden_hit() {
             (ds_hh::SLOPE, 1.0),
             (ds_hh::ATTACK, 50.0),
             (ds_hh::TONE, 6_000.0),
-            (DECAY, 300.0),
+            (DECAY, decay_for(300.0)),
         ],
-        &[(ds_cymbal::TONE, 3_000.0), (ds_cymbal::PITCH, 5.0)],
+        &[
+            (ds_cymbal::TONE, 3_000.0),
+            (ds_cymbal::PITCH, tune_for(5.0)),
+        ],
         &[
             (ds_fm::AMNT, 70.0),
             (ds_fm::FEEDB, 50.0),
@@ -1479,7 +1491,7 @@ fn each_device_renders_its_golden_hit() {
         &[
             (ds_clang::NOISE, 30.0),
             (ds_clang::FILTER, 1_500.0),
-            (ds_clang::PITCH, 3.0),
+            (ds_clang::PITCH, tune_for(3.0)),
         ],
     ];
     let profiles: Vec<Vec<f64>> = KINDS

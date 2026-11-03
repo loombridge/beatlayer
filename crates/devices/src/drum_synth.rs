@@ -429,9 +429,13 @@ pub(crate) fn decay_display(
     description: &DeviceDescription,
     values: &OrdMap<ParamId, f64>,
 ) -> DeviceDisplay {
-    display(device, description, values, |value, ms| {
-        master_at(ms, value(DECAY))
-    })
+    display(
+        device,
+        description,
+        values,
+        |_| Vec::new(),
+        |value, ms| master_at(ms, decay_ms(value(DECAY))),
+    )
 }
 
 /// A Drum Synth's display: its hit's amplitude envelope over the time it

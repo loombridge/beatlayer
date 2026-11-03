@@ -5,14 +5,14 @@
 //! the same [`Hat`] with its own base pitch and no attack or slope.
 
 use bl_engine::{DeviceType, Registry};
-use bl_model::device_layout::Widget;
 use bl_model::{
     DeviceDescription, DeviceDisplay, DeviceId, DeviceRole, OrdMap, ParamDescriptor, ParamId,
     ParamUnit,
 };
 
 use crate::drum_synth::{
-    DECAY, DrumSynth, Filter, Hit, Pass, Preset, VOLUME, decay, layout, percent, volume,
+    DECAY, DrumSynth, Filter, Hit, Pass, Preset, VOLUME, decay, framed, label, large, panel,
+    percent, tune, tune_semitones, volume,
 };
 use crate::ds_metal::{Noise, Squares};
 use crate::framework::{ParamBank, add};
@@ -22,7 +22,7 @@ pub const DS_HH: &str = "beatlayer.ds_hh";
 
 /// The high-pass's cutoff, in hertz.
 pub const TONE: ParamId = ParamId(2);
-/// The pitch of the squares, in semitones.
+/// The pitch of the squares, in per cent of two octaves each way (spec R5).
 pub const PITCH: ParamId = ParamId(3);
 /// The noise's colour.
 pub const NOISE: ParamId = ParamId(4);
@@ -57,12 +57,12 @@ pub(crate) fn base_hz(base: f64, semitones: f64) -> f64 {
 #[must_use]
 pub fn ds_hh_type() -> DeviceType {
     let params = vec![
-        decay(120.0),
+        decay(41.5),
         volume(),
         ParamDescriptor::continuous(TONE, "Tone", (2_000.0, 16_000.0), 6_000.0, ParamUnit::Hertz)
             .logarithmic()
             .describe("The high-pass's cutoff: higher values leave a thinner, brighter hat."),
-        crate::drum_synth::tune(PITCH, "Pitch"),
+        tune(PITCH, "Pitch", 50.0),
         ParamDescriptor::choice(NOISE, "Noise", &NOISES, 0)
             .describe("The noise's colour: white, or pink with less treble."),
         ParamDescriptor::choice(SLOPE, "Slope", &SLOPES, 0)
@@ -76,15 +76,18 @@ pub fn ds_hh_type() -> DeviceType {
     ];
     DeviceType::native(DS_HH, "DS HH", DeviceRole::Instrument).with_description(
         DeviceDescription::new(params)
-            .with_layout(layout(&[
-                (TONE, Widget::Knob),
-                (SLOPE, Widget::Chooser),
-                (NOISE, Widget::Chooser),
-                (ATTACK, Widget::Knob),
-                (PITCH, Widget::Knob),
-                (DECAY, Widget::Knob),
-                (VOLUME, Widget::Knob),
-            ]))
+            .with_layout(panel(
+                (
+                    vec![
+                        large(TONE, 0),
+                        large(ATTACK, 1),
+                        framed(NOISE, 2, 0),
+                        framed(SLOPE, 2, 1),
+                    ],
+                    vec![label("Noise/Slope", 2)],
+                ),
+                [PITCH, DECAY, VOLUME],
+            ))
             .with_banks(&[
                 ("Hat", &["Tone", "Slope", "Noise", "Attack", "Pitch"]),
                 ("Level", &["Decay", "Volume"]),
@@ -96,11 +99,11 @@ pub fn ds_hh_type() -> DeviceType {
 pub const PRESETS: [Preset; 3] = [
     Preset {
         name: "Closed",
-        params: &[(TONE, 8_000.0), (DECAY, 60.0)],
+        params: &[(TONE, 8_000.0), (DECAY, 29.9)],
     },
     Preset {
         name: "Open",
-        params: &[(TONE, 5_000.0), (DECAY, 450.0), (SLOPE, 1.0)],
+        params: &[(TONE, 5_000.0), (DECAY, 63.5), (SLOPE, 1.0)],
     },
     Preset {
         name: "Pink Shaker",
@@ -108,8 +111,8 @@ pub const PRESETS: [Preset; 3] = [
             (TONE, 4_000.0),
             (NOISE, 1.0),
             (ATTACK, 40.0),
-            (PITCH, -5.0),
-            (DECAY, 200.0),
+            (PITCH, 39.6),
+            (DECAY, 50.0),
         ],
     },
 ];
@@ -171,7 +174,7 @@ impl Hit for Hat {
 
     fn frame(&mut self, bank: &ParamBank, frame: usize, master: f32) -> (f32, f32) {
         let at = |id: ParamId| f64::from(bank.ramp(id.0 as usize)[frame]);
-        let base = base_hz(self.base, at(PITCH));
+        let base = base_hz(self.base, tune_semitones(at(PITCH)));
         let squares = self
             .squares
             .tick(RATIOS.map(|ratio| base * ratio), self.rate);

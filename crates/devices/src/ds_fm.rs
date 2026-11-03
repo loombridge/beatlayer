@@ -4,7 +4,6 @@
 //! and no ranges or curves, so the laws here are Beatlayer's own.
 
 use bl_engine::{DeviceType, Registry};
-use bl_model::device_layout::Widget;
 use bl_model::{
     DeviceDescription, DeviceDisplay, DeviceId, DeviceRole, OrdMap, ParamDescriptor, ParamId,
     ParamUnit,
@@ -12,7 +11,8 @@ use bl_model::{
 use lspk_voice::Start;
 
 use crate::drum_synth::{
-    DECAY, DrumSynth, Filter, Hit, Pass, Preset, VOLUME, decay, layout, percent, tune, volume,
+    DECAY, DrumSynth, Filter, Hit, Pass, Preset, VOLUME, decay, framed, label, large, panel,
+    percent, tune, tune_semitones, volume,
 };
 use crate::fm::{Core, OPERATORS};
 use crate::framework::{ParamBank, add};
@@ -28,7 +28,7 @@ pub const FEEDB: ParamId = ParamId(3);
 pub const AMNT: ParamId = ParamId(4);
 /// The modulator's ratio, blended through [`RATIOS`].
 pub const MOD: ParamId = ParamId(5);
-/// The carrier's pitch, in semitones.
+/// The carrier's pitch, in per cent of two octaves each way (spec R5).
 pub const PITCH: ParamId = ParamId(6);
 
 /// The modulator's ratios to the carrier that Mod blends through, in turn.
@@ -50,7 +50,7 @@ const LOW_PASS_Q: f64 = 0.707;
 #[must_use]
 pub fn ds_fm_type() -> DeviceType {
     let params = vec![
-        decay(300.0),
+        decay(56.8),
         volume(),
         ParamDescriptor::continuous(TONE, "Tone", (200.0, 20_000.0), 12_000.0, ParamUnit::Hertz)
             .logarithmic()
@@ -75,19 +75,22 @@ pub fn ds_fm_type() -> DeviceType {
             "Blends the modulator's frequency ratio through 1, 1.41, 2.76 and 3.5 times the \
              carrier's.",
         ),
-        tune(PITCH, "Pitch"),
+        tune(PITCH, "Pitch", 50.0),
     ];
     DeviceType::native(DS_FM, "DS FM", DeviceRole::Instrument).with_description(
         DeviceDescription::new(params)
-            .with_layout(layout(&[
-                (TONE, Widget::Knob),
-                (FEEDB, Widget::Knob),
-                (AMNT, Widget::Knob),
-                (MOD, Widget::Knob),
-                (PITCH, Widget::Knob),
-                (DECAY, Widget::Knob),
-                (VOLUME, Widget::Knob),
-            ]))
+            .with_layout(panel(
+                (
+                    vec![
+                        large(TONE, 0),
+                        large(AMNT, 1),
+                        framed(FEEDB, 2, 0),
+                        framed(MOD, 2, 1),
+                    ],
+                    vec![label("Feedb./Mod", 2)],
+                ),
+                [PITCH, DECAY, VOLUME],
+            ))
             .with_banks(&[
                 ("FM", &["Tone", "Feedb.", "Amnt", "Mod", "Pitch"]),
                 ("Level", &["Decay", "Volume"]),
@@ -99,7 +102,7 @@ pub fn ds_fm_type() -> DeviceType {
 pub const PRESETS: [Preset; 3] = [
     Preset {
         name: "Zap",
-        params: &[(AMNT, 70.0), (MOD, 60.0), (PITCH, 12.0), (DECAY, 180.0)],
+        params: &[(AMNT, 70.0), (MOD, 60.0), (PITCH, 75.0), (DECAY, 48.2)],
     },
     Preset {
         name: "Metal Tom",
@@ -107,13 +110,13 @@ pub const PRESETS: [Preset; 3] = [
             (AMNT, 55.0),
             (FEEDB, 50.0),
             (MOD, 85.0),
-            (PITCH, -7.0),
-            (DECAY, 400.0),
+            (PITCH, 35.4),
+            (DECAY, 61.6),
         ],
     },
     Preset {
         name: "Soft Blip",
-        params: &[(TONE, 3_000.0), (AMNT, 20.0), (MOD, 0.0), (DECAY, 140.0)],
+        params: &[(TONE, 3_000.0), (AMNT, 20.0), (MOD, 0.0), (DECAY, 44.0)],
     },
 ];
 
@@ -173,7 +176,7 @@ impl Hit for Fm {
 
     fn frame(&mut self, bank: &ParamBank, frame: usize, master: f32) -> (f32, f32) {
         let at = |id: ParamId| f64::from(bank.ramp(id.0 as usize)[frame]);
-        let carrier = CARRIER_HZ * (at(PITCH) / 12.0).exp2();
+        let carrier = CARRIER_HZ * (tune_semitones(at(PITCH)) / 12.0).exp2();
         let mut hz = [0.0; OPERATORS];
         hz[0] = carrier;
         hz[1] = carrier * ratio_at(at(MOD) / 100.0);

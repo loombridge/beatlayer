@@ -1328,8 +1328,8 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `device` | [`DeviceId`](README.md#deviceid) | yes | The device. |
-| `slot` | integer from 0 to 255 | yes | The slot, counted from 0. |
 | `media` | [`ContentHash`](README.md#contenthash) or null | no | The response's file, or `null` to empty the slot. |
+| `slot` | integer from 0 to 255 | no | The slot, counted from 0. |
 
 Result: [`ChangeSet`](README.md#changeset).
 

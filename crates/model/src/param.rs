@@ -381,6 +381,13 @@ impl DeviceDescription {
         banks
     }
 
+    /// Whether the device still has the generic layout: a grid of all its
+    /// parameters' controls, which no device laid out as Live draws it has.
+    #[must_use]
+    pub fn has_generic_layout(&self) -> bool {
+        self.layout == DeviceLayout::generic(&self.placed())
+    }
+
     /// The parameters the layout places a control for: all but the menu
     /// options and the title bar's switch.
     fn placed(&self) -> Vec<ParamDescriptor> {

@@ -1791,6 +1791,7 @@ Arguments:
 | `name` | string | yes | The name the title bar shows while Show Preset Name is on, such as the preset's; empty for the device's own name. |
 | `articulations` | array or null | no | An Articulation Map's articulations (the articulation map spec, R16), which a preset of one holds; `null` to keep the ones the device has. |
 | `mpe` | [`PluginMpe`](README.md#pluginmpe) or null | no | A plug-in's MPE Mode and settings (the MPE spec, R14), which a preset of one holds; `null` to keep the ones the device has. |
+| `patch` | [`Patch`](README.md#patch) or null | no | A Modular's patch (the modular device spec, R8), which its preset holds; `null` to keep the one the device has. |
 | `routes` | array or null | no | The routes of an instrument's modulation matrix (the instrument modulation spec, R10), which a preset of one holds; `null` to keep the ones the device has. |
 | `shape` | array or null | no | A Shaper's breakpoint shape (the modulation spec, R23), which a preset of one holds; `null` for the default shape. |
 | `similarity_reference` | [`ContentHash`](README.md#contenthash) or null | no | A sampler's similarity reference (sound similarity R23), which its preset holds; `null` to keep the one the device has. |

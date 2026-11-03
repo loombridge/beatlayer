@@ -60,6 +60,7 @@ The commands, by the part of their ID before its first dot:
 - [`midi_tool`](midi_tool.md)
 - [`mixer`](mixer.md)
 - [`mixer_view`](mixer_view.md)
+- [`modular`](modular.md)
 - [`modulation`](modulation.md)
 - [`modulator`](modulator.md)
 - [`note`](note.md)
@@ -3768,6 +3769,169 @@ Changes to Beats' controls: only the ones given change.
 
 </details>
 
+### `Block`
+
+One block of a patch (R2).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | [`BlockId`](#blockid) | yes | The block's ID in the patch. |
+| `type` | string | yes | Its type's ID (R19). |
+| `x` | number | yes | Where it sits in the editor. |
+| `y` | number | yes | Where it sits in the editor. |
+| `settings` | object | no | The settings that aren't the type's defaults, by setting ID. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One block of a patch (R2).",
+  "properties": {
+    "id": {
+      "$ref": "#/$defs/BlockId",
+      "description": "The block's ID in the patch."
+    },
+    "settings": {
+      "additionalProperties": {
+        "format": "double",
+        "type": "number"
+      },
+      "description": "The settings that aren't the type's defaults, by setting ID.",
+      "type": "object"
+    },
+    "type": {
+      "description": "Its type's ID (R19).",
+      "type": "string"
+    },
+    "x": {
+      "description": "Where it sits in the editor.",
+      "format": "float",
+      "type": "number"
+    },
+    "y": {
+      "description": "Where it sits in the editor.",
+      "format": "float",
+      "type": "number"
+    }
+  },
+  "required": [
+    "id",
+    "type",
+    "x",
+    "y"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `BlockId`
+
+A block's ID within its patch.
+
+Type: integer, at least 0.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A block's ID within its patch.",
+  "format": "uint32",
+  "minimum": 0,
+  "type": "integer"
+}
+```
+
+</details>
+
+### `BlockView`
+
+One block of the patch.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | [`BlockId`](#blockid) | yes | The block's ID in the patch. |
+| `type` | string | yes | Its type's ID. |
+| `name` | string | yes | Its type's name, or the type's ID where Beatlayer doesn't know it. |
+| `known` | boolean | yes | Whether Beatlayer knows the type; a block it doesn't know is silent. |
+| `x` | number | yes | Where it sits in the editor. |
+| `y` | number | yes | Where it sits in the editor. |
+| `inputs` | array of [`PortView`](#portview) | yes | Its input ports. |
+| `outputs` | array of [`PortView`](#portview) | yes | Its output ports. |
+| `settings` | array of [`SettingView`](#settingview) | yes | Its settings. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One block of the patch.",
+  "properties": {
+    "id": {
+      "$ref": "#/$defs/BlockId",
+      "description": "The block's ID in the patch."
+    },
+    "inputs": {
+      "description": "Its input ports.",
+      "items": {
+        "$ref": "#/$defs/PortView"
+      },
+      "type": "array"
+    },
+    "known": {
+      "description": "Whether Beatlayer knows the type; a block it doesn't know is silent.",
+      "type": "boolean"
+    },
+    "name": {
+      "description": "Its type's name, or the type's ID where Beatlayer doesn't know it.",
+      "type": "string"
+    },
+    "outputs": {
+      "description": "Its output ports.",
+      "items": {
+        "$ref": "#/$defs/PortView"
+      },
+      "type": "array"
+    },
+    "settings": {
+      "description": "Its settings.",
+      "items": {
+        "$ref": "#/$defs/SettingView"
+      },
+      "type": "array"
+    },
+    "type": {
+      "description": "Its type's ID.",
+      "type": "string"
+    },
+    "x": {
+      "description": "Where it sits in the editor.",
+      "format": "float",
+      "type": "number"
+    },
+    "y": {
+      "description": "Where it sits in the editor.",
+      "format": "float",
+      "type": "number"
+    }
+  },
+  "required": [
+    "id",
+    "type",
+    "name",
+    "known",
+    "x",
+    "y",
+    "inputs",
+    "outputs",
+    "settings"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `BlockedItem`
 
 A plug-in that failed a scan, and why.
@@ -4257,6 +4421,52 @@ What the browser shows: most browser commands return it.
     "columns",
     "can_back",
     "can_forward"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Cable`
+
+A cable from one block's output port to another's input port (R2).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `from` | [`BlockId`](#blockid) | yes | The block it leaves. |
+| `from_port` | string | yes | The output port it leaves, by ID. |
+| `to` | [`BlockId`](#blockid) | yes | The block it enters. |
+| `to_port` | string | yes | The input port it enters, by ID. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A cable from one block's output port to another's input port (R2).",
+  "properties": {
+    "from": {
+      "$ref": "#/$defs/BlockId",
+      "description": "The block it leaves."
+    },
+    "from_port": {
+      "description": "The output port it leaves, by ID.",
+      "type": "string"
+    },
+    "to": {
+      "$ref": "#/$defs/BlockId",
+      "description": "The block it enters."
+    },
+    "to_port": {
+      "description": "The input port it enters, by ID.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "from",
+    "from_port",
+    "to",
+    "to_port"
   ],
   "type": "object"
 }
@@ -9335,6 +9545,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `other_params` | array or null | no | The values of the state that isn't active, in the same form as [`params`](Self::params) (device compare R1, R10). `None` while the two states are equal, as a new device's are, and left out of the saved set then. Use [`other_params`](Self::other_params) to read it. |
 | `own_name` | string | no | The device's own name, such as `Auto Filter`, which the title bar shows while Show Preset Name is off. Empty while it's the same as [`name`](Self::name), and left out of the saved set then. |
 | `partials` | array of [`Partials`](#partials) | no | The partials of the user waves an Operator's oscillators play (the Operator spec, R27), by oscillator; one that isn't listed has the first partial alone. Empty for a device without drawn waves, and left out of the saved set then. |
+| `patch` | [`Patch`](#patch) or null | no | A Modular device's patch (the modular device spec, R2, R8): its blocks, cables and patch parameters. `None` for every device that isn't Modular, and left out of the saved set then. |
 | `plugin` | [`PluginState`](#pluginstate) or null | no | A plug-in's own state and where it was loaded from (WP-2.6), as last saved with the set. Left out of the saved set for a native device, and for a plug-in until the set is first saved with it. |
 | `preset_name` | string or null | no | The name of the preset the device holds (the plug-in list spec, R5): the Beatlayer device preset last loaded into it or saved from it, or else the program name the plug-in's format reported. Left out of the saved set while there is none, so a device saved before this package loads with none. |
 | `region` | [`SampleRegion`](#sampleregion) or null | no | The part of slot 0's sample a Simpler plays, between its Start and End flags (the sampler spec, R22): `None` for the whole sample. Loading another sample clears it; an edit that changes the sample's length moves it. Left out of the saved set while it is the whole sample. |
@@ -9511,6 +9722,17 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
         "$ref": "#/$defs/Partials"
       },
       "type": "array"
+    },
+    "patch": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Patch"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A Modular device's patch (the modular device spec, R2, R8): its blocks, cables and patch parameters. `None` for every device that isn't Modular, and left out of the saved set then."
     },
     "plugin": {
       "anyOf": [
@@ -25889,6 +26111,61 @@ One of:
 
 </details>
 
+### `ParamView`
+
+One patch parameter.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `slot` | integer from 0 to 255 | yes | Its slot, from 1. |
+| `param` | [`ParamId`](#paramid) | yes | The device parameter number `device.set_param` and automation take. |
+| `name` | string | yes | Its name: the block's, then the setting's. |
+| `block` | [`BlockId`](#blockid) | yes | The block. |
+| `setting` | string | yes | The setting's ID. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One patch parameter.",
+  "properties": {
+    "block": {
+      "$ref": "#/$defs/BlockId",
+      "description": "The block."
+    },
+    "name": {
+      "description": "Its name: the block's, then the setting's.",
+      "type": "string"
+    },
+    "param": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The device parameter number `device.set_param` and automation take."
+    },
+    "setting": {
+      "description": "The setting's ID.",
+      "type": "string"
+    },
+    "slot": {
+      "description": "Its slot, from 1.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "slot",
+    "param",
+    "name",
+    "block",
+    "setting"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ParameterState`
 
 One of a device's parameters as `device.parameters` reports it.
@@ -26119,6 +26396,168 @@ What `device.set_partials` returns.
     "device",
     "osc",
     "count"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Patch`
+
+A Modular device's patch (R2).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `blocks` | array of [`Block`](#block) | yes | The blocks, in the order they were added. |
+| `cables` | array of [`Cable`](#cable) | yes | The cables. |
+| `params` | array of [`PatchParam`](#patchparam) | no | The patch parameters, by slot. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A Modular device's patch (R2).",
+  "properties": {
+    "blocks": {
+      "description": "The blocks, in the order they were added.",
+      "items": {
+        "$ref": "#/$defs/Block"
+      },
+      "type": "array"
+    },
+    "cables": {
+      "description": "The cables.",
+      "items": {
+        "$ref": "#/$defs/Cable"
+      },
+      "type": "array"
+    },
+    "params": {
+      "description": "The patch parameters, by slot.",
+      "items": {
+        "$ref": "#/$defs/PatchParam"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "blocks",
+    "cables"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PatchParam`
+
+A setting made a patch parameter (R6).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `slot` | integer from 0 to 255 | yes | Which of the device's 64 patch parameters it is, from 1: its parameter number is the same. |
+| `block` | [`BlockId`](#blockid) | yes | The block. |
+| `setting` | string | yes | The setting's ID. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A setting made a patch parameter (R6).",
+  "properties": {
+    "block": {
+      "$ref": "#/$defs/BlockId",
+      "description": "The block."
+    },
+    "setting": {
+      "description": "The setting's ID.",
+      "type": "string"
+    },
+    "slot": {
+      "description": "Which of the device's 64 patch parameters it is, from 1: its parameter number is the same.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "slot",
+    "block",
+    "setting"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PatchState`
+
+What `modular.patch` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `voices` | integer, at least 0 | yes | How many voices play, 1 to 32; 1 for an effect. |
+| `blocks` | array of [`BlockView`](#blockview) | yes | The blocks, in the order they were added. |
+| `cables` | array of [`Cable`](#cable) | yes | The cables. |
+| `params` | array of [`ParamView`](#paramview) | yes | The patch parameters, by slot. A value runs from 0 to 1 across its setting's range. |
+| `unknown_blocks` | integer, at least 0 | yes | How many blocks Beatlayer doesn't know, which play silence. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `modular.patch` returns.",
+  "properties": {
+    "blocks": {
+      "description": "The blocks, in the order they were added.",
+      "items": {
+        "$ref": "#/$defs/BlockView"
+      },
+      "type": "array"
+    },
+    "cables": {
+      "description": "The cables.",
+      "items": {
+        "$ref": "#/$defs/Cable"
+      },
+      "type": "array"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "params": {
+      "description": "The patch parameters, by slot. A value runs from 0 to 1 across its setting's range.",
+      "items": {
+        "$ref": "#/$defs/ParamView"
+      },
+      "type": "array"
+    },
+    "unknown_blocks": {
+      "description": "How many blocks Beatlayer doesn't know, which play silence.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "voices": {
+      "description": "How many voices play, 1 to 32; 1 for an effect.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "voices",
+    "blocks",
+    "cables",
+    "params",
+    "unknown_blocks"
   ],
   "type": "object"
 }
@@ -27088,6 +27527,83 @@ A port a row names, and whether the MIDI system offers it now.
   "required": [
     "name",
     "present"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PortType`
+
+What a port carries (R2).
+
+One of:
+
+- `"audio"`: A sample per frame.
+- `"control"`: A value per frame, from −1 to 1 unless the block says otherwise.
+- `"gate"`: On above 0.5.
+- `"notes"`: Note and expression events.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a port carries (R2).",
+  "oneOf": [
+    {
+      "const": "audio",
+      "description": "A sample per frame.",
+      "type": "string"
+    },
+    {
+      "const": "control",
+      "description": "A value per frame, from −1 to 1 unless the block says otherwise.",
+      "type": "string"
+    },
+    {
+      "const": "gate",
+      "description": "On above 0.5.",
+      "type": "string"
+    },
+    {
+      "const": "notes",
+      "description": "Note and expression events.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PortView`
+
+One port of a block.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | The port's ID, which cables name. |
+| `type` | [`PortType`](#porttype) | yes | What it carries. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One port of a block.",
+  "properties": {
+    "id": {
+      "description": "The port's ID, which cables name.",
+      "type": "string"
+    },
+    "type": {
+      "$ref": "#/$defs/PortType",
+      "description": "What it carries."
+    }
+  },
+  "required": [
+    "id",
+    "type"
   ],
   "type": "object"
 }
@@ -35594,6 +36110,94 @@ What `midi.set_show_resync_button` returns.
   },
   "required": [
     "on"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SettingView`
+
+One setting of a block.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | The setting's ID, which `modular.set` names. |
+| `name` | string | yes | Its name. |
+| `value` | number | yes | Its value now. |
+| `default` | number | yes | Its value in a new block. |
+| `min` | number | yes | Its lowest value. |
+| `max` | number | yes | Its highest value. |
+| `unit` | string | yes | The text after its number, with its space, or none. |
+| `choices` | array of string | yes | The names of a choice's values, in order; empty for a number. |
+| `slot` | integer or null | no | The patch parameter it is, if it is one. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One setting of a block.",
+  "properties": {
+    "choices": {
+      "description": "The names of a choice's values, in order; empty for a number.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "default": {
+      "description": "Its value in a new block.",
+      "format": "double",
+      "type": "number"
+    },
+    "id": {
+      "description": "The setting's ID, which `modular.set` names.",
+      "type": "string"
+    },
+    "max": {
+      "description": "Its highest value.",
+      "format": "double",
+      "type": "number"
+    },
+    "min": {
+      "description": "Its lowest value.",
+      "format": "double",
+      "type": "number"
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "slot": {
+      "description": "The patch parameter it is, if it is one.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "unit": {
+      "description": "The text after its number, with its space, or none.",
+      "type": "string"
+    },
+    "value": {
+      "description": "Its value now.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "value",
+    "default",
+    "min",
+    "max",
+    "unit",
+    "choices"
   ],
   "type": "object"
 }

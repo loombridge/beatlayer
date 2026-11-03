@@ -51,6 +51,7 @@ The commands, by the part of their ID before its first dot:
 - [`edit`](edit.md)
 - [`envelope`](envelope.md)
 - [`export`](export.md)
+- [`extension`](extension.md)
 - [`file_manager`](file_manager.md)
 - [`focus`](focus.md)
 - [`granulator`](granulator.md)
@@ -4507,6 +4508,62 @@ A file a missing file could be relinked to (R14).
 
 </details>
 
+### `Caption`
+
+A line of text in a band, which names nothing and sets nothing: the L beside Align Delay's left box.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `text` | string | yes | The text. |
+| `x` | number | yes | Its left edge, from the band's. |
+| `y` | number | yes | Its top edge, from the band's. |
+| `width` | number | yes | The width it is set in: left-aligned in it, or centred. |
+| `centered` | boolean | yes | Whether the text is centred in its width. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A line of text in a band, which names nothing and sets nothing: the L beside Align Delay's left box.",
+  "properties": {
+    "centered": {
+      "default": false,
+      "description": "Whether the text is centred in its width.",
+      "type": "boolean"
+    },
+    "text": {
+      "description": "The text.",
+      "type": "string"
+    },
+    "width": {
+      "description": "The width it is set in: left-aligned in it, or centred.",
+      "format": "float",
+      "type": "number"
+    },
+    "x": {
+      "description": "Its left edge, from the band's.",
+      "format": "float",
+      "type": "number"
+    },
+    "y": {
+      "description": "Its top edge, from the band's.",
+      "format": "float",
+      "type": "number"
+    }
+  },
+  "required": [
+    "text",
+    "x",
+    "y",
+    "width",
+    "centered"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `CaptureResult`
 
 What `perception.capture_view` returns, beside the image.
@@ -7829,6 +7886,63 @@ Changes to Complex Pro's controls.
 
 </details>
 
+### `ComponentRow`
+
+A component of an extension, as its manifest gives it (R1).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `file` | string | yes | Its file in the extension's folder. |
+| `kind` | string | yes | What it does. |
+| `world` | string | yes | The version of the `beatlayer:ext` world it targets. |
+| `imports` | array of string | yes | The imports it asks for. |
+| `memory_mib` | integer, at least 0 | yes | The memory its instances reserve up front, in MiB. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A component of an extension, as its manifest gives it (R1).",
+  "properties": {
+    "file": {
+      "description": "Its file in the extension's folder.",
+      "type": "string"
+    },
+    "imports": {
+      "description": "The imports it asks for.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "kind": {
+      "description": "What it does.",
+      "type": "string"
+    },
+    "memory_mib": {
+      "description": "The memory its instances reserve up front, in MiB.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "world": {
+      "description": "The version of the `beatlayer:ext` world it targets.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "file",
+    "kind",
+    "world",
+    "imports",
+    "memory_mib"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ConditionArgs`
 
 The Condition filter's controls in `clip_view.note_filters`.
@@ -8131,9 +8245,13 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
 | `caption` | string or null | no | The name the control shows in place of its parameter's, where a section's own heading makes the full name redundant (Vinyl Distortion's Freq and B in each section). |
 | `glyph` | [`Glyph`](#glyph) or null | no | The icon of an icon button or a round button. |
 | `grey` | [`GreyWhen`](#greywhen) or null | no | The condition that greys the control. |
+| `hide` | [`GreyWhen`](#greywhen) or null | no | The condition that puts the control away, so another control of a different kind can take its place (Delay's time grid and its millisecond box). |
+| `only` | [`GreyWhen`](#greywhen) or null | no | The condition that puts the control away unless it holds: the control shows only while the parameter's value, rounded, is the value (one of three modes' boxes in the same place). |
 | `size` | [`Size`](#size) or null | no | Its size where the device sets it, in place of the widget's: the width of a box, a row of buttons or a unit pair's control. |
+| `steps` | array or null | no | For a grid, row or stack of buttons over a whole-number parameter, the values its buttons set, in order (Delay's 1 2 3 4 5 6 8 16 of the sixteen steps its time takes): the button for the value the parameter has is lit, and none is while it has another. Over a choice parameter, the indexes of the choices that have a button, in order. |
+| `titled` | boolean | no | Set for a row, stack or grid of buttons with its parameter's name above it, left-aligned (Chorus-Ensemble's Taps). |
 | `unit` | [`UnitPair`](#unitpair) or null | no | The unit pair beside a knob, which makes the knob show one of two parameters. |
-| `unnamed` | boolean | no | Set for a box or a chooser drawn without the name above it (the Saturator's curve chooser inside its display): it takes only the box's height. |
+| `unnamed` | boolean | no | Set for a box drawn without its name above it: its place says what it is (Delay's offset under its grid), and the control is its box alone. |
 
 <details><summary>JSON Schema</summary>
 
@@ -8170,6 +8288,28 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
       ],
       "description": "The condition that greys the control."
     },
+    "hide": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/GreyWhen"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The condition that puts the control away, so another control of a different kind can take its place (Delay's time grid and its millisecond box)."
+    },
+    "only": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/GreyWhen"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The condition that puts the control away unless it holds: the control shows only while the parameter's value, rounded, is the value (one of three modes' boxes in the same place)."
+    },
     "param": {
       "$ref": "#/$defs/ParamId",
       "description": "The parameter."
@@ -8185,6 +8325,22 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
       ],
       "description": "Its size where the device sets it, in place of the widget's: the width of a box, a row of buttons or a unit pair's control."
     },
+    "steps": {
+      "description": "For a grid, row or stack of buttons over a whole-number parameter, the values its buttons set, in order (Delay's 1 2 3 4 5 6 8 16 of the sixteen steps its time takes): the button for the value the parameter has is lit, and none is while it has another. Over a choice parameter, the indexes of the choices that have a button, in order.",
+      "items": {
+        "format": "int32",
+        "type": "integer"
+      },
+      "readOnly": true,
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "titled": {
+      "description": "Set for a row, stack or grid of buttons with its parameter's name above it, left-aligned (Chorus-Ensemble's Taps).",
+      "type": "boolean"
+    },
     "unit": {
       "anyOf": [
         {
@@ -8197,7 +8353,7 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
       "description": "The unit pair beside a knob, which makes the knob show one of two parameters."
     },
     "unnamed": {
-      "description": "Set for a box or a chooser drawn without the name above it (the Saturator's curve chooser inside its display): it takes only the box's height.",
+      "description": "Set for a box drawn without its name above it: its place says what it is (Delay's offset under its grid), and the control is its box alone.",
       "type": "boolean"
     },
     "widget": {
@@ -8236,6 +8392,7 @@ A band of controls, of a fixed size.
 | `width` | number | yes | Its width. |
 | `height` | number | yes | Its height. |
 | `controls` | array of [`Control`](#control) | yes | Its controls. |
+| `captions` | array of [`Caption`](#caption) | no | Lines of text among the controls: an L beside a box, an ms after it. |
 | `labels` | array of [`BandLabel`](#bandlabel) | no | Its text labels, drawn beside the controls they name. |
 | `slots` | [`SlotGroup`](#slotgroup) or null | no | Set for a band that shows the selected sample slot's controls: its controls name the first slot's parameters, and the band is placed for the selected slot ([`DeviceLayout::place_for`]). |
 
@@ -8245,6 +8402,13 @@ A band of controls, of a fixed size.
 {
   "description": "A band of controls, of a fixed size.",
   "properties": {
+    "captions": {
+      "description": "Lines of text among the controls: an L beside a box, an ms after it.",
+      "items": {
+        "$ref": "#/$defs/Caption"
+      },
+      "type": "array"
+    },
     "controls": {
       "description": "Its controls.",
       "items": {
@@ -13569,6 +13733,196 @@ One of:
 
 </details>
 
+### `ExtensionDescription`
+
+What `extension.describe` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | Its ID. |
+| `name` | string | yes | Its name. |
+| `version` | string | yes | Its version. |
+| `author` | string | yes | Who made it. |
+| `licence` | string | yes | The licence it's under. |
+| `description` | string | yes | What it does. |
+| `enabled` | boolean | yes | Whether it is on. |
+| `components` | array of [`ComponentRow`](#componentrow) | yes | Its components. |
+| `calls` | array of string | yes | The registered commands it may call, each with its permission class (R44). None until extensions reach the set (R38). |
+| `last_failure` | string or null | no | Why a component of it was stopped, if one was. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `extension.describe` returns.",
+  "properties": {
+    "author": {
+      "description": "Who made it.",
+      "type": "string"
+    },
+    "calls": {
+      "description": "The registered commands it may call, each with its permission class (R44). None until extensions reach the set (R38).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "components": {
+      "description": "Its components.",
+      "items": {
+        "$ref": "#/$defs/ComponentRow"
+      },
+      "type": "array"
+    },
+    "description": {
+      "description": "What it does.",
+      "type": "string"
+    },
+    "enabled": {
+      "description": "Whether it is on.",
+      "type": "boolean"
+    },
+    "id": {
+      "description": "Its ID.",
+      "type": "string"
+    },
+    "last_failure": {
+      "description": "Why a component of it was stopped, if one was.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "licence": {
+      "description": "The licence it's under.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "version": {
+      "description": "Its version.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "version",
+    "author",
+    "licence",
+    "description",
+    "enabled",
+    "components",
+    "calls"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ExtensionList`
+
+What `extension.list` and the commands that change the list return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `folder` | string | yes | The User Library folder the extensions are installed in. |
+| `extensions` | array of [`ExtensionRow`](#extensionrow) | yes | The installed extensions, by ID. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `extension.list` and the commands that change the list return.",
+  "properties": {
+    "extensions": {
+      "description": "The installed extensions, by ID.",
+      "items": {
+        "$ref": "#/$defs/ExtensionRow"
+      },
+      "type": "array"
+    },
+    "folder": {
+      "description": "The User Library folder the extensions are installed in.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "folder",
+    "extensions"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ExtensionRow`
+
+An installed extension, as `extension.list` gives it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | Its ID, which the other commands take. |
+| `name` | string | yes | Its name. |
+| `version` | string | yes | Its version. |
+| `kinds` | array of string | yes | What its components do, once each: `midi-tool`, `control-surface`, `audio-effect`, `instrument` or `midi-effect`. |
+| `enabled` | boolean | yes | Whether it is on. |
+| `last_failure` | string or null | no | Why a component of it was stopped, if one was (R10 to R12): kept until the extension is switched on again or Beatlayer restarts. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An installed extension, as `extension.list` gives it.",
+  "properties": {
+    "enabled": {
+      "description": "Whether it is on.",
+      "type": "boolean"
+    },
+    "id": {
+      "description": "Its ID, which the other commands take.",
+      "type": "string"
+    },
+    "kinds": {
+      "description": "What its components do, once each: `midi-tool`, `control-surface`, `audio-effect`, `instrument` or `midi-effect`.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "last_failure": {
+      "description": "Why a component of it was stopped, if one was (R10 to R12): kept until the extension is switched on again or Beatlayer restarts.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "version": {
+      "description": "Its version.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "version",
+    "kinds",
+    "enabled"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `External`
 
 An external device's routing: `port` (MIDI To, the MIDI output port's name as the MIDI settings list it; absent for No Output), `channel` (the MIDI channel, 1 to 16), `mpe` (the MPE/Multi-channel Settings when MPE is chosen in place of a channel), `audio_from` (the audio interface's inputs it comes back on, a channel or a pair), and `hardware_latency`.
@@ -15423,6 +15777,11 @@ One of:
 - `"plus"`: A plus sign.
 - `"minus"`: A minus sign.
 - `"flat_sharp"`: A flat and a sharp: Use Current Scale.
+- `"link"`: Two linked rings: the link between a device's two channels.
+- `"freeze"`: An asterisk: Freeze.
+- `"phase_invert"`: A circle struck through: invert the phase.
+- `"record"`: A filled circle: record.
+- `"stop"`: A filled square: stop.
 - `"crossfade"`: Two lines crossing: a crossfade.
 - `"envelope"`: A rise and a fall: an envelope's shape.
 - `"phase"`: A circle cut by a line: a phase.
@@ -15501,6 +15860,31 @@ One of:
     {
       "const": "flat_sharp",
       "description": "A flat and a sharp: Use Current Scale.",
+      "type": "string"
+    },
+    {
+      "const": "link",
+      "description": "Two linked rings: the link between a device's two channels.",
+      "type": "string"
+    },
+    {
+      "const": "freeze",
+      "description": "An asterisk: Freeze.",
+      "type": "string"
+    },
+    {
+      "const": "phase_invert",
+      "description": "A circle struck through: invert the phase.",
+      "type": "string"
+    },
+    {
+      "const": "record",
+      "description": "A filled circle: record.",
+      "type": "string"
+    },
+    {
+      "const": "stop",
+      "description": "A filled square: stop.",
       "type": "string"
     },
     {
@@ -44246,6 +44630,11 @@ One of:
 - an object with `stack` (integer from 0 to 255): The same as a column of that many buttons.
 - an object with `grid` (object with `columns` (integer from 0 to 255), `rows` (integer from 0 to 255)): The choices of a choice parameter as a grid of small buttons, filled by rows (Note Echo's 1 2 3 4 over 5 6 8 16).
 - an object with `icon_segments` (integer from 0 to 255): A row of that many icon buttons, one for each choice of a choice parameter (the filter types), the chosen one lit.
+- `"inline"`: A name and the value after it on one line, the value in blue, dragged or typed (Freq and Width along the foot of Delay's display).
+- `"tick"`: A small box that is filled while the switch is on, with the name after it (the Filter switch along the foot of a display).
+- `"stacked"`: The name over the value, both centred, the value in blue and dragged or typed, with no box (Reverb's Amount and Rate).
+- `"spread"`: The name at the left and the value at the right of one line, the value in blue (Reverb's Shape).
+- an object with `tabs` (integer from 0 to 255): A row of that many tabs, one for each choice of a choice parameter, outlined in orange while off and filled while on (Chorus-Ensemble's Chorus, Ensemble and Vibrato).
 - an object with `beside` (integer from 0 to 255): A lit number box with its name to its left on the same line (Pedal's Dry/Wet, Overdrive's Dynamics): the number is the points the name has before the box.
 - an object with `beside_dim` (integer from 0 to 255): A plain number box with its name in dim text to its left on the same line (Spectral Resonator's Glide and PB): the number is the points the name has before the box.
 - an object with `beside_switch` (integer from 0 to 255): A button that reads On or Off, lit while on, with its name in dim text to its left (Spectral Resonator's MIDI Gate): the number is the points the name has before the button.
@@ -44263,7 +44652,6 @@ One of:
 - an object with `abbreviated` (integer from 0 to 255): A text button like [`Toggle`](Self::Toggle) that holds only the first that many characters of its parameter's name (Impulse's M, S and Sat).
 - `"bare_chooser"`: A [`Chooser`](Self::Chooser) with no name row: the device's own label is beside it, or it needs none (the Drum Sampler's effect type).
 - `"cycle"`: A lit text button holding the chosen choice's name, a press taking the next choice and the last going round to the first (the Drum Sampler's modulation source, Resonators' Mode).
-- `"inline"`: The name and the value on one line, the value in the accent, dragged or typed (the Drum Sampler's Start, Length and Gain under its sample).
 
 <details><summary>JSON Schema</summary>
 
@@ -44399,6 +44787,42 @@ One of:
       },
       "required": [
         "icon_segments"
+      ],
+      "type": "object"
+    },
+    {
+      "const": "inline",
+      "description": "A name and the value after it on one line, the value in blue, dragged or typed (Freq and Width along the foot of Delay's display).",
+      "type": "string"
+    },
+    {
+      "const": "tick",
+      "description": "A small box that is filled while the switch is on, with the name after it (the Filter switch along the foot of a display).",
+      "type": "string"
+    },
+    {
+      "const": "stacked",
+      "description": "The name over the value, both centred, the value in blue and dragged or typed, with no box (Reverb's Amount and Rate).",
+      "type": "string"
+    },
+    {
+      "const": "spread",
+      "description": "The name at the left and the value at the right of one line, the value in blue (Reverb's Shape).",
+      "type": "string"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A row of that many tabs, one for each choice of a choice parameter, outlined in orange while off and filled while on (Chorus-Ensemble's Chorus, Ensemble and Vibrato).",
+      "properties": {
+        "tabs": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "tabs"
       ],
       "type": "object"
     },
@@ -44540,11 +44964,6 @@ One of:
     {
       "const": "cycle",
       "description": "A lit text button holding the chosen choice's name, a press taking the next choice and the last going round to the first (the Drum Sampler's modulation source, Resonators' Mode).",
-      "type": "string"
-    },
-    {
-      "const": "inline",
-      "description": "The name and the value on one line, the value in the accent, dragged or typed (the Drum Sampler's Start, Length and Gain under its sample).",
       "type": "string"
     }
   ]

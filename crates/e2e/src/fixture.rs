@@ -26,12 +26,12 @@
 use std::collections::BTreeMap;
 
 use bl_core::time::Ticks;
-use bl_devices::auto_filter::{AUTO_FILTER, FREQ as FILTER_FREQ, RES as FILTER_RES};
+use bl_devices::auto_filter::{self as af, AUTO_FILTER, FREQ as FILTER_FREQ, RES as FILTER_RES};
 use bl_devices::compressor::COMPRESSOR;
-use bl_devices::delay::DELAY;
+use bl_devices::delay::{self as dl, DELAY};
 use bl_devices::limiter::LIMITER;
 use bl_devices::operator::OPERATOR;
-use bl_devices::reverb::REVERB;
+use bl_devices::reverb::{self as rv, REVERB};
 use bl_devices::saturator::SATURATOR;
 use bl_model::modulator::WAVE_MOD;
 use bl_model::{ClipData, MidiData, Note};
@@ -179,6 +179,15 @@ pub fn native(name: &str, device_type: &str, role: &str) -> Value {
             "role": role, "kind": { "native": { "device_type": device_type } } })
 }
 
+/// The same with the parameters `settings` set (number and value), as a set
+/// saves them.
+#[must_use]
+pub fn native_with(name: &str, device_type: &str, role: &str, settings: &[(u32, f64)]) -> Value {
+    let mut device = native(name, device_type, role);
+    device["params"] = json!(settings);
+    device
+}
+
 /// A MIDI clip's data, as `clip.create` takes it, of `notes` (key, start,
 /// length, velocity) and unlooped.
 #[must_use]
@@ -322,7 +331,14 @@ pub fn build(driver: &mut impl Driver) -> Ids {
             insert(
                 ids.track("Keys"),
                 1,
-                native("filter", AUTO_FILTER, "audio_effect"),
+                // The 12 dB slope and the LFO phase of 0 the rich set's references
+                // were made with: Live's panel starts at 24 dB and 4 degrees.
+                native_with(
+                    "filter",
+                    AUTO_FILTER,
+                    "audio_effect",
+                    &[(af::SLOPE.0, 1.0), (af::LFO_PHASE.0, 0.0)],
+                ),
             ),
             insert(
                 ids.track("Keys"),
@@ -348,9 +364,47 @@ pub fn build(driver: &mut impl Driver) -> Ids {
             insert(
                 ids.track("Verb"),
                 0,
-                native("reverb", REVERB, "audio_effect"),
+                // Reverb as the references were made with it: Live's panel starts
+                // with other values.
+                native_with(
+                    "reverb",
+                    REVERB,
+                    "audio_effect",
+                    &[
+                        (rv::HIGH_CUT.0, 0.0),
+                        (rv::SPIN_RATE.0, 1.0),
+                        (rv::DIFFUSION.0, 50.0),
+                        (rv::SCALE.0, 50.0),
+                        (rv::CHORUS_RATE.0, 0.5),
+                        (rv::PREDELAY.0, 10.0),
+                        (rv::SMOOTH.0, 0.0),
+                        (rv::DECAY.0, 2.0),
+                        (rv::FLAT.0, 0.0),
+                        (rv::DENSITY.0, 1.0),
+                        (rv::REFLECT.0, 1.0),
+                        (rv::DIFFUSE.0, 1.0),
+                        (rv::DRY_WET.0, 100.0),
+                    ],
+                ),
             ),
-            insert(ids.track("Echo"), 0, native("delay", DELAY, "audio_effect")),
+            // Delay with its filter off at Q 2.5, four sixteenths a side and
+            // fully wet, as the references were made with it.
+            insert(
+                ids.track("Echo"),
+                0,
+                native_with(
+                    "delay",
+                    DELAY,
+                    "audio_effect",
+                    &[
+                        (dl::FILTER.0, 0.0),
+                        (dl::WIDTH.0, 2.5),
+                        (dl::DRY_WET.0, 100.0),
+                        (dl::L_SYNC.0, 4.0),
+                        (dl::R_SYNC.0, 4.0),
+                    ],
+                ),
+            ),
             insert(ids.main, 0, native("limiter", LIMITER, "audio_effect")),
         ],
     );

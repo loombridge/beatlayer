@@ -39,6 +39,7 @@ This spec covers the device only; where it sits in a chain and the frame around 
 - **R12.** With Filter on, the repeats (not the input) pass through a second-order Butterworth high-pass and low-pass in series, at Freq × 2^(−Width/2) and Freq × 2^(Width/2) (Freq 20 Hz to 20 kHz, Width 0.1 to 8 octaves; the low edge kept to at least 20 Hz and the high to below 0.45 of the sample rate). Its state clears when a span starts. (S1, S4)
 - **R13.** A render is bit-identical at block sizes 1, 64, 512 and 4,096 and run after run, with Chance and Variation, a tempo change and parameter changes mid-stream. Every block runs without allocating, locking or blocking: the capture buffers (eight seconds a channel), the filters and the random source are made with the device. (S3, S5)
 - **R14.** Every parameter can be inserted, set by ID and read back through the agent API (`device.insert`, `device.set_param`, `device.parameters`), is automatable and modulatable (rule G2), and the gain (Volume) reaches −∞ dB (rule G1). A set with the device saves and reopens with every parameter. (S2, S3)
+- **R15.** The panel is Live's (observed in Live 12.4.16, 2 November 2026): the grid display over the knobs Interval, Offset, Grid and Variation, with Repeat, No Trpl and the variation's trigger under them and Chance, Gate, Pitch and Pitch Decay below; at the right the filter's display with its frequency and width boxes, the Filter button, the mix mode as three buttons (Mix, Ins, Gate) and the Volume and Decay knobs. A new Beat Repeat has a Gate of 7 sixteenths, the mix mode's Insert is named Ins, and No Triplets reads No Trpl. (Layout L-DEV-087)
 
 ## Tests
 
@@ -57,6 +58,7 @@ This spec covers the device only; where it sits in a chain and the frame around 
 | R12 | `crates/devices/tests/beat_repeat.rs`, `the_filter_passes_its_band_and_cuts_what_lies_outside_it` | real-time trap |
 | R13 | `crates/devices/tests/beat_repeat.rs`, `renders_are_bit_identical_at_block_sizes_1_64_512_and_4096_and_run_after_run`; `crates/cli/tests/golden.rs`, `every_fixture_nulls_against_its_reference` (the `beat-repeat` fixture); `rtsan/tests/devices.rs`, `stutter_passes_under_rtsan` | real-time trap, golden render, RTSan |
 | R14 | `crates/cli/tests/agent.rs`, `an_agent_inserts_stutter_by_its_type_and_sets_and_reads_its_parameters_by_id`; `crates/shell/tests/beat_repeat.rs`, `a_set_with_stutter_reopens_with_every_parameter`; `crates/devices/tests/rules.rs` over the shipped types | MCP script, unit, real-time trap |
+| R15 | `crates/devices/tests/live_panels.rs`, `beat_repeat_holds_lives_controls_in_lives_order` | unit |
 
 ## Not built yet
 

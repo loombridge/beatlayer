@@ -1073,7 +1073,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 9.26 | done | 3 November 2026 | [#816](https://github.com/loombridge/beatlayer/pull/816): the Video Window, a floating window titled Video showing the frame at the playhead through the warp map (or under a dragged warp marker), black in gaps, shown by View ▸ Video Window and Cmd-Option-Shift-V and on a dropped movie, its place and size kept in the preferences, double-click for full screen and Option-double-click for the movie's size; `video.window_state` and `video.set_window` read and set it |
 | 9.27 | todo |  |  |
 | 9.28 | done | 1 November 2026 | [#690](https://github.com/loombridge/beatlayer/pull/690): a spike under `spikes/ext-wasmtime` runs a component's process function under `wasmtime` with a pooling allocator on a real-time thread on all three platforms: no allocation after instantiation, about 0.4 to 1.3 µs per 32-frame block, runaways stopped by epoch interruption, and `cargo deny` passing; its report on D12 is with the maintainer |
-| 9.29 | todo |  |  |
+| 9.29 | done | 3 November 2026 | [#819](https://github.com/loombridge/beatlayer/pull/819): a new UI-free `bl-ext` crate runs WebAssembly components under `wasmtime` with a pooling allocator and epoch interruption; `.blext` packages are validated before anything is written, compiled code is cached by SHA-256 and `wasmtime` version, extensions install, enable, disable and remove in the User Library through the `extension.*` commands, and a trapping or overrunning extension is stopped alone with its reason. |
 | 9.30 | todo |  |  |
 | 9.31 | todo |  |  |
 | 9.32 | todo |  |  |

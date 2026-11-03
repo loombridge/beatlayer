@@ -24,8 +24,11 @@ rayon = "1.12.0"
 # Stem separation's network (IMP-11): ONNX Runtime, whose shared library is
 # loaded at run time from the packages a person downloads on first use, so
 # nothing is fetched or linked at build time (`load-dynamic`, no default
-# features). API 28 is ONNX Runtime 1.28, the version the packages install.
-ort = { version = "=2.0.0-rc.14", default-features = false, features = ["std", "load-dynamic", "api-28", "coreml"], optional = true }
+# features). API 24 is the oldest ONNX Runtime the packages install: the
+# DirectML build on NuGet stops at 1.24.4, and a newer library serves an older
+# API. The three GPU providers (Core ML, DirectML, CUDA) are all compiled in
+# and each is tried only on its own platform.
+ort = { version = "=2.0.0-rc.14", default-features = false, features = ["std", "load-dynamic", "api-24", "coreml", "directml", "cuda"], optional = true }
 # The SHA-256 that names the compiled model's cache folder (R34), the version
 # bl-shell checks the packages with.
 sha2 = { version = "0.11", optional = true }

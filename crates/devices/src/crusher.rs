@@ -9,7 +9,7 @@
 
 use bl_dsp::Random;
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, LayoutNode, Widget};
+use bl_model::device_layout::{BOX_HEIGHT, Control, ControlBand, Heading, LayoutNode, Widget};
 use bl_model::{
     Device, DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit,
 };
@@ -35,7 +35,8 @@ pub const POST_OCTAVE: ParamId = ParamId(4);
 pub const BITS: ParamId = ParamId(5);
 /// Shape: finer steps for quiet parts.
 pub const SHAPE: ParamId = ParamId(6);
-/// DC Shift: an offset before the quantiser, in per cent of one step.
+/// DC Shift: a switch for an offset of [`DC_SHIFT_STEPS`] before the
+/// quantiser.
 pub const DC_SHIFT: ParamId = ParamId(7);
 /// Dry/Wet.
 pub const DRY_WET: ParamId = ParamId(8);
@@ -54,6 +55,8 @@ const WET_INDEX: usize = 8;
 const BUTTERWORTH_Q: [f64; 2] = [0.5412, 1.3066];
 /// The highest corner a filter has, as a fraction of the sample rate.
 const MAX_CORNER: f64 = 0.45;
+/// What DC Shift adds before the quantiser while it is on, in steps.
+pub const DC_SHIFT_STEPS: f32 = 0.25;
 /// At Jitter 100 %, the clock's step varies by up to this fraction.
 const JITTER_SPREAD: f64 = 0.5;
 /// At Shape 100 %, the quantiser works on the signal raised to the power
@@ -66,7 +69,7 @@ const REFRESH_FRAMES: u64 = 16;
 #[must_use]
 pub fn crusher_type() -> DeviceType {
     let params = vec![
-        ParamDescriptor::continuous(RATE, "Rate", (100.0, 48_000.0), 8_000.0, ParamUnit::Hertz)
+        ParamDescriptor::continuous(RATE, "Rate", (100.0, 48_000.0), 40_000.0, ParamUnit::Hertz)
             .logarithmic()
             .describe("The sample rate the signal is reduced to. At the engine's rate or above, it is untouched."),
         ParamDescriptor::continuous(JITTER, "Jitter", (0.0, 100.0), 0.0, ParamUnit::Percent)
@@ -83,33 +86,46 @@ pub fn crusher_type() -> DeviceType {
             ParamUnit::None,
         )
         .describe("The Post filter's corner, in octaves above or below half the Rate."),
-        ParamDescriptor::integer(BITS, "Bits", (2, 16), 8, ParamUnit::None)
+        ParamDescriptor::integer(BITS, "Bits", (2, 16), 16, ParamUnit::None)
             .describe("How many bits the output is quantised to."),
         ParamDescriptor::continuous(SHAPE, "Shape", (0.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("Makes the quantiser's steps finer at small amplitudes."),
-        ParamDescriptor::continuous(DC_SHIFT, "DC Shift", (-50.0, 50.0), 0.0, ParamUnit::Percent)
-            .describe("Adds an offset, in per cent of one step, before the quantiser."),
+        ParamDescriptor::toggle(DC_SHIFT, "DC Shift", false)
+            .describe("Adds an offset of a quarter of a step before the quantiser."),
         ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 100.0, ParamUnit::Percent)
             .describe("The balance between the dry and the crushed signal."),
     ];
     let layout = DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (RATE, Widget::Knob),
-                (JITTER, Widget::Knob),
-                (PRE, Widget::Toggle),
-                (POST, Widget::Toggle),
-                (POST_OCTAVE, Widget::Knob),
-            ],
-        )),
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (BITS, Widget::Number),
-                (SHAPE, Widget::Knob),
-                (DC_SHIFT, Widget::Knob),
-                (DRY_WET, Widget::Knob),
+        LayoutNode::Column(vec![
+            LayoutNode::Band(ControlBand::free(
+                68.5,
+                112.0,
+                vec![
+                    Control::new(RATE, Widget::Knob, 14.0, 4.0),
+                    Control::new(JITTER, Widget::SmallKnob, 18.0, 64.5),
+                ],
+            )),
+            LayoutNode::Heading(Heading::new("Filter", 30.0)),
+            LayoutNode::Band(ControlBand::free(
+                68.5,
+                34.0,
+                vec![
+                    Control::new(PRE, Widget::Toggle, 6.0, 0.0).sized(25.0, BOX_HEIGHT),
+                    Control::new(POST, Widget::Toggle, 35.5, 0.0).sized(26.0, BOX_HEIGHT),
+                    Control::new(POST_OCTAVE, Widget::Marked, 6.0, 15.0)
+                        .unnamed()
+                        .sized(55.0, BOX_HEIGHT),
+                ],
+            )),
+        ]),
+        LayoutNode::Band(ControlBand::free(
+            66.5,
+            158.0,
+            vec![
+                Control::new(BITS, Widget::Knob, 13.5, 4.0),
+                Control::new(SHAPE, Widget::SmallKnob, 17.8, 64.5),
+                Control::new(DC_SHIFT, Widget::Toggle, 6.0, 112.0).sized(56.0, BOX_HEIGHT),
+                Control::new(DRY_WET, Widget::Slider, 6.0, 128.5).sized(56.0, 21.0),
             ],
         )),
     ]));
@@ -135,7 +151,7 @@ pub fn register(registry: &mut Registry) {
 /// from −1 up to one step under 1. `power` below 1 (Shape) quantises the
 /// signal raised to it, so steps near zero are finer; `offset` (DC Shift) is
 /// in steps and is added before the rounding.
-fn quantise(x: f32, bits: u32, power: f32, offset: f32) -> f32 {
+pub(crate) fn quantise(x: f32, bits: u32, power: f32, offset: f32) -> f32 {
     let half = (1u32 << (bits - 1)) as f32;
     let x = x.clamp(-1.0, 1.0);
     let curved = if power == 1.0 {
@@ -154,7 +170,7 @@ fn quantise(x: f32, bits: u32, power: f32, offset: f32) -> f32 {
 }
 
 /// A 4th-order low-pass at `corner` Hz: two stages.
-fn low_pass(corner: f64, rate: f64) -> [Coeffs; 2] {
+pub(crate) fn low_pass(corner: f64, rate: f64) -> [Coeffs; 2] {
     let corner = corner.min(rate * MAX_CORNER);
     BUTTERWORTH_Q.map(|q| coeffs(Type::HighCut12, corner, 0.0, q, rate))
 }
@@ -247,7 +263,7 @@ impl NativeDevice for Crusher {
                     y = channel.post.iter_mut().fold(y, |y, stage| stage.process(y));
                 }
                 let power = 1.0 / (1.0 + SHAPE_RANGE * f64::from(shape[i]) / 100.0);
-                let y = quantise(y, bits[i] as u32, power as f32, dc[i] / 100.0);
+                let y = quantise(y, bits[i] as u32, power as f32, dc[i] * DC_SHIFT_STEPS);
                 *sample = dry + (y - dry) * (wet[i] / 100.0);
             }
         }

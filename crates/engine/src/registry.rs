@@ -104,6 +104,9 @@ pub struct DeviceType {
     /// tracks can route into it, and its node reads what its detector
     /// hears with [`Block::sidechain`](crate::Block::sidechain).
     pub sidechain: bool,
+    /// Whether that sidechain's External switch is on in a new device: the
+    /// node always hears its source (Granulator III's capture).
+    pub sidechain_on: bool,
     /// Whether its devices work with hardware outside the computer
     /// (WP-5.34): they have an output port, a channel, the interface inputs
     /// the sound comes back on, and a Hardware Latency
@@ -157,6 +160,7 @@ impl DeviceType {
             role,
             description: DeviceDescription::default(),
             sidechain: false,
+            sidechain_on: false,
             external: false,
             external_output: false,
             cv_outputs: Vec::new(),
@@ -195,6 +199,15 @@ impl DeviceType {
     #[must_use]
     pub fn with_sidechain(mut self) -> Self {
         self.sidechain = true;
+        self
+    }
+
+    /// The same device type, declaring a sidechain input whose External
+    /// switch is on in a new device, for a node that always reads its source.
+    #[must_use]
+    pub fn with_sidechain_on(mut self) -> Self {
+        self.sidechain = true;
+        self.sidechain_on = true;
         self
     }
 
@@ -278,6 +291,11 @@ impl DeviceType {
         let mut device = Device::new(id, self.name.clone(), self.kind.clone()).with_role(self.role);
         if self.sidechain {
             device = device.with_sidechain();
+            if self.sidechain_on
+                && let Some(sidechain) = &mut device.sidechain
+            {
+                sidechain.enabled = true;
+            }
         }
         if self.external {
             device = device.with_external();
@@ -357,6 +375,10 @@ pub struct Registry {
     /// data, fading out the voices of the one before, so a sample change
     /// doesn't make a new node.
     swaps_samples: Vec<String>,
+    /// The native device types whose node data is built from some of their
+    /// parameters, and which: a change to one sends the data again
+    /// ([`Registry::rebuilds_data_on`]).
+    data_params: Vec<(String, Vec<bl_model::ParamId>)>,
 }
 
 impl Registry {
@@ -379,7 +401,32 @@ impl Registry {
             factories: Vec::new(),
             media: None,
             swaps_samples: Vec::new(),
+            data_params: Vec::new(),
         }
+    }
+
+    /// Says that the data of the native device type `device_type` (see
+    /// [`add_device_with_data`](Self::add_device_with_data)) is built from
+    /// the values of `params`, so a change to one of them sends it again
+    /// with no new program (the Operator spec, R7: Repeat shapes a user
+    /// wave's table).
+    pub fn rebuilds_data_on(&mut self, device_type: &str, params: &[bl_model::ParamId]) {
+        self.data_params
+            .push((device_type.to_owned(), params.to_vec()));
+    }
+
+    /// Whether a change from `before` to `after` changes a parameter their
+    /// type's data is built from ([`rebuilds_data_on`](Self::rebuilds_data_on)).
+    #[must_use]
+    pub fn data_params_changed(&self, before: &Device, after: &Device) -> bool {
+        let DeviceKind::Native { device_type } = &after.kind else {
+            return false;
+        };
+        self.data_params
+            .iter()
+            .filter(|(kind, _)| kind == device_type)
+            .flat_map(|(_, params)| params)
+            .any(|id| before.params.get(id) != after.params.get(id))
     }
 
     /// Says that the node of the native device type `device_type` takes a

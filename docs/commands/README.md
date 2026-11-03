@@ -37,6 +37,7 @@ The commands, by the part of their ID before its first dot:
 - [`articulation`](articulation.md)
 - [`assistant`](assistant.md)
 - [`audio`](audio.md)
+- [`audio_to_midi`](audio_to_midi.md)
 - [`automation`](automation.md)
 - [`browser`](browser.md)
 - [`chain`](chain.md)
@@ -53,6 +54,7 @@ The commands, by the part of their ID before its first dot:
 - [`export`](export.md)
 - [`file_manager`](file_manager.md)
 - [`focus`](focus.md)
+- [`granulator`](granulator.md)
 - [`groove`](groove.md)
 - [`keymap`](keymap.md)
 - [`link`](link.md)
@@ -64,6 +66,7 @@ The commands, by the part of their ID before its first dot:
 - [`modulation`](modulation.md)
 - [`modulator`](modulator.md)
 - [`note`](note.md)
+- [`operator`](operator.md)
 - [`packages`](packages.md)
 - [`pad`](pad.md)
 - [`perception`](perception.md)
@@ -339,6 +342,7 @@ Two parameters that share one control, which a switch turns between: while `swit
 | `switch` | [`ParamId`](#paramid) | yes | The switch. |
 | `off` | [`ParamId`](#paramid) | yes | The parameter the control is while the switch is off. |
 | `on` | [`ParamId`](#paramid) | yes | The parameter the control is while the switch is on. |
+| `at` | integer or null | no | For a switch that is a choice: the choice, by its number, that puts `on` in place (the Drum Sampler's Res is its Peak filter's gain while the type is Peak). Left out, `on` takes over while the switch is on: a toggle, or a choice past its first (Shifter's Freq and Ring modes). |
 
 <details><summary>JSON Schema</summary>
 
@@ -346,6 +350,15 @@ Two parameters that share one control, which a switch turns between: while `swit
 {
   "description": "Two parameters that share one control, which a switch turns between: while `switch` is on the control is `on`'s, and otherwise `off`'s. The layout places `off`'s control only (Limiter's Maximize turns Ceiling into Threshold).",
   "properties": {
+    "at": {
+      "description": "For a switch that is a choice: the choice, by its number, that puts `on` in place (the Drum Sampler's Res is its Peak filter's gain while the type is Peak). Left out, `on` takes over while the switch is on: a toggle, or a choice past its first (Shifter's Freq and Ring modes).",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "off": {
       "$ref": "#/$defs/ParamId",
       "description": "The parameter the control is while the switch is off."
@@ -2520,6 +2533,131 @@ What `audio.status` returns.
 
 </details>
 
+### `AudioToMidiStatus`
+
+What `audio_to_midi.status` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `installed` | boolean | yes | Whether every package Harmony and Melody need is installed. Drums needs none. |
+| `folder` | string | yes | Where the packages are installed. |
+| `packages` | array of [`PackageStatus`](#packagestatus) | yes | The packages Harmony and Melody need. |
+| `install` | [`JobStatus`](#jobstatus) | yes | The download. |
+| `conversion` | [`JobStatus`](#jobstatus) | yes | The conversion, the last one when none is running. |
+| `clip` | [`ClipId`](#clipid) or null | no | The clip being converted, or the last one's. |
+| `created_clip` | [`ClipId`](#clipid) or null | no | The clip the last conversion made. |
+| `created_track` | [`TrackId`](#trackid) or null | no | The track the last conversion made. |
+| `dialog` | [`ConvertDialogStatus`](#convertdialogstatus) or null | no | The window, if it's open. |
+| `kind` | [`ConvertKind`](#convertkind) or null | no | The kind of the conversion running, or the last one's. |
+| `notes` | integer or null | no | How many notes the last conversion put in its clip; a conversion that found none made an empty clip. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `audio_to_midi.status` returns.",
+  "properties": {
+    "clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip being converted, or the last one's."
+    },
+    "conversion": {
+      "$ref": "#/$defs/JobStatus",
+      "description": "The conversion, the last one when none is running."
+    },
+    "created_clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip the last conversion made."
+    },
+    "created_track": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrackId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The track the last conversion made."
+    },
+    "dialog": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ConvertDialogStatus"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The window, if it's open."
+    },
+    "folder": {
+      "description": "Where the packages are installed.",
+      "type": "string"
+    },
+    "install": {
+      "$ref": "#/$defs/JobStatus",
+      "description": "The download."
+    },
+    "installed": {
+      "description": "Whether every package Harmony and Melody need is installed. Drums needs none.",
+      "type": "boolean"
+    },
+    "kind": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ConvertKind"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The kind of the conversion running, or the last one's."
+    },
+    "notes": {
+      "description": "How many notes the last conversion put in its clip; a conversion that found none made an empty clip.",
+      "format": "uint",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "packages": {
+      "description": "The packages Harmony and Melody need.",
+      "items": {
+        "$ref": "#/$defs/PackageStatus"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "installed",
+    "folder",
+    "packages",
+    "install",
+    "conversion"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Auditioned`
 
 What `device.audition_sample` returns.
@@ -3161,6 +3299,55 @@ What `set.backups` returns.
   },
   "required": [
     "backups"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `BandLabel`
+
+A line of text in a band that names a control or a pair of them: centred in `width` points from `x`, in a row of [`LABEL_HEIGHT`] at `y`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `text` | string | yes | The text. |
+| `x` | number | yes | Its left edge, from the band's. |
+| `y` | number | yes | Its top edge, from the band's. |
+| `width` | number | yes | The width it is centred in. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A line of text in a band that names a control or a pair of them: centred in `width` points from `x`, in a row of [`LABEL_HEIGHT`] at `y`.",
+  "properties": {
+    "text": {
+      "description": "The text.",
+      "type": "string"
+    },
+    "width": {
+      "description": "The width it is centred in.",
+      "format": "float",
+      "type": "number"
+    },
+    "x": {
+      "description": "Its left edge, from the band's.",
+      "format": "float",
+      "type": "number"
+    },
+    "y": {
+      "description": "Its top edge, from the band's.",
+      "format": "float",
+      "type": "number"
+    }
+  },
+  "required": [
+    "text",
+    "x",
+    "y",
+    "width"
   ],
   "type": "object"
 }
@@ -7941,10 +8128,12 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
 | `widget` | [`Widget`](#widget) | yes | How it's drawn. |
 | `x` | number | yes | Its left edge, from the band's. |
 | `y` | number | yes | Its top edge, from the band's. |
+| `caption` | string or null | no | The name the control shows in place of its parameter's, where a section's own heading makes the full name redundant (Vinyl Distortion's Freq and B in each section). |
 | `glyph` | [`Glyph`](#glyph) or null | no | The icon of an icon button or a round button. |
 | `grey` | [`GreyWhen`](#greywhen) or null | no | The condition that greys the control. |
 | `size` | [`Size`](#size) or null | no | Its size where the device sets it, in place of the widget's: the width of a box, a row of buttons or a unit pair's control. |
 | `unit` | [`UnitPair`](#unitpair) or null | no | The unit pair beside a knob, which makes the knob show one of two parameters. |
+| `unnamed` | boolean | no | Set for a box or a chooser drawn without the name above it (the Saturator's curve chooser inside its display): it takes only the box's height. |
 
 <details><summary>JSON Schema</summary>
 
@@ -7952,6 +8141,13 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
 {
   "description": "One control in a band: a parameter, drawn by a widget, at a place in the band.",
   "properties": {
+    "caption": {
+      "description": "The name the control shows in place of its parameter's, where a section's own heading makes the full name redundant (Vinyl Distortion's Freq and B in each section).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "glyph": {
       "anyOf": [
         {
@@ -8000,6 +8196,10 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
       ],
       "description": "The unit pair beside a knob, which makes the knob show one of two parameters."
     },
+    "unnamed": {
+      "description": "Set for a box or a chooser drawn without the name above it (the Saturator's curve chooser inside its display): it takes only the box's height.",
+      "type": "boolean"
+    },
     "widget": {
       "$ref": "#/$defs/Widget",
       "description": "How it's drawn."
@@ -8036,6 +8236,7 @@ A band of controls, of a fixed size.
 | `width` | number | yes | Its width. |
 | `height` | number | yes | Its height. |
 | `controls` | array of [`Control`](#control) | yes | Its controls. |
+| `labels` | array of [`BandLabel`](#bandlabel) | no | Its text labels, drawn beside the controls they name. |
 | `slots` | [`SlotGroup`](#slotgroup) or null | no | Set for a band that shows the selected sample slot's controls: its controls name the first slot's parameters, and the band is placed for the selected slot ([`DeviceLayout::place_for`]). |
 
 <details><summary>JSON Schema</summary>
@@ -8055,6 +8256,13 @@ A band of controls, of a fixed size.
       "description": "Its height.",
       "format": "float",
       "type": "number"
+    },
+    "labels": {
+      "description": "Its text labels, drawn beside the controls they name.",
+      "items": {
+        "$ref": "#/$defs/BandLabel"
+      },
+      "type": "array"
     },
     "slots": {
       "anyOf": [
@@ -8187,6 +8395,120 @@ One of:
         "type"
       ],
       "type": "object"
+    }
+  ]
+}
+```
+
+</details>
+
+### `ConvertDialogStatus`
+
+The open window.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `step` | [`ConvertDialogStep`](#convertdialogstep) | yes | What it shows. |
+| `kind` | [`ConvertKind`](#convertkind) | yes | The conversion it is for. |
+| `clip` | [`ClipId`](#clipid) | yes | The clip it converts. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The open window.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip it converts."
+    },
+    "kind": {
+      "$ref": "#/$defs/ConvertKind",
+      "description": "The conversion it is for."
+    },
+    "step": {
+      "$ref": "#/$defs/ConvertDialogStep",
+      "description": "What it shows."
+    }
+  },
+  "required": [
+    "step",
+    "kind",
+    "clip"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ConvertDialogStep`
+
+The window a person sees.
+
+One of:
+
+- `"packages"`: The packages to download, the first time.
+- `"installing"`: The download's progress.
+- `"converting"`: The conversion's progress.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The window a person sees.",
+  "oneOf": [
+    {
+      "const": "packages",
+      "description": "The packages to download, the first time.",
+      "type": "string"
+    },
+    {
+      "const": "installing",
+      "description": "The download's progress.",
+      "type": "string"
+    },
+    {
+      "const": "converting",
+      "description": "The conversion's progress.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `ConvertKind`
+
+What a conversion finds in the audio.
+
+One of:
+
+- `"harmony"`: Pitches of polyphonic audio, chords included.
+- `"melody"`: Pitches of monophonic audio, one at a time.
+- `"drums"`: Hits of unpitched, percussive audio: kick, snare and hi-hat.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a conversion finds in the audio.",
+  "oneOf": [
+    {
+      "const": "harmony",
+      "description": "Pitches of polyphonic audio, chords included.",
+      "type": "string"
+    },
+    {
+      "const": "melody",
+      "description": "Pitches of monophonic audio, one at a time.",
+      "type": "string"
+    },
+    {
+      "const": "drums",
+      "description": "Hits of unpitched, percussive audio: kick, snare and hi-hat.",
+      "type": "string"
     }
   ]
 }
@@ -9096,6 +9418,52 @@ What `file_manager.delete_unused` returns.
 
 </details>
 
+### `DestinationRemoved`
+
+What `device.remove_destination` returns: the slots it emptied.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `destination` | string | yes | The destination's name. |
+| `cleared` | array of integer from 0 to 255 | yes | The numbers of the slots whose routes it cleared. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.remove_destination` returns: the slots it emptied.",
+  "properties": {
+    "cleared": {
+      "description": "The numbers of the slots whose routes it cleared.",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "destination": {
+      "description": "The destination's name.",
+      "type": "string"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    }
+  },
+  "required": [
+    "device",
+    "destination",
+    "cleared"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `DetailState`
 
 What the detail area's commands return, and `view.state` reports under `detail` (detail-views R17): which views show, where the focus is and how tall the Clip View is.
@@ -9221,6 +9589,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `mpe` | [`PluginMpe`](#pluginmpe) | no | A plug-in's MPE Mode and the MPE/Multi-channel Settings its MPE MIDI goes out on (the MPE spec, R14, R18). Off in a new device, and left out of the saved set until changed. Native devices never set it. |
 | `other_params` | array or null | no | The values of the state that isn't active, in the same form as [`params`](Self::params) (device compare R1, R10). `None` while the two states are equal, as a new device's are, and left out of the saved set then. Use [`other_params`](Self::other_params) to read it. |
 | `own_name` | string | no | The device's own name, such as `Auto Filter`, which the title bar shows while Show Preset Name is off. Empty while it's the same as [`name`](Self::name), and left out of the saved set then. |
+| `partials` | array of [`Partials`](#partials) | no | The partials of the user waves an Operator's oscillators play (the Operator spec, R27), by oscillator; one that isn't listed has the first partial alone. Empty for a device without drawn waves, and left out of the saved set then. |
 | `plugin` | [`PluginState`](#pluginstate) or null | no | A plug-in's own state and where it was loaded from (WP-2.6), as last saved with the set. Left out of the saved set for a native device, and for a plug-in until the set is first saved with it. |
 | `preset_name` | string or null | no | The name of the preset the device holds (the plug-in list spec, R5): the Beatlayer device preset last loaded into it or saved from it, or else the program name the plug-in's format reported. Left out of the saved set while there is none, so a device saved before this package loads with none. |
 | `region` | [`SampleRegion`](#sampleregion) or null | no | The part of slot 0's sample a Simpler plays, between its Start and End flags (the sampler spec, R22): `None` for the whole sample. Loading another sample clears it; an edit that changes the sample's length moves it. Left out of the saved set while it is the whole sample. |
@@ -9388,6 +9757,13 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
           }
         ],
         "type": "array"
+      },
+      "type": "array"
+    },
+    "partials": {
+      "description": "The partials of the user waves an Operator's oscillators play (the Operator spec, R27), by oscillator; one that isn't listed has the first partial alone. Empty for a device without drawn waves, and left out of the saved set then.",
+      "items": {
+        "$ref": "#/$defs/Partials"
       },
       "type": "array"
     },
@@ -9575,6 +9951,7 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
 | `alternates` | array of [`Alternate`](#alternate) | no | The controls that show one of two parameters, as a switch says. Both parameters keep their values and their lanes whichever is shown. |
 | `banks` | array of [`Bank`](#bank) | no | The banks the type declares for control surfaces, its main controls first; empty for a type that leaves them to [`DeviceDescription::banks`]' generic ones. They hold neither the menu options nor the title switch. |
 | `display_drag` | array of [`ParamId`](#paramid) | no | The parameter a vertical drag on the display changes, one for each of `views`, in their order (Roar's shaper display drags the shown stage's Shaper Amount); empty for a display that isn't dragged. |
+| `grid_params` | array of [`ParamId`](#paramid) | no | The parameters a display cell sets by its own gestures, which the layout places no control for: a matrix grid's route amounts. |
 | `menu_options` | array of [`ParamId`](#paramid) | no | The switches the device lists as its own items in its Show Options menu, after Save as Default Preset (C-DEVICE-015), in this order. They are parameters like any other, but the layout places no control for them. |
 | `relabels` | array of [`Relabel`](#relabel) | no | The parameters whose names follow another parameter's value. |
 | `spectrogram` | [`SpectrogramGrid`](#spectrogramgrid) or null | no | The grid of the spectrogram its display holds, if it holds one (the device framework spec, R46). |
@@ -9603,6 +9980,13 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
     },
     "display_drag": {
       "description": "The parameter a vertical drag on the display changes, one for each of `views`, in their order (Roar's shaper display drags the shown stage's Shaper Amount); empty for a display that isn't dragged.",
+      "items": {
+        "$ref": "#/$defs/ParamId"
+      },
+      "type": "array"
+    },
+    "grid_params": {
+      "description": "The parameters a display cell sets by its own gestures, which the layout places no control for: a matrix grid's route amounts.",
       "items": {
         "$ref": "#/$defs/ParamId"
       },
@@ -10491,10 +10875,12 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
 | `selected_slot` | integer, at least 0 | yes | For a device with sample slots (WP-5.17): the slot whose controls the panel shows, a view setting that isn't saved with the set. |
 | `articulations` | array of [`Articulation`](#articulation) | no | An Articulation Map's articulations, in order: the list its panel shows. Empty for every other device. |
 | `configured` | array of [`ConfiguredParam`](#configuredparam) | no | The parameters a plug-in device's panel can show, in configured order (clap-hosting R5, configure mode): a knob's context menu offers them, each over the knob it is right-clicked on. Empty for a native device. |
+| `harmonics` | [`HarmonicsOptions`](#harmonicsoptions) or null | no | An Operator's harmonics editor options, which a drag across its partials follows (operator R27): view state. |
 | `knobs` | array of integer, at least 0 | no | The knob each of the panel's parameters is drawn on, 0 to 7, parallel to `description`'s parameters (clap-hosting R5, WP-5.40): a knob's context menu remaps the knob it is right-clicked on. Empty for a device that isn't a plug-in. |
 | `learning` | integer or null | no | The articulation whose Learn button is lit, counted from 0: the panel's state, not the set's. |
 | `loaded_slots` | array of boolean | no | For a device with sample slots: whether each slot holds a sample. |
 | `locked` | array of [`ParamId`](#paramid) | no | The parameters drawn disabled because the device takes them from its current scale: Scale's Base and Scale Name and Arpeggiator's Root and Scale, while Use Current Scale is on (the scales spec, R16). |
+| `matrix_grid` | [`MatrixGrid`](#matrixgrid) or null | no | For an instrument whose Matrix tab draws its routes as a grid (the wavetable spec, R39): the grid's columns, its rows and what can still be added. None for any other device. |
 | `matrix_routes` | array of [`MatrixRoutes`](#matrixroutes) | no | For each parameter an instrument's modulation matrix moves, the sources routed into it, in slot order (the instrument modulation spec, R12): what assistive technology reads beside the control's value. Empty for a device without a matrix or with no route. |
 | `pages` | array of [`PagesFrame`](#pagesframe) | no | Each pages node of the device's layout with its pages and the one shown (device framework R43): view state, saved with the set but no undo step. Empty for a device with none. |
 | `slot_keys` | array of string | no | For a device with sample slots: the key each slot plays, as Live names notes (`C3`). |
@@ -10522,6 +10908,17 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
     "description": {
       "$ref": "#/$defs/DeviceDescription",
       "description": "Its parameters' descriptors and its layout."
+    },
+    "harmonics": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HarmonicsOptions"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "An Operator's harmonics editor options, which a drag across its partials follows (operator R27): view state."
     },
     "knobs": {
       "description": "The knob each of the panel's parameters is drawn on, 0 to 7, parallel to `description`'s parameters (clap-hosting R5, WP-5.40): a knob's context menu remaps the knob it is right-clicked on. Empty for a device that isn't a plug-in.",
@@ -10555,6 +10952,17 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
         "$ref": "#/$defs/ParamId"
       },
       "type": "array"
+    },
+    "matrix_grid": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MatrixGrid"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "For an instrument whose Matrix tab draws its routes as a grid (the wavetable spec, R39): the grid's columns, its rows and what can still be added. None for any other device."
     },
     "matrix_routes": {
       "description": "For each parameter an instrument's modulation matrix moves, the sources routed into it, in slot order (the instrument modulation spec, R12): what assistive technology reads beside the control's value. Empty for a device without a matrix or with no route.",
@@ -11154,6 +11562,7 @@ A display cell: a graph, a spectrum, a waveform, or an envelope editor, which gr
 | `height` | number | yes | Its docked height, the least it has. |
 | `weight` | number | yes | Its share of extra room, against the other cells it shares with. |
 | `bottom` | [`ControlBand`](#controlband) or null | no | Controls inside its bottom edge, from its left. |
+| `inset` | number | no | The space left clear around the cell inside the room it is given, as Live leaves round a Drum Synth's display (L-DEV-047): the cell's size and growth are inside it. |
 | `slot` | integer or null | no | The sample slot the cell stands for, if it does: it shows the slot and takes a click that selects it, and a sample dropped on it (WP-5.17). |
 | `top` | [`ControlBand`](#controlband) or null | no | Controls inside its top edge, from its left. |
 
@@ -11176,6 +11585,11 @@ A display cell: a graph, a spectrum, a waveform, or an envelope editor, which gr
     },
     "height": {
       "description": "Its docked height, the least it has.",
+      "format": "float",
+      "type": "number"
+    },
+    "inset": {
+      "description": "The space left clear around the cell inside the room it is given, as Live leaves round a Drum Synth's display (L-DEV-047): the cell's size and growth are inside it.",
       "format": "float",
       "type": "number"
     },
@@ -11233,6 +11647,7 @@ What dragging a marker sets: where the marker sits across the cell is the horizo
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `x` | [`ParamId`](#paramid) | yes | The parameter its horizontal place is. |
+| `span` | array or null | no | The part of the cell's width, from 0 to 1 across it, that the horizontal parameter's travel covers (the whole width without one): an envelope's stages each take a share of the cell. |
 | `y` | [`ParamId`](#paramid) or null | no | The parameter its vertical place is, if it has one. |
 
 <details><summary>JSON Schema</summary>
@@ -11241,6 +11656,19 @@ What dragging a marker sets: where the marker sits across the cell is the horizo
 {
   "description": "What dragging a marker sets: where the marker sits across the cell is the horizontal parameter's travel, and up the cell is the marker's place on its series (with a vertical parameter, a drag moves that too), so a drag is the parameters' own control at another place.",
   "properties": {
+    "span": {
+      "description": "The part of the cell's width, from 0 to 1 across it, that the horizontal parameter's travel covers (the whole width without one): an envelope's stages each take a share of the cell.",
+      "items": {
+        "format": "float",
+        "type": "number"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": [
+        "array",
+        "null"
+      ]
+    },
     "x": {
       "$ref": "#/$defs/ParamId",
       "description": "The parameter its horizontal place is."
@@ -12515,6 +12943,28 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `EnvelopeLevel`
+
+The level `operator.set_envelope_levels` sets.
+
+Type: one of `"maximum"`, `"minimum"`, `"middle"`.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The level `operator.set_envelope_levels` sets.",
+  "enum": [
+    "maximum",
+    "minimum",
+    "middle"
+  ],
+  "type": "string"
 }
 ```
 
@@ -14927,6 +15377,14 @@ One of:
 - `"plus"`: A plus sign.
 - `"minus"`: A minus sign.
 - `"flat_sharp"`: A flat and a sharp: Use Current Scale.
+- `"crossfade"`: Two lines crossing: a crossfade.
+- `"envelope"`: A rise and a fall: an envelope's shape.
+- `"phase"`: A circle cut by a line: a phase.
+- `"spin"`: A circle with an arrow round it: a spin.
+- `"low_pass24"`: A low-pass filter's response at 24 dB per octave.
+- `"high_pass24"`: A high-pass filter's response at 24 dB per octave.
+- `"peak"`: A peak filter's response.
+- `"headphones"`: Headphones: a device's audition button (Boom Audition, Utility's Bass Mono, EQ Eight's Audition).
 
 <details><summary>JSON Schema</summary>
 
@@ -14998,8 +15456,113 @@ One of:
       "const": "flat_sharp",
       "description": "A flat and a sharp: Use Current Scale.",
       "type": "string"
+    },
+    {
+      "const": "crossfade",
+      "description": "Two lines crossing: a crossfade.",
+      "type": "string"
+    },
+    {
+      "const": "envelope",
+      "description": "A rise and a fall: an envelope's shape.",
+      "type": "string"
+    },
+    {
+      "const": "phase",
+      "description": "A circle cut by a line: a phase.",
+      "type": "string"
+    },
+    {
+      "const": "spin",
+      "description": "A circle with an arrow round it: a spin.",
+      "type": "string"
+    },
+    {
+      "const": "low_pass24",
+      "description": "A low-pass filter's response at 24 dB per octave.",
+      "type": "string"
+    },
+    {
+      "const": "high_pass24",
+      "description": "A high-pass filter's response at 24 dB per octave.",
+      "type": "string"
+    },
+    {
+      "const": "peak",
+      "description": "A peak filter's response.",
+      "type": "string"
+    },
+    {
+      "const": "headphones",
+      "description": "Headphones: a device's audition button (Boom Audition, Utility's Bass Mono, EQ Eight's Audition).",
+      "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `GranulatorCaptureAction`
+
+What `granulator.capture` does.
+
+One of:
+
+- `"start"`: Starts a capture.
+- `"stop"`: Ends the capture running now.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `granulator.capture` does.",
+  "oneOf": [
+    {
+      "const": "start",
+      "description": "Starts a capture.",
+      "type": "string"
+    },
+    {
+      "const": "stop",
+      "description": "Ends the capture running now.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `GranulatorCaptureResult`
+
+What `granulator.capture` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `capturing` | boolean | yes | Whether a capture runs now. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `granulator.capture` returns.",
+  "properties": {
+    "capturing": {
+      "description": "Whether a capture runs now.",
+      "type": "boolean"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    }
+  },
+  "required": [
+    "device",
+    "capturing"
+  ],
+  "type": "object"
 }
 ```
 
@@ -15033,6 +15596,94 @@ A condition that greys a control: while parameter `param`'s value, rounded, is `
   "required": [
     "param",
     "value"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `GridCell`
+
+A route a grid cell shows.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `slot` | integer from 0 to 255 | yes | The slot's number. |
+| `amount_param` | [`ParamId`](#paramid) | yes | Its amount's parameter. |
+| `amount` | number | yes | Its amount, in per cent from -100 to 100. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A route a grid cell shows.",
+  "properties": {
+    "amount": {
+      "description": "Its amount, in per cent from -100 to 100.",
+      "format": "double",
+      "type": "number"
+    },
+    "amount_param": {
+      "$ref": "#/$defs/ParamId",
+      "description": "Its amount's parameter."
+    },
+    "slot": {
+      "description": "The slot's number.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "slot",
+    "amount_param",
+    "amount"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `GridRow`
+
+One destination's row of a matrix grid.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `destination` | string | yes | The destination's name. |
+| `cells` | array of [`GridCell`](#gridcell) or null | yes | One cell for each of the grid's sources: the free slot that routes it here, or none while no slot does. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One destination's row of a matrix grid.",
+  "properties": {
+    "cells": {
+      "description": "One cell for each of the grid's sources: the free slot that routes it here, or none while no slot does.",
+      "items": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/GridCell"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "type": "array"
+    },
+    "destination": {
+      "description": "The destination's name.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "destination",
+    "cells"
   ],
   "type": "object"
 }
@@ -15868,6 +16519,86 @@ One of:
 
 </details>
 
+### `HarmonicsOptions`
+
+The harmonics editor's options in a device's panel (operator R27).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `even_only` | boolean | yes |  |
+| `odd_only` | boolean | yes |  |
+| `normalize` | boolean | yes |  |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The harmonics editor's options in a device's panel (operator R27).",
+  "properties": {
+    "even_only": {
+      "type": "boolean"
+    },
+    "normalize": {
+      "type": "boolean"
+    },
+    "odd_only": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "even_only",
+    "odd_only",
+    "normalize"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `HarmonicsView`
+
+The harmonics editor's options, which `operator.set_harmonics` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `even_only` | boolean | yes |  |
+| `odd_only` | boolean | yes |  |
+| `normalize` | boolean | yes |  |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The harmonics editor's options, which `operator.set_harmonics` returns.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "even_only": {
+      "type": "boolean"
+    },
+    "normalize": {
+      "type": "boolean"
+    },
+    "odd_only": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "device",
+    "even_only",
+    "odd_only",
+    "normalize"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Heading`
 
 A section heading: a line of text over a group of controls (Electric's Hammer and Fork).
@@ -15876,6 +16607,7 @@ A section heading: a line of text over a group of controls (Electric's Hammer an
 |---|---|---|---|
 | `text` | string | yes | The text. |
 | `width` | number | yes | The width its text needs, in points: the least it takes. |
+| `centered` | boolean | no | Set for a heading whose text is centred over its group. |
 
 <details><summary>JSON Schema</summary>
 
@@ -15883,6 +16615,10 @@ A section heading: a line of text over a group of controls (Electric's Hammer an
 {
   "description": "A section heading: a line of text over a group of controls (Electric's Hammer and Fork).",
   "properties": {
+    "centered": {
+      "description": "Set for a heading whose text is centred over its group.",
+      "type": "boolean"
+    },
     "text": {
       "description": "The text.",
       "type": "string"
@@ -17642,6 +18378,63 @@ A label as the sidebar lists it.
     "section",
     "available",
     "shown"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `LabelLaw`
+
+The range a [`ParamLabel`] reads a parameter's travel as: the Drum Sampler's FX1 is Stretch's Factor, 0.25 to 4 across its travel.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `min` | number | yes | The value at the bottom of the travel. |
+| `max` | number | yes | The value at the top of the travel. |
+| `logarithmic` | boolean | yes | Whether each doubling takes the same travel (the range is above 0). |
+| `decimals` | integer from 0 to 255 | yes | How many decimals the value shows. |
+| `unit` | string | yes | The text after it, with its space, or none. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The range a [`ParamLabel`] reads a parameter's travel as: the Drum Sampler's FX1 is Stretch's Factor, 0.25 to 4 across its travel.",
+  "properties": {
+    "decimals": {
+      "description": "How many decimals the value shows.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "logarithmic": {
+      "description": "Whether each doubling takes the same travel (the range is above 0).",
+      "type": "boolean"
+    },
+    "max": {
+      "description": "The value at the top of the travel.",
+      "format": "double",
+      "type": "number"
+    },
+    "min": {
+      "description": "The value at the bottom of the travel.",
+      "format": "double",
+      "type": "number"
+    },
+    "unit": {
+      "description": "The text after it, with its space, or none.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "min",
+    "max",
+    "logarithmic",
+    "decimals",
+    "unit"
   ],
   "type": "object"
 }
@@ -20812,6 +21605,55 @@ One of:
 
 </details>
 
+### `MatrixGrid`
+
+An instrument's matrix as its grid draws it (the wavetable spec, R39): the sources as columns, the destinations shown as rows.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `sources` | array of string | yes | The sources, one for each column. |
+| `rows` | array of [`GridRow`](#gridrow) | yes | The destinations shown: those with a route and those added, in the matrix's order. |
+| `addable` | array of string | yes | The destinations not shown, in the matrix's order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An instrument's matrix as its grid draws it (the wavetable spec, R39): the sources as columns, the destinations shown as rows.",
+  "properties": {
+    "addable": {
+      "description": "The destinations not shown, in the matrix's order.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "rows": {
+      "description": "The destinations shown: those with a route and those added, in the matrix's order.",
+      "items": {
+        "$ref": "#/$defs/GridRow"
+      },
+      "type": "array"
+    },
+    "sources": {
+      "description": "The sources, one for each column.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "sources",
+    "rows",
+    "addable"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `MatrixRoutes`
 
 The sources routed into one parameter of an instrument's matrix.
@@ -23740,6 +24582,60 @@ One of:
 
 </details>
 
+### `OperatorChanged`
+
+What `operator.set_envelope_levels` and `operator.play_by_key` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `operator.set_envelope_levels` and `operator.play_by_key` return.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    }
+  },
+  "required": [
+    "device"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `OperatorEnvelope`
+
+The Operator envelope `operator.set_envelope_levels` sets.
+
+Type: one of `"A"`, `"B"`, `"C"`, `"D"`, `"Filter"`, `"Pitch"`, `"LFO"`.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Operator envelope `operator.set_envelope_levels` sets.",
+  "enum": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "Filter",
+    "Pitch",
+    "LFO"
+  ],
+  "type": "string"
+}
+```
+
+</details>
+
 ### `Origin`
 
 Where a shortcut's keys come from.
@@ -23772,6 +24668,52 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `OscillatorCopied`
+
+What `operator.copy_oscillator` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `from` | integer from 0 to 255 | yes | The oscillator copied from. |
+| `into` | integer from 0 to 255 | yes | The oscillator copied to. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `operator.copy_oscillator` returns.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "from": {
+      "description": "The oscillator copied from.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "into": {
+      "description": "The oscillator copied to.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "from",
+    "into"
+  ],
+  "type": "object"
 }
 ```
 
@@ -25182,6 +26124,7 @@ What a [`Relabel`] gives a parameter.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | yes | Its name. |
+| `law` | [`LabelLaw`](#labellaw) or null | no | The scale its number reads on instead of its own, where the label gives the parameter's travel a range of its own. |
 | `unit` | string or null | no | The unit its number reads in instead of its own, as text. |
 
 <details><summary>JSON Schema</summary>
@@ -25190,6 +26133,17 @@ What a [`Relabel`] gives a parameter.
 {
   "description": "What a [`Relabel`] gives a parameter.",
   "properties": {
+    "law": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LabelLaw"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The scale its number reads on instead of its own, where the label gives the parameter's travel a range of its own."
+    },
     "name": {
       "description": "Its name.",
       "type": "string"
@@ -25430,6 +26384,92 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `Partials`
+
+One oscillator's drawn partials.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `osc` | integer from 0 to 255 | yes | The oscillator, from 0 for A. |
+| `levels` | array of number | yes | The levels of the first partials, each from 0 to 1; there are 16, 32 or 64 of them. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One oscillator's drawn partials.",
+  "properties": {
+    "levels": {
+      "description": "The levels of the first partials, each from 0 to 1; there are 16, 32 or 64 of them.",
+      "items": {
+        "format": "float",
+        "type": "number"
+      },
+      "type": "array"
+    },
+    "osc": {
+      "description": "The oscillator, from 0 for A.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "osc",
+    "levels"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PartialsChanged`
+
+What `device.set_partials` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `osc` | integer from 0 to 255 | yes | The oscillator, from 0. |
+| `count` | integer, at least 0 | yes | Its partials' count. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.set_partials` returns.",
+  "properties": {
+    "count": {
+      "description": "Its partials' count.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "osc": {
+      "description": "The oscillator, from 0.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "osc",
+    "count"
+  ],
+  "type": "object"
 }
 ```
 
@@ -36884,7 +37924,7 @@ What `stems.status` returns.
 | `created_clips` | array of [`ClipId`](#clipid) | no | The clips the last separation made, in the order of their tracks. |
 | `created_tracks` | array of [`TrackId`](#trackid) | no | The tracks the last separation made, the group first if it made one. |
 | `dialog` | [`DialogStatus`](#dialogstatus) or null | no | The dialog, if it's open. |
-| `provider` | string | no | What the current or last separation ran on, such as `Core ML`, or `CPU (not the GPU: ...)` with the reason a GPU wasn't used. |
+| `provider` | string | no | What the current or last separation ran on, such as `Core ML`, `DirectML` or `CUDA`, or `CPU (not the GPU: ...)` with the reason a GPU wasn't used. |
 
 <details><summary>JSON Schema</summary>
 
@@ -36937,7 +37977,7 @@ What `stems.status` returns.
       "type": "array"
     },
     "provider": {
-      "description": "What the current or last separation ran on, such as `Core ML`, or `CPU (not the GPU: ...)` with the reason a GPU wasn't used.",
+      "description": "What the current or last separation ran on, such as `Core ML`, `DirectML` or `CUDA`, or `CPU (not the GPU: ...)` with the reason a GPU wasn't used.",
       "type": "string"
     },
     "separation": {
@@ -42963,6 +44003,24 @@ One of:
 - an object with `stack` (integer from 0 to 255): The same as a column of that many buttons.
 - an object with `grid` (object with `columns` (integer from 0 to 255), `rows` (integer from 0 to 255)): The choices of a choice parameter as a grid of small buttons, filled by rows (Note Echo's 1 2 3 4 over 5 6 8 16).
 - an object with `icon_segments` (integer from 0 to 255): A row of that many icon buttons, one for each choice of a choice parameter (the filter types), the chosen one lit.
+- an object with `beside` (integer from 0 to 255): A lit number box with its name to its left on the same line (Pedal's Dry/Wet, Overdrive's Dynamics): the number is the points the name has before the box.
+- an object with `beside_dim` (integer from 0 to 255): A plain number box with its name in dim text to its left on the same line (Spectral Resonator's Glide and PB): the number is the points the name has before the box.
+- an object with `beside_switch` (integer from 0 to 255): A button that reads On or Off, lit while on, with its name in dim text to its left (Spectral Resonator's MIDI Gate): the number is the points the name has before the button.
+- `"check"`: A small square that is filled while on, with the name after it (Spectral Resonator's Quantize).
+- `"pill"`: A small pill that shows which of a choice parameter's choices is chosen by where its dot sits, a click moving it on (Pedal's Mid frequency).
+- an object with `icon_column` (integer from 0 to 255): A column of that many icon buttons, one for each choice of a choice parameter, the chosen one lit (Resonators' filter types).
+- `"lit_chooser"`: A chooser whose box is filled blue like a lit number box (Saturator's curve).
+- `"unboxed_chooser"`: A chooser with no box: the value in the blue text and a small ▼ after it, its name in dim text above (Vocoder's Bands) unless the control is [`unnamed`](Control::unnamed) (Saturator's Post Clip).
+- `"unboxed"`: A number with no box: the value in the accent colour from the left, its name in dim text above unless the control is [`unnamed`](Control::unnamed) (Vocoder's Range).
+- `"readout"`: A name in the dim text colour with the value after it in the accent, no box, dragged or typed (Saturator's Amt Lo along the display's foot).
+- `"large"`: The Drum Synths' large display numbers: the name above, the value in large figures in the accent, and its unit under them.
+- `"bare"`: A number box with no name row: the device's own label sits beside or above it ([`BandLabel`]).
+- `"bare_slider"`: A [`Bare`](Self::Bare) box whose blue fill shows the value's place in its range, as [`Slider`](Self::Slider)'s does.
+- `"framed"`: A [`Bare`](Self::Bare) box outlined in the accent: the Drum Synths' display boxes.
+- an object with `abbreviated` (integer from 0 to 255): A text button like [`Toggle`](Self::Toggle) that holds only the first that many characters of its parameter's name (Impulse's M, S and Sat).
+- `"bare_chooser"`: A [`Chooser`](Self::Chooser) with no name row: the device's own label is beside it, or it needs none (the Drum Sampler's effect type).
+- `"cycle"`: A lit text button holding the chosen choice's name, a press taking the next choice and the last going round to the first (the Drum Sampler's modulation source, Resonators' Mode).
+- `"inline"`: The name and the value on one line, the value in the accent, dragged or typed (the Drum Sampler's Start, Length and Gain under its sample).
 
 <details><summary>JSON Schema</summary>
 
@@ -43100,6 +44158,151 @@ One of:
         "icon_segments"
       ],
       "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A lit number box with its name to its left on the same line (Pedal's Dry/Wet, Overdrive's Dynamics): the number is the points the name has before the box.",
+      "properties": {
+        "beside": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "beside"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A plain number box with its name in dim text to its left on the same line (Spectral Resonator's Glide and PB): the number is the points the name has before the box.",
+      "properties": {
+        "beside_dim": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "beside_dim"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A button that reads On or Off, lit while on, with its name in dim text to its left (Spectral Resonator's MIDI Gate): the number is the points the name has before the button.",
+      "properties": {
+        "beside_switch": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "beside_switch"
+      ],
+      "type": "object"
+    },
+    {
+      "const": "check",
+      "description": "A small square that is filled while on, with the name after it (Spectral Resonator's Quantize).",
+      "type": "string"
+    },
+    {
+      "const": "pill",
+      "description": "A small pill that shows which of a choice parameter's choices is chosen by where its dot sits, a click moving it on (Pedal's Mid frequency).",
+      "type": "string"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A column of that many icon buttons, one for each choice of a choice parameter, the chosen one lit (Resonators' filter types).",
+      "properties": {
+        "icon_column": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "icon_column"
+      ],
+      "type": "object"
+    },
+    {
+      "const": "lit_chooser",
+      "description": "A chooser whose box is filled blue like a lit number box (Saturator's curve).",
+      "type": "string"
+    },
+    {
+      "const": "unboxed_chooser",
+      "description": "A chooser with no box: the value in the blue text and a small ▼ after it, its name in dim text above (Vocoder's Bands) unless the control is [`unnamed`](Control::unnamed) (Saturator's Post Clip).",
+      "type": "string"
+    },
+    {
+      "const": "unboxed",
+      "description": "A number with no box: the value in the accent colour from the left, its name in dim text above unless the control is [`unnamed`](Control::unnamed) (Vocoder's Range).",
+      "type": "string"
+    },
+    {
+      "const": "readout",
+      "description": "A name in the dim text colour with the value after it in the accent, no box, dragged or typed (Saturator's Amt Lo along the display's foot).",
+      "type": "string"
+    },
+    {
+      "const": "large",
+      "description": "The Drum Synths' large display numbers: the name above, the value in large figures in the accent, and its unit under them.",
+      "type": "string"
+    },
+    {
+      "const": "bare",
+      "description": "A number box with no name row: the device's own label sits beside or above it ([`BandLabel`]).",
+      "type": "string"
+    },
+    {
+      "const": "bare_slider",
+      "description": "A [`Bare`](Self::Bare) box whose blue fill shows the value's place in its range, as [`Slider`](Self::Slider)'s does.",
+      "type": "string"
+    },
+    {
+      "const": "framed",
+      "description": "A [`Bare`](Self::Bare) box outlined in the accent: the Drum Synths' display boxes.",
+      "type": "string"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A text button like [`Toggle`](Self::Toggle) that holds only the first that many characters of its parameter's name (Impulse's M, S and Sat).",
+      "properties": {
+        "abbreviated": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "abbreviated"
+      ],
+      "type": "object"
+    },
+    {
+      "const": "bare_chooser",
+      "description": "A [`Chooser`](Self::Chooser) with no name row: the device's own label is beside it, or it needs none (the Drum Sampler's effect type).",
+      "type": "string"
+    },
+    {
+      "const": "cycle",
+      "description": "A lit text button holding the chosen choice's name, a press taking the next choice and the last going round to the first (the Drum Sampler's modulation source, Resonators' Mode).",
+      "type": "string"
+    },
+    {
+      "const": "inline",
+      "description": "The name and the value on one line, the value in the accent, dragged or typed (the Drum Sampler's Start, Length and Gain under its sample).",
+      "type": "string"
     }
   ]
 }
@@ -43184,6 +44387,65 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `WindowState`
+
+What `video.window_state` and `video.set_window` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `shown` | boolean | yes | Whether the window shows. |
+| `enabled` | boolean | yes | Whether the set has a video clip in the Arrangement, which the window needs to show. |
+| `frame` | [`WindowFrame`](#windowframe) or null | yes | Where the window is and how big, once it has been placed; the same in every set. |
+| `full_screen` | boolean | yes | Whether the window is in full screen. |
+| `showing` | [`FrameAt`](#frameat) | yes | The frame the window shows now: `clip` is `null` where it is black for want of a video clip at the playhead. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `video.window_state` and `video.set_window` return.",
+  "properties": {
+    "enabled": {
+      "description": "Whether the set has a video clip in the Arrangement, which the window needs to show.",
+      "type": "boolean"
+    },
+    "frame": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WindowFrame"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Where the window is and how big, once it has been placed; the same in every set."
+    },
+    "full_screen": {
+      "description": "Whether the window is in full screen.",
+      "type": "boolean"
+    },
+    "showing": {
+      "$ref": "#/$defs/FrameAt",
+      "description": "The frame the window shows now: `clip` is `null` where it is black for want of a video clip at the playhead."
+    },
+    "shown": {
+      "description": "Whether the window shows.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "shown",
+    "enabled",
+    "frame",
+    "full_screen",
+    "showing"
+  ],
+  "type": "object"
 }
 ```
 

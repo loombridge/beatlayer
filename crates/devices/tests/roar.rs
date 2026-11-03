@@ -29,10 +29,35 @@ fn registry() -> Registry {
     registry
 }
 
+/// What a new Roar had before it took Live's panel defaults (Multi Band
+/// routing, a compressor at 25 %, the sidechain's high-pass on and so on): the
+/// tests below look at one thing at a time from this base.
+fn base(params: &[(ParamId, f64)]) -> Vec<(ParamId, f64)> {
+    let mut all = vec![
+        (bl_devices::roar::ROUTING_MODE, 0.0),
+        (bl_devices::roar::TONE_FREQUENCY, 1_000.0),
+        (bl_devices::roar::LOW_CROSSOVER, 250.0),
+        (bl_devices::roar::HIGH_CROSSOVER, 2_500.0),
+        (bl_devices::roar::FB_TIME, 100.0),
+        (bl_devices::roar::FB_AMOUNT, 50.0),
+        (bl_devices::roar::FB_WIDTH, 4.0),
+        (bl_devices::roar::COMPRESSION, 0.0),
+        (bl_devices::roar::SIDECHAIN_HP, 0.0),
+        (p(2, FREQUENCY), 20_000.0),
+        (p(2, RESONANCE), 0.0),
+    ];
+    all.extend_from_slice(params);
+    all
+}
+
 /// A Roar of `params`, up to `max_frames` at a time.
 fn roar(params: &[(ParamId, f64)], max_frames: usize) -> Box<dyn Node> {
     let device_type: DeviceType = roar_type();
-    node(&registry(), &device(&device_type, params), max_frames)
+    node(
+        &registry(),
+        &device(&device_type, &base(params)),
+        max_frames,
+    )
 }
 
 fn p(stage: usize, offset: u32) -> ParamId {
@@ -114,11 +139,11 @@ fn roar_is_described_with_part_ones_parameters_and_defaults() {
     assert_eq!(range(DRIVE), (0.0, 36.0));
     assert_eq!(range(TONE_AMOUNT), (-100.0, 100.0));
     assert_eq!(range(TONE_FREQUENCY), (100.0, 10_000.0));
-    assert_eq!(value(TONE_FREQUENCY).default, 1_000.0);
+    assert_eq!(value(TONE_FREQUENCY).default, 180.0);
     assert_eq!(range(LOW_CROSSOVER), (50.0, 2_000.0));
-    assert_eq!(value(LOW_CROSSOVER).default, 250.0);
+    assert_eq!(value(LOW_CROSSOVER).default, 200.0);
     assert_eq!(range(HIGH_CROSSOVER), (500.0, 16_000.0));
-    assert_eq!(value(HIGH_CROSSOVER).default, 2_500.0);
+    assert_eq!(value(HIGH_CROSSOVER).default, 2_000.0);
     assert_eq!(range(DRY_WET), (0.0, 100.0));
     assert_eq!(value(DRY_WET).default, 100.0);
     assert!(value(OUTPUT_GAIN).is_gain());
@@ -145,7 +170,16 @@ fn roar_is_described_with_part_ones_parameters_and_defaults() {
         assert_eq!(value(p(stage, LEVEL)).max(), 10f64.powf(12.0 / 20.0));
         assert_eq!(value(p(stage, FILTER)).format(0.0), "LP");
         assert_eq!(range(p(stage, FREQUENCY)), (20.0, 20_000.0));
-        assert_eq!(value(p(stage, FREQUENCY)).default, 20_000.0);
+        // Live's High stage opens at 16 kHz, with a Res of 0.10.
+        let high = stage == STAGES - 1;
+        assert_eq!(
+            value(p(stage, FREQUENCY)).default,
+            if high { 16_000.0 } else { 20_000.0 }
+        );
+        assert_eq!(
+            value(p(stage, RESONANCE)).default,
+            if high { 10.0 } else { 0.0 }
+        );
         assert_eq!(range(p(stage, RESONANCE)), (0.0, 100.0));
         assert_eq!(range(p(stage, PEAK_GAIN)), (-24.0, 24.0));
         assert_eq!(value(p(stage, PEAK_GAIN)).default, 0.0);
@@ -331,7 +365,7 @@ fn bit_crusher_amount_sets_the_bits_and_noise_injection_follows_the_devices_seed
     let render = |id: u64, amount: f64| {
         let device_type = roar_type();
         let mut device = device_type.device(DeviceId(Id::new(id).unwrap()));
-        for (param, value) in clean(0) {
+        for (param, value) in base(&clean(0)) {
             device.params.insert(param, value);
         }
         device.params.insert(p(0, SHAPER), NOISE_INJECTION);

@@ -835,8 +835,11 @@ fn dragging_corpus_xy_control_sets_decay_and_material_or_radius_in_one_undo_step
     let r = cell(&mut h);
     let steps = h.shell.editor().undo_history().len();
     drag(&mut h, at(r, 0.5, 0.5), at(r, 0.8, 0.25));
+    // Decay is in seconds, 50 ms to 30 s, logarithmic: where it stands across
+    // its range is what the drag set.
+    let across = |decay: f64| (decay / 0.05).ln() / (30.0f64 / 0.05).ln();
     let (decay, material) = (param_of(&h, corpus, DECAY), param_of(&h, corpus, MATERIAL));
-    assert!((decay - 80.0).abs() < 3.0, "Decay {decay}");
+    assert!((across(decay) - 0.8).abs() < 0.03, "Decay {decay}");
     assert!((material + 50.0).abs() < 6.0, "Material {material}");
     assert_eq!(
         h.shell.editor().undo_history().len(),
@@ -845,7 +848,7 @@ fn dragging_corpus_xy_control_sets_decay_and_material_or_radius_in_one_undo_step
     );
     assert_eq!(last_step(&h), "Change \"Decay\" and \"Material\"");
     h.shell.run("edit.undo", json!({})).unwrap();
-    assert_eq!(param_of(&h, corpus, DECAY), 50.0);
+    assert_eq!(param_of(&h, corpus, DECAY), 1.32);
     assert_eq!(param_of(&h, corpus, MATERIAL), 0.0);
     // A pipe's vertical axis is Radius, and its dimmed controls are the
     // spec's.
@@ -869,7 +872,7 @@ fn dragging_corpus_xy_control_sets_decay_and_material_or_radius_in_one_undo_step
     assert!(locked.contains(&HIT) && locked.contains(&QUALITY) && !locked.contains(&RADIUS));
     let r = cell(&mut h);
     drag(&mut h, at(r, 0.5, 0.5), at(r, 0.25, 0.75));
-    assert!((param_of(&h, corpus, DECAY) - 25.0).abs() < 3.0);
+    assert!((across(param_of(&h, corpus, DECAY)) - 0.25).abs() < 0.03);
     assert!((param_of(&h, corpus, RADIUS) - 75.0).abs() < 6.0);
     assert_eq!(param_of(&h, corpus, MATERIAL), 0.0, "Material stays");
 }
@@ -1212,7 +1215,7 @@ fn clicking_a_slot_cell_shows_that_slots_controls() {
         .unwrap();
     h.settle();
     let nodes = Harness::nodes(&h.settle());
-    assert_eq!(Harness::node(&nodes, "Slot 1 Pan").value, "0");
+    assert_eq!(Harness::node(&nodes, "Slot 1 Pan").value, "C");
     let cell = Harness::node(&nodes, "Slot 4");
     assert_eq!(cell.role, Role::Button);
     assert!(
@@ -1232,7 +1235,7 @@ fn clicking_a_slot_cell_shows_that_slots_controls() {
     h.settle();
     assert_eq!(selected_slot(&h, device), 3);
     let nodes = Harness::nodes(&h.settle());
-    assert_eq!(Harness::node(&nodes, "Slot 4 Pan").value, "-20");
+    assert_eq!(Harness::node(&nodes, "Slot 4 Pan").value, "20L");
     assert!(
         nodes.iter().all(|n| n.label != "Slot 1 Pan"),
         "slot 1's controls are gone"

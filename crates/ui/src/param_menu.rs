@@ -84,7 +84,7 @@ impl<'a> ParamMenu<'a> {
     /// control has items of its own above them, which a separator sets off.
     pub fn items(&self, ui: &mut Ui, after_own: bool, events: &mut Vec<UiEvent>) {
         if after_own {
-            ui.separator();
+            crate::menus::separator(ui);
         }
         let keymap = Keymap::from_data(self.shell.keymap().clone());
         let platform = Platform::current();
@@ -113,7 +113,7 @@ impl<'a> ParamMenu<'a> {
         });
         for item in bl_shell::menus::shown(&menu) {
             if item.is_separator() {
-                ui.separator();
+                crate::menus::separator(ui);
                 continue;
             }
             let row = item.row;

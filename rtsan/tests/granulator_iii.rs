@@ -4,7 +4,9 @@
 //! between blocks, and the song jumps about under Loop's grid. RTSan stops
 //! the process at the first allocation, free, lock, or blocking call in any
 //! of it, and the allocation trap, installed as in every Beatlayer test
-//! binary, fails the test at any heap use it sees.
+//! binary, fails the test at any heap use it sees. A capture from a tone
+//! track starts, runs to its Length, restarts and is stopped during it
+//! (WP-8.27, R22): nothing it does on the audio thread allocates or waits.
 
 bl_rt::install_trap!();
 
@@ -12,12 +14,16 @@ use std::sync::Arc;
 
 use bl_core::time::{SampleRate, Ticks};
 use bl_devices::granulator_iii::{
-    DENSITY, FILTER, FILTER_FREQ, GRANULATOR_III, MODE, POSITION, RATE, SHAPE, SIZE, SPRAY, VOICES,
+    CAPTURE_LENGTH, CaptureBuffer, CaptureCommand, DENSITY, FILTER, FILTER_FREQ, MODE, POSITION,
+    RATE, SHAPE, SIZE, SPRAY, VOICES, granulator_iii_type,
 };
-use bl_engine::{Collector, Compiler, EngineConfig, MediaMap, Registry, TransportCommand, channel};
+use bl_engine::nodes::TEST_TONE;
+use bl_engine::{
+    Collector, Compiler, EngineConfig, MediaMap, NodeKey, Registry, TransportCommand, channel,
+};
 use bl_media::SampleData;
 use bl_model::{
-    Clip, ClipData, Command, ContentHash, Device, DeviceKind, DeviceRole, Editor, MidiData, Note,
+    Clip, ClipData, Command, ContentHash, Device, DeviceKind, Editor, Input, MidiData, Note, Tap,
     TrackKind,
 };
 
@@ -50,15 +56,34 @@ fn granulator_iii_passes_under_rtsan() {
 
     let mut editor = Editor::new();
     let id: bl_model::DeviceId = editor.new_id();
-    let mut device = Device::new(
-        id,
-        "Granulator III",
-        DeviceKind::Native {
-            device_type: GRANULATOR_III.to_owned(),
-        },
-    )
-    .with_role(DeviceRole::Instrument);
+    let mut device = granulator_iii_type().device(id);
     device.set_media(0, Some(hash));
+    device.params.insert(CAPTURE_LENGTH, 1.0);
+    // The capture's source: a tone on an audio track.
+    let source = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: source,
+            kind: TrackKind::Audio,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let tone = Device::new(
+        editor.new_id(),
+        "",
+        DeviceKind::Native {
+            device_type: TEST_TONE.to_owned(),
+        },
+    );
+    editor
+        .apply(Command::InsertDevice {
+            track: source,
+            index: 0,
+            device: tone,
+        })
+        .unwrap();
     let track = editor.new_id();
     editor
         .apply(Command::CreateTrack {
@@ -74,6 +99,17 @@ fn granulator_iii_passes_under_rtsan() {
             track,
             index: 0,
             device,
+        })
+        .unwrap();
+    editor
+        .apply(Command::SetSidechainInput {
+            device: id,
+            input: Input::Track {
+                track: source,
+                tap: Tap::PostFx,
+                chain: None,
+                output: None,
+            },
         })
         .unwrap();
     // Held notes that overlap, so voices are stolen and grains outlive them.
@@ -129,6 +165,16 @@ fn granulator_iii_passes_under_rtsan() {
                 })
                 .unwrap();
             sender.send_update(compiler.sync(editor.document()));
+        }
+        // A capture of Length 1 s (375 blocks) starts, is replaced before it
+        // ends, runs to its Length, and a third is stopped part way.
+        let capture = match round {
+            100 | 300 | 1_000 => Some(CaptureCommand::Start(Arc::new(CaptureBuffer::new(48_000)))),
+            1_200 => Some(CaptureCommand::Stop),
+            _ => None,
+        };
+        if let Some(capture) = capture {
+            sender.send_data(NodeKey::Device(id), collector.handle().data(capture));
         }
         // Jump back into the notes now and then, so the grid is found again
         // and notes retrigger mid-sound.

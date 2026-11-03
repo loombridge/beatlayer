@@ -13,13 +13,12 @@ use egui::accesskit::Role;
 use egui::{Align2, Color32, Id, Key, Rect, ScrollArea, Sense, Stroke, Ui, UiBuilder, pos2, vec2};
 use serde_json::{Value, json};
 
+use crate::layout::list_row;
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
 
 /// The header's height (L-LRN-002).
 pub(crate) const HEADER: f32 = 21.0;
-/// A row's height (undo history R4).
-pub(crate) const ROW: f32 = 18.0;
 /// The width the agent's mark takes before a row's label.
 const MARK: f32 = 12.0;
 /// The margin inside the panel.
@@ -206,12 +205,12 @@ impl UndoHistoryPanelUi {
         self.drawn = Some(history);
         let height = rect.height();
         let offset = if scroll {
-            let top = current as f32 * ROW;
+            let top = current as f32 * list_row();
             let mut offset = 0.0;
             if top < offset {
                 offset = top;
-            } else if top + ROW > offset + height {
-                offset = top + ROW - height;
+            } else if top + list_row() > offset + height {
+                offset = top + list_row() - height;
             }
             offset.max(0.0)
         } else {
@@ -228,7 +227,7 @@ impl UndoHistoryPanelUi {
         if scroll {
             scroll_area = scroll_area.vertical_scroll_offset(offset);
         }
-        scroll_area.show_rows(&mut area, ROW, rows.len(), |ui, range| {
+        scroll_area.show_rows(&mut area, list_row(), rows.len(), |ui, range| {
             let first = range.start;
             // The rows' place is taken once: putting a label in the row
             // moves the area the rest are laid out in.
@@ -240,8 +239,8 @@ impl UndoHistoryPanelUi {
             for index in range {
                 let row = &rows[index];
                 let at = Rect::from_min_size(
-                    pos2(left, top + (index - first) as f32 * ROW),
-                    vec2(width, ROW),
+                    pos2(left, top + (index - first) as f32 * list_row()),
+                    vec2(width, list_row()),
                 );
                 let clicked = draw_row(
                     ui,

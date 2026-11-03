@@ -17,9 +17,10 @@ use egui::accesskit::Role;
 use egui::{Align2, Id, Key, Rect, ScrollArea, Sense, Stroke, Ui, UiBuilder, pos2, vec2};
 use serde_json::json;
 
+use crate::layout::list_row;
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
-use crate::undo_history_panel::{HEADER, MARGIN, ROW, bounds, invoke, name, paint_label, register};
+use crate::undo_history_panel::{HEADER, MARGIN, bounds, invoke, name, paint_label, register};
 
 /// The height of the line that says what Save Continuously keeps, and of its
 /// Settings button.
@@ -208,7 +209,7 @@ impl SaveHistoryPanelUi {
         area.spacing_mut().item_spacing.y = 0.0;
         ScrollArea::vertical()
             .id_salt("save-history-rows")
-            .show_rows(&mut area, ROW, rows.len(), |ui, range| {
+            .show_rows(&mut area, list_row(), rows.len(), |ui, range| {
                 let first = range.start;
                 let (left, top, width) = (
                     ui.max_rect().left(),
@@ -218,8 +219,8 @@ impl SaveHistoryPanelUi {
                 for index in range {
                     let row = &rows[index];
                     let at = Rect::from_min_size(
-                        pos2(left, top + (index - first) as f32 * ROW),
-                        vec2(width, ROW),
+                        pos2(left, top + (index - first) as f32 * list_row()),
+                        vec2(width, list_row()),
                     );
                     let selected = self.selected.as_deref() == Some(row.id.as_str());
                     let (clicked, double) = draw_row(ui, theme, at, row, &now, selected);

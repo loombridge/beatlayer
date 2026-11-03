@@ -13,10 +13,10 @@ use egui::{
 use serde_json::json;
 
 use super::{
-    BROWSER_ROW, BrowserUi, ClipDropTarget, SideRow, add_folder_id, bounds, collection_colour,
-    drop_chains, drop_tracks, invoke, label_id, note_clip_target, scrolled, sidebar_id,
+    BrowserUi, ClipDropTarget, SideRow, add_folder_id, bounds, collection_colour, drop_chains,
+    drop_tracks, invoke, label_id, note_clip_target, scrolled, sidebar_id,
 };
-use crate::layout::BrowserLayout;
+use crate::layout::{BrowserLayout, list_row};
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
 
@@ -233,7 +233,7 @@ impl BrowserUi {
             .into_iter()
             .filter(|l| l.section == Section::Collections)
             .collect();
-        let content = rows.len() as f32 * BROWSER_ROW;
+        let content = rows.len() as f32 * list_row();
         self.sidebar_scroll = scrolled(ui, area, self.sidebar_scroll, content);
         // Spec: view-options R1. A middle-button drag pans the list, the
         // content following the pointer.
@@ -241,15 +241,15 @@ impl BrowserUi {
             self.sidebar_scroll =
                 (self.sidebar_scroll - delta.y).clamp(0.0, (content - area.height()).max(0.0));
         }
-        let first = (self.sidebar_scroll / BROWSER_ROW).floor() as usize;
+        let first = (self.sidebar_scroll / list_row()).floor() as usize;
         let mut sidebar_ui = ui.new_child(egui::UiBuilder::new().max_rect(area));
         sidebar_ui.set_clip_rect(area);
         for (index, row) in rows.iter().enumerate().skip(first) {
-            let top = area.top() + index as f32 * BROWSER_ROW - self.sidebar_scroll;
+            let top = area.top() + index as f32 * list_row() - self.sidebar_scroll;
             if top > area.bottom() {
                 break;
             }
-            let rect = Rect::from_min_size(pos2(area.left(), top), vec2(area.width(), BROWSER_ROW));
+            let rect = Rect::from_min_size(pos2(area.left(), top), vec2(area.width(), list_row()));
             match row {
                 SideRow::Heading(name) => {
                     let mut text = (*name).to_owned();
@@ -844,7 +844,7 @@ impl BrowserUi {
                     ui.close();
                 }
             }
-            ui.separator();
+            crate::menus::separator(ui);
             let reset = ui.add_enabled(has_icon, egui::Button::new("Reset Icon"));
             crate::menus::register_item(ui.ctx(), &reset);
             if reset.clicked() {

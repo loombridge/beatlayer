@@ -16,10 +16,10 @@ use egui::accesskit::Role;
 use egui::{Align2, DragValue, Id, Rect, Sense, Ui, pos2, vec2};
 use serde_json::{Value, json};
 
+use crate::layout::list_row;
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
 
-const ROW: f32 = 22.0;
 const HEAD: f32 = 22.0;
 const COLUMNS: f32 = 18.0;
 /// The width of a Min or Max box, and the gap after it.
@@ -120,9 +120,11 @@ pub fn show(ui: &mut Ui, shell: &Shell, theme: &Theme, rect: Rect, events: &mut 
             let selected = shell.map_selection();
             let mut y = body.top();
             for info in shell.map_rows() {
-                let row =
-                    Rect::from_min_size(pos2(rect.left() + 2.0, y), vec2(rect.width() - 4.0, ROW));
-                y += ROW;
+                let row = Rect::from_min_size(
+                    pos2(rect.left() + 2.0, y),
+                    vec2(rect.width() - 4.0, list_row()),
+                );
+                y += list_row();
                 if !body.contains_rect(row) {
                     break;
                 }
@@ -191,8 +193,10 @@ fn row(
                 .into_iter()
                 .enumerate()
             {
-                let cell =
-                    Rect::from_min_size(pos2(at[3 + n], row.top() + 3.0), vec2(BOX, ROW - 6.0));
+                let cell = Rect::from_min_size(
+                    pos2(at[3 + n], row.top() + 3.0),
+                    vec2(BOX, list_row() - 6.0),
+                );
                 number_box(ui, info, name, value, cell, events);
             }
         },

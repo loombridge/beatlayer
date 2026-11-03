@@ -996,6 +996,16 @@ fn an_agent_adds_the_eqs_and_dynamics_sets_them_by_id_and_keys_them_from_another
         );
     };
     set(&mut host, shutter, gate::THRESHOLD, -30.0);
+    // The settings this test was written against, not a new Gate's.
+    for (param, value) in [
+        (gate::RETURN, 6.0),
+        (gate::ATTACK, 1.0),
+        (gate::HOLD, 20.0),
+        (gate::RELEASE, 100.0),
+        (gate::FLOOR, 0.0),
+    ] {
+        set(&mut host, shutter, param, value);
+    }
     set(&mut host, bond, bus_compressor::THRESHOLD, -30.0);
     set(&mut host, bond, bus_compressor::RATIO, 20.0);
     let mute = |host: &mut EngineHost, track, mute: bool| {
@@ -3017,7 +3027,7 @@ fn an_agent_inserts_pedal_and_sets_and_reads_back_its_parameters() {
             set(TYPE, 2.0),
             set(GAIN, 80.0),
             set(MID_FREQUENCY, 2.0),
-            set(SUB, 9.0),
+            set(SUB, 1.0),
             set(OUTPUT, 0.5),
             set(HI_QUALITY, 1.0),
         ] }),
@@ -3047,7 +3057,7 @@ fn an_agent_inserts_pedal_and_sets_and_reads_back_its_parameters() {
             json!(2.0),
             json!(80.0),
             json!(2.0),
-            json!(9.0),
+            json!(1.0),
             json!(0.5),
             json!(1.0)
         ]
@@ -3228,7 +3238,7 @@ fn an_agent_inserts_veer_sets_its_parameters_and_points_its_midi_sidechain_at_a_
         json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
     );
     let params = read["results"][0]["result"]["params"].as_array().unwrap();
-    assert_eq!(params.len(), 34, "every parameter is listed");
+    assert_eq!(params.len(), 35, "every parameter is listed");
     let value = |id: bl_model::ParamId| {
         params
             .iter()
@@ -4117,12 +4127,12 @@ fn an_agent_sets_the_vocoder_by_id_reads_its_bands_and_finds_it_after_a_reopen()
         (vocoder::DEPTH, 150.0),
         (vocoder::ATTACK, 20.0),
         (vocoder::RELEASE, 400.0),
-        (vocoder::UNVOICED, 60.0),
+        (vocoder::UNVOICED, 0.6),
         (vocoder::RANGE_LOW, 100.0),
         (vocoder::RANGE_HIGH, 6_400.0),
         (vocoder::BW, 140.0),
         (vocoder::FILTER_MODE, 1.0),
-        (vocoder::GATE, -40.0),
+        (vocoder::GATE, 0.01),
         (vocoder::ENHANCE, 1.0),
         (vocoder::CHANNEL_MODE, 2.0),
         (vocoder::NOISE_X, 20.0),
@@ -4292,7 +4302,7 @@ fn an_agent_loads_a_sample_into_granulator_iii_reads_its_display_and_finds_it_af
     }
     let read = one(&mut client, "device.parameters", json!({ "device": id }));
     let params = read["params"].as_array().unwrap();
-    assert_eq!(params.len(), 30);
+    assert_eq!(params.len(), 31);
     assert!(params.iter().all(|p| p["automatable"] == json!(true)));
     for (param, value) in &sets {
         let found = params.iter().find(|p| p["id"] == param.0).unwrap();
@@ -5867,7 +5877,7 @@ fn an_agent_adds_sets_and_reads_the_saturation_devices_by_id_and_reopens_them() 
     };
     assert_eq!(parameters(&mut client, singe).as_array().unwrap().len(), 19);
     assert_eq!(parameters(&mut client, grit).as_array().unwrap().len(), 6);
-    assert_eq!(parameters(&mut client, valve).as_array().unwrap().len(), 9);
+    assert_eq!(parameters(&mut client, valve).as_array().unwrap().len(), 10);
 
     let set = |client: &mut Client<InProcess>, device: &Value, param: u32, value: f64| {
         call(
@@ -5957,6 +5967,107 @@ fn an_agent_adds_sets_and_reads_the_saturation_devices_by_id_and_reopens_them() 
     assert_eq!(find(overdrive::OVERDRIVE).params[&overdrive::DRIVE], 80.0);
     assert_eq!(find(tube::TUBE).params[&tube::MODEL], 2.0);
     assert_eq!(find(tube::TUBE).params[&tube::ENVELOPE], -40.0);
+}
+
+// Spec: amp R1, R12 and R14 (WP-8.40): an agent adds Amp, reads its
+// parameters, sets some by ID, reads them back, and finds the device and its
+// values again when the saved set is opened.
+#[test]
+fn an_agent_adds_sets_and_reads_amp_by_id_and_reopens_it() {
+    use bl_devices::amp;
+
+    let dir = TempDir::new("amp");
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("amp-agent").unwrap();
+    let track = default_tracks(&mut client)[2];
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{
+            "command": "arrangement.select_tracks",
+            "args": { "tracks": [track] },
+        }] }),
+    );
+    let device_type = amp::amp_type();
+    let reply = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{
+            "command": "device.add",
+            "args": {
+                "track": track,
+                "device": {
+                    "kind": device_type.kind,
+                    "name": device_type.name,
+                    "role": device_type.role,
+                },
+            },
+        }] }),
+    );
+    let device = reply["results"][0]["result"]["device"].clone();
+    let parameters = |client: &mut Client<InProcess>| {
+        let read = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+        );
+        read["results"][0]["result"]["params"].clone()
+    };
+    let value_of = |params: &Value, name: &str| {
+        params
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == name)
+            .unwrap_or_else(|| panic!("no {name}"))["value"]
+            .clone()
+    };
+    let defaults = parameters(&mut client);
+    assert_eq!(defaults.as_array().unwrap().len(), 9);
+    assert_eq!(value_of(&defaults, "Volume"), json!(9.0));
+    for (param, value) in [
+        (amp::MODEL, 5.0),
+        (amp::GAIN, 8.0),
+        (amp::TREBLE, 2.5),
+        (amp::VOLUME, 7.5),
+        (amp::OUTPUT, 1.0),
+    ] {
+        call(
+            &mut client,
+            "run",
+            json!({ "commands": [{
+                "command": "device.set_param",
+                "args": { "device": device, "param": param.0, "value": value },
+            }] }),
+        );
+    }
+    let params = parameters(&mut client);
+    assert_eq!(value_of(&params, "Model"), json!(5.0));
+    assert_eq!(value_of(&params, "Gain"), json!(8.0));
+    assert_eq!(value_of(&params, "Treble"), json!(2.5));
+    assert_eq!(value_of(&params, "Volume"), json!(7.5));
+    assert_eq!(value_of(&params, "Output"), json!(1.0));
+
+    let saved = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "set.save_as",
+                               "args": { "path": dir.0.join("Amp.blset").to_string_lossy() } }] }),
+    );
+    let (project, _) = bl_project::load(saved_path(&saved)).unwrap();
+    let reopened = project
+        .document
+        .tracks()
+        .flat_map(|t| t.devices().cloned().collect::<Vec<_>>())
+        .find(|d| {
+            matches!(&d.kind, bl_model::DeviceKind::Native { device_type } if device_type == amp::AMP)
+        })
+        .expect("Amp in the reopened set");
+    assert_eq!(reopened.params[&amp::MODEL], 5.0);
+    assert_eq!(reopened.params[&amp::GAIN], 8.0);
+    assert_eq!(reopened.params[&amp::TREBLE], 2.5);
+    assert_eq!(reopened.params[&amp::VOLUME], 7.5);
+    assert_eq!(reopened.params[&amp::OUTPUT], 1.0);
 }
 
 // Spec: multiband-dynamics R18, device-framework R14 (WP-5.22): an agent
@@ -6997,7 +7108,7 @@ fn an_agent_adds_sets_and_reads_resonators_by_id_and_reopens_it() {
     let parameters = |client: &mut Client<InProcess>| {
         run(client, "device.parameters", json!({ "device": device }))["params"].clone()
     };
-    assert_eq!(parameters(&mut client).as_array().unwrap().len(), 30);
+    assert_eq!(parameters(&mut client).as_array().unwrap().len(), 31);
 
     // Every parameter moved to the other end of its range, and read back.
     let mut wanted = Vec::new();

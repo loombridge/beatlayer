@@ -19,8 +19,13 @@ use bl_engine::{
     SlotSample,
 };
 use bl_media::SampleData;
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
-use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
+use bl_model::device_layout::{
+    BODY_HEIGHT, BOX_HEIGHT, BandLabel, Control, ControlBand, DisplayCell, LayoutNode, Widget,
+};
+use bl_model::{
+    DeviceDescription, DeviceLayout, DeviceRole, LabelLaw, ParamDescriptor, ParamId, ParamLabel,
+    ParamUnit, Relabel,
+};
 
 use crate::eq::{Type, coeffs};
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
@@ -111,6 +116,53 @@ pub const MOD_SOURCES: [&str; 2] = ["Velocity", "Slide"];
 /// The modulation destinations; FX1 and FX2 are the effect's two
 /// parameters.
 pub const MOD_DESTS: [&str; 6] = ["Filter", "Attack", "Hold", "Decay", "FX1", "FX2"];
+
+/// The filter type whose gain takes the Res knob's place: Peak, the fourth.
+const PEAK: u32 = 3;
+
+/// Stretch's two parameters as the panel reads them, FX1 as its Factor and
+/// FX2 as its Grain, in place of the effect's per cent of travel: FX1's
+/// travel is [`STRETCH_MIN`] to four times, FX2's [`GRAIN_MIN_MS`] to 200 ms.
+/// Where the type isn't Stretch they stay FX1 and FX2.
+fn stretch_labels() -> Vec<Relabel> {
+    let law = |name: &str, (min, max, decimals): (f64, f64, u8), unit: &str| ParamLabel {
+        name: name.to_owned(),
+        unit: None,
+        law: Some(LabelLaw {
+            min,
+            max,
+            logarithmic: true,
+            decimals,
+            unit: unit.to_owned(),
+        }),
+    };
+    let relabel = |param, stretch, plain: &str| Relabel {
+        param,
+        by: FX_TYPE,
+        labels: std::iter::once(stretch)
+            .chain((1..EFFECTS.len()).map(|_| ParamLabel::named(plain)))
+            .collect(),
+    };
+    vec![
+        relabel(
+            FX1,
+            law("Factor", (STRETCH_MIN, STRETCH_MIN * STRETCH_RATIO, 2), ""),
+            "FX1",
+        ),
+        relabel(
+            FX2,
+            law(
+                "Grain",
+                (GRAIN_MIN_MS, GRAIN_MIN_MS * GRAIN_RATIO, 0),
+                " ms",
+            ),
+            "FX2",
+        ),
+    ]
+}
+
+/// FX2's travel, in per cent, that is a Stretch grain of 100 ms.
+const STRETCH_GRAIN_DEFAULT: f64 = 76.862;
 
 /// How many notes sound at once.
 const POLYPHONY: usize = 8;
@@ -223,20 +275,20 @@ pub fn drum_sampler_type() -> DeviceType {
             .describe("Where in the sample the played region starts, as a share of it."),
         percent(LENGTH, "Length", 100.0)
             .describe("How long the played region is, as a share of the sample from Start."),
-        ParamDescriptor::gain(SAMPLE_GAIN, "Sample Gain", 24.0, 0.0).describe(
+        ParamDescriptor::gain(SAMPLE_GAIN, "Gain", 24.0, 0.0).describe(
             "The sample's own gain stage, before the effect and the filter; reaches silence at \
              its bottom.",
         ),
-        time(ATTACK, "Attack", 0.0)
+        time(ATTACK, "Attack", 0.1)
             .describe("The time the level takes to rise to its peak after a note starts."),
         time(HOLD, "Hold", 300.0).describe(
             "Trigger mode: how long the level stays at its peak. Ignored in Gate mode and while \
              Hold Inf is on.",
         ),
-        ParamDescriptor::toggle(HOLD_INF, "Hold Inf", true).describe(
+        ParamDescriptor::toggle(HOLD_INF, "Hold Inf", false).describe(
             "Trigger mode: holds the peak until the sample's end, so the whole sample plays.",
         ),
-        time(DECAY, "Decay", 200.0).describe(
+        time(DECAY, "Decay", 1_000.0).describe(
             "The time the level takes to fall to silence after Hold in Trigger mode, or after \
              the note ends in Gate mode. Also times the FM and Ring Mod effects' fade.",
         ),
@@ -248,7 +300,7 @@ pub fn drum_sampler_type() -> DeviceType {
             .describe("Transposes the sample in whole semitones; C3 plays it at its own pitch."),
         ParamDescriptor::continuous(DETUNE, "Detune", (-50.0, 50.0), 0.0, ParamUnit::Cents)
             .describe("Fine-tunes the sample in cents."),
-        ParamDescriptor::toggle(FX_ON, "Effect", false)
+        ParamDescriptor::toggle(FX_ON, "FX", true)
             .describe("Turns the playback effect section on."),
         ParamDescriptor::choice(FX_TYPE, "Effect Type", &EFFECTS, 0).describe(
             "Which playback effect runs: Stretch, Loop, Pitch Env, Punch, 8-Bit, FM, Ring Mod, \
@@ -259,27 +311,27 @@ pub fn drum_sampler_type() -> DeviceType {
              Pitch Env's amount, Punch's amount, 8-Bit's sample rate, FM's amount, Ring Mod's \
              amount, Sub Osc's level or Noise Osc's level.",
         ),
-        percent(FX2, "FX2", 50.0).describe(
+        percent(FX2, "FX2", STRETCH_GRAIN_DEFAULT).describe(
             "The effect's second parameter over its whole range: Stretch's grain size, Loop's \
              length, Pitch Env's decay, Punch's release, 8-Bit's decay time, FM's or Ring Mod's \
              frequency, Sub Osc's frequency or Noise Osc's colour.",
         ),
-        ParamDescriptor::toggle(FILTER_ON, "Filter", false)
+        ParamDescriptor::toggle(FILTER_ON, "Filter", true)
             .describe("Runs the sound through the filter; off bypasses it."),
-        ParamDescriptor::choice(FILTER_TYPE, "Filter Type", &FILTER_TYPES, 0).describe(
+        ParamDescriptor::choice(FILTER_TYPE, "Filter Type", &FILTER_TYPES, 1).describe(
             "A low-pass at 12 or 24 dB per octave, a high-pass at 24 dB per octave, or a peak \
              that boosts or cuts a band.",
         ),
         ParamDescriptor::continuous(
             FILTER_FREQ,
-            "Frequency",
-            (20.0, 20_000.0),
-            1_000.0,
+            "Freq",
+            (20.0, 22_000.0),
+            22_000.0,
             ParamUnit::Hertz,
         )
         .logarithmic()
         .describe("The filter's cutoff, or the peak's centre."),
-        percent(FILTER_RES, "Resonance", 0.0)
+        percent(FILTER_RES, "Res", 0.0)
             .describe("Raises the low-pass and high-pass types' resonance at the cutoff."),
         ParamDescriptor::continuous(
             FILTER_GAIN,
@@ -289,12 +341,12 @@ pub fn drum_sampler_type() -> DeviceType {
             ParamUnit::Decibels,
         )
         .describe("The peak type's boost or cut at its centre."),
-        ParamDescriptor::gain(VOLUME, "Volume", 36.0, 0.0)
+        ParamDescriptor::gain(VOLUME, "Volume", 36.0, -12.0)
             .describe("The device's output level; reaches silence at its bottom."),
         ParamDescriptor::continuous(PAN, "Pan", (-50.0, 50.0), 0.0, ParamUnit::None)
             .decimals(0)
             .describe("Where the sound sits in the stereo field."),
-        percent(VELOCITY_TO_VOLUME, "Velocity to Volume", 100.0).describe(
+        percent(VELOCITY_TO_VOLUME, "Vel > Vol", 35.0).describe(
             "How much a note's velocity scales its volume: at 0 it doesn't, at 100 % the level \
              follows it.",
         ),
@@ -322,35 +374,28 @@ pub fn drum_sampler_type() -> DeviceType {
     DeviceType::native(DRUM_SAMPLER, "Drum Sampler", DeviceRole::Instrument).with_description(
         DeviceDescription::new(params)
             .with_layout(layout())
-            .with_menu_options(&[PER_NOTE_BEND, ENV_FOLLOWS_PITCH])
+            .with_menu_options(&[HOLD_INF, PER_NOTE_BEND, ENV_FOLLOWS_PITCH])
+            .with_alternate_at((FILTER_TYPE, PEAK), FILTER_RES, FILTER_GAIN)
+            .with_relabels(stretch_labels())
             .with_banks(&[
                 (
                     "Sample",
                     &[
                         "Start",
                         "Length",
-                        "Sample Gain",
+                        "Gain",
                         "Transpose",
                         "Detune",
                         "Volume",
                         "Pan",
-                        "Velocity to Volume",
+                        "Vel > Vol",
                     ],
                 ),
-                (
-                    "Envelope",
-                    &["Attack", "Hold", "Hold Inf", "Decay", "Env Mode"],
-                ),
-                ("Effect", &["Effect", "Effect Type", "FX1", "FX2"]),
+                ("Envelope", &["Attack", "Hold", "Decay", "Env Mode"]),
+                ("Effect", &["FX", "Effect Type", "FX1", "FX2"]),
                 (
                     "Filter",
-                    &[
-                        "Filter",
-                        "Filter Type",
-                        "Frequency",
-                        "Resonance",
-                        "Peak Gain",
-                    ],
+                    &["Filter", "Filter Type", "Freq", "Res", "Peak Gain"],
                 ),
                 (
                     "Modulation",
@@ -360,68 +405,102 @@ pub fn drum_sampler_type() -> DeviceType {
     )
 }
 
-/// A layout of fixed control bands and the sample's display, which grows.
+/// The panel as Live draws it (layout L-DEV-048, observed in Live 12.4.16 on
+/// 2 November 2026): the sample's display with Start, Length and Gain along
+/// its foot, the effect's display with its switch and type, the envelope
+/// and transposition knobs under them, the filter column and the global
+/// column. Every place is in points from the body's top-left corner.
 fn layout() -> DeviceLayout {
-    let sample = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (START, Widget::Knob),
-            (LENGTH, Widget::Knob),
-            (SAMPLE_GAIN, Widget::Knob),
-            (TRANSPOSE, Widget::Number),
-            (DETUNE, Widget::Knob),
+    let wave = (236.8, 101.7);
+    let effect = (99.9, 101.7);
+    let inset = 0.6;
+    // The room the two columns of display and knobs take, and the gaps
+    // between them (the display's own edge is 1.8 from the frame).
+    let (left, gap) = (1.2, 1.1);
+    let under = BODY_HEIGHT - wave.1 - 2.0 * inset;
+    let knob = |param, x: f32, y: f32| Control::new(param, Widget::SmallKnob, x, y);
+    let at = |param, widget, x: f32, y: f32, width: f32| {
+        Control::new(param, widget, x, y).sized(width, BOX_HEIGHT)
+    };
+    let sample = DisplayCell::new("Sample", wave.0, wave.1, 1.0)
+        .with_inset(inset)
+        .with_top(ControlBand::free(
+            wave.0,
+            wave.1,
+            vec![
+                at(START, Widget::Inline, 5.2, 84.8, 70.0),
+                at(LENGTH, Widget::Inline, 75.2, 84.8, 70.0),
+                at(SAMPLE_GAIN, Widget::Inline, 154.5, 84.8, 70.0),
+            ],
+        ));
+    let envelope = ControlBand::free(
+        wave.0 + 2.0 * inset,
+        under,
+        vec![
+            knob(ATTACK, 11.2, 6.8),
+            knob(HOLD, 59.5, 6.8),
+            knob(DECAY, 107.3, 6.8),
+            at(TRANSPOSE, Widget::Bare, 193.3, 5.4, 42.0),
+            at(DETUNE, Widget::Bare, 193.3, 21.8, 42.0),
+            at(ENV_MODE, Widget::Cycle, 193.3, 38.2, 42.0),
         ],
+    )
+    .with_labels(vec![
+        BandLabel::new("Transp", 155.1, 6.9, 30.0),
+        BandLabel::new("Detune", 155.1, 23.3, 32.0),
+        BandLabel::new("Mode", 155.1, 39.7, 24.0),
+    ]);
+    let playback = DisplayCell::new("Effect", effect.0, effect.1, 1.0)
+        .with_inset(inset)
+        .with_top(ControlBand::free(
+            effect.0,
+            effect.1,
+            vec![
+                at(FX_ON, Widget::Toggle, 3.5, 85.2, 26.4),
+                at(FX_TYPE, Widget::BareChooser, 34.1, 85.2, 62.3),
+            ],
+        ));
+    let factor_grain = ControlBand::free(
+        effect.0 + 2.0 * inset,
+        under,
+        vec![knob(FX1, 11.5, 6.8), knob(FX2, 57.9, 6.8)],
     );
-    let envelope = ControlBand::stacked(
+    let right = ControlBand::free(
+        110.0,
         BODY_HEIGHT,
-        &[
-            (ENV_MODE, Widget::Chooser),
-            (ATTACK, Widget::Knob),
-            (HOLD, Widget::Knob),
-            (HOLD_INF, Widget::Toggle),
-            (DECAY, Widget::Knob),
+        vec![
+            at(FILTER_ON, Widget::Toggle, 5.8, 4.2, 43.5),
+            Control::new(
+                FILTER_TYPE,
+                Widget::Grid {
+                    columns: 2,
+                    rows: 2,
+                },
+                5.8,
+                18.8,
+            )
+            .sized(43.5, 27.5),
+            knob(FILTER_RES, 11.5, 59.8),
+            knob(FILTER_FREQ, 11.5, 109.7),
+            knob(VOLUME, 66.2, 5.8),
+            at(PAN, Widget::Bare, 59.3, 49.9, 45.8),
+            Control::new(VELOCITY_TO_VOLUME, Widget::Slider, 59.3, 70.4).sized(45.8, 21.0),
+            at(MOD_SOURCE, Widget::Cycle, 60.5, 111.5, 43.5),
+            at(MOD_DEST, Widget::BareChooser, 59.3, 126.0, 45.8),
+            at(MOD_AMOUNT, Widget::Bare, 59.3, 141.5, 45.8),
         ],
-    );
-    let effect = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (FX_ON, Widget::Toggle),
-            (FX_TYPE, Widget::Chooser),
-            (FX1, Widget::Knob),
-            (FX2, Widget::Knob),
-        ],
-    );
-    let filter = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (FILTER_ON, Widget::Toggle),
-            (FILTER_TYPE, Widget::Chooser),
-            (FILTER_FREQ, Widget::Knob),
-            (FILTER_RES, Widget::Knob),
-            (FILTER_GAIN, Widget::Knob),
-        ],
-    );
-    let global = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (VOLUME, Widget::Knob),
-            (PAN, Widget::Knob),
-            (VELOCITY_TO_VOLUME, Widget::Knob),
-            (MOD_SOURCE, Widget::Chooser),
-            (MOD_DEST, Widget::Chooser),
-            (MOD_AMOUNT, Widget::Knob),
-        ],
-    );
-    // The sample's waveform and the effect's X-Y pad have no drawing yet:
-    // the display cell is left for them.
-    let display = DisplayCell::new("Sample", 160.0, BODY_HEIGHT, 1.0);
+    )
+    .with_labels(vec![BandLabel::new("Mod", 59.3, 101.0, 45.8)]);
+    let spacer = |width| LayoutNode::Band(ControlBand::free(width, 1.0, Vec::new()));
     DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Cell(display),
-        LayoutNode::Band(sample),
-        LayoutNode::Band(envelope),
-        LayoutNode::Band(effect),
-        LayoutNode::Band(filter),
-        LayoutNode::Band(global),
+        spacer(left),
+        LayoutNode::Column(vec![LayoutNode::Cell(sample), LayoutNode::Band(envelope)]),
+        spacer(gap),
+        LayoutNode::Column(vec![
+            LayoutNode::Cell(playback),
+            LayoutNode::Band(factor_grain),
+        ]),
+        LayoutNode::Band(right),
     ]))
 }
 

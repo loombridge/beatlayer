@@ -105,7 +105,6 @@ const STILL_GENERIC: &[&str] = &[
     "Arpeggiator",
     "CC Control",
     "Chord",
-    "External Audio Effect",
     "External Instrument",
     "MPE Control",
     "Note Echo",
@@ -113,7 +112,6 @@ const STILL_GENERIC: &[&str] = &[
     "Pitch",
     "Random",
     "Scale",
-    "Utility",
     "Velocity",
 ];
 

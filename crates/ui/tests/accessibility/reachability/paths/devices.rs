@@ -500,6 +500,11 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                 Key::ArrowDown,
             ),
         ),
+        // Granulator III's Capture button (WP-8.27): Enter on it.
+        (
+            "granulator.capture",
+            main(a_granulator, device_view, "Capture", Key::Enter),
+        ),
         // The CV Instrument's section (WP-7.17): Enter on its buttons.
         (
             "cv.calibrate",
@@ -709,16 +714,77 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                  button control (WP-8.21)",
             )),
         ),
+        // Operator's title bar menu items (operator R28) and the partials'
+        // drag (R27): the title bar menu isn't opened from the keyboard yet.
         (
-            "device.set_route",
-            Exception(LaterView(
-                "the Matrix tabs of Wavetable and Meld (WP-8.10, WP-8.20)",
+            "operator.copy_oscillator",
+            Exception(Gap(
+                "the device's title bar menu isn't opened from the keyboard (operator R28)",
             )),
         ),
         (
+            "operator.set_envelope_levels",
+            Exception(Gap(
+                "the device's title bar menu isn't opened from the keyboard (operator R28)",
+            )),
+        ),
+        (
+            "operator.play_by_key",
+            Exception(Gap(
+                "the device's title bar menu isn't opened from the keyboard (operator R28)",
+            )),
+        ),
+        (
+            "operator.set_harmonics",
+            Exception(Gap(
+                "the device's title bar menu isn't opened from the keyboard (operator R28)",
+            )),
+        ),
+        (
+            "device.set_partials",
+            Exception(Gap(
+                "dragging across the partials has no keyboard form yet; arrow keys that step \
+                 each partial would close it (operator R27)",
+            )),
+        ),
+        (
+            "device.write_partials",
+            Exception(Equivalent(
+                "`device.set_partials`, which also sets Repeat in the same undo step",
+            )),
+        ),
+        // WP-8.11: the cells of Wavetable's grid take the arrow keys and
+        // Delete; Meld's Matrix tab comes with WP-8.20.
+        (
+            "device.set_route",
+            main(
+                a_wavetable_grid,
+                device_view,
+                "LFO 1 to Osc 1 Position",
+                Key::ArrowUp,
+            ),
+        ),
+        (
             "device.clear_route",
-            Exception(LaterView(
-                "the Matrix tabs of Wavetable and Meld (WP-8.10, WP-8.20)",
+            main(
+                a_wavetable_route,
+                device_view,
+                "LFO 1 to Osc 1 Position",
+                Key::Delete,
+            ),
+        ),
+        (
+            "device.add_destination",
+            Exception(Equivalent(
+                "the Add Destination chooser, which Enter opens and whose items run it, and \
+                 `device.set_route`, which gives a destination its row",
+            )),
+        ),
+        (
+            "device.remove_destination",
+            Exception(Equivalent(
+                "`device.clear_route` on each cell of the row; the row's menu is the pointer's \
+                 form of the same",
             )),
         ),
         // Manual slicing in the sample display, and the Warp controls

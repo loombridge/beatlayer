@@ -86,6 +86,8 @@ fn steady(bpm: f64) -> TempoMap {
 /// What a run plays and where.
 struct Run {
     params: Vec<(ParamId, f64)>,
+    /// The partials drawn on the device, whose user waves' tables it is sent.
+    partials: Vec<bl_model::Partials>,
     notes: Vec<NoteEvent>,
     events: Vec<NodeEvent>,
     tempo: TempoMap,
@@ -97,6 +99,7 @@ struct Run {
 fn run(params: Vec<(ParamId, f64)>, notes: Vec<NoteEvent>) -> Run {
     Run {
         params,
+        partials: Vec::new(),
         notes,
         events: Vec::new(),
         tempo: steady(120.0),
@@ -117,9 +120,22 @@ impl Run {
         self
     }
 
+    fn partials(mut self, osc: u8, levels: Vec<f32>) -> Self {
+        self.partials.push(bl_model::Partials { osc, levels });
+        self
+    }
+
     /// `frames` frames in blocks of `block`, left and right.
     fn render(&self, frames: usize, block: usize) -> [Vec<f32>; 2] {
-        let mut node = make_node(&self.params, block);
+        // The tables the device's partials and Repeat build, sent as the
+        // compiler sends them.
+        let mut device = common::device(&operator_type(), &self.params);
+        device.partials.clone_from(&self.partials);
+        let mut node = common::node(&common::registry(), &device, block);
+        let collector = bl_engine::Collector::new();
+        for item in operator::device_data(&device, &|_| None).items {
+            node.receive_data(item(&collector.handle()));
+        }
         let mut out = [Vec::with_capacity(frames), Vec::with_capacity(frames)];
         let mut at = 0;
         while at < frames {
@@ -1306,7 +1322,7 @@ fn sixteen_voices_of_four_operators_render_faster_than_the_device_budget() {
     let realtime = seconds as f64 / elapsed;
     println!("16 voices: {seconds} s of audio in {elapsed:.3} s, {realtime:.0}x real time (debug)");
     assert!(rms(&left) > 0.01, "the chord sounds");
-    if full_depth() {
+    if full_depth() && crate::common::budget::judged() {
         // A debug build on a loaded machine; 16 voices mustn't eat more than
         // a quarter of the time they play.
         assert!(realtime >= 4.0, "16 voices ran at {realtime:.1}x real time");
@@ -1432,4 +1448,477 @@ fn the_body_is_a_shell_of_sections_and_each_section_fills_the_display() {
         let shown = layout.with_pages(&[("Sections".to_owned(), name.to_owned())].into());
         assert_eq!(shown.docked_size(), size, "{name}");
     }
+}
+
+// ---- Part 2 (WP-8.13): the LFO, the filter and shaper, the global targets,
+// Glide and Spread ----
+
+/// A patch whose carrier A is the naive square at a fixed 100 Hz, and whose
+/// LFO is a square at 8 Hz (Range Hi, Rate 0) at full Amount, sending
+/// itself to A's level: `|x|` is 1 while the LFO is high (the first 3,000
+/// frames of each 6,000) and `1 - Amount A` while it is low.
+fn tremolo(extra: &[(ParamId, f64)]) -> Vec<(ParamId, f64)> {
+    let mut params = vec![
+        (LFO_WAVE, 1.0),
+        (LFO_RANGE, 1.0),
+        (LFO_RATE, 0.0),
+        (LFO_AMOUNT, 100.0),
+        (ParamId(LFO_OSC), 1.0),
+    ];
+    params.extend_from_slice(extra);
+    square(&params)
+}
+
+/// `|x|` of `signal` at `frame`, averaged over 40 frames.
+fn at_frame(signal: &[f32], frame: usize) -> f64 {
+    signal[frame..frame + 40]
+        .iter()
+        .map(|x| f64::from(x.abs()))
+        .sum::<f64>()
+        / 40.0
+}
+
+// Spec: operator R23 (the LFO's waves, range and Amount, to the oscillators' levels)
+#[test]
+fn the_lfo_swings_an_oscillators_level_between_its_whole_and_none() {
+    let signal = run(tremolo(&[]), vec![on(0, A3, 0.8)]).left(24_000);
+    assert!((at_frame(&signal, 1_000) - 1.0).abs() < 0.01);
+    assert!(at_frame(&signal, 4_500) < 0.01);
+    assert!((at_frame(&signal, 7_000) - 1.0).abs() < 0.01);
+    // Amount A halves the swing; a negative one swings the other way.
+    let half = run(tremolo(&[(LFO_AMOUNT_A, 50.0)]), vec![on(0, A3, 0.8)]).left(24_000);
+    assert!((at_frame(&half, 4_500) - 0.5).abs() < 0.01);
+    let flipped = run(tremolo(&[(LFO_AMOUNT_A, -100.0)]), vec![on(0, A3, 0.8)]).left(24_000);
+    assert!(at_frame(&flipped, 1_000) < 0.01);
+    assert!((at_frame(&flipped, 4_500) - 1.0).abs() < 0.01);
+    // Amount scales the depth, and a new device's 0 % moves nothing.
+    let less = run(tremolo(&[(LFO_AMOUNT, 25.0)]), vec![on(0, A3, 0.8)]).left(24_000);
+    assert!((at_frame(&less, 4_500) - 0.75).abs() < 0.01);
+    let none = run(tremolo(&[(LFO_AMOUNT, 0.0)]), vec![on(0, A3, 0.8)]).left(24_000);
+    assert!((at_frame(&none, 4_500) - 1.0).abs() < 0.01);
+}
+
+// Spec: operator R23 (Amt < Vel; its envelope scales it)
+#[test]
+fn amt_vel_and_the_lfos_envelope_scale_its_depth() {
+    // Velocity 0.5 at 100 % leaves half the Amount.
+    let soft = run(tremolo(&[(LFO_AMT_VEL, 100.0)]), vec![on(0, A3, 0.5)]).left(24_000);
+    assert!((at_frame(&soft, 4_500) - 0.5).abs() < 0.01);
+    let loud = run(tremolo(&[(LFO_AMT_VEL, 100.0)]), vec![on(0, A3, 1.0)]).left(24_000);
+    assert!(at_frame(&loud, 4_500) < 0.01);
+    // An envelope held at 50 % halves it.
+    let envelope = |level| {
+        [SHAPED_INITIAL, SHAPED_PEAK, SHAPED_SUSTAIN, SHAPED_END]
+            .map(|c| (shaped(LFO_ENV, c), level))
+    };
+    let half = run(tremolo(&envelope(50.0)), vec![on(0, A3, 0.8)]).left(24_000);
+    assert!((at_frame(&half, 4_500) - 0.5).abs() < 0.01);
+}
+
+// Spec: operator R23 (Rate < Key doubles the rate each octave at 100 %)
+#[test]
+fn rate_key_doubles_the_rate_each_octave_from_c3() {
+    // C4 is an octave up: 16 Hz, so the LFO is high for 1,500 frames.
+    let signal = run(tremolo(&[(LFO_RATE_KEY, 100.0)]), vec![on(0, 72, 0.8)]).left(12_000);
+    assert!((at_frame(&signal, 700) - 1.0).abs() < 0.01);
+    assert!(at_frame(&signal, 2_200) < 0.01);
+    assert!((at_frame(&signal, 3_700) - 1.0).abs() < 0.01);
+    // C3 is the centre: 8 Hz.
+    let centre = run(tremolo(&[(LFO_RATE_KEY, 100.0)]), vec![on(0, 60, 0.8)]).left(12_000);
+    assert!((at_frame(&centre, 2_200) - 1.0).abs() < 0.01);
+}
+
+// Spec: operator R23 (Sync: a division of the song's tempo, on the beat)
+#[test]
+fn sync_runs_the_lfo_in_a_division_of_the_tempo() {
+    // Rate 55.6 is the sixth division, one beat a cycle.
+    let sync = [(LFO_RANGE, 2.0), (LFO_RATE, 55.6)];
+    for (bpm, cycle) in [(120.0, 24_000usize), (60.0, 48_000)] {
+        let signal = run(tremolo(&sync), vec![on(0, A3, 0.8)])
+            .playing(steady(bpm))
+            .left(cycle * 2);
+        assert!(
+            (at_frame(&signal, cycle / 4) - 1.0).abs() < 0.01,
+            "{bpm} bpm"
+        );
+        assert!(at_frame(&signal, cycle * 3 / 4) < 0.01, "{bpm} bpm");
+        assert!(
+            (at_frame(&signal, cycle + cycle / 4) - 1.0).abs() < 0.01,
+            "{bpm} bpm"
+        );
+    }
+}
+
+// Spec: operator R23 (Retrigger restarts it per note; off, one free-running LFO)
+#[test]
+fn retrigger_restarts_the_lfo_with_each_note_and_off_one_free_runs() {
+    let notes = vec![on(0, A3, 0.8), off(1_000, A3), on(4_500, A3, 0.8)];
+    // 4,500 is in the low half of a cycle begun at 0.
+    let retriggered = run(tremolo(&[]), notes.clone()).left(9_000);
+    assert!((at_frame(&retriggered, 5_000) - 1.0).abs() < 0.01);
+    let free = run(tremolo(&[(LFO_RETRIGGER, 0.0)]), notes).left(9_000);
+    assert!(at_frame(&free, 5_000) < 0.01);
+}
+
+// Spec: operator R23 (the filter's cutoff, up to four octaves; Destination B)
+#[test]
+fn the_lfo_moves_the_filters_cutoff_and_one_more_destination() {
+    // A saw through a low-pass at 440 Hz: the LFO's high half raises the
+    // cutoff four octaves, its low half lowers it by as many.
+    let saw = [
+        (osc(0, OSC_WAVE), 9.0),
+        (FILTER_ON, 1.0),
+        (FILTER_FREQ, 440.0),
+        (LFO_FILTER, 1.0),
+        (ParamId(LFO_OSC), 0.0),
+    ];
+    let signal = run(tremolo(&saw), vec![on(0, A3, 0.8)]).left(12_000);
+    let (high, low) = (rms(&signal[1_500..2_900]), rms(&signal[4_500..5_900]));
+    assert!(high > 4.0 * low, "{high} {low}");
+    // Destination B, Osc Volume B (2): B at Level 0 sounds while the LFO is
+    // high, at the Amount B of the LFO.
+    let b = [
+        (ALGORITHM, 11.0),
+        level(0, 0.0),
+        level(1, 0.0),
+        (osc(1, OSC_COARSE), 2.0),
+        (ParamId(LFO_OSC), 0.0),
+        (LFO_DEST_B, 2.0),
+        (LFO_AMOUNT_B, 80.0),
+    ];
+    let signal = run(tremolo(&b), vec![on(0, A3, 0.8)]).left(12_000);
+    let high = amplitude_at(&signal[600..2_900], 2.0 * F0);
+    let low = amplitude_at(&signal[3_600..5_900], 2.0 * F0);
+    // 0.8 of full level, divided among four carriers.
+    assert!((high - 0.2).abs() < 0.01 && low < 0.005, "{high} {low}");
+}
+
+/// A saw (Saw 64) at A3 through the filter with `extra`, left channel.
+fn filtered(extra: &[(ParamId, f64)], notes: Vec<NoteEvent>, frames: usize) -> Vec<f32> {
+    let mut params = vec![(osc(0, OSC_WAVE), 9.0), (FILTER_ON, 1.0), (LFO_ON, 0.0)];
+    params.extend_from_slice(extra);
+    run(patch(&params), notes).left(frames)
+}
+
+// Spec: operator R24 (Freq < Key, Freq < Vel)
+#[test]
+fn the_cutoff_follows_the_key_and_the_velocity() {
+    // C5 is two octaves above C3: at 100 % its cutoff rises 24 semitones.
+    let rms_of = |extra: &[(ParamId, f64)], key, velocity| {
+        let signal = filtered(extra, vec![on(0, key, velocity)], 24_000);
+        rms(&signal[9_600..])
+    };
+    let fixed = rms_of(&[(FILTER_FREQ, 300.0)], 84, 0.8);
+    let keyed = rms_of(&[(FILTER_FREQ, 300.0), (FREQ_KEY, 100.0)], 84, 0.8);
+    assert!(keyed > 2.0 * fixed, "{fixed} {keyed}");
+    let soft = rms_of(&[(FILTER_FREQ, 300.0), (FREQ_VEL, 100.0)], 84, 0.1);
+    let hard = rms_of(&[(FILTER_FREQ, 300.0), (FREQ_VEL, 100.0)], 84, 1.0);
+    assert!(hard > 2.0 * soft, "{soft} {hard}");
+}
+
+// Spec: operator R24 (Freq < Envelope and the filter's envelope)
+#[test]
+fn the_cutoff_follows_the_filters_envelope() {
+    let env = |c, v| (shaped(FILTER_ENV, c), v);
+    let signal = filtered(
+        &[
+            (FILTER_FREQ, 100.0),
+            (FREQ_ENV, 100.0),
+            env(SHAPED_INITIAL, 100.0),
+            env(SHAPED_PEAK, 100.0),
+            env(SHAPED_SUSTAIN, 0.0),
+            env(SHAPED_DECAY, 300.0),
+        ],
+        vec![on(0, A3, 0.8)],
+        48_000,
+    );
+    let (early, late) = (rms(&signal[480..4_800]), rms(&signal[38_400..]));
+    assert!(early > 5.0 * late, "{early} {late}");
+    // Without the amount the envelope moves nothing.
+    let flat = filtered(
+        &[
+            (FILTER_FREQ, 100.0),
+            env(SHAPED_INITIAL, 100.0),
+            env(SHAPED_SUSTAIN, 0.0),
+        ],
+        vec![on(0, A3, 0.8)],
+        48_000,
+    );
+    assert!(rms(&flat[480..4_800]) < 2.0 * rms(&flat[38_400..]));
+}
+
+// Spec: operator R24 (the shaper: curve, Drive, Dry/Wet; bypassed at 0 %)
+#[test]
+fn the_shaper_follows_the_filter_and_is_bypassed_at_zero_wet() {
+    let sine = |extra: &[(ParamId, f64)]| {
+        let mut params = vec![(LFO_ON, 0.0), (SHAPER_TYPE, 2.0), (SHAPER_DRIVE, 24.0)];
+        params.extend_from_slice(extra);
+        run(patch(&params), vec![on(0, A3, 0.1)]).left(24_000)
+    };
+    let clean = run(patch(&[(LFO_ON, 0.0)]), vec![on(0, A3, 0.1)]).left(24_000);
+    // At 0 % the signal is the unshaped one, to the bit.
+    assert_eq!(sine(&[(SHAPER_WET, 0.0)]), clean);
+    // Hard clipping a sine adds its odd harmonics.
+    let hard = sine(&[(SHAPER_WET, 100.0)]);
+    assert!(db(amplitude_at(&hard[4_800..], 3.0 * F0)) > -20.0);
+    assert!(db(amplitude_at(&clean[4_800..], 3.0 * F0)) < -60.0);
+    // Off bypasses it whatever the wet.
+    let mut params = vec![(LFO_ON, 0.0), (SHAPER_DRIVE, 24.0), (SHAPER_WET, 100.0)];
+    params.push((SHAPER_TYPE, 0.0));
+    assert_eq!(
+        run(patch(&params), vec![on(0, A3, 0.1)]).left(24_000),
+        clean
+    );
+}
+
+/// Target `source`'s Destination A chooser and Amount A.
+fn target(source: usize, dest: usize, amount: f64) -> [(ParamId, f64); 2] {
+    [
+        (target_dest(source, false), dest as f64),
+        (target_amount(source, false), amount),
+    ]
+}
+
+fn controller(controller: u8, value: f32) -> NoteEvent {
+    NoteEvent {
+        offset: 0,
+        kind: NoteKind::Control { controller, value },
+        channel: 0,
+        key: 0,
+        velocity: 0.0,
+        note_id: None,
+    }
+}
+
+// Spec: operator R25 (a global target moves its destination by its amount)
+#[test]
+fn each_global_target_moves_its_destination_by_its_amount() {
+    // Velocity to Osc Volume B (2): B at Level 0 sounds at velocity times
+    // the amount, over four carriers.
+    let b = |velocity, amount| {
+        let mut extra = vec![
+            (ALGORITHM, 11.0),
+            level(0, 0.0),
+            level(1, 0.0),
+            (osc(1, OSC_COARSE), 2.0),
+        ];
+        extra.extend(target(0, 2, amount));
+        let signal = run(patch(&extra), vec![on(0, A3, velocity)]).left(48_000);
+        amplitude_at(&signal[4_800..], 2.0 * F0)
+    };
+    assert!((b(0.8, 100.0) - 0.2).abs() < 0.004);
+    assert!((b(0.8, 50.0) - 0.1).abs() < 0.004);
+    assert!(b(0.8, 0.0) < 0.001);
+    // Mod Wheel to Volume (19): a wheel at 0.5 with -100 % halves the output.
+    let volume = |wheel, amount| {
+        let signal = run(
+            patch(&target(4, 19, amount)),
+            vec![controller(1, wheel), on(0, A3, 0.8)],
+        )
+        .left(48_000);
+        amplitude_at(&signal[4_800..], F0)
+    };
+    assert!((volume(0.5, -100.0) - 0.5).abs() < 0.01);
+    assert!(volume(1.0, -100.0) < 0.001);
+    assert!((volume(0.0, -100.0) - 1.0).abs() < 0.01);
+    // Pitch Bend to Osc Fixed Frequency (8): 50 % of a full bend is 24
+    // semitones, 200 Hz to 800 Hz.
+    let mut extra = vec![(osc(0, OSC_FIXED), 1.0), (osc(0, OSC_FREQ), 200.0)];
+    extra.extend(target(3, 8, 50.0));
+    let bend = NoteEvent {
+        offset: 0,
+        kind: NoteKind::PitchBend { value: 1.0 },
+        channel: 0,
+        key: 0,
+        velocity: 0.0,
+        note_id: None,
+    };
+    let signal = run(patch(&extra), vec![bend, on(0, A3, 0.8)]).left(48_000);
+    assert!((amplitude_at(&signal[4_800..], 800.0) - 1.0).abs() < 0.02);
+    // Key to Panorama (20): C5 is half of the key's span to the right.
+    let signal = run(patch(&target(1, 20, 100.0)), vec![on(0, 84, 0.8)]).render(48_000, 4_096);
+    let (left, right) = (rms(&signal[0][4_800..]), rms(&signal[1][4_800..]));
+    assert!(right > 2.0 * left, "{left} {right}");
+    // Aftertouch to Osc Crossfade A/C (5): at full pressure A fades out
+    // and C stays.
+    let pressure = NoteEvent {
+        offset: 0,
+        kind: NoteKind::ChannelPressure { value: 1.0 },
+        channel: 0,
+        key: 0,
+        velocity: 0.0,
+        note_id: None,
+    };
+    let mut extra = vec![(ALGORITHM, 11.0), level(2, 1.0), (osc(2, OSC_COARSE), 3.0)];
+    extra.extend(target(2, 5, 100.0));
+    let signal = run(patch(&extra), vec![pressure, on(0, A3, 0.8)]).left(48_000);
+    assert!(amplitude_at(&signal[4_800..], F0) < 0.001);
+    assert!(amplitude_at(&signal[4_800..], 3.0 * F0) > 0.2);
+}
+
+// Spec: operator R25 (FM Drive raises every index)
+#[test]
+fn fm_drive_raises_the_index_of_every_modulation() {
+    let pressure = NoteEvent {
+        offset: 0,
+        kind: NoteKind::ChannelPressure { value: 1.0 },
+        channel: 0,
+        key: 0,
+        velocity: 0.0,
+        note_id: None,
+    };
+    let sideband = |amount| {
+        let mut extra = vec![(ALGORITHM, 7.0), level(1, 0.15)];
+        extra.extend(target(2, 9, amount));
+        let signal = run(patch(&extra), vec![pressure, on(0, A3, 0.8)]).left(48_000);
+        amplitude_at(&signal[4_800..], 3.0 * F0)
+    };
+    assert!(sideband(100.0) > 3.0 * sideband(0.0).max(1e-4));
+}
+
+/// The strongest frequency from `lo` to `hi` hertz in `signal`.
+fn peak_hz(signal: &[f32], lo: f64, hi: f64) -> f64 {
+    let mut best = (lo, 0.0);
+    let mut hz = lo;
+    while hz <= hi {
+        let at = amplitude_at(signal, hz);
+        if at > best.1 {
+            best = (hz, at);
+        }
+        hz += 0.5;
+    }
+    best.0
+}
+
+// Spec: operator R26 (Glide: polyphonic portamento over Glide Time)
+#[test]
+fn glide_slides_each_note_from_the_last_over_glide_time() {
+    let notes = vec![on(0, A3, 0.8), on(24_000, A3 + 7, 0.8)];
+    let after = |glide: &[(ParamId, f64)]| {
+        let mut extra = vec![(VOICES, 1.0)];
+        extra.extend_from_slice(glide);
+        let signal = run(patch(&extra), notes.clone()).left(24_000 + 48_000);
+        (
+            peak_hz(&signal[24_000 + 240..24_000 + 1_680], 200.0, 360.0),
+            peak_hz(&signal[24_000 + 36_000..24_000 + 38_400], 200.0, 360.0),
+        )
+    };
+    let glide = [(GLIDE_ON, 1.0), (GLIDE_TIME, 500.0)];
+    let (early, late) = after(&glide);
+    assert!(early < 235.0, "{early}");
+    assert!((late - frequency(A3 + 7)).abs() < 2.0, "{late}");
+    // Off, the note plays at its pitch at once.
+    let (early, _) = after(&[]);
+    assert!((early - frequency(A3 + 7)).abs() < 2.0, "{early}");
+}
+
+// Spec: operator R26 (Spread: two copies detuned and panned, in phase at the start)
+#[test]
+fn spread_plays_two_detuned_copies_left_and_right_that_start_in_phase() {
+    let spread = run(patch(&[(SPREAD, 100.0)]), vec![on(0, A3, 0.8)]).render(96_000, 4_096);
+    let (low, high) = (F0 * (-0.25f64 / 12.0).exp2(), F0 * (0.25f64 / 12.0).exp2());
+    let [left, right] = &spread;
+    // The lower copy is hard left, the higher hard right.
+    assert!(amplitude_at(&left[9_600..], low) > 3.0 * amplitude_at(&left[9_600..], high));
+    assert!(amplitude_at(&right[9_600..], high) > 3.0 * amplitude_at(&right[9_600..], low));
+    // They start in the same phase, so the first frames are alike.
+    let largest = left[..200].iter().fold(0.0f32, |m, x| m.max(x.abs()));
+    assert!(largest > 0.01);
+    for i in 0..30 {
+        assert!((left[i] - right[i]).abs() < 0.03 * largest, "frame {i}");
+    }
+    // Each copy is 3 dB down from the single note.
+    let single = run(patch(&[]), vec![on(0, A3, 0.8)]).render(96_000, 4_096);
+    let ratio = amplitude_at(&left[9_600..], low) / amplitude_at(&single[0][9_600..], F0);
+    let pan = f64::from(pan_gains(0.0).0);
+    assert!((ratio - 0.7079 / pan).abs() < 0.02, "{ratio} {pan}");
+}
+
+// Spec: operator R30 (every new parameter is the same at any block size)
+#[test]
+fn part_two_renders_the_same_at_block_sizes_1_to_4096() {
+    let phrase = || {
+        let mut params = patch(&[
+            (ALGORITHM, 4.0),
+            level(1, 0.3),
+            (osc(1, OSC_COARSE), 2.0),
+            (ANTIALIAS, 1.0),
+            (LFO_WAVE, 6.0),
+            (LFO_RANGE, 1.0),
+            (LFO_RATE, 20.0),
+            (LFO_AMOUNT, 70.0),
+            (LFO_RATE_KEY, 50.0),
+            (ParamId(LFO_OSC), 1.0),
+            (LFO_FILTER, 1.0),
+            (LFO_DEST_B, 20.0),
+            (LFO_AMOUNT_B, 40.0),
+            (FILTER_ON, 1.0),
+            (FILTER_FREQ, 900.0),
+            (FILTER_RES, 40.0),
+            (FREQ_KEY, 60.0),
+            (FREQ_ENV, 50.0),
+            (SHAPER_TYPE, 1.0),
+            (SHAPER_DRIVE, 12.0),
+            (SHAPER_WET, 50.0),
+            (SPREAD, 60.0),
+            (GLIDE_ON, 1.0),
+            (GLIDE_TIME, 120.0),
+            (PAN_RANDOM, 30.0),
+        ]);
+        params.extend(target(0, 2, 30.0));
+        params.extend(target(1, 10, 20.0));
+        params.extend([(shaped(FILTER_ENV, SHAPED_DECAY), 200.0)]);
+        let mut notes = Vec::new();
+        for (i, key) in [48u8, 55, 60, 64, 67].into_iter().enumerate() {
+            let at = 4_000 * i as u32;
+            notes.push(on(at, key, 0.4 + 0.1 * i as f32));
+            notes.push(off(at + 9_000, key));
+        }
+        notes.sort_by_key(|n| n.offset);
+        run(params, notes)
+    };
+    let frames = 40_000;
+    let reference = phrase().render(frames, 4_096);
+    assert!(rms(&reference[0]) > 0.01 && rms(&reference[1]) > 0.01);
+    // The filter's coefficients are updated in stretches that start where a
+    // call does, so its output differs by rounding alone (under -90 dB).
+    for block in BLOCKS {
+        let got = phrase().render(frames, block);
+        for (got, reference) in got.iter().zip(&reference) {
+            let worst = got
+                .iter()
+                .zip(reference)
+                .fold(0.0f32, |worst, (a, b)| worst.max((a - b).abs()));
+            assert!(worst < 3e-5, "block {block}: {worst}");
+        }
+    }
+}
+
+// Spec: operator R7, R27 (a drawn wave's partials and Repeat build its table)
+#[test]
+fn a_drawn_waves_partials_and_repeat_build_the_table_the_device_plays() {
+    let mut levels = vec![0.0f32; 16];
+    levels[0] = 1.0;
+    levels[2] = 0.5;
+    let user = [(osc(0, OSC_WAVE), 22.0)];
+    let heard = |extra: &[(ParamId, f64)]| {
+        let mut params = user.to_vec();
+        params.extend_from_slice(extra);
+        let signal = run(patch(&params), vec![on(0, A3, 0.8)])
+            .partials(0, levels.clone())
+            .left(48_000);
+        move |partial: f64| amplitude_at(&signal[4_800..], partial * F0)
+    };
+    let off = heard(&[]);
+    assert!((off(1.0) - 1.0).abs() < 0.01 && (off(3.0) - 0.5).abs() < 0.01);
+    assert!(off(2.0) < 0.001 && off(17.0) < 0.001);
+    // Repeat at 50 % goes on with the pattern a copy fainter: partial 17 is
+    // the first again, at half.
+    let repeating = heard(&[(osc(0, OSC_REPEAT_ON), 1.0), (osc(0, OSC_REPEAT), 50.0)]);
+    assert!((repeating(17.0) - 0.5).abs() < 0.01, "{}", repeating(17.0));
+    assert!((repeating(19.0) - 0.25).abs() < 0.01);
+    // A new user wave is the first partial alone.
+    let new = run(patch(&user), vec![on(0, A3, 0.8)]).left(48_000);
+    assert!((amplitude_at(&new[4_800..], F0) - 1.0).abs() < 0.01);
+    assert!(amplitude_at(&new[4_800..], 3.0 * F0) < 0.001);
 }

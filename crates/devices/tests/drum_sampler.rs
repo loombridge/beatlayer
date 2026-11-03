@@ -12,9 +12,9 @@ use std::sync::Arc;
 use bl_core::time::{TICKS_PER_QUARTER, Ticks};
 use bl_devices::drum_sampler::{
     ATTACK, DECAY, DETUNE, ENV_FOLLOWS_PITCH, ENV_MODE, FILTER_FREQ, FILTER_GAIN, FILTER_ON,
-    FILTER_RES, FILTER_TYPE, FX_ON, FX_TYPE, FX1, FX2, HOLD, HOLD_INF, LENGTH, MOD_AMOUNT,
-    MOD_DEST, MOD_SOURCE, PAN, PER_NOTE_BEND, SAMPLE_GAIN, START, TRANSPOSE, VELOCITY_TO_VOLUME,
-    VOLUME, drum_sampler_type,
+    FILTER_RES, FILTER_TYPE, FILTER_TYPES, FX_ON, FX_TYPE, FX1, FX2, HOLD, HOLD_INF, LENGTH,
+    MOD_AMOUNT, MOD_DEST, MOD_SOURCE, PAN, PER_NOTE_BEND, SAMPLE_GAIN, START, TRANSPOSE,
+    VELOCITY_TO_VOLUME, VOLUME, drum_sampler_type,
 };
 use bl_engine::{
     Block, Collector, DeviceType, EngineConfig, MediaMap, Node, NodeEvent, NoteBuffer, NoteEvent,
@@ -58,10 +58,28 @@ fn registry() -> Registry {
     registry
 }
 
+/// The settings these tests start from: the plain sample, as the device
+/// opened before it took Live's defaults (Volume at 0 dB, the filter and
+/// the effect off, the whole sample held, Decay 200 ms). A test names the
+/// settings it changes; `a_new_drum_sampler_opens_as_live_shows_it` reads the defaults.
+const PLAIN: [(ParamId, f64); 10] = [
+    (ATTACK, 0.0),
+    (HOLD_INF, 1.0),
+    (DECAY, 200.0),
+    (FX_ON, 0.0),
+    (FX2, 50.0),
+    (FILTER_ON, 0.0),
+    (FILTER_TYPE, 0.0),
+    (FILTER_FREQ, 1_000.0),
+    (VOLUME, 1.0),
+    (VELOCITY_TO_VOLUME, 100.0),
+];
+
 /// Drum Sampler of `params`, up to 4,096 frames at a time.
 fn strike(params: &[(ParamId, f64)]) -> Box<dyn Node> {
     let device_type: DeviceType = drum_sampler_type();
-    node(&registry(), &device(&device_type, params), 4096)
+    let all: Vec<(ParamId, f64)> = PLAIN.iter().chain(params).copied().collect();
+    node(&registry(), &device(&device_type, &all), 4096)
 }
 
 /// Decoded audio of `frames` frames at the engine's rate, one channel.
@@ -220,7 +238,7 @@ fn rms(signal: &[f32]) -> f64 {
 
 // Spec: one-shot-drum-sampler R1
 #[test]
-fn strike_is_described_laid_out_and_lists_its_two_menu_options() {
+fn strike_is_described_laid_out_and_lists_its_menu_options() {
     let device_type = drum_sampler_type();
     assert_eq!(device_type.name, "Drum Sampler");
     assert_eq!(device_type.role, DeviceRole::Instrument);
@@ -229,9 +247,11 @@ fn strike_is_described_laid_out_and_lists_its_two_menu_options() {
     for (index, param) in device_type.description.params.iter().enumerate() {
         assert_eq!(param.id.0 as usize, index, "{}", param.name);
     }
+    // Hold Inf has no control of its own in Live's panel, so it is a menu
+    // option here.
     assert_eq!(
         device_type.description.menu_options,
-        [PER_NOTE_BEND, ENV_FOLLOWS_PITCH]
+        [HOLD_INF, PER_NOTE_BEND, ENV_FOLLOWS_PITCH]
     );
     // Per-note pitch bend is on in a new device, Envelope Follows Pitch off.
     let param = |id| device_type.description.param(id).unwrap();
@@ -1019,6 +1039,7 @@ fn the_engine_plays_the_sample_the_set_names() {
     let strike = drum_sampler_type();
     let mut device: Device = strike.device(editor.new_id());
     device.media = vec![Some(hash)];
+    device.params.extend(PLAIN);
     editor
         .apply(Command::InsertDevice {
             track,
@@ -1086,6 +1107,7 @@ fn a_change_of_sample_in_the_set_fades_the_sounding_voice_and_plays_the_new_samp
         .unwrap();
     let mut device: Device = drum_sampler_type().device(editor.new_id());
     device.media = vec![Some(old_hash)];
+    device.params.extend(PLAIN);
     let id = device.id;
     editor
         .apply(Command::InsertDevice {
@@ -1189,4 +1211,83 @@ fn a_sample_that_arrives_while_a_voice_sounds_fades_the_voice_out_over_five_mill
         "{} for half of {level}",
         after[0][999]
     );
+}
+
+// Spec: one-shot-drum-sampler R1, R29
+#[test]
+fn a_new_drum_sampler_opens_as_live_shows_it() {
+    let description = drum_sampler_type().description;
+    let device = common::device(&drum_sampler_type(), &[]);
+    let read = |id| {
+        device
+            .params
+            .get(&id)
+            .copied()
+            .unwrap_or_else(|| description.param(id).expect("a parameter").default)
+    };
+    let text = |id| {
+        let param = description.param(id).expect("a parameter");
+        description.text(&read, param, read(id))
+    };
+    // The values and units of Live's panel, as the capture shows them.
+    assert_eq!(text(START), "0.0 %");
+    assert_eq!(text(LENGTH), "100 %");
+    assert_eq!(text(ATTACK), "0.10 ms");
+    assert_eq!(text(HOLD), "300 ms");
+    assert_eq!(text(DECAY), "1.00 s");
+    assert_eq!(text(TRANSPOSE), "0 st");
+    assert_eq!(text(DETUNE), "0 ct");
+    assert_eq!(text(FX1), "1.00");
+    assert_eq!(text(FX2), "100 ms");
+    assert_eq!(text(FILTER_RES), "0.0 %");
+    assert_eq!(text(FILTER_FREQ), "22.0 kHz");
+    assert_eq!(text(VOLUME), "-12.0 dB");
+    assert_eq!(text(VELOCITY_TO_VOLUME), "35 %");
+    assert_eq!(text(MOD_AMOUNT), "0.0 %");
+    // The switches and choices.
+    let choice = |id, names: &[&'static str]| names[read(id) as usize];
+    assert_eq!(
+        choice(ENV_MODE, &bl_devices::drum_sampler::ENV_MODES),
+        "Trigger"
+    );
+    assert_eq!(
+        choice(MOD_SOURCE, &bl_devices::drum_sampler::MOD_SOURCES),
+        "Velocity"
+    );
+    assert_eq!(
+        choice(MOD_DEST, &bl_devices::drum_sampler::MOD_DESTS),
+        "Filter"
+    );
+    assert_eq!(
+        choice(FX_TYPE, &bl_devices::drum_sampler::EFFECTS),
+        "Stretch"
+    );
+    assert_eq!(choice(FILTER_TYPE, &FILTER_TYPES), "Low-pass 24");
+    assert_eq!(
+        (read(FX_ON), read(FILTER_ON), read(HOLD_INF)),
+        (1.0, 1.0, 0.0)
+    );
+    // Stretch's two parameters read as its Factor and Grain, and another
+    // effect's keep their own names.
+    let named = |values: &dyn Fn(ParamId) -> f64, id| {
+        let param = description.param(id).expect("a parameter");
+        description.described(values, param).name.clone()
+    };
+    assert_eq!(
+        (named(&read, FX1), named(&read, FX2)),
+        ("Factor".to_owned(), "Grain".to_owned())
+    );
+    let looping = |id| if id == FX_TYPE { LOOP } else { read(id) };
+    assert_eq!(
+        (named(&looping, FX1), named(&looping, FX2)),
+        ("FX1".to_owned(), "FX2".to_owned())
+    );
+    // Res is the Peak filter's gain while the type is Peak.
+    let drawn = |filter: f64| {
+        let mut params = device.params.clone();
+        params.insert(FILTER_TYPE, filter);
+        description.drawn(&params, FILTER_RES)
+    };
+    assert_eq!(drawn(1.0), FILTER_RES);
+    assert_eq!(drawn(3.0), FILTER_GAIN);
 }

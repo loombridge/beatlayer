@@ -23,21 +23,21 @@ use bl_model::{DeviceKind, ParamId, Scale, ScaleName, Tuning};
 use realfft::RealFftPlanner;
 
 /// The sample rate the tests run at, in hertz.
-const HZ: f64 = 48_000.0;
+pub(crate) const HZ: f64 = 48_000.0;
 
 /// A device's parameters, each with its value.
-type Params = Vec<(ParamId, f64)>;
+pub(crate) type Params = Vec<(ParamId, f64)>;
 
 /// The block sizes every render is checked at.
-const BLOCKS: [usize; 4] = [1, 64, 512, 4096];
+pub(crate) const BLOCKS: [usize; 4] = [1, 64, 512, 4096];
 
-fn registry() -> Registry {
+pub(crate) fn registry() -> Registry {
     let mut registry = Registry::empty();
     bl_devices::register(&mut registry);
     registry
 }
 
-fn meld_type() -> DeviceType {
+pub(crate) fn meld_type() -> DeviceType {
     bl_devices::device_types()
         .into_iter()
         .find(|t| matches!(&t.kind, DeviceKind::Native { device_type } if device_type == MELD))
@@ -45,18 +45,18 @@ fn meld_type() -> DeviceType {
 }
 
 /// Engine A's parameter `offset`.
-fn a(offset: u32) -> ParamId {
+pub(crate) fn a(offset: u32) -> ParamId {
     param(0, offset)
 }
 
 /// Engine B's parameter `offset`.
-fn b(offset: u32) -> ParamId {
+pub(crate) fn b(offset: u32) -> ParamId {
     param(1, offset)
 }
 
 /// A device with Meld's filters open, the limiter off and the levels at
 /// 0 dB, so a test reads the oscillator itself, with `params` on top.
-fn meld_with(params: &[(ParamId, f64)]) -> bl_model::Device {
+pub(crate) fn meld_with(params: &[(ParamId, f64)]) -> bl_model::Device {
     let mut all = vec![
         (a(FILTER_ON), 0.0),
         (b(FILTER_ON), 0.0),
@@ -82,20 +82,20 @@ fn event(offset: usize, kind: NoteKind, key: u8) -> NoteEvent {
     }
 }
 
-fn on(offset: usize, key: u8) -> NoteEvent {
+pub(crate) fn on(offset: usize, key: u8) -> NoteEvent {
     event(offset, NoteKind::On, key)
 }
 
-fn off(offset: usize, key: u8) -> NoteEvent {
+pub(crate) fn off(offset: usize, key: u8) -> NoteEvent {
     event(offset, NoteKind::Off, key)
 }
 
 /// What a render plays through: the set's tuning, and its scale from
 /// frame 0 with the changes that follow it.
 #[derive(Clone, Default)]
-struct Setting {
-    tuning: Option<Tuning>,
-    scales: Vec<(usize, Scale)>,
+pub(crate) struct Setting {
+    pub(crate) tuning: Option<Tuning>,
+    pub(crate) scales: Vec<(usize, Scale)>,
 }
 
 fn scaled(scale: Scale) -> Setting {
@@ -105,13 +105,13 @@ fn scaled(scale: Scale) -> Setting {
     }
 }
 
-fn c_major() -> Scale {
+pub(crate) fn c_major() -> Scale {
     Scale::new(0, ScaleName::Major)
 }
 
 /// Plays `notes` (frames from the start) through `node` for `frames`, in
 /// blocks of `block`, and returns both channels.
-fn render_node(
+pub(crate) fn render_node(
     node: &mut dyn Node,
     block: usize,
     frames: usize,
@@ -178,7 +178,7 @@ fn render_node(
 }
 
 /// A Meld with `params` set, rendered at block size `block`.
-fn play_with(
+pub(crate) fn play_with(
     params: &[(ParamId, f64)],
     block: usize,
     frames: usize,
@@ -190,25 +190,25 @@ fn play_with(
 }
 
 /// As [`play_with`] at 512 frames a block, with nothing special in the set.
-fn play(params: &[(ParamId, f64)], frames: usize, notes: &[NoteEvent]) -> [Vec<f32>; 2] {
+pub(crate) fn play(params: &[(ParamId, f64)], frames: usize, notes: &[NoteEvent]) -> [Vec<f32>; 2] {
     play_with(params, 512, frames, notes, &Setting::default())
 }
 
 /// A second of `key` with `params`, and its left channel's last half
 /// second: a steady tone.
-fn steady(params: &[(ParamId, f64)], key: u8) -> Vec<f32> {
+pub(crate) fn steady(params: &[(ParamId, f64)], key: u8) -> Vec<f32> {
     let [left, _] = play(params, 48_000, &[on(0, key)]);
     left[24_000..].to_vec()
 }
 
 /// The frequency of a pitch in semitones, A4 at 440 Hz.
-fn hz(pitch: f64) -> f64 {
+pub(crate) fn hz(pitch: f64) -> f64 {
     440.0 * ((pitch - 69.0) / 12.0).exp2()
 }
 
 /// The amplitude of a sine at `frequency` in `signal`, by a Hann-windowed
 /// DFT over the whole slice.
-fn amp(signal: &[f32], frequency: f64) -> f64 {
+pub(crate) fn amp(signal: &[f32], frequency: f64) -> f64 {
     let n = signal.len() as f64;
     let (mut re, mut im) = (0.0f64, 0.0f64);
     for (i, &x) in signal.iter().enumerate() {
@@ -221,7 +221,7 @@ fn amp(signal: &[f32], frequency: f64) -> f64 {
 }
 
 /// The root mean square of `signal`.
-fn rms(signal: &[f32]) -> f64 {
+pub(crate) fn rms(signal: &[f32]) -> f64 {
     (signal
         .iter()
         .map(|&x| f64::from(x) * f64::from(x))
@@ -230,13 +230,13 @@ fn rms(signal: &[f32]) -> f64 {
         .sqrt()
 }
 
-fn peak(signal: &[f32]) -> f32 {
+pub(crate) fn peak(signal: &[f32]) -> f32 {
     signal.iter().fold(0.0, |m, x| m.max(x.abs()))
 }
 
 /// The power-weighted mean frequency of `signal` between `low` and `high`,
 /// in hertz: where a tone, or a tight swarm of them, sits.
-fn centroid(signal: &[f32], low: f64, high: f64) -> f64 {
+pub(crate) fn centroid(signal: &[f32], low: f64, high: f64) -> f64 {
     let n = signal.len().next_power_of_two() / 2;
     let fft = RealFftPlanner::<f64>::new().plan_fft_forward(n);
     let mut input = fft.make_input_vec();
@@ -259,7 +259,7 @@ fn centroid(signal: &[f32], low: f64, high: f64) -> f64 {
 }
 
 /// The share of `signal`'s power outside `bands` (pairs of frequencies).
-fn power_outside(signal: &[f32], bands: &[(f64, f64)]) -> f64 {
+pub(crate) fn power_outside(signal: &[f32], bands: &[(f64, f64)]) -> f64 {
     let n = signal.len().next_power_of_two() / 2;
     let fft = RealFftPlanner::<f64>::new().plan_fft_forward(n);
     let mut input = fft.make_input_vec();
@@ -283,7 +283,7 @@ fn power_outside(signal: &[f32], bands: &[(f64, f64)]) -> f64 {
 
 /// Asserts that two renders are the same bits, naming the first sample
 /// that differs.
-fn assert_same(actual: &[f32], expected: &[f32], what: &str) {
+pub(crate) fn assert_same(actual: &[f32], expected: &[f32], what: &str) {
     assert_eq!(actual.len(), expected.len(), "{what}: length");
     if let Some(i) = (0..actual.len()).find(|&i| actual[i].to_bits() != expected[i].to_bits()) {
         panic!(
@@ -294,7 +294,7 @@ fn assert_same(actual: &[f32], expected: &[f32], what: &str) {
 }
 
 /// Asserts that two renders differ nowhere by more than `tolerance`.
-fn assert_near(actual: &[f32], expected: &[f32], tolerance: f32, what: &str) {
+pub(crate) fn assert_near(actual: &[f32], expected: &[f32], tolerance: f32, what: &str) {
     assert_eq!(actual.len(), expected.len(), "{what}: length");
     let worst = actual
         .iter()
@@ -641,7 +641,7 @@ fn the_swarms_spread_drift_and_fade_into_a_chord() {
 /// the aliasing level. A 7-term Blackman–Harris window, 8,192-frame spectra
 /// overlapping by half, and 9 bins either side of each harmonic of each of
 /// `fundamentals`, as the kit's own measurement does.
-fn aliasing_db(signal: &[f32], fundamentals: &[f64]) -> f64 {
+pub(crate) fn aliasing_db(signal: &[f32], fundamentals: &[f64]) -> f64 {
     const N: usize = 8_192;
     const A: [f64; 7] = [
         0.271_051_400_693_42,
@@ -775,14 +775,14 @@ fn no_type_folds_back_more_than_minus_80_db_at_the_top_key() {
 }
 
 /// The level of a sine at `ms` (a 5 ms window's peak-equivalent).
-fn level_at(signal: &[f32], ms: f64) -> f64 {
+pub(crate) fn level_at(signal: &[f32], ms: f64) -> f64 {
     let at = (ms * HZ / 1000.0) as usize;
     let window = &signal[at.saturating_sub(120)..(at + 120).min(signal.len())];
     rms(window) * 2f64.sqrt()
 }
 
 /// The frequency of a sine, from its positive-going zero crossings.
-fn crossing_hz(signal: &[f32]) -> f64 {
+pub(crate) fn crossing_hz(signal: &[f32]) -> f64 {
     let mut crossings = Vec::new();
     for i in 1..signal.len() {
         if signal[i - 1] < 0.0 && signal[i] >= 0.0 {
@@ -795,7 +795,7 @@ fn crossing_hz(signal: &[f32]) -> f64 {
 }
 
 /// The distance in cents between two frequencies.
-fn cents_between(a: f64, b: f64) -> f64 {
+pub(crate) fn cents_between(a: f64, b: f64) -> f64 {
     1200.0 * (a / b).log2()
 }
 
@@ -1219,7 +1219,7 @@ fn every_key_of_a_nineteen_step_tuning_sounds_within_a_tenth_of_a_cent() {
 }
 
 /// A phrase that steals, releases and stacks, for the block-size checks.
-fn phrase() -> Vec<NoteEvent> {
+pub(crate) fn phrase() -> Vec<NoteEvent> {
     vec![
         on(0, 60),
         on(0, 64),
@@ -1358,7 +1358,7 @@ fn sixteen_voices_of_swarm_saw_on_both_engines_render_inside_the_device_budget()
     let realtime = seconds as f64 / start.elapsed().as_secs_f64();
     println!("sixteen voices of Swarm Saw: {realtime:.1}x real time (debug)");
     assert!(heard > 1.0, "it sounds");
-    if full_depth() {
+    if full_depth() && crate::common::budget::judged() {
         assert!(realtime >= 4.0, "{realtime:.1}x real time");
     }
 }

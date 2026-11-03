@@ -41,7 +41,14 @@ use crate::param_menu::ParamMenu;
 use crate::theme::Theme;
 use crate::widgets::modulated_text;
 
+mod drum_drawings;
 mod parts;
+
+/// Where a Drum Synth's drawing is centred in its display, and its note's
+/// text, from the display's top-left corner, in points (observed in Live
+/// 12.4.16, 2 November 2026; layout L-DEV-047).
+const DRAWING_CENTRE: (f32, f32) = (70.0, 26.0);
+const NOTE_CENTRE: (f32, f32) = (23.0, 28.0);
 pub use parts::{BOX_CORNER, DEVICE_TEXT, glyph_for, paint_glyph, title_parts, truncated};
 
 /// What the panel asks of the device view for each parameter: its base and
@@ -484,6 +491,21 @@ pub fn show(
             slot_cell(ui, theme, frame, panel, (id, &name, slot, rect), events);
             continue;
         }
+        // Spec: wavetable R35 to R39. Wavetable's displays and its grid are
+        // drawn by its own panel.
+        if crate::wavetable_panel::is_wavetable(frame)
+            && crate::wavetable_panel::cell(
+                ui,
+                theme,
+                frame,
+                panel,
+                display,
+                (id, &name, rect),
+                events,
+            )
+        {
+            continue;
+        }
         // Spec: corpus R1. Corpus's X–Y control is its display cell.
         if matches!(&frame.kind, bl_model::DeviceKind::Native { device_type }
             if device_type == bl_devices::corpus::CORPUS)
@@ -498,6 +520,29 @@ pub fn show(
         if bl_devices::drum_synth::is_drum_synth(&frame.kind)
             && name == bl_devices::drum_synth::ENVELOPE
         {
+            // Layout L-DEV-047: the display shows the instrument's drawing,
+            // and its note where the device reads one.
+            if let bl_model::DeviceKind::Native { device_type } = &frame.kind
+                && let Some(drawing) = drum_drawings::Drawing::of(device_type)
+            {
+                let ink = highlight(theme, frame.enabled);
+                let painter = ui.painter_at(rect);
+                drum_drawings::draw(
+                    &painter,
+                    drawing,
+                    rect.min + vec2(DRAWING_CENTRE.0, DRAWING_CENTRE.1),
+                    ink,
+                );
+                if let Some(note) = display.and_then(|display| display.reading("Note")) {
+                    painter.text(
+                        rect.min + vec2(NOTE_CENTRE.0, NOTE_CENTRE.1),
+                        Align2::CENTER_CENTER,
+                        &note.text,
+                        parts::font(),
+                        c.text_dim.0,
+                    );
+                }
+            }
             let upper = Rect::from_min_max(rect.min, pos2(rect.right(), rect.center().y));
             let preview = id.with("preview");
             let response = ui.interact(upper, preview, Sense::click());
@@ -547,6 +592,9 @@ pub fn show(
         // series (the Expression Control's tabs); otherwise the first cell draws it all.
         let own;
         let shown = match display {
+            // Layout L-DEV-047: a Drum Synth's display shows its drawing, not
+            // the envelope that `device.display` reads.
+            Some(_) if bl_devices::drum_synth::is_drum_synth(&frame.kind) => None,
             Some(d) if d.series.iter().any(|s| s.name == name) => {
                 own = DeviceDisplay {
                     spectrograms: Vec::new(),
@@ -564,7 +612,7 @@ pub fn show(
             }
             // Spec: roar R31. Roar's source traces have cells of their own
             // on their pages; the shaper's cell leaves them out.
-            Some(d) if index == 0 && has_drawing(d) => {
+            Some(d) if has_drawing(d) && draws_first(frame, index, &name) => {
                 let roar = frame.kind
                     == bl_model::DeviceKind::Native {
                         device_type: bl_devices::roar::ROAR.to_owned(),
@@ -609,6 +657,9 @@ pub fn show(
             }
         });
     }
+    for label in &laid.labels {
+        parts::band_label(ui, theme, label, body.min);
+    }
     for (at, (param, widget, whole)) in controls.into_iter().enumerate() {
         let extra = laid.controls.get(at);
         // A knob with a unit pair beside it keeps the rest of its place.
@@ -641,7 +692,7 @@ pub fn show(
         let relabelled_text = panel
             .description
             .label(&read, param)
-            .is_some_and(|label| label.unit.is_some())
+            .is_some_and(|label| label.unit.is_some() || label.law.is_some())
             .then(|| panel.description.text(&read, &descriptor, value));
         let control = Control {
             device: frame.id,
@@ -678,7 +729,15 @@ pub fn show(
                     .map(|reading| reading.text.clone())
             })
             .flatten()
-            .or(relabelled_text),
+            .or(relabelled_text)
+            .or_else(|| pan_reading(&frame.kind, &descriptor, value)),
+            under: (widget == Widget::Large)
+                .then(|| {
+                    display
+                        .and_then(|display| display.reading(&descriptor.name))
+                        .map(|reading| reading.text.clone())
+                })
+                .flatten(),
             automation: menu(param),
             coarse: if frame.kind
                 == (bl_model::DeviceKind::Native {
@@ -690,6 +749,8 @@ pub fn show(
             } else {
                 1
             },
+            unnamed: extra.is_some_and(|e| e.unnamed),
+            caption: extra.and_then(|e| e.caption.as_deref()),
         };
         // Spec: scales R16. A parameter the device takes from its current
         // scale is drawn disabled.
@@ -701,11 +762,36 @@ pub fn show(
             Widget::Number => control.number(ui, theme, events, (false, false)),
             Widget::Slider => control.number(ui, theme, events, (true, false)),
             Widget::Marked => control.number(ui, theme, events, (false, true)),
-            Widget::Toggle => control.toggle(ui, theme, events, false),
-            Widget::Outlined => control.toggle(ui, theme, events, true),
+            Widget::Toggle => control.toggle(ui, theme, events, (false, None)),
+            Widget::Abbreviated(n) => {
+                control.toggle(ui, theme, events, (false, Some(usize::from(n))));
+            }
+            Widget::Outlined => control.toggle(ui, theme, events, (true, None)),
             Widget::IconToggle => control.icon_toggle(ui, theme, events, (glyph, false)),
             Widget::Round => control.icon_toggle(ui, theme, events, (glyph, true)),
-            Widget::Chooser => control.chooser(ui, theme, events),
+            Widget::Chooser => control.chooser(ui, theme, events, parts::ChooserStyle::Plain),
+            Widget::LitChooser => control.chooser(ui, theme, events, parts::ChooserStyle::Lit),
+            Widget::UnboxedChooser => {
+                control.chooser(ui, theme, events, parts::ChooserStyle::Unboxed);
+            }
+            Widget::BareChooser => {
+                control.chooser(ui, theme, events, parts::ChooserStyle::Nameless);
+            }
+            Widget::Unboxed => control.bare(ui, theme, events),
+            Widget::IconColumn(n) => {
+                let cells = button_cells(rect, 1, usize::from(n));
+                control.choice_buttons(ui, theme, events, (&cells, true));
+            }
+            Widget::Beside(label) => control.beside(ui, theme, events, (f32::from(label), true)),
+            Widget::BesideDim(label) => {
+                control.beside(ui, theme, events, (f32::from(label), false));
+            }
+            Widget::BesideSwitch(label) => {
+                control.beside_switch(ui, theme, events, f32::from(label))
+            }
+            Widget::Check => control.check(ui, theme, events),
+            Widget::Pill => control.pill(ui, theme, events),
+            Widget::Readout => control.readout(ui, theme, events),
             Widget::Segments(n) => {
                 let cells = button_cells(rect, usize::from(n), 1);
                 control.choice_buttons(ui, theme, events, (&cells, false));
@@ -720,8 +806,14 @@ pub fn show(
             }
             Widget::Grid { columns, rows } => {
                 let cells = button_cells(rect, usize::from(columns), usize::from(rows));
-                control.choice_buttons(ui, theme, events, (&cells, false));
+                control.choice_buttons(ui, theme, events, (&cells, true));
             }
+            Widget::Large => control.large(ui, theme, events),
+            Widget::Bare => control.boxed(ui, theme, events, (false, false)),
+            Widget::BareSlider => control.boxed(ui, theme, events, (false, true)),
+            Widget::Framed => control.boxed(ui, theme, events, (true, false)),
+            Widget::Cycle => control.cycle(ui, theme, events),
+            Widget::Inline => control.inline(ui, theme, events),
         };
         if locked {
             ui.add_enabled_ui(false, draw);
@@ -807,6 +899,15 @@ pub fn show(
                         | Widget::Number
                         | Widget::Slider
                         | Widget::Marked
+                        | Widget::Beside(_)
+                        | Widget::BesideDim(_)
+                        | Widget::Unboxed
+                        | Widget::Readout
+                        | Widget::Large
+                        | Widget::Bare
+                        | Widget::BareSlider
+                        | Widget::Framed
+                        | Widget::Inline
                 ),
                 events,
             );
@@ -870,11 +971,28 @@ fn display_drag(
         knob: None,
         configured: &[],
         text: None,
+        under: None,
         automation: None,
         coarse: 1,
+        unnamed: false,
+        caption: None,
     };
     let response = ui.interact(rect, id.with("drag"), Sense::click_and_drag());
     control.value_input(ui, &response, events);
+}
+
+/// How a Drum Sampler's or an Impulse slot's Pan reads, as the mixer's pan
+/// does (`C`, `25L`; Live shows `C` on both): its range is -50 to 50.
+fn pan_reading(kind: &bl_model::DeviceKind, param: &ParamDescriptor, value: f64) -> Option<String> {
+    let bl_model::DeviceKind::Native { device_type } = kind else {
+        return None;
+    };
+    let ours = [
+        bl_devices::drum_sampler::DRUM_SAMPLER,
+        bl_devices::kitbag::KITBAG,
+    ]
+    .contains(&device_type.as_str());
+    (ours && short_name(&param.name) == "Pan").then(|| bl_model::fader::pan_text(value / 50.0))
 }
 
 /// What a control's name above it reads: a sample slot's parameter drops the
@@ -884,7 +1002,15 @@ fn short_name(name: &str) -> &str {
     name.strip_prefix("Slot ")
         .and_then(|rest| rest.split_once(' '))
         .filter(|(number, _)| number.chars().all(|c| c.is_ascii_digit()))
-        .map_or(name, |(_, rest)| rest)
+        .map_or(name, |(_, rest)| {
+            // Live's Impulse writes these shorter over its knobs.
+            match rest {
+                "Transpose" => "Transp",
+                "Filter Freq" => "Freq",
+                "Filter Res" => "Res",
+                other => other,
+            }
+        })
 }
 
 /// A display cell standing for a sample slot (WP-5.17): its number and key,
@@ -1081,6 +1207,25 @@ fn has_drawing(display: &DeviceDisplay) -> bool {
     !(display.series.is_empty() && display.readings.is_empty() && display.spectrograms.is_empty())
 }
 
+/// Whether cell `index`, named `name`, is the one a device's own drawing
+/// fills: the first, or for Roar the shaper's and for the Vocoder the band
+/// display, which have another cell before them.
+fn draws_first(frame: &DeviceFrame, index: usize, name: &str) -> bool {
+    let native = |device_type: &str| {
+        frame.kind
+            == bl_model::DeviceKind::Native {
+                device_type: device_type.to_owned(),
+            }
+    };
+    if native(bl_devices::roar::ROAR) {
+        name == "Shaper"
+    } else if native(bl_devices::vocoder::VOCODER) {
+        name == "Band Display"
+    } else {
+        index == 0
+    }
+}
+
 /// One control being drawn.
 struct Control<'a> {
     device: DeviceId,
@@ -1107,11 +1252,18 @@ struct Control<'a> {
     /// number (the Articulation Map's Articulation control reads the
     /// articulation's name).
     text: Option<String>,
+    /// The line under a large number in place of its unit, where the device
+    /// reads one (DS Tom's Pitch reads its hertz).
+    under: Option<String>,
     /// The automation items of its context menu (the automation spec, R29).
     automation: Option<ParamMenu<'a>>,
     /// How many steps Shift with Up or Down moves it: 12 for Roar's
     /// Feedback Note, an octave (the roar spec, R26), else 1.
     coarse: i32,
+    /// Whether the layout leaves the name off a box or a chooser.
+    unnamed: bool,
+    /// The name the layout shows in place of the parameter's.
+    caption: Option<&'a str>,
 }
 
 impl Control<'_> {
@@ -1320,7 +1472,7 @@ impl Control<'_> {
                     ui.close();
                 }
                 if remapped {
-                    ui.separator();
+                    crate::menus::separator(ui);
                 }
                 for entry in self.configured {
                     if ui.button(&entry.name).clicked() {

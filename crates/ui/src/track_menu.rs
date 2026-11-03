@@ -128,7 +128,7 @@ impl TrackMenus {
         let contexts = shell.track_menu_contexts();
         for item in shown(&menu) {
             if item.is_separator() {
-                ui.separator();
+                crate::menus::separator(ui);
                 continue;
             }
             let package = context_menus::pending_package(item.row);

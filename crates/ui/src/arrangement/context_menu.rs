@@ -256,7 +256,7 @@ impl ContextMenus {
         let menu = &menu;
         for item in shown(menu) {
             if item.is_separator() {
-                ui.separator();
+                crate::menus::separator(ui);
             } else if grid_row(ui, shell, item.row, events) {
                 // The grid's choices, laid out in rows.
             } else if item.row == CLIP_COLOUR_ROW {

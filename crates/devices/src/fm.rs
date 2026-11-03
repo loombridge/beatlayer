@@ -307,11 +307,11 @@ pub struct Core {
     looped: Vec<f32>,
     noise: Random,
     /// Each voice's operators' phases and last two outputs.
-    phase: [[u32; OPERATORS]; MAX_VOICES],
-    history: [[[f32; 2]; OPERATORS]; MAX_VOICES],
+    phase: Vec<[u32; OPERATORS]>,
+    history: Vec<[[f32; 2]; OPERATORS]>,
     /// Each voice's operators' last table level, by the increment it was
     /// chosen for.
-    levels: [[(u32, usize); OPERATORS]; MAX_VOICES],
+    levels: Vec<[(u32, usize); OPERATORS]>,
     /// The stretch's mix, left and right, at the operators' rate.
     mix: [Vec<f32>; 2],
     oversampler: Oversampler,
@@ -324,6 +324,13 @@ impl Core {
     /// `max_frames`, with `seed` for its noise. Builds every table.
     #[must_use]
     pub fn new(rate: f64, max_frames: usize, seed: u64) -> Self {
+        Self::with_voices(rate, max_frames, seed, MAX_VOICES)
+    }
+
+    /// [`Core::new`] for `voices` voices, where a device's voices aren't the
+    /// voice section's (Meld plays a slot for each stacked copy).
+    #[must_use]
+    pub fn with_voices(rate: f64, max_frames: usize, seed: u64, voices: usize) -> Self {
         let cache = Cache::global();
         let tables: Vec<Option<SharedTable>> = (0..WAVES.len())
             .map(|wave| built_in(wave).map(|table| cache.share(table)))
@@ -339,9 +346,9 @@ impl Core {
                 .map(|_| random.next_bipolar() as f32)
                 .collect(),
             noise: Random::seeded(seed),
-            phase: [[0; OPERATORS]; MAX_VOICES],
-            history: [[[0.0; 2]; OPERATORS]; MAX_VOICES],
-            levels: [[(0, 0); OPERATORS]; MAX_VOICES],
+            phase: vec![[0; OPERATORS]; voices],
+            history: vec![[[0.0; 2]; OPERATORS]; voices],
+            levels: vec![[(0, 0); OPERATORS]; voices],
             mix: [
                 vec![0.0; max_frames.max(1) * 2],
                 vec![0.0; max_frames.max(1) * 2],
@@ -353,8 +360,8 @@ impl Core {
 
     /// Frees every voice's state, as a switched-off device does.
     pub fn reset(&mut self) {
-        self.phase = [[0; OPERATORS]; MAX_VOICES];
-        self.history = [[[0.0; 2]; OPERATORS]; MAX_VOICES];
+        self.phase.fill([0; OPERATORS]);
+        self.history.fill([[0.0; 2]; OPERATORS]);
         self.oversampler.reset();
     }
 
@@ -413,7 +420,8 @@ impl Core {
         }
     }
 
-    /// Renders `frames` of the stretch for the active voices into the
+    /// Renders `frames` of the stretch for the active voices of the voice
+    /// section (a core of more voices is [`Core::play`]'s) into the
     /// stretch's mix. `operator(voice, op, frame)` is what the device gives
     /// each operator on top of its settings (an envelope's amplitude, a
     /// pitch envelope's move), and `pan(voice, frame)` the left and right
@@ -482,16 +490,7 @@ impl Core {
                     };
                     feedbacks[op] = (s.feedback + moves.feedback).clamp(0.0, 1.0);
                 }
-                let mut table_levels = [0usize; OPERATORS];
-                for (op, level) in table_levels.iter_mut().enumerate() {
-                    let scaled = (f64::from(steps[op]) * darker).min(f64::from(u32::MAX)) as u32;
-                    let cached = &mut self.levels[voice][op];
-                    if cached.0 != scaled {
-                        let table = self.tables[0].as_ref().expect("Sine is a table");
-                        *cached = (scaled, table.level_for(scaled));
-                    }
-                    *level = cached.1;
-                }
+                let table_levels = self.table_levels(voice, &steps, darker);
                 let place = pan(voice, i);
                 for sub in 0..factor {
                     let out = self.step(voice, algorithm, &steps, &amps, &feedbacks, &table_levels);
@@ -501,6 +500,50 @@ impl Core {
                 }
             }
         }
+    }
+
+    /// The mipmap level each of `voice`'s operators reads: the one chosen for
+    /// its increment, made `darker` times larger (R9).
+    fn table_levels(
+        &mut self,
+        voice: usize,
+        steps: &[u32; OPERATORS],
+        darker: f64,
+    ) -> [usize; OPERATORS] {
+        let mut table_levels = [0usize; OPERATORS];
+        for (op, level) in table_levels.iter_mut().enumerate() {
+            let scaled = (f64::from(steps[op]) * darker).min(f64::from(u32::MAX)) as u32;
+            let cached = &mut self.levels[voice][op];
+            if cached.0 != scaled {
+                let table = self.tables[0].as_ref().expect("Sine is a table");
+                *cached = (scaled, table.level_for(scaled));
+            }
+            *level = cached.1;
+        }
+        table_levels
+    }
+
+    /// One frame of `voice` for a device that mixes its voices itself
+    /// (Meld's FM types): the operators at `hz` hertz each, with `amps` and
+    /// `feedbacks`, in the settings' algorithm. Returns the carriers' sum,
+    /// not normalised. Uses the core at its own rate, so Antialias is not
+    /// applied. A carrier that isn't a sine reads a table whose partials
+    /// stay below Nyquist when its modulation speeds it up `reach` times
+    /// (1 for none): the harmonics of a phase-modulated wave move faster
+    /// than its note.
+    pub fn play(
+        &mut self,
+        voice: usize,
+        hz: &[f64; OPERATORS],
+        amps: &[f32; OPERATORS],
+        feedbacks: &[f32; OPERATORS],
+        reach: f64,
+    ) -> f32 {
+        let algorithm = self.settings.algorithm.min(MODULATORS.len() - 1);
+        let darker = (f64::from(1.0 - self.settings.tone.clamp(0.0, 1.0)) * 4.0).exp2() * reach;
+        let steps = hz.map(|hz| increment(hz, self.rate));
+        let levels = self.table_levels(voice, &steps, darker);
+        self.step(voice, algorithm, &steps, amps, feedbacks, &levels)
     }
 
     /// One frame at the operators' rate for `voice`: D first and A last

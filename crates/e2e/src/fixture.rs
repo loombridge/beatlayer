@@ -30,6 +30,7 @@ use bl_devices::auto_filter::{AUTO_FILTER, FREQ as FILTER_FREQ, RES as FILTER_RE
 use bl_devices::compressor::COMPRESSOR;
 use bl_devices::delay::DELAY;
 use bl_devices::limiter::LIMITER;
+use bl_devices::operator::OPERATOR;
 use bl_devices::reverb::REVERB;
 use bl_devices::saturator::SATURATOR;
 use bl_model::modulator::WAVE_MOD;
@@ -261,14 +262,17 @@ pub fn build(driver: &mut impl Driver) -> Ids {
         vec![
             track("Keys", "midi", 0, None),
             track("Bass", "midi", 1, None),
-            track("Band", "group", 2, None),
+            track("Ops", "midi", 2, None),
+            track("Band", "group", 3, None),
             track("Loop", "audio", 0, Some("Band")),
             track("Tone", "audio", 1, Some("Band")),
             track("Verb", "return", 0, None),
             track("Echo", "return", 1, None),
         ],
     );
-    for name in ["Keys", "Bass", "Band", "Loop", "Tone", "Verb", "Echo"] {
+    for name in [
+        "Keys", "Bass", "Ops", "Band", "Loop", "Tone", "Verb", "Echo",
+    ] {
         ids.tracks.insert(name.to_owned(), id(&made, name));
     }
     ids.midi_tracks = vec![ids.track("Keys"), ids.track("Bass")];
@@ -323,6 +327,11 @@ pub fn build(driver: &mut impl Driver) -> Ids {
                 1,
                 native("snapshot", SAMPLER, "instrument"),
             ),
+            insert(
+                ids.track("Ops"),
+                0,
+                native("operator", OPERATOR, "instrument"),
+            ),
             insert(ids.track("Band"), 0, rack),
             insert(
                 ids.track("Verb"),
@@ -339,6 +348,7 @@ pub fn build(driver: &mut impl Driver) -> Ids {
         ("wave", WAVE_MOD),
         ("arpeggiator", ARPEGGIATOR),
         ("snapshot", SAMPLER),
+        ("operator", OPERATOR),
         ("rack", "rack:audio_effect"),
         ("saturator", SATURATOR),
         ("utility", UTILITY),

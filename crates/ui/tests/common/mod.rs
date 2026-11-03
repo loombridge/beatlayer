@@ -122,6 +122,9 @@ pub struct Harness {
     /// Files dropped into this window at the next frame, as a drag and
     /// drop from Finder or Explorer gives them.
     pub dropped: Vec<egui::DroppedFileHandle>,
+    /// The files being dragged over the window, as the OS reports them to
+    /// every frame until they are dropped or leave.
+    pub hovered: Vec<egui::HoveredFile>,
     /// The blocks of a null stream paced by hand (T199), when the harness
     /// runs one: the engine advances only as the test asks or as its
     /// [`frame`](Self::frame)s run, never on the wall clock.
@@ -250,6 +253,7 @@ impl Harness {
             engine: bl_shell::audio::EngineTransport::default(),
             menu_bar: None,
             dropped: Vec::new(),
+            hovered: Vec::new(),
             control: None,
         }
     }
@@ -334,6 +338,7 @@ impl Harness {
             time: Some(self.time),
             events,
             dropped_files: std::mem::take(&mut self.dropped),
+            hovered_files: self.hovered.clone(),
             ..Default::default()
         };
         // Spec: view-options R1. The middle button pans the area under the

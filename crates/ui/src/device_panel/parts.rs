@@ -757,6 +757,20 @@ pub fn paint_glyph(painter: &Painter, rect: Rect, glyph: Glyph, ink: Color32) {
             line(&[(0.1, -0.15), (1.0, -0.4)]);
             line(&[(0.1, 0.4), (1.0, 0.15)]);
         }
+        Glyph::Headphones => {
+            // A band over two ear cups.
+            let band: Vec<(f32, f32)> = (0..=8)
+                .map(|i| {
+                    let angle = std::f32::consts::PI * (1.0 + i as f32 / 8.0);
+                    (0.8 * angle.cos(), 0.1 + 0.8 * angle.sin())
+                })
+                .collect();
+            line(&band);
+            line(&[(-0.8, 0.1), (-0.8, 0.5)]);
+            line(&[(0.8, 0.1), (0.8, 0.5)]);
+            fill(&[(-1.0, 0.1), (-0.6, 0.1), (-0.6, 0.7), (-1.0, 0.7)]);
+            fill(&[(0.6, 0.1), (1.0, 0.1), (1.0, 0.7), (0.6, 0.7)]);
+        }
     }
 }
 

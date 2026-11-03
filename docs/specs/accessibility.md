@@ -116,6 +116,11 @@ The test of R8 walks the whole registry. A command is reached by a key, a menu i
 
 11. `device.autosample_open`: the device's title bar menu isn't opened from the keyboard (R64).
 
+**Gaps in Operator** ([Operator](operator.md), WP-8.13):
+
+12. `operator.copy_oscillator`, `operator.set_envelope_levels`, `operator.play_by_key` and `operator.set_harmonics`: the device's title bar menu isn't opened from the keyboard (R28).
+13. `device.set_partials`: dragging across the partials has no keyboard form yet; arrow keys that step each partial would close it (R27).
+
 ## Tests
 
 | Rule | Test | Kind |

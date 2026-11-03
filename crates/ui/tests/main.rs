@@ -119,5 +119,6 @@ mod vector_delay;
 mod video_window;
 mod view_options;
 mod vocoder;
+mod wavetable_panel;
 mod zone_editor;
 mod zoom;

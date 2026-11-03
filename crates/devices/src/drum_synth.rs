@@ -22,7 +22,11 @@ use bl_model::device_layout::{
 use bl_model::{DeviceDescription, DeviceId, DeviceLayout, ParamDescriptor, ParamId, ParamUnit};
 use bl_model::{DeviceDisplay, DisplayReading, DisplaySeries, OrdMap};
 
+use crate::ds_clang::DS_CLANG;
 use crate::ds_clap::DS_CLAP;
+use crate::ds_cymbal::DS_CYMBAL;
+use crate::ds_fm::DS_FM;
+use crate::ds_hh::DS_HH;
 use crate::ds_kick::DS_KICK;
 use crate::ds_snare::DS_SNARE;
 use crate::ds_tom::DS_TOM;
@@ -62,7 +66,8 @@ pub struct PreviewHit;
 #[must_use]
 pub fn is_drum_synth(kind: &bl_model::DeviceKind) -> bool {
     matches!(kind, bl_model::DeviceKind::Native { device_type }
-        if [DS_KICK, DS_SNARE, DS_TOM, DS_CLAP].contains(&device_type.as_str()))
+        if [DS_KICK, DS_SNARE, DS_TOM, DS_CLAP, DS_HH, DS_CYMBAL, DS_FM, DS_CLANG]
+            .contains(&device_type.as_str()))
 }
 
 /// What Decay's `percent` of travel is, in milliseconds: 10 ms to 4 s on a
@@ -221,6 +226,12 @@ pub(crate) trait Hit: Send + 'static {
     fn min_ms(&self) -> f64 {
         0.0
     }
+
+    /// Whether the hit still has sound to make once its master envelope has
+    /// fallen below -90 dB (DS Clang's clave repeats).
+    fn busy(&self) -> bool {
+        false
+    }
 }
 
 /// One hit's place in the device.
@@ -321,7 +332,7 @@ impl<V: Hit> DrumSynth<V> {
             right += r.clamp(-1.0, 1.0) * level;
             slot.master *= step;
             slot.age = slot.age.saturating_add(1);
-            if slot.master < end && slot.age >= slot.min_frames {
+            if slot.master < end && slot.age >= slot.min_frames && !slot.hit.busy() {
                 slot.active = false;
             }
         }
@@ -410,6 +421,21 @@ impl Filter {
 #[must_use]
 pub fn master_at(ms: f64, decay_ms: f64) -> f64 {
     10f64.powf(-3.0 * ms / decay_ms.max(DECAY_MIN_MS))
+}
+
+/// The display of a device whose whole sound falls with the master envelope.
+pub(crate) fn decay_display(
+    device: DeviceId,
+    description: &DeviceDescription,
+    values: &OrdMap<ParamId, f64>,
+) -> DeviceDisplay {
+    display(
+        device,
+        description,
+        values,
+        |_| Vec::new(),
+        |value, ms| master_at(ms, decay_ms(value(DECAY))),
+    )
 }
 
 /// A Drum Synth's display: its hit's amplitude envelope over the time it

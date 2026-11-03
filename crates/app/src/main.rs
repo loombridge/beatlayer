@@ -37,6 +37,7 @@ Options:
                          With --screenshot: add a new DEVICE to a track and save
                          only its panel, at 100% zoom
       --page PAGE        With --device-shot: show the page named PAGE
+      --expanded         With --device-shot: show the device's expanded part
       --benchmark-scene  Show the Arrangement benchmark scene (200 tracks,
                          5,000 clips with waveforms) instead of a new set
       --user-library DIR Use DIR as the browser's User Library (made if it's
@@ -107,6 +108,7 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
                 parsed.device_shot = Some(device_shot::Request {
                     device: it.next().ok_or("--device-shot takes a device's name")?,
                     page: None,
+                    expanded: false,
                 });
             }
             "--page" => {
@@ -116,6 +118,13 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
                     .as_mut()
                     .ok_or("--page goes after --device-shot")?
                     .page = Some(page);
+            }
+            "--expanded" => {
+                parsed
+                    .device_shot
+                    .as_mut()
+                    .ok_or("--expanded goes after --device-shot")?
+                    .expanded = true;
             }
             "--benchmark-scene" => parsed.benchmark_scene = true,
             "--user-library" => {

@@ -1385,8 +1385,8 @@ impl DeviceViewUi {
             }
             "expand" => {
                 // A triangle: pointing right while the part is hidden, down
-                // while it shows.
-                let (a, b, c) = if on {
+                // while it shows; the other way round where the device says.
+                let (a, b, c) = if on != frame.points_right_when_shown {
                     (vec2(-0.5, -0.3), vec2(0.5, -0.3), vec2(0.0, 0.5))
                 } else {
                     (vec2(-0.3, -0.5), vec2(-0.3, 0.5), vec2(0.5, 0.0))

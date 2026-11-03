@@ -826,7 +826,7 @@ fn rtsan_runtime() -> Result<PathBuf, String> {
         let install = if cfg!(target_os = "macos") {
             "brew install llvm"
         } else {
-            "install LLVM 20 or later's compiler-rt (for example `libclang-rt-20-dev` from apt.llvm.org)"
+            "install LLVM 20 or later's compiler-rt (for example `libclang-rt-20-dev`, in Ubuntu 24.04's noble-updates and on apt.llvm.org)"
         };
         format!(
             "no RealtimeSanitizer runtime found. Install one ({install}), or set RTSAN_LIB_PATH \

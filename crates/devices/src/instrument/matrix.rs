@@ -39,7 +39,7 @@ pub fn time_factor(time: f64) -> f64 {
 struct Route {
     source: usize,
     dest: usize,
-    /// −1 to 1, after the matrix's Amount.
+    /// −1 to 1, before the matrix's Amount.
     amount: f64,
 }
 
@@ -62,11 +62,11 @@ pub struct Matrix {
     layout: Arc<MatrixLayout>,
     free: FreeRoutes,
     routes: Vec<Route>,
-    amount: f64,
+    amount: Cell<f64>,
     /// A control-rate destination's worked-out movement for each voice, and
     /// whether it holds one: the movement is held between grid points (R7).
     held: Vec<Cell<(f64, bool)>>,
-    oldest: Option<usize>,
+    oldest: Cell<Option<usize>>,
     /// The newest sounding voice, and for each destination the position
     /// that voice played last in the stretch (R12).
     newest: Option<usize>,
@@ -83,9 +83,9 @@ impl Matrix {
             layout,
             free: FreeRoutes::default(),
             routes: Vec::with_capacity(MAX_SLOTS),
-            amount: 1.0,
+            amount: Cell::new(1.0),
             held: vec![Cell::new((0.0, false)); dests * MAX_VOICES],
-            oldest: None,
+            oldest: Cell::new(None),
             newest: None,
             shown: vec![Cell::new(None); dests],
         }
@@ -112,9 +112,11 @@ impl Matrix {
     }
 
     /// The matrix's Amount, 0 to 1 (R15): every route's amount is scaled by
-    /// it. A device without the control leaves it at 1.
-    pub fn set_amount(&mut self, amount: f64) {
-        self.amount = amount.clamp(0.0, 1.0);
+    /// it, from the next route worked out. A device without the control
+    /// leaves it at 1. Routes are dropped at [`begin`](Self::begin) while it
+    /// is 0.
+    pub fn set_amount(&self, amount: f64) {
+        self.amount.set(amount.clamp(0.0, 1.0));
     }
 
     /// Reads the slots for the stretch: each slot's source and destination
@@ -140,8 +142,8 @@ impl Matrix {
             ) else {
                 continue;
             };
-            let amount = (value(def.amount) / 100.0).clamp(-1.0, 1.0) * self.amount;
-            if amount != 0.0 {
+            let amount = (value(def.amount) / 100.0).clamp(-1.0, 1.0);
+            if amount != 0.0 && self.amount.get() != 0.0 {
                 self.routes.push(Route {
                     source,
                     dest,
@@ -165,9 +167,9 @@ impl Matrix {
 
     /// The voice a global destination reads per-voice sources from (R6): the
     /// oldest voice still sounding, or none.
-    pub fn set_oldest(&mut self, oldest: Option<usize>) {
-        if self.oldest != oldest {
-            self.oldest = oldest;
+    pub fn set_oldest(&self, oldest: Option<usize>) {
+        if self.oldest.get() != oldest {
+            self.oldest.set(oldest);
             for (dest, def) in self.layout.dests.iter().enumerate() {
                 if def.scope == Scope::Global {
                     self.held[dest * MAX_VOICES].set((0.0, false));
@@ -209,7 +211,7 @@ impl Matrix {
     pub fn add(&self, dest: usize, base: f64, voice: usize, frame: usize, read: &impl Read) -> f64 {
         let mut value = base;
         for route in self.routes.iter().filter(|route| route.dest == dest) {
-            value += route.amount * read.read(route.source, voice, frame);
+            value += route.amount * self.amount.get() * read.read(route.source, voice, frame);
         }
         value
     }
@@ -225,7 +227,7 @@ impl Matrix {
                 Range::Unipolar => x,
                 Range::Bipolar => (x + 1.0) / 2.0,
             };
-            let a = route.amount;
+            let a = route.amount * self.amount.get();
             factor *= if a >= 0.0 {
                 1.0 - a * (1.0 - s)
             } else {
@@ -254,7 +256,8 @@ impl Matrix {
     ) -> f64 {
         let position = self.moved(dest, base, voice, frame, due, read);
         let global = self.layout.dests[dest].scope == Scope::Global;
-        if self.has(dest) && (self.newest == Some(voice) || (global && self.oldest.is_some())) {
+        if self.has(dest) && (self.newest == Some(voice) || (global && self.oldest.get().is_some()))
+        {
             self.shown[dest].set(Some(position));
         }
         position
@@ -271,7 +274,7 @@ impl Matrix {
     ) -> f64 {
         let def = self.layout.dests[dest];
         let from = if def.scope == Scope::Global {
-            match self.oldest {
+            match self.oldest.get() {
                 Some(oldest) => oldest,
                 None => return base,
             }

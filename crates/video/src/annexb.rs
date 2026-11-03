@@ -97,6 +97,93 @@ fn read_sets(extra: &[u8], at: &mut usize, count: usize, sets: &mut Vec<Vec<u8>>
     Some(())
 }
 
+/// The SPS and PPS of an H.264 stream an encoder made, kept aside to make the
+/// movie's `avcC` box.
+#[cfg(any(unix, windows))]
+pub(crate) type ParameterSets = Option<(Vec<u8>, Vec<u8>)>;
+
+/// The NAL units of a start-code stream, without their start codes.
+#[cfg(any(unix, windows))]
+pub(crate) fn nal_units(stream: &[u8]) -> Vec<&[u8]> {
+    // Where each unit's bytes begin, after a `00 00 01`.
+    let mut starts = Vec::new();
+    let mut at = 0;
+    while at + 3 <= stream.len() {
+        if stream[at..at + 3] == [0, 0, 1] {
+            starts.push(at + 3);
+            at += 3;
+        } else {
+            at += 1;
+        }
+    }
+    starts
+        .iter()
+        .enumerate()
+        .map(|(i, &from)| {
+            let mut to = starts.get(i + 1).map_or(stream.len(), |next| next - 3);
+            // A four-byte start code leaves a zero on the unit before it,
+            // and trailing zeros are never part of a unit.
+            while to > from && stream[to - 1] == 0 {
+                to -= 1;
+            }
+            &stream[from..to]
+        })
+        .collect()
+}
+
+/// An H.264 packet of start-code NAL units as a movie stores it: each unit
+/// behind its four-byte length, the parameter sets left out and kept in
+/// `sets` (the first of each). Whether the packet starts a group (holds an
+/// IDR picture) comes with it.
+#[cfg(any(unix, windows))]
+pub(crate) fn length_prefixed(packet: &[u8], sets: &mut ParameterSets) -> (Vec<u8>, bool) {
+    let mut data = Vec::with_capacity(packet.len());
+    let mut sync = false;
+    for nal in nal_units(packet) {
+        match nal.first().map(|b| b & 0x1f) {
+            Some(7) => {
+                if sets.is_none() {
+                    *sets = Some((nal.to_vec(), Vec::new()));
+                }
+            }
+            Some(8) => {
+                if let Some((_, pps)) = sets
+                    && pps.is_empty()
+                {
+                    *pps = nal.to_vec();
+                }
+            }
+            kind => {
+                sync |= kind == Some(5);
+                data.extend_from_slice(&(nal.len() as u32).to_be_bytes());
+                data.extend_from_slice(nal);
+            }
+        }
+    }
+    (data, sync)
+}
+
+/// The `avcC` box for the parameter sets of an H.264 stream, or `None`
+/// before both have been seen.
+#[cfg(any(unix, windows))]
+pub(crate) fn avcc(sets: &ParameterSets) -> Option<Vec<u8>> {
+    let (sps, pps) = sets
+        .as_ref()
+        .filter(|(sps, pps)| sps.len() >= 4 && !pps.is_empty())?;
+    let mut avcc = vec![1, sps[1], sps[2], sps[3], 0xff, 0xe1];
+    avcc.extend_from_slice(&(sps.len() as u16).to_be_bytes());
+    avcc.extend_from_slice(sps);
+    avcc.push(1);
+    avcc.extend_from_slice(&(pps.len() as u16).to_be_bytes());
+    avcc.extend_from_slice(pps);
+    // The high profiles carry the picture format after the sets: 4:2:0,
+    // eight bits.
+    if matches!(sps[1], 100 | 110 | 122 | 144) {
+        avcc.extend_from_slice(&[0xfd, 0xf8, 0xf8, 0]);
+    }
+    Some(avcc)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

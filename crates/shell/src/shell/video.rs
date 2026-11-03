@@ -39,7 +39,7 @@ impl Shell {
             .flatten()
     }
 
-    fn movie_of(&self, hash: ContentHash) -> Option<Arc<Movie>> {
+    pub(super) fn movie_of(&self, hash: ContentHash) -> Option<Arc<Movie>> {
         let path = self.media.entry(hash)?.path;
         let mut movies = self.movies.0.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some((read, movie)) = movies.get(&hash)

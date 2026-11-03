@@ -495,6 +495,21 @@ impl Document {
             .rfind(|clip| matches!(&clip.data, ClipData::Audio(audio) if audio.video))
     }
 
+    /// Whether an active video clip plays anywhere in `from..to` (the export
+    /// spec, R38).
+    #[must_use]
+    pub fn has_video_between(&self, from: Ticks, to: Ticks) -> bool {
+        self.tracks
+            .values()
+            .flat_map(|track| track.clips())
+            .any(|clip| {
+                !clip.mute
+                    && clip.start < to
+                    && from < clip.end()
+                    && matches!(&clip.data, ClipData::Audio(audio) if audio.video)
+            })
+    }
+
     /// The spans of the Arrangement clips that lead the tempo (R43), in
     /// display order: what the Main track's lane shows and where the tempo
     /// commands refuse.

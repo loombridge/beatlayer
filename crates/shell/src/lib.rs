@@ -85,6 +85,7 @@ pub mod detail;
 pub mod devices;
 pub mod export;
 pub mod export_dialog;
+pub mod export_video;
 pub mod files;
 pub mod link;
 pub mod link_audio;

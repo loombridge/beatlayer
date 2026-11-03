@@ -5,5 +5,6 @@ mod audio;
 mod common;
 mod damaged;
 mod decode;
+mod encode;
 mod platform;
 mod thread;

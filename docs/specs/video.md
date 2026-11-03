@@ -90,4 +90,4 @@ Decoding runs in a crate of its own, `bl-video`, on a video thread that decodes 
 | R14 | `crates/shell/tests/video_clips.rs`: the File Manager lists a movie, and replacing it by a movie keeps a video clip | shell test |
 | R15 | `crates/interop/tests/dawproject.rs` (`video_timelines_become_video_clips`); a Live set's video clips wait on the Live set importer (WP-9.14 to WP-9.17) | interop test |
 | R16 to R23 | to be written in WP-9.26: `crates/ui/tests/video_window.rs` on the test clock; `crates/ui/tests/keymap/resolve.rs` for S-VIEW-009 | UI script |
-| R24, R25 | to be written in WP-9.27: a Motion JPEG export checked frame by frame | shell test |
+| R24, R25 | `crates/shell/tests/export_video.rs`: a Motion JPEG export checked frame by frame, its sound against the audio export's, and the selected clip's whole-movie span | shell test |

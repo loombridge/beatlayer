@@ -198,7 +198,7 @@ fn a_set_with_veer_reopens_with_every_parameter_and_its_midi_source() {
             .unwrap();
         wanted.push((param.id, to));
     }
-    assert_eq!(wanted.len(), 34);
+    assert_eq!(wanted.len(), 35);
 
     let saved: bl_shell::commands::SetResult = serde_json::from_value(
         shell

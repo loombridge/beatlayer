@@ -18,7 +18,8 @@ use core::f64::consts::{FRAC_PI_2, PI};
 use bl_dsp::{Oversampler, Random};
 use bl_engine::{DeviceType, NodeConfig, NoteEvent, NoteKind, Registry};
 use bl_model::device_layout::{
-    ControlBand, DisplayCell, LayoutNode, PADDING, Page, PageStyle, PagesNode, Widget,
+    BOX_HEIGHT, Control, ControlBand, DisplayCell, LayoutNode, PADDING, Page, PageStyle, PagesNode,
+    Widget,
 };
 use bl_model::param::db_to_gain;
 use bl_model::{
@@ -434,14 +435,14 @@ pub fn roar_type() -> DeviceType {
             TONE_FREQUENCY,
             "Tone Frequency",
             (100.0, 10_000.0),
-            1_000.0,
+            180.0,
             ParamUnit::Hertz,
         )
         .logarithmic()
         .describe("The centre of the Tone tilt."),
         ParamDescriptor::toggle(COLOR_COMPENSATION, "Color Compensation", false)
             .describe("Applies the Tone tilt the other way after the stages, so only the stages hear it."),
-        ParamDescriptor::choice(ROUTING_MODE, "Routing Mode", &MODES, 0)
+        ParamDescriptor::choice(ROUTING_MODE, "Routing Mode", &MODES, MULTI_BAND)
             .describe("How the gain stages are joined."),
         percent(BLEND, "Blend", 50.0).describe(
             "Crossfades between the routing mode's two signals; Single and Multi Band have none.",
@@ -450,7 +451,7 @@ pub fn roar_type() -> DeviceType {
             LOW_CROSSOVER,
             "Low Crossover",
             (50.0, 2_000.0),
-            250.0,
+            200.0,
             ParamUnit::Hertz,
         )
         .logarithmic()
@@ -459,7 +460,7 @@ pub fn roar_type() -> DeviceType {
             HIGH_CROSSOVER,
             "High Crossover",
             (500.0, 16_000.0),
-            2_500.0,
+            2_000.0,
             ParamUnit::Hertz,
         )
         .logarithmic()
@@ -496,12 +497,22 @@ pub fn roar_type() -> DeviceType {
                 id(FREQUENCY),
                 &name("Frequency"),
                 (20.0, 20_000.0),
-                20_000.0,
+                // Observed on the High stage: 16 kHz.
+                if stage == STAGES - 1 {
+                    16_000.0
+                } else {
+                    20_000.0
+                },
                 ParamUnit::Hertz,
             )
             .logarithmic()
             .describe("The filter's frequency."),
-            percent(id(RESONANCE), &name("Resonance"), 0.0).describe(
+            percent(
+                id(RESONANCE),
+                &name("Resonance"),
+                if stage == STAGES - 1 { 10.0 } else { 0.0 },
+            )
+            .describe(
                 "The filter's resonance; Comb's feedback and Dispersion's Q. Resampling has none.",
             ),
             ParamDescriptor::continuous(
@@ -524,23 +535,6 @@ pub fn roar_type() -> DeviceType {
     let page_height = 4.0 * Widget::Number.size().height + 5.0 * PADDING;
     let band = |controls: &[(ParamId, Widget)]| {
         LayoutNode::Band(ControlBand::stacked(page_height, controls))
-    };
-    let stage_band = |stage: usize| {
-        use Widget::{Chooser, Knob, Toggle};
-        let id = |offset| stage_param(stage, offset);
-        band(&[
-            (id(ON), Toggle),
-            (id(SHAPER), Chooser),
-            (id(AMOUNT), Knob),
-            (id(BIAS), Knob),
-            (id(LEVEL), Knob),
-            (id(FILTER), Chooser),
-            (id(FREQUENCY), Knob),
-            (id(RESONANCE), Knob),
-            (id(PEAK_GAIN), Knob),
-            (id(MORPH), Knob),
-            (id(PRE), Toggle),
-        ])
     };
     let lfo_band = |lfo: usize| {
         use Widget::{Chooser, Knob};
@@ -565,44 +559,60 @@ pub fn roar_type() -> DeviceType {
         band(&amounts)
     };
     let layout = {
-        use Widget::{Chooser, Knob, Toggle};
-        let device = LayoutNode::Row(vec![
-            band(&[
-                (DRIVE, Knob),
-                (TONE_AMOUNT, Knob),
-                (TONE_FREQUENCY, Knob),
-                (COLOR_COMPENSATION, Toggle),
-            ]),
-            LayoutNode::Cell(DisplayCell::new("Shaper", 150.0, page_height, 1.0)),
-            stage_band(0),
-            stage_band(1),
-            stage_band(2),
-            band(&[
-                (ROUTING_MODE, Chooser),
-                (BLEND, Knob),
-                (LOW_CROSSOVER, Knob),
-                (HIGH_CROSSOVER, Knob),
-                (COMPRESSION, Knob),
-                (SIDECHAIN_HP, Toggle),
-                (GLOBAL_MODULATION, Knob),
-                (OUTPUT_GAIN, Knob),
-                (DRY_WET, Knob),
-            ]),
-            band(&[
-                (FB_MODE, Chooser),
-                (FB_TIME, Knob),
-                (FB_SYNCED, Chooser),
-                (FB_TRIPLET, Chooser),
-                (FB_DOTTED, Chooser),
-                (FB_NOTE, Knob),
-                (MIDI_FB_NOTE, Toggle),
-                (FB_AMOUNT, Knob),
-                (FB_INVERT, Toggle),
-                (FB_GATE, Toggle),
-                (FB_FREQUENCY, Knob),
-                (FB_WIDTH, Knob),
-            ]),
-        ]);
+        use Widget::{Bare, BareChooser, Chooser, Knob, Slider, SmallKnob, Toggle};
+        // A stage's page, as Live lays it out (observed in Live 12.4.16, 2
+        // November 2026; layout L-DEV-084): Amount, Bias and Frequency with
+        // Pre along the top, the shaper's cell and the filter's under them.
+        let stage_page = |stage: usize| {
+            let id = |offset| stage_param(stage, offset);
+            LayoutNode::Column(vec![
+                LayoutNode::Band(ControlBand::free(
+                    260.0,
+                    68.6,
+                    vec![
+                        Control::new(id(AMOUNT), Knob, 35.8, 5.5).captioned("Amount"),
+                        Control::new(id(BIAS), SmallKnob, 112.6, 11.4).captioned("Bias"),
+                        Control::new(id(FREQUENCY), Knob, 181.2, 5.5).captioned("Frequency"),
+                        Control::new(id(PRE), Toggle, 232.4, 27.5)
+                            .captioned("Pre")
+                            .sized(21.0, 11.0),
+                    ],
+                )),
+                LayoutNode::Row(vec![
+                    LayoutNode::Cell(DisplayCell::new("Shaper", 129.0, 89.4, 1.0).with_top(
+                        ControlBand::free(
+                            129.0,
+                            89.4,
+                            vec![
+                                Control::new(id(ON), Widget::Check, 5.5, 60.0)
+                                    .captioned("Shaper")
+                                    .sized(60.0, BOX_HEIGHT),
+                                Control::new(id(SHAPER), BareChooser, 5.5, 73.0)
+                                    .unnamed()
+                                    .sized(60.0, 11.0),
+                                Control::new(id(LEVEL), Bare, 74.5, 61.0)
+                                    .captioned("Level")
+                                    .sized(40.0, 21.0),
+                            ],
+                        ),
+                    )),
+                    LayoutNode::Cell(DisplayCell::new("Filter", 131.0, 89.4, 1.0).with_top(
+                        ControlBand::free(
+                            131.0,
+                            89.4,
+                            vec![
+                                Control::new(id(FILTER), BareChooser, 5.5, 73.0)
+                                    .unnamed()
+                                    .sized(50.0, 11.0),
+                                Control::new(id(RESONANCE), Bare, 55.0, 61.0)
+                                    .captioned("Res")
+                                    .sized(40.0, 21.0),
+                            ],
+                        ),
+                    )),
+                ]),
+            ])
+        };
         // A source's page: its display (R31), its controls and its amounts.
         let source_page = |name: &str, controls: LayoutNode, source: usize| {
             Page::new(
@@ -614,34 +624,133 @@ pub fn roar_type() -> DeviceType {
                 ]),
             )
         };
-        DeviceLayout::new(LayoutNode::Pages(PagesNode::new(
-            PAGES,
-            PageStyle::Tabs,
-            vec![
-                Page::new("Roar", device),
-                source_page("LFO 1", lfo_band(0), 0),
-                source_page("LFO 2", lfo_band(1), 1),
-                source_page(
-                    "Env",
-                    band(&[
-                        (ENV_ATTACK, Knob),
-                        (ENV_RELEASE, Knob),
-                        (ENV_HOLD, Toggle),
-                        (ENV_THRESHOLD, Knob),
-                        (ENV_GAIN, Knob),
-                        (ENV_FREQUENCY, Knob),
-                        (ENV_WIDTH, Knob),
-                        (INPUT_LISTEN, Toggle),
-                    ]),
-                    2,
-                ),
-                source_page(
-                    "Noise",
-                    band(&[(NOISE_TYPE, Chooser), (NOISE_RATE, Knob)]),
-                    3,
-                ),
-            ],
-        )))
+        let device = LayoutNode::Row(vec![
+            LayoutNode::Column(vec![
+                LayoutNode::Band(ControlBand::free(
+                    115.0,
+                    68.6,
+                    vec![
+                        Control::new(DRIVE, Knob, 7.2, 5.5),
+                        Control::new(TONE_AMOUNT, SmallKnob, 53.0, 5.5).captioned("Tone"),
+                        Control::new(COLOR_COMPENSATION, Widget::IconToggle, 91.8, 6.2)
+                            .with_glyph(bl_model::device_layout::Glyph::HighPass)
+                            .sized(17.0, 11.0),
+                        Control::new(TONE_FREQUENCY, Slider, 58.0, 50.7)
+                            .unnamed()
+                            .sized(50.7, 11.0),
+                    ],
+                )),
+                LayoutNode::Cell(DisplayCell::new("Routing", 115.0, 89.4, 1.0).with_top(
+                    ControlBand::free(
+                        115.0,
+                        89.4,
+                        vec![
+                            Control::new(ROUTING_MODE, BareChooser, 7.7, 26.7)
+                                .captioned("Routing")
+                                .sized(70.0, 21.0),
+                            Control::new(LOW_CROSSOVER, Bare, 7.7, 61.7)
+                                .captioned("Low")
+                                .sized(40.0, 21.0),
+                            Control::new(HIGH_CROSSOVER, Bare, 52.5, 61.7)
+                                .captioned("High")
+                                .sized(40.0, 21.0),
+                        ],
+                    ),
+                )),
+            ]),
+            LayoutNode::Pages(PagesNode::new(
+                "Stage",
+                PageStyle::TitleBar,
+                vec![
+                    Page::new("Low", stage_page(0)),
+                    Page::new("Mid", stage_page(1)),
+                    Page::new("High", stage_page(2)),
+                ],
+            )),
+            LayoutNode::Pages(PagesNode::side_strip(
+                "Modulation",
+                LayoutNode::Pages(PagesNode::new(
+                    PAGES,
+                    PageStyle::Tabs,
+                    vec![
+                        source_page("LFO 1", lfo_band(0), 0),
+                        source_page("LFO 2", lfo_band(1), 1),
+                        source_page(
+                            "Env",
+                            band(&[
+                                (ENV_ATTACK, Knob),
+                                (ENV_RELEASE, Knob),
+                                (ENV_HOLD, Toggle),
+                                (ENV_THRESHOLD, Knob),
+                                (ENV_GAIN, Knob),
+                                (ENV_FREQUENCY, Knob),
+                                (ENV_WIDTH, Knob),
+                                (INPUT_LISTEN, Toggle),
+                            ]),
+                            2,
+                        ),
+                        source_page(
+                            "Noise",
+                            band(&[(NOISE_TYPE, Chooser), (NOISE_RATE, Knob)]),
+                            3,
+                        ),
+                    ],
+                )),
+            )),
+            LayoutNode::Band(ControlBand::free(
+                66.0,
+                158.0,
+                vec![
+                    Control::new(FB_MODE, Chooser, 6.3, 5.5)
+                        .captioned("FB Mode")
+                        .sized(55.4, 21.0),
+                    Control::new(FB_TIME, Slider, 6.3, 33.0)
+                        .unnamed()
+                        .sized(55.4, 11.0),
+                    Control::new(FB_AMOUNT, SmallKnob, 18.3, 48.0).captioned("Amount"),
+                    Control::new(FB_INVERT, Toggle, 19.5, 94.0)
+                        .captioned("\u{d8}")
+                        .sized(11.4, 11.0),
+                    Control::new(FB_GATE, Widget::IconToggle, 35.7, 94.0)
+                        .with_glyph(bl_model::device_layout::Glyph::Envelope)
+                        .sized(11.4, 11.0),
+                    Control::new(FB_FREQUENCY, Slider, 6.3, 116.5)
+                        .captioned("Freq|Width")
+                        .sized(55.4, 21.0),
+                    Control::new(FB_WIDTH, Slider, 6.3, 141.3)
+                        .unnamed()
+                        .sized(55.4, 11.0),
+                ],
+            )),
+            LayoutNode::Band(ControlBand::free(
+                56.0,
+                158.0,
+                vec![
+                    Control::new(COMPRESSION, SmallKnob, 8.0, 5.5).captioned("Compress"),
+                    Control::new(SIDECHAIN_HP, Toggle, 4.2, 51.4)
+                        .captioned("SC HPF")
+                        .sized(44.8, 11.0),
+                    Control::new(OUTPUT_GAIN, SmallKnob, 8.0, 75.0).captioned("Output"),
+                    Control::new(DRY_WET, Slider, 4.2, 130.3).sized(44.8, 21.0),
+                ],
+            )),
+        ]);
+        // The panel's pieces that Live's panel doesn't show for the stage
+        // open, and the feedback's other modes, sit in the expanded part.
+        let mut hidden = vec![
+            (BLEND, Knob),
+            (FB_SYNCED, Chooser),
+            (FB_TRIPLET, Chooser),
+            (FB_DOTTED, Chooser),
+            (FB_NOTE, Knob),
+            (MIDI_FB_NOTE, Toggle),
+            (GLOBAL_MODULATION, Knob),
+        ];
+        for stage in 0..STAGES {
+            hidden.push((stage_param(stage, PEAK_GAIN), Knob));
+            hidden.push((stage_param(stage, MORPH), Knob));
+        }
+        DeviceLayout::new(device).with_expanded(band(&hidden))
     };
     let shaper_drag: Vec<ParamId> = (0..STAGES).map(|s| stage_param(s, AMOUNT)).collect();
     let stage_ids = |stage: usize, offsets: &[u32]| -> Vec<ParamId> {
@@ -734,13 +843,13 @@ fn part_two_params(existing: &[ParamDescriptor]) -> Vec<ParamDescriptor> {
             .logarithmic()
     };
     let octaves = |id, name: &str, default| {
-        ParamDescriptor::continuous(id, name, (0.1, 4.0), default, ParamUnit::None)
+        ParamDescriptor::continuous(id, name, (0.1, 8.0), default, ParamUnit::None)
     };
     let strings = |names: &[&str]| names.iter().map(|n| (*n).to_owned()).collect::<Vec<_>>();
     let mut params = vec![
         choice(FB_MODE, "Feedback Mode", &strings(&FEEDBACK_MODES), 0)
             .describe("What sets the feedback path's delay: a time, a division of the beat or a note's pitch."),
-        millis(FB_TIME, "Feedback Time", (1.0, 2_000.0), 100.0)
+        millis(FB_TIME, "Feedback Time", (1.0, 2_000.0), 18.2)
             .describe("Time mode: the feedback path's delay."),
         choice(
             FB_SYNCED,
@@ -771,7 +880,7 @@ fn part_two_params(existing: &[ParamDescriptor]) -> Vec<ParamDescriptor> {
             ParamUnit::None,
         )
         .describe("Note mode: the key whose pitch the feedback path rings at, from C-2 (0) to G8 (127)."),
-        percent(FB_AMOUNT, "Feedback Amount", 50.0)
+        percent(FB_AMOUNT, "Feedback Amount", 0.0)
             .describe("How much of the signal returns round the feedback path."),
         ParamDescriptor::toggle(FB_INVERT, "Feedback Invert", false)
             .describe("Flips the sign of what returns."),
@@ -779,11 +888,11 @@ fn part_two_params(existing: &[ParamDescriptor]) -> Vec<ParamDescriptor> {
             .describe("Fades the feedback out once the input has stopped."),
         hertz(FB_FREQUENCY, "Feedback Frequency", (20.0, 20_000.0), 1_000.0)
             .describe("The centre of the band-pass the feedback path passes."),
-        octaves(FB_WIDTH, "Feedback Width", 4.0)
+        octaves(FB_WIDTH, "Feedback Width", 8.0)
             .describe("The width of the feedback band-pass, in octaves."),
-        percent(COMPRESSION, "Compression Amount", 0.0)
+        percent(COMPRESSION, "Compression Amount", 25.0)
             .describe("A compressor on the output, and so on the feedback: more lowers its threshold and raises its ratio."),
-        ParamDescriptor::toggle(SIDECHAIN_HP, "Sidechain HP", false)
+        ParamDescriptor::toggle(SIDECHAIN_HP, "Sidechain HP", true)
             .describe("The compressor's detector hears a high-pass, so lows don't squash the rest."),
         ParamDescriptor::toggle(MIDI_FB_NOTE, "MIDI > FB Note", false)
             .describe("Notes from the MIDI sidechain's source set Feedback Note."),

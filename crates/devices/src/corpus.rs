@@ -18,7 +18,9 @@ use bl_dsp::physical::{
     CONTROL, Kind, ModalBank, ModalParams, Quality, Shape, WaveguideBank, WaveguideParams,
 };
 use bl_engine::{DeviceType, KeyPitches, NodeConfig, NodeData, NoteEvent, NoteKind, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{
+    BODY_HEIGHT, BOX_HEIGHT, Control, ControlBand, DisplayCell, LayoutNode, Widget,
+};
 use bl_model::{
     Device, DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayReading,
     ParamDescriptor, ParamId, ParamUnit,
@@ -106,6 +108,8 @@ pub const OFF_AMOUNT: ParamId = ParamId(34);
 pub const PRIORITY: ParamId = ParamId(35);
 /// PB Range: the pitch bend's range, in semitones.
 pub const PB_RANGE: ParamId = ParamId(36);
+/// LFO: whether the LFO moves the tuning.
+pub const LFO_ON: ParamId = ParamId(37);
 
 /// The resonator types, in the chooser's order.
 pub const TYPES: [&str; 7] = [
@@ -153,7 +157,8 @@ pub const PRIORITIES: [&str; 2] = ["Last", "Low"];
 /// The division a new device's LFO starts on: 1/4.
 const DEFAULT_DIVISION: usize = 4;
 
-/// The fundamental's ring at Decay 0 and at 100 %, in seconds.
+/// The shortest and the longest ring Decay sets the fundamental to, in
+/// seconds.
 const DECAY_SECONDS: (f64, f64) = (0.05, 30.0);
 
 /// How far a full LFO moves the tuning at an Amount of 100 %, in cents.
@@ -195,7 +200,8 @@ pub fn corpus_type() -> DeviceType {
             .describe("The body that rings: a beam, a marimba bar, a string, a membrane, a plate, a pipe or a tube."),
         ParamDescriptor::choice(QUALITY, "Quality", &QUALITIES, 1)
             .describe("Eco rings 8 partials and High 64, in the bodies made of partials."),
-        ParamDescriptor::continuous(DECAY, "Decay", (0.0, 100.0), 50.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(DECAY, "Decay", DECAY_SECONDS, 1.32, ParamUnit::Seconds)
+            .logarithmic()
             .describe("How long the fundamental rings, from 50 ms to 30 s."),
         ParamDescriptor::continuous(MATERIAL, "Material", (-100.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("How long the highs ring against the lows: damped like wood at the bottom, ringing like metal at the top."),
@@ -209,13 +215,13 @@ pub fn corpus_type() -> DeviceType {
             .describe("A pipe's far end: closed at 0, open at both ends at 100."),
         ParamDescriptor::continuous(RATIO, "Ratio", (0.0, 100.0), 50.0, ParamUnit::Percent)
             .describe("The size of a membrane or plate along one axis against the other."),
-        ParamDescriptor::continuous(HIT, "Hit", (0.0, 100.0), 30.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(HIT, "Hit", (0.0, 100.0), 50.0, ParamUnit::Percent)
             .describe("Where the body is excited, from its centre to its edge."),
-        ParamDescriptor::continuous(POS_L, "Pos. L", (0.0, 100.0), 30.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(POS_L, "Pos. L", (0.0, 100.0), 10.0, ParamUnit::Percent)
             .describe("Where the left resonator is listened to, from its centre to its edge."),
-        ParamDescriptor::continuous(POS_R, "Pos. R", (0.0, 100.0), 70.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(POS_R, "Pos. R", (0.0, 100.0), 90.0, ParamUnit::Percent)
             .describe("Where the right resonator is listened to, from its centre to its edge."),
-        ParamDescriptor::continuous(TUNE, "Tune", (20.0, 5_000.0), 440.0, ParamUnit::Hertz)
+        ParamDescriptor::continuous(TUNE, "Tune", (20.0, 5_000.0), 261.63, ParamUnit::Hertz)
             .logarithmic()
             .describe("The left resonator's fundamental, in Hz."),
         ParamDescriptor::continuous(FINE, "Fine", (-50.0, 50.0), 0.0, ParamUnit::Cents)
@@ -229,7 +235,7 @@ pub fn corpus_type() -> DeviceType {
             .describe("Whether the LFO's rate is in Hz or a beat division."),
         ParamDescriptor::continuous(LFO_AMOUNT, "LFO Amount", (0.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("How far the LFO moves the tuning: at 100 %, up to two octaves."),
-        ParamDescriptor::continuous(LFO_HZ, "LFO Rate", (0.01, 40.0), 1.0, ParamUnit::Hertz)
+        ParamDescriptor::continuous(LFO_HZ, "LFO Rate", (0.01, 40.0), 0.32, ParamUnit::Hertz)
             .logarithmic()
             .describe("The LFO's rate in Hz."),
         ParamDescriptor::choice(LFO_DIVISION, "LFO Beats", &divisions, DEFAULT_DIVISION)
@@ -239,7 +245,7 @@ pub fn corpus_type() -> DeviceType {
             .describe("Moves the LFO against the beat grid, in degrees, in the synced mode."),
         ParamDescriptor::choice(LFO_STEREO, "LFO Stereo", &STEREO_MODES, 0)
             .describe("Whether the two resonators' LFOs differ in phase or in rate. The noise waves ignore it."),
-        ParamDescriptor::continuous(LFO_PHASE, "LFO Phase", (0.0, 360.0), 0.0, ParamUnit::None)
+        ParamDescriptor::continuous(LFO_PHASE, "LFO Phase", (0.0, 360.0), 180.0, ParamUnit::None)
             .decimals(0)
             .describe("How many degrees the right LFO is ahead."),
         ParamDescriptor::continuous(LFO_SPIN, "LFO Spin", (0.0, 50.0), 0.0, ParamUnit::Percent)
@@ -249,13 +255,13 @@ pub fn corpus_type() -> DeviceType {
         ParamDescriptor::continuous(FILTER_FREQ, "Filter Freq", (50.0, 18_000.0), 1_000.0, ParamUnit::Hertz)
             .logarithmic()
             .describe("The band-pass's centre."),
-        ParamDescriptor::continuous(FILTER_WIDTH, "Bdwidth", (0.1, 4.0), 2.0, ParamUnit::None)
+        ParamDescriptor::continuous(FILTER_WIDTH, "Bdwidth", (0.1, 4.0), 4.0, ParamUnit::None)
             .describe("The band-pass's width, in octaves."),
         ParamDescriptor::continuous(BLEED, "Bleed", (0.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("Mixes some of the unprocessed input into the resonators' output."),
         ParamDescriptor::gain(GAIN, "Gain", 24.0, 0.0)
             .describe("The resonators' level, into a limiter at 0 dBFS that keeps them from clipping."),
-        ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 100.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 50.0, ParamUnit::Percent)
             .describe("The balance between the dry signal and the resonators."),
         ParamDescriptor::toggle(FREQUENCY, "Frequency", false)
             .describe("The notes of the MIDI source set the tuning, Tune then reading in semitones."),
@@ -269,11 +275,15 @@ pub fn corpus_type() -> DeviceType {
             .describe("Which held note sets the tuning: the newest or the lowest."),
         ParamDescriptor::integer(PB_RANGE, "PB Range", (0, 24), 2, ParamUnit::Semitones)
             .describe("How far a full pitch bend of the MIDI source moves the tuning."),
+        ParamDescriptor::toggle(LFO_ON, "LFO", false)
+            .describe("Switches the LFO on: it moves the tuning only while it is on."),
     ];
     DeviceType::native(CORPUS, "Corpus", DeviceRole::AudioEffect)
         .with_midi_sidechain_tap()
         .with_description(
             DeviceDescription::new(params)
+                .with_alternate(LFO_MODE, LFO_HZ, LFO_DIVISION)
+                .with_alternate(LFO_STEREO, LFO_PHASE, LFO_SPIN)
                 .with_layout(layout())
                 .with_banks(&[
                     (
@@ -303,7 +313,7 @@ pub fn corpus_type() -> DeviceType {
                             "LFO Spin",
                         ],
                     ),
-                    ("LFO Shape", &["LFO Offset"]),
+                    ("LFO Shape", &["LFO", "LFO Offset"]),
                     ("Filter", &["Filter", "Filter Freq", "Bdwidth"]),
                     (
                         "Sidechain",
@@ -323,53 +333,97 @@ pub fn corpus_type() -> DeviceType {
         )
 }
 
-/// The device's layout: the LFO, the filter, the resonator and the global
-/// sections around the X–Y display; the sidechain's own controls in the
-/// expanded part.
+/// The panel as Live lays it out (observed in Live 12.4.16, 2 November 2026;
+/// layout L-DEV-083): the resonator's display with its type, quality, Decay,
+/// Material, Width and positions, the four knobs under it, Tune, Fine and
+/// Spread, the LFO, the filter and the output. Radius, Opening and the
+/// sidechain's controls sit in the expanded part, as Live's panel doesn't
+/// show them for a beam.
 fn layout() -> DeviceLayout {
-    use Widget::{Chooser, Knob, Number, Toggle};
+    use Widget::{Bare, Chooser, Knob, Number, SmallKnob, Toggle};
     let band = |controls: &[(ParamId, Widget)]| {
         LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, controls))
     };
     DeviceLayout::new(LayoutNode::Row(vec![
-        band(&[
-            (LFO_WAVE, Chooser),
-            (LFO_MODE, Chooser),
-            (LFO_AMOUNT, Knob),
-            (LFO_HZ, Knob),
-            (LFO_DIVISION, Chooser),
-            (LFO_OFFSET, Knob),
-            (LFO_STEREO, Chooser),
-            (LFO_PHASE, Knob),
-            (LFO_SPIN, Knob),
+        LayoutNode::Column(vec![
+            LayoutNode::Cell(DisplayCell::new(XY_CELL, 206.3, 107.0, 1.0).with_top(
+                ControlBand::free(
+                    206.3,
+                    107.0,
+                    vec![
+                        Control::new(TYPE, Widget::BareChooser, 4.4, 4.5)
+                            .unnamed()
+                            .sized(60.0, 11.0),
+                        Control::new(QUALITY, Widget::BareChooser, 109.0, 4.5)
+                            .unnamed()
+                            .sized(45.0, 11.0),
+                        Control::new(DECAY, Widget::Readout, 4.4, 90.0).sized(60.0, BOX_HEIGHT),
+                        Control::new(MATERIAL, Widget::Readout, 75.3, 90.0)
+                            .sized(70.0, BOX_HEIGHT),
+                        Control::new(WIDTH, Bare, 167.8, 4.4).sized(35.0, 21.0),
+                        Control::new(POS_L, Bare, 167.8, 41.0).sized(35.0, 21.0),
+                        Control::new(POS_R, Bare, 167.8, 78.6).sized(35.0, 21.0),
+                    ],
+                ),
+            )),
+            LayoutNode::Band(ControlBand::free(
+                206.3,
+                51.0,
+                vec![
+                    Control::new(BRIGHT, SmallKnob, 9.7, 3.0),
+                    Control::new(INHARM, SmallKnob, 61.8, 3.0),
+                    Control::new(RATIO, SmallKnob, 112.5, 3.0).greyed_while(TYPE, 0),
+                    Control::new(HIT, SmallKnob, 162.0, 3.0),
+                ],
+            )),
         ]),
-        band(&[
-            (FILTER_ON, Toggle),
-            (FILTER_FREQ, Knob),
-            (FILTER_WIDTH, Knob),
-        ]),
-        band(&[
-            (TYPE, Chooser),
-            (QUALITY, Chooser),
-            (DECAY, Knob),
-            (MATERIAL, Knob),
-            (RADIUS, Knob),
-            (BRIGHT, Knob),
-            (INHARM, Knob),
-            (OPENING, Knob),
-            (RATIO, Knob),
-            (HIT, Knob),
-            (POS_L, Knob),
-            (POS_R, Knob),
-            (TUNE, Knob),
-            (FINE, Knob),
-            (SPREAD, Knob),
-            (WIDTH, Knob),
-        ]),
-        LayoutNode::Cell(DisplayCell::new(XY_CELL, 140.0, BODY_HEIGHT, 1.0)),
-        band(&[(BLEED, Knob), (GAIN, Knob), (DRY_WET, Knob)]),
+        LayoutNode::Band(ControlBand::free(
+            58.4,
+            BODY_HEIGHT,
+            vec![
+                Control::new(TUNE, SmallKnob, 15.5, 4.4),
+                Control::new(FINE, SmallKnob, 15.5, 73.0),
+                Control::new(SPREAD, Widget::Slider, 3.6, 126.0).sized(54.5, 21.0),
+            ],
+        )),
+        LayoutNode::Band(ControlBand::free(
+            86.6,
+            BODY_HEIGHT,
+            vec![
+                Control::new(LFO_ON, Widget::Check, 9.0, 3.0).sized(60.0, BOX_HEIGHT),
+                Control::new(LFO_AMOUNT, SmallKnob, 1.5, 28.0).captioned("Amount"),
+                Control::new(LFO_WAVE, Chooser, 55.0, 28.5)
+                    .captioned("Shape")
+                    .sized(28.5, 21.0),
+                Control::new(LFO_HZ, SmallKnob, 0.9, 73.0).captioned("Rate"),
+                Control::new(LFO_MODE, Widget::IconColumn(2), 66.4, 77.8).sized(16.5, 27.0),
+                Control::new(LFO_PHASE, SmallKnob, 0.9, 116.5).captioned("Phase"),
+                Control::new(LFO_STEREO, Widget::IconColumn(2), 66.4, 122.6).sized(16.5, 27.0),
+            ],
+        )),
+        LayoutNode::Band(ControlBand::free(
+            53.3,
+            BODY_HEIGHT,
+            vec![
+                Control::new(FILTER_ON, Widget::Check, 5.0, 3.0).sized(45.0, BOX_HEIGHT),
+                Control::new(FILTER_FREQ, SmallKnob, 10.3, 57.6).captioned("Freq"),
+                Control::new(FILTER_WIDTH, SmallKnob, 10.3, 110.0),
+            ],
+        )),
+        LayoutNode::Band(ControlBand::free(
+            52.9,
+            BODY_HEIGHT,
+            vec![
+                Control::new(BLEED, SmallKnob, 9.6, 4.4),
+                Control::new(GAIN, SmallKnob, 9.6, 57.0),
+                Control::new(DRY_WET, SmallKnob, 9.6, 110.0),
+            ],
+        )),
     ]))
     .with_expanded(band(&[
+        (RADIUS, Knob),
+        (OPENING, Knob),
+        (LFO_OFFSET, Knob),
         (FREQUENCY, Toggle),
         (TUNE_SEMITONES, Number),
         (OFF_DECAY, Toggle),
@@ -450,12 +504,6 @@ pub fn makeup(rate: f64, decay: f64) -> f64 {
 
 /// ln 1000: 60 dB in amplitude.
 const LN_1000: f64 = 6.907_755_278_982_137;
-
-/// The seconds the fundamental rings at a Decay of `percent`.
-fn decay_seconds(percent: f64) -> f64 {
-    let (from, to) = DECAY_SECONDS;
-    from * (to / from).powf(percent.clamp(0.0, 100.0) / 100.0)
-}
 
 /// The band-pass's coefficients: unity gain at `hz`, `octaves` wide.
 fn band_pass(hz: f64, octaves: f64, rate: f64) -> Coeffs {
@@ -775,6 +823,7 @@ impl NativeDevice for Corpus {
         let (opening, radius, ratio, hit) = (ramp(OPENING), ramp(RADIUS), ramp(RATIO), ramp(HIT));
         let (pos_l, pos_r) = (ramp(POS_L), ramp(POS_R));
         let (amount, off_amount) = (ramp(LFO_AMOUNT), ramp(OFF_AMOUNT));
+        let lfo_on = f64::from(u8::from(on(LFO_ON)));
         let (filter_freq, filter_width) = (ramp(FILTER_FREQ), ramp(FILTER_WIDTH));
         let semitones = target(TUNE_SEMITONES);
         let range = target(PB_RANGE);
@@ -808,14 +857,14 @@ impl NativeDevice for Corpus {
                 let moved_cents = |side: usize| {
                     let spread =
                         if side == 0 { -1.0 } else { 1.0 } * unit(spread[i]) * SPREAD_CENTS;
-                    f64::from(fine[i]) + spread + LFO_CENTS * unit(amount[i]) * swing[side]
+                    f64::from(fine[i]) + spread + lfo_on * LFO_CENTS * unit(amount[i]) * swing[side]
                 };
                 let settings = Settings {
                     hz: std::array::from_fn(|side| {
                         (base * (moved_cents(side) / 1_200.0).exp2()).clamp(LOWEST_HZ, rate / 4.0)
                     }),
                     decay: {
-                        let ring = decay_seconds(f64::from(decay[i]));
+                        let ring = f64::from(decay[i]);
                         if self.played.damped {
                             let share = unit(off_amount[i]);
                             ring.powf(1.0 - share) * OFF_SECONDS.powf(share)
@@ -868,7 +917,7 @@ impl NativeDevice for Corpus {
             let (a, b) = ((1.0 + w) / 2.0, (1.0 - w) / 2.0);
             let (y0, y1) = (f64::from(self.wet[0][i]), f64::from(self.wet[1][i]));
             if self.makeup.0.to_bits() != decay[i].to_bits() {
-                self.makeup = (decay[i], makeup(rate, decay_seconds(f64::from(decay[i]))));
+                self.makeup = (decay[i], makeup(rate, f64::from(decay[i])));
             }
             let gain = f64::from(gain[i]) * self.makeup.1;
             let bleed = if bleeds { unit(bleed[i]) } else { 0.0 };
@@ -1001,10 +1050,12 @@ mod tests {
 
     // Spec: corpus R3
     #[test]
-    fn decay_runs_from_fifty_milliseconds_to_thirty_seconds_logarithmically() {
-        assert!((decay_seconds(0.0) - 0.05).abs() < 1e-12);
-        assert!((decay_seconds(100.0) - 30.0).abs() < 1e-9);
-        assert!((decay_seconds(50.0) - (0.05f64 * 30.0).sqrt()).abs() < 1e-9);
+    fn decay_runs_from_fifty_milliseconds_to_thirty_seconds_and_starts_at_1_32() {
+        let decay = corpus_type().description.param(DECAY).unwrap().clone();
+        assert_eq!(
+            (decay.min(), decay.max(), decay.default),
+            (0.05, 30.0, 1.32)
+        );
     }
 
     /// |H| of the biquad `c` at `hz`, in dB.

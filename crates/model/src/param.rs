@@ -468,7 +468,7 @@ impl DeviceDescription {
         for a in &self.alternates {
             let toggle = self
                 .param(a.switch)
-                .is_some_and(|p| matches!(p.kind, ParamKind::Toggle));
+                .is_some_and(|p| matches!(p.kind, ParamKind::Toggle | ParamKind::Choice { .. }));
             if !toggle
                 || a.off == a.on
                 || self.param(a.off).is_none()
@@ -772,5 +772,14 @@ mod tests {
                 .check()
                 .is_err()
         );
+        // A choice serves as a switch: its first choice is off, the rest on.
+        let mut choice = params();
+        choice[0] = ParamDescriptor::choice(id(0), "Switch", &["A", "B", "C"], 0);
+        let mode = DeviceDescription::new(choice).with_alternate(id(0), id(1), id(2));
+        mode.check().unwrap();
+        let mut values = OrdMap::new();
+        assert_eq!(mode.drawn(&values, id(1)), id(1));
+        values.insert(id(0), 2.0);
+        assert_eq!(mode.drawn(&values, id(1)), id(2));
     }
 }

@@ -8,8 +8,9 @@ use std::f64::consts::{PI, TAU};
 
 use crate::common;
 use bl_devices::pedal::{
-    BASS, DRY_WET, GAIN, HI_QUALITY, MID, MID_FREQUENCY, MID_HZ, OUTPUT, PEDAL, SUB, TREBLE, TYPE,
-    TYPES, distortion_curve, drive, fuzz_bias, fuzz_curve, overdrive_curve, pedal_type,
+    BASS, DRY_WET, EQ_DB, GAIN, HI_QUALITY, MID, MID_FREQUENCY, MID_HZ, OUTPUT, PEDAL, SUB, SUB_DB,
+    TREBLE, TYPE, TYPES, distortion_curve, drive, fuzz_bias, fuzz_curve, overdrive_curve,
+    pedal_type,
 };
 use bl_engine::{Node, Registry};
 use bl_model::ParamId;
@@ -170,9 +171,9 @@ fn the_pedal_is_described_and_laid_out() {
             .unwrap()
             .default
     };
-    assert_eq!(TYPES, ["Overdrive", "Distortion", "Fuzz"]);
+    assert_eq!(TYPES, ["OD", "Distort", "Fuzz"]);
     assert_eq!(default(TYPE), 0.0, "Overdrive in a new device");
-    assert_eq!(default(GAIN), 50.0);
+    assert_eq!(default(GAIN), 0.0, "Live's Drive starts at 0 %");
     assert_eq!(default(MID_FREQUENCY), 1.0, "1 kHz");
     assert_eq!(MID_HZ, [500.0, 1_000.0, 2_000.0]);
     assert_eq!(default(DRY_WET), 100.0);
@@ -386,20 +387,21 @@ fn each_eq_band_is_within_half_a_decibel_of_its_design_at_each_mid_position() {
     ];
     for hz in probes {
         for gain in [-15.0, 12.0] {
-            let got = eq_response(&[(BASS, gain)], hz);
+            let percent = gain / EQ_DB * 100.0;
+            let got = eq_response(&[(BASS, percent)], hz);
             let want = design(Kind::Peak, 100.0, gain, 0.7, hz);
             assert!(
                 (got - want).abs() < 0.5,
                 "Bass {gain} dB at {hz}: {got} for {want}"
             );
-            let got = eq_response(&[(TREBLE, gain)], hz);
+            let got = eq_response(&[(TREBLE, percent)], hz);
             let want = design(Kind::HighShelf, 3_300.0, gain, 0.71, hz);
             assert!(
                 (got - want).abs() < 0.5,
                 "Treble {gain} dB at {hz}: {got} for {want}"
             );
             for (position, mid_hz) in MID_HZ.iter().enumerate() {
-                let got = eq_response(&[(MID, gain), (MID_FREQUENCY, position as f64)], hz);
+                let got = eq_response(&[(MID, percent), (MID_FREQUENCY, position as f64)], hz);
                 let want = design(Kind::Peak, *mid_hz, gain, 1.0, hz);
                 assert!(
                     (got - want).abs() < 0.5,
@@ -413,22 +415,21 @@ fn each_eq_band_is_within_half_a_decibel_of_its_design_at_each_mid_position() {
 // Spec: pedal R7
 #[test]
 fn sub_raises_the_lows_with_a_shelf_below_250_hz() {
-    for gain in [6.0, 15.0] {
-        for hz in [30.0, 100.0, 250.0, 1_000.0, 8_000.0] {
-            let got = eq_response(&[(SUB, gain)], hz);
-            let want = db(biquad_response(rbj(Kind::LowShelf, 250.0, gain, 0.71), hz));
-            assert!(
-                (got - want).abs() < 0.5,
-                "Sub {gain} dB at {hz}: {got} for {want}"
-            );
-        }
-        let low = eq_response(&[(SUB, gain)], 30.0);
-        let high = eq_response(&[(SUB, gain)], 8_000.0);
+    let gain = SUB_DB;
+    for hz in [30.0, 100.0, 250.0, 1_000.0, 8_000.0] {
+        let got = eq_response(&[(SUB, 1.0)], hz);
+        let want = db(biquad_response(rbj(Kind::LowShelf, 250.0, gain, 0.71), hz));
         assert!(
-            low > gain - 1.0 && high.abs() < 0.5,
-            "{low} dB down low, {high} dB up high"
+            (got - want).abs() < 0.5,
+            "Sub {gain} dB at {hz}: {got} for {want}"
         );
     }
+    let low = eq_response(&[(SUB, 1.0)], 30.0);
+    let high = eq_response(&[(SUB, 1.0)], 8_000.0);
+    assert!(
+        low > gain - 1.0 && high.abs() < 0.5,
+        "{low} dB down low, {high} dB up high"
+    );
     assert!(eq_response(&[], 100.0).abs() < 0.01, "flat at 0 dB");
 }
 
@@ -551,11 +552,11 @@ fn renders_are_bit_identical_at_four_block_sizes_and_run_after_run() {
         let params = [
             (TYPE, kind),
             (GAIN, 80.0),
-            (BASS, 6.0),
-            (MID, -9.0),
+            (BASS, 40.0),
+            (MID, -60.0),
             (MID_FREQUENCY, 2.0),
-            (TREBLE, 4.0),
-            (SUB, 7.0),
+            (TREBLE, 27.0),
+            (SUB, 1.0),
             (DRY_WET, 80.0),
             (HI_QUALITY, hi_quality),
         ];

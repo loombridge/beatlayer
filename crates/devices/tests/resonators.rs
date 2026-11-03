@@ -10,7 +10,7 @@ use crate::common::response::{Kind, biquad_response, db as complex_db, rbj, resp
 use bl_core::time::SampleRate;
 use bl_devices::resonators::{
     self, COLOR, CONST, DECAY, DRY_WET, FILTER_FREQ, FILTER_TYPE, FINE, GAIN, LEVEL, MODE, ON,
-    PITCH, USE_SCALE, WIDTH, resonators_type, voice_param,
+    PITCH, USE_SCALE, WIDTH, decay_value, resonators_type, voice_param,
 };
 use bl_engine::scales::ScaleRuns;
 use bl_engine::{Block, Collector, KeyPitches, Node, NodeConfig, NodeEvent, TransportInfo};
@@ -18,6 +18,11 @@ use bl_model::{ParamId, Scale, ScaleName, Tuning};
 
 /// The block sizes every render must agree at (R12).
 const BLOCKS: [usize; 4] = [1, 64, 512, 4_096];
+
+/// The Color value that means `percent` of the law (−100 to 100).
+fn color_value(percent: f64) -> f64 {
+    percent / 2.0 + 50.0
+}
 
 /// The frequency of key `key` of twelve equal steps, A3 = 440 Hz at 69.
 fn hz(key: f64) -> f64 {
@@ -38,6 +43,10 @@ struct Rig {
 impl Rig {
     fn new(rate: SampleRate, params: &[(ParamId, f64)]) -> Self {
         let device_type = resonators_type();
+        // Dry/Wet starts at 50 %; the tests listen to the resonators alone
+        // unless they say otherwise.
+        let mut wet = vec![(DRY_WET, 100.0)];
+        wet.extend_from_slice(params);
         let config = NodeConfig {
             round_trip_latency: 0,
             sample_rate: rate,
@@ -45,7 +54,7 @@ impl Rig {
             channels: 2,
         };
         let node = common::registry()
-            .create(&common::device(&device_type, params), &config)
+            .create(&common::device(&device_type, &wet), &config)
             .expect("the registry makes Resonators");
         Self {
             node,
@@ -121,10 +130,14 @@ fn alone(note: u32, decay: f64, rest: &[(ParamId, f64)]) -> Vec<(ParamId, f64)> 
     let mut params = vec![
         (FILTER_TYPE, 0.0),
         (FILTER_FREQ, 18_000.0),
-        (DECAY, decay),
+        (DECAY, decay_value(decay)),
+        (COLOR, color_value(0.0)),
+        (CONST, 0.0),
         (voice_param(0, PITCH), f64::from(note)),
         (voice_param(1, ON), 0.0),
         (voice_param(2, ON), 0.0),
+        (voice_param(3, ON), 0.0),
+        (voice_param(4, ON), 0.0),
     ];
     params.extend_from_slice(rest);
     params
@@ -224,7 +237,7 @@ fn fine_and_pitch_set_the_pitches() {
     let params = [
         (FILTER_TYPE, 0.0),
         (FILTER_FREQ, 18_000.0),
-        (DECAY, 2.0),
+        (DECAY, decay_value(2.0)),
         (voice_param(0, PITCH), 48.0),
         (voice_param(0, FINE), 30.0),
         (voice_param(1, PITCH), 7.0),
@@ -272,7 +285,7 @@ fn const_keeps_the_ring_time_the_same_at_every_pitch() {
         let params = [
             (FILTER_TYPE, 0.0),
             (FILTER_FREQ, 18_000.0),
-            (DECAY, 1.0),
+            (DECAY, decay_value(1.0)),
             (CONST, constant),
             (voice_param(0, PITCH), 48.0),
             (voice_param(0, ON), 0.0),
@@ -302,7 +315,7 @@ fn color_tilts_the_loops_within_half_a_decibel() {
     let rate = SampleRate::HZ_48000;
     let f0 = hz(48.0);
     let level = |color: f64, at: f64| {
-        let mut rig = Rig::new(rate, &alone(48, 2.0, &[(COLOR, color)]));
+        let mut rig = Rig::new(rate, &alone(48, 2.0, &[(COLOR, color_value(color))]));
         let ir = rig.impulse(8 * 48_000);
         let near = peak(&ir, at, 30.0, rate);
         (complex_db(response_at(&ir, near)), near)
@@ -318,7 +331,7 @@ fn color_tilts_the_loops_within_half_a_decibel() {
     }
     // Dark: the loop's low-pass takes the highs down and the ring shorter.
     for color in [-100.0, -50.0] {
-        let mut rig = Rig::new(rate, &alone(48, 1.0, &[(COLOR, color)]));
+        let mut rig = Rig::new(rate, &alone(48, 1.0, &[(COLOR, color_value(color))]));
         let ir = rig.impulse(4 * 48_000);
         let window = (rate.as_f64() / f0).round() as usize;
         assert!(ring_time(&ir, window, rate) < 1.0, "Color {color}");
@@ -354,8 +367,8 @@ fn textbook(kind: usize, f0: f64, hz: f64) -> f64 {
     let alpha = sin / (2.0 * std::f64::consts::FRAC_1_SQRT_2);
     let filter = match kind {
         0 => rbj(Kind::LowPass, f0, 0.0, std::f64::consts::FRAC_1_SQRT_2),
-        2 => rbj(Kind::HighPass, f0, 0.0, std::f64::consts::FRAC_1_SQRT_2),
-        1 => ([alpha, 0.0, -alpha], [1.0 + alpha, -2.0 * cos, 1.0 - alpha]),
+        1 => rbj(Kind::HighPass, f0, 0.0, std::f64::consts::FRAC_1_SQRT_2),
+        2 => ([alpha, 0.0, -alpha], [1.0 + alpha, -2.0 * cos, 1.0 - alpha]),
         _ => (
             [1.0, -2.0 * cos, 1.0],
             [1.0 + alpha, -2.0 * cos, 1.0 - alpha],
@@ -375,10 +388,14 @@ fn the_input_filter_measures_within_half_a_decibel_of_its_design() {
             let params = [
                 (FILTER_TYPE, kind as f64),
                 (FILTER_FREQ, f0),
-                (DECAY, 0.01),
+                (DECAY, decay_value(0.01)),
+                (COLOR, color_value(0.0)),
+                (CONST, 0.0),
                 (voice_param(0, PITCH), 0.0),
                 (voice_param(1, ON), 0.0),
                 (voice_param(2, ON), 0.0),
+                (voice_param(3, ON), 0.0),
+                (voice_param(4, ON), 0.0),
             ];
             let ir = Rig::new(rate, &params).impulse(8_192);
             for at in [f0 / 4.0, f0 / 1.5, f0 * 1.5, f0 * 4.0] {
@@ -425,9 +442,9 @@ fn mode_b_adds_a_fifth_twelve_decibels_down() {
 /// `width`, for noise.
 fn placed(voice: usize, width: f64) -> (f64, f64) {
     let mut params = vec![
-        (FILTER_TYPE, 1.0),
+        (FILTER_TYPE, 2.0),
         (FILTER_FREQ, 1_000.0),
-        (DECAY, 0.5),
+        (DECAY, decay_value(0.5)),
         (WIDTH, width),
     ];
     for other in 0..5 {
@@ -505,7 +522,7 @@ fn use_current_scale_counts_degrees_of_a_d_minor_clip() {
     let params = [
         (FILTER_TYPE, 0.0),
         (FILTER_FREQ, 18_000.0),
-        (DECAY, 2.0),
+        (DECAY, decay_value(2.0)),
         (USE_SCALE, 1.0),
         (voice_param(0, PITCH), 23.0),
         (voice_param(1, PITCH), 2.0),
@@ -546,7 +563,7 @@ fn a_scale_change_retunes_from_its_frame() {
     let params = [
         (FILTER_TYPE, 0.0),
         (FILTER_FREQ, 18_000.0),
-        (DECAY, 2.0),
+        (DECAY, decay_value(2.0)),
         (USE_SCALE, 1.0),
         (voice_param(0, PITCH), 23.0),
         (voice_param(1, ON), 0.0),
@@ -603,7 +620,7 @@ fn under_a_19_note_tuning_the_pitches_come_from_the_tuning() {
     let params = [
         (FILTER_TYPE, 0.0),
         (FILTER_FREQ, 18_000.0),
-        (DECAY, 2.0),
+        (DECAY, decay_value(2.0)),
         (voice_param(0, PITCH), 60.0),
         (voice_param(1, PITCH), 5.0),
         (voice_param(1, FINE), 10.0),
@@ -629,7 +646,7 @@ fn under_a_19_note_tuning_the_pitches_come_from_the_tuning() {
         (voice_param(0, PITCH), 60.0),
         (FILTER_TYPE, 0.0),
         (FILTER_FREQ, 18_000.0),
-        (DECAY, 2.0),
+        (DECAY, decay_value(2.0)),
     ];
     let mut rig = Rig::new(rate, &only(0, &hidden));
     rig.tune(Some(&tuning));
@@ -646,17 +663,17 @@ fn scenario(block: usize) -> Vec<Vec<f32>> {
     let params = [
         (voice_param(3, ON), 1.0),
         (MODE, 1.0),
-        (COLOR, 40.0),
+        (COLOR, color_value(40.0)),
         (USE_SCALE, 1.0),
     ];
     let events: Vec<(usize, ParamId, f64)> = vec![
-        (1_000, DECAY, 0.2),
+        (1_000, DECAY, decay_value(0.2)),
         (3_000, FILTER_FREQ, 3_000.0),
         (5_000, voice_param(0, PITCH), 55.0),
         (7_001, CONST, 1.0),
         (9_000, voice_param(2, ON), 0.0),
         (11_000, voice_param(2, ON), 1.0),
-        (12_000, COLOR, -60.0),
+        (12_000, COLOR, color_value(-60.0)),
         (13_000, WIDTH, 40.0),
         (14_000, MODE, 0.0),
         (15_000, voice_param(1, FINE), 33.0),
@@ -697,7 +714,7 @@ fn renders_are_bit_identical_at_every_block_size_and_run_after_run() {
 fn the_longest_decay_never_grows() {
     let rate = SampleRate::HZ_48000;
     let params = [
-        (DECAY, 30.0),
+        (DECAY, decay_value(30.0)),
         (CONST, 1.0),
         (MODE, 1.0),
         (voice_param(3, ON), 1.0),

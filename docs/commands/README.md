@@ -7940,10 +7940,12 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
 | `widget` | [`Widget`](#widget) | yes | How it's drawn. |
 | `x` | number | yes | Its left edge, from the band's. |
 | `y` | number | yes | Its top edge, from the band's. |
+| `caption` | string or null | no | The name the control shows in place of its parameter's, where a section's own heading makes the full name redundant (Vinyl Distortion's Freq and B in each section). |
 | `glyph` | [`Glyph`](#glyph) or null | no | The icon of an icon button or a round button. |
 | `grey` | [`GreyWhen`](#greywhen) or null | no | The condition that greys the control. |
 | `size` | [`Size`](#size) or null | no | Its size where the device sets it, in place of the widget's: the width of a box, a row of buttons or a unit pair's control. |
 | `unit` | [`UnitPair`](#unitpair) or null | no | The unit pair beside a knob, which makes the knob show one of two parameters. |
+| `unnamed` | boolean | no | Set for a box or a chooser drawn without the name above it (the Saturator's curve chooser inside its display): it takes only the box's height. |
 
 <details><summary>JSON Schema</summary>
 
@@ -7951,6 +7953,13 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
 {
   "description": "One control in a band: a parameter, drawn by a widget, at a place in the band.",
   "properties": {
+    "caption": {
+      "description": "The name the control shows in place of its parameter's, where a section's own heading makes the full name redundant (Vinyl Distortion's Freq and B in each section).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "glyph": {
       "anyOf": [
         {
@@ -7998,6 +8007,10 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
         }
       ],
       "description": "The unit pair beside a knob, which makes the knob show one of two parameters."
+    },
+    "unnamed": {
+      "description": "Set for a box or a chooser drawn without the name above it (the Saturator's curve chooser inside its display): it takes only the box's height.",
+      "type": "boolean"
     },
     "widget": {
       "$ref": "#/$defs/Widget",
@@ -11153,6 +11166,7 @@ A display cell: a graph, a spectrum, a waveform, or an envelope editor, which gr
 | `height` | number | yes | Its docked height, the least it has. |
 | `weight` | number | yes | Its share of extra room, against the other cells it shares with. |
 | `bottom` | [`ControlBand`](#controlband) or null | no | Controls inside its bottom edge, from its left. |
+| `inset` | number | no | How far the black cell sits inside the space its size and weight claim, on every side, in points: Live's cells over a column of controls keep [`PADDING`] from the device's edge. |
 | `slot` | integer or null | no | The sample slot the cell stands for, if it does: it shows the slot and takes a click that selects it, and a sample dropped on it (WP-5.17). |
 | `top` | [`ControlBand`](#controlband) or null | no | Controls inside its top edge, from its left. |
 
@@ -11175,6 +11189,11 @@ A display cell: a graph, a spectrum, a waveform, or an envelope editor, which gr
     },
     "height": {
       "description": "Its docked height, the least it has.",
+      "format": "float",
+      "type": "number"
+    },
+    "inset": {
+      "description": "How far the black cell sits inside the space its size and weight claim, on every side, in points: Live's cells over a column of controls keep [`PADDING`] from the device's edge.",
       "format": "float",
       "type": "number"
     },
@@ -14926,6 +14945,10 @@ One of:
 - `"plus"`: A plus sign.
 - `"minus"`: A minus sign.
 - `"flat_sharp"`: A flat and a sharp: Use Current Scale.
+- `"crossfade"`: Two lines crossing: a crossfade.
+- `"envelope"`: A rise and a fall: an envelope's shape.
+- `"phase"`: A circle cut by a line: a phase.
+- `"spin"`: A circle with an arrow round it: a spin.
 
 <details><summary>JSON Schema</summary>
 
@@ -14996,6 +15019,26 @@ One of:
     {
       "const": "flat_sharp",
       "description": "A flat and a sharp: Use Current Scale.",
+      "type": "string"
+    },
+    {
+      "const": "crossfade",
+      "description": "Two lines crossing: a crossfade.",
+      "type": "string"
+    },
+    {
+      "const": "envelope",
+      "description": "A rise and a fall: an envelope's shape.",
+      "type": "string"
+    },
+    {
+      "const": "phase",
+      "description": "A circle cut by a line: a phase.",
+      "type": "string"
+    },
+    {
+      "const": "spin",
+      "description": "A circle with an arrow round it: a spin.",
       "type": "string"
     }
   ]
@@ -15875,6 +15918,7 @@ A section heading: a line of text over a group of controls (Electric's Hammer an
 |---|---|---|---|
 | `text` | string | yes | The text. |
 | `width` | number | yes | The width its text needs, in points: the least it takes. |
+| `centered` | boolean | no | Set for a heading whose text is centred over its group. |
 
 <details><summary>JSON Schema</summary>
 
@@ -15882,6 +15926,10 @@ A section heading: a line of text over a group of controls (Electric's Hammer an
 {
   "description": "A section heading: a line of text over a group of controls (Electric's Hammer and Fork).",
   "properties": {
+    "centered": {
+      "description": "Set for a heading whose text is centred over its group.",
+      "type": "boolean"
+    },
     "text": {
       "description": "The text.",
       "type": "string"
@@ -42885,6 +42933,17 @@ One of:
 - an object with `stack` (integer from 0 to 255): The same as a column of that many buttons.
 - an object with `grid` (object with `columns` (integer from 0 to 255), `rows` (integer from 0 to 255)): The choices of a choice parameter as a grid of small buttons, filled by rows (Note Echo's 1 2 3 4 over 5 6 8 16).
 - an object with `icon_segments` (integer from 0 to 255): A row of that many icon buttons, one for each choice of a choice parameter (the filter types), the chosen one lit.
+- an object with `beside` (integer from 0 to 255): A lit number box with its name to its left on the same line (Pedal's Dry/Wet, Overdrive's Dynamics): the number is the points the name has before the box.
+- an object with `beside_dim` (integer from 0 to 255): A plain number box with its name in dim text to its left on the same line (Spectral Resonator's Glide and PB): the number is the points the name has before the box.
+- an object with `beside_switch` (integer from 0 to 255): A button that reads On or Off, lit while on, with its name in dim text to its left (Spectral Resonator's MIDI Gate): the number is the points the name has before the button.
+- `"check"`: A small square that is filled while on, with the name after it (Spectral Resonator's Quantize).
+- `"pill"`: A small pill that shows which of a choice parameter's choices is chosen by where its dot sits, a click moving it on (Pedal's Mid frequency).
+- `"cycle"`: A single text button holding the chosen choice's name, lit in the accent, a click taking the next choice and the last going round to the first (Resonators' Mode).
+- an object with `icon_column` (integer from 0 to 255): A column of that many icon buttons, one for each choice of a choice parameter, the chosen one lit (Resonators' filter types).
+- `"lit_chooser"`: A chooser whose box is filled blue like a lit number box (Saturator's curve).
+- `"bare_chooser"`: A chooser with no box: the value in the blue text and a small ▼ after it, its name in dim text above (Vocoder's Bands) unless the control is [`unnamed`](Control::unnamed) (Saturator's Post Clip).
+- `"bare"`: A number with no box: the value in the accent colour from the left, its name in dim text above unless the control is [`unnamed`](Control::unnamed) (Vocoder's Range).
+- `"readout"`: A name in the dim text colour with the value after it in the accent, no box, dragged or typed (Saturator's Amt Lo along the display's foot).
 
 <details><summary>JSON Schema</summary>
 
@@ -43022,6 +43081,105 @@ One of:
         "icon_segments"
       ],
       "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A lit number box with its name to its left on the same line (Pedal's Dry/Wet, Overdrive's Dynamics): the number is the points the name has before the box.",
+      "properties": {
+        "beside": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "beside"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A plain number box with its name in dim text to its left on the same line (Spectral Resonator's Glide and PB): the number is the points the name has before the box.",
+      "properties": {
+        "beside_dim": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "beside_dim"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A button that reads On or Off, lit while on, with its name in dim text to its left (Spectral Resonator's MIDI Gate): the number is the points the name has before the button.",
+      "properties": {
+        "beside_switch": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "beside_switch"
+      ],
+      "type": "object"
+    },
+    {
+      "const": "check",
+      "description": "A small square that is filled while on, with the name after it (Spectral Resonator's Quantize).",
+      "type": "string"
+    },
+    {
+      "const": "pill",
+      "description": "A small pill that shows which of a choice parameter's choices is chosen by where its dot sits, a click moving it on (Pedal's Mid frequency).",
+      "type": "string"
+    },
+    {
+      "const": "cycle",
+      "description": "A single text button holding the chosen choice's name, lit in the accent, a click taking the next choice and the last going round to the first (Resonators' Mode).",
+      "type": "string"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A column of that many icon buttons, one for each choice of a choice parameter, the chosen one lit (Resonators' filter types).",
+      "properties": {
+        "icon_column": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "icon_column"
+      ],
+      "type": "object"
+    },
+    {
+      "const": "lit_chooser",
+      "description": "A chooser whose box is filled blue like a lit number box (Saturator's curve).",
+      "type": "string"
+    },
+    {
+      "const": "bare_chooser",
+      "description": "A chooser with no box: the value in the blue text and a small ▼ after it, its name in dim text above (Vocoder's Bands) unless the control is [`unnamed`](Control::unnamed) (Saturator's Post Clip).",
+      "type": "string"
+    },
+    {
+      "const": "bare",
+      "description": "A number with no box: the value in the accent colour from the left, its name in dim text above unless the control is [`unnamed`](Control::unnamed) (Vocoder's Range).",
+      "type": "string"
+    },
+    {
+      "const": "readout",
+      "description": "A name in the dim text colour with the value after it in the accent, no box, dragged or typed (Saturator's Amt Lo along the display's foot).",
+      "type": "string"
     }
   ]
 }

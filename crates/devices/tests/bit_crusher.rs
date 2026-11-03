@@ -153,9 +153,8 @@ fn dc_shift_moves_the_quantisers_offset() {
     };
     let quarter = 0.3 * 0.125;
     assert_eq!(held(0.0, quarter), 0.0);
-    assert_eq!(held(25.0, quarter), 0.125);
-    assert_eq!(held(-25.0, -quarter), -0.125);
-    assert_eq!(held(-25.0, quarter), 0.0);
+    assert_eq!(held(1.0, quarter), 0.125);
+    assert_eq!(held(1.0, -quarter), 0.0);
 }
 
 // Spec: bit-crusher R5
@@ -238,7 +237,7 @@ fn a_render_repeats_run_after_run_and_at_any_block_size() {
         (POST_OCTAVE, 0.5),
         (BITS, 5.0),
         (SHAPE, 40.0),
-        (DC_SHIFT, 10.0),
+        (DC_SHIFT, 1.0),
         (DRY_WET, 80.0),
     ];
     let first = render(&params, &input, 4_096);

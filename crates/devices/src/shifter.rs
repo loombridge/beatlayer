@@ -20,7 +20,9 @@ use core::f64::consts::{PI, TAU};
 
 use bl_dsp::EnvelopeFollower;
 use bl_engine::{DeviceType, NodeConfig, NoteEvent, NoteKind, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, LayoutNode, Widget};
+use bl_model::device_layout::{
+    BODY_HEIGHT, BOX_HEIGHT, Control, ControlBand, DisplayCell, Heading, LayoutNode, Widget,
+};
 use bl_model::{
     Device, DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit,
 };
@@ -52,20 +54,21 @@ pub const WIDE: ParamId = ParamId(7);
 pub const DELAY_ON: ParamId = ParamId(8);
 /// Delay Mode: whether its time is free, in Hz, or synced to the tempo.
 pub const DELAY_MODE: ParamId = ParamId(9);
-/// Delay Time: the free delay time, as a rate in Hz.
-pub const DELAY_HZ: ParamId = ParamId(10);
+/// Delay Time: the free delay time, in milliseconds.
+pub const DELAY_MS: ParamId = ParamId(10);
 /// Delay Beats: the synced delay time, one of [`DELAY_DIVISIONS`].
 pub const DELAY_DIVISION: ParamId = ParamId(11);
 /// Feedback: how much of the delay's output goes back into it, in per
 /// cent.
 pub const FEEDBACK: ParamId = ParamId(12);
-/// Tone: how far the feedback path cuts the highs, in per cent.
+/// Tone: the corner of the feedback path's low-pass, in Hz; at the top of
+/// its range ([`TONE_OPEN`]) the path isn't filtered.
 pub const TONE: ParamId = ParamId(13);
 /// Dry/Wet: the balance between the shifted and dry signals, in per cent.
 pub const DRY_WET: ParamId = ParamId(14);
 
-/// LFO Amount: how far the LFO moves the shift, in per cent, negative
-/// turning the wave over.
+/// LFO Amount: how far the LFO moves the shift in Pitch mode, in
+/// semitones, negative turning the wave over.
 pub const LFO_AMOUNT: ParamId = ParamId(15);
 /// LFO Wave: one of [`WAVES`].
 pub const LFO_WAVE: ParamId = ParamId(16);
@@ -108,15 +111,17 @@ pub const PITCH_SOURCE: ParamId = ParamId(31);
 pub const GLIDE: ParamId = ParamId(32);
 /// PB: the pitch bend range, in semitones.
 pub const BEND_RANGE: ParamId = ParamId(33);
+/// LFO Amount in Freq and Ring modes, in Hz.
+pub const LFO_AMOUNT_HZ: ParamId = ParamId(34);
 
 /// The shift modes, in the chooser's order.
 pub const MODES: [&str; 3] = ["Pitch", "Freq", "Ring"];
 
 /// The delay's modes.
-pub const DELAY_MODES: [&str; 2] = ["Hz", "Sync"];
+pub const DELAY_MODES: [&str; 2] = ["ms", "sync"];
 
 /// The LFO's rate modes.
-pub const RATE_MODES: [&str; 2] = ["Hz", "Sync"];
+pub const RATE_MODES: [&str; 2] = ["Hz", "sync"];
 
 /// The pitch sources.
 pub const SOURCES: [&str; 2] = ["Internal", "MIDI"];
@@ -160,8 +165,8 @@ pub const DELAY_DIVISION_COUNT: usize = 14;
 /// The delay's synced divisions, in the chooser's order.
 pub const DELAY_DIVISIONS: &[(&str, f64)] = DIVISIONS.split_at(DELAY_DIVISION_COUNT).0;
 
-/// The division a new device's delay starts on: 1/8.
-const DEFAULT_DIVISION: usize = 5;
+/// The division a new device's delay starts on: 1/4.
+const DEFAULT_DIVISION: usize = 8;
 
 /// The division a new device's LFO starts on: 1/4.
 const DEFAULT_LFO_DIVISION: usize = 8;
@@ -173,10 +178,10 @@ pub const REFERENCE_KEY: u8 = 60;
 /// The latency every mode reports, in seconds.
 const LATENCY_SECONDS: f64 = 0.010;
 
-/// How far a full-scale LFO moves the shift at an Amount of 100 %: in
-/// semitones in Pitch mode, in Hz in Freq and Ring modes.
-const LFO_SEMITONES: f64 = 12.0;
-const LFO_HERTZ: f64 = 1_000.0;
+/// The Tone value at which the feedback path isn't filtered, in Hz.
+pub const TONE_OPEN: f64 = 22_000.0;
+/// The lowest corner Tone sets, in Hz.
+const TONE_LOWEST: f64 = 500.0;
 
 /// How far Spread detunes each channel at 100 %: in cents in Pitch mode, in
 /// Hz in Freq and Ring modes.
@@ -238,40 +243,44 @@ pub fn shifter_type() -> DeviceType {
             .describe("Inverts Spread for the right channel. It has no effect at 0 Spread."),
         ParamDescriptor::toggle(DELAY_ON, "Delay", false)
             .describe("Adds repeats of the shifted signal."),
-        ParamDescriptor::choice(DELAY_MODE, "Delay Mode", &DELAY_MODES, 0)
+        ParamDescriptor::choice(DELAY_MODE, "Delay Mode", &DELAY_MODES, 1)
             .describe("Whether the delay time is a rate in Hz or a beat division."),
         ParamDescriptor::continuous(
-            DELAY_HZ,
+            DELAY_MS,
             "Delay Time",
             (1.0, 1_000.0),
-            5.0,
-            ParamUnit::Hertz,
+            200.0,
+            ParamUnit::Milliseconds,
         )
         .logarithmic()
-        .describe("The delay's rate in Hz: its time is the reciprocal."),
+        .describe("The delay's time while it isn't synced."),
         ParamDescriptor::choice(DELAY_DIVISION, "Delay Beats", &divisions, DEFAULT_DIVISION)
             .describe("The delay time as a beat division, synced to the tempo."),
         ParamDescriptor::continuous(FEEDBACK, "Feedback", (0.0, 95.0), 0.0, ParamUnit::Percent)
             .describe("How much of the delay's output goes back into its input."),
-        ParamDescriptor::continuous(TONE, "Tone", (0.0, 100.0), 0.0, ParamUnit::Percent)
-            .describe("Darkens the delay's feedback path by cutting the highs."),
+        ParamDescriptor::continuous(
+            TONE,
+            "Tone",
+            (TONE_LOWEST, TONE_OPEN),
+            TONE_OPEN,
+            ParamUnit::Hertz,
+        )
+        .logarithmic()
+        .describe("Darkens the delay's feedback path by cutting the highs above it."),
         ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 100.0, ParamUnit::Percent)
             .describe("The balance between the dry and the shifted signal."),
         ParamDescriptor::continuous(
             LFO_AMOUNT,
             "LFO Amount",
-            (-100.0, 100.0),
+            (-48.0, 48.0),
             0.0,
-            ParamUnit::Percent,
+            ParamUnit::Semitones,
         )
-        .describe(
-            "How far the LFO moves the shift: at 100 %, 12 semitones in Pitch mode or 1,000 Hz \
-             in Freq and Ring modes.",
-        ),
-        ParamDescriptor::choice(LFO_WAVE, "LFO Wave", &WAVES, 0).describe("The LFO's waveform."),
+        .describe("Pitch mode: how many semitones the LFO moves the shift."),
+        ParamDescriptor::choice(LFO_WAVE, "LFO Wave", &WAVES, 1).describe("The LFO's waveform."),
         ParamDescriptor::choice(LFO_MODE, "LFO Mode", &RATE_MODES, 0)
             .describe("Whether the LFO's rate is in Hz or a beat division."),
-        ParamDescriptor::continuous(LFO_HZ, "LFO Rate", (0.01, 40.0), 1.0, ParamUnit::Hertz)
+        ParamDescriptor::continuous(LFO_HZ, "LFO Rate", (0.01, 40.0), 0.5, ParamUnit::Hertz)
             .logarithmic()
             .describe("The LFO's rate in Hz."),
         ParamDescriptor::choice(
@@ -281,7 +290,7 @@ pub fn shifter_type() -> DeviceType {
             DEFAULT_LFO_DIVISION,
         )
         .describe("The LFO's cycle as a beat division, synced to the tempo."),
-        ParamDescriptor::choice(LFO_STEREO, "LFO Stereo", &["Phase", "Spin"], 0)
+        ParamDescriptor::choice(LFO_STEREO, "LFO Stereo", &["Phase", "Spin"], 1)
             .describe("Whether the two channels' LFOs differ in phase or in rate."),
         ParamDescriptor::continuous(LFO_PHASE, "LFO Phase", (0.0, 360.0), 0.0, ParamUnit::None)
             .decimals(0)
@@ -322,7 +331,7 @@ pub fn shifter_type() -> DeviceType {
             ENV_ATTACK,
             "Env Attack",
             (0.1, 1_000.0),
-            10.0,
+            6.0,
             ParamUnit::Milliseconds,
         )
         .logarithmic()
@@ -331,7 +340,7 @@ pub fn shifter_type() -> DeviceType {
             ENV_RELEASE,
             "Env Release",
             (1.0, 5_000.0),
-            100.0,
+            200.0,
             ParamUnit::Milliseconds,
         )
         .logarithmic()
@@ -360,11 +369,25 @@ pub fn shifter_type() -> DeviceType {
             .describe("How long a MIDI note takes to slide the pitch to its own."),
         ParamDescriptor::integer(BEND_RANGE, "PB", (0, 24), 2, ParamUnit::Semitones)
             .describe("How far the full pitch bend of the MIDI source moves the pitch."),
+        ParamDescriptor::continuous(
+            LFO_AMOUNT_HZ,
+            "LFO Amount Hz",
+            (-5_000.0, 5_000.0),
+            0.0,
+            ParamUnit::Hertz,
+        )
+        .describe("Freq and Ring modes: how many Hz the LFO moves the shift."),
     ];
     DeviceType::native(SHIFTER, "Shifter", DeviceRole::AudioEffect)
         .with_midi_sidechain()
         .with_description(
             DeviceDescription::new(params)
+                .with_alternate(MODE, COARSE, SHIFT)
+                .with_alternate(MODE, ENV_SEMITONES, ENV_HZ)
+                .with_alternate(MODE, LFO_AMOUNT, LFO_AMOUNT_HZ)
+                .with_alternate(DELAY_MODE, DELAY_MS, DELAY_DIVISION)
+                .with_alternate(LFO_MODE, LFO_HZ, LFO_DIVISION)
+                .with_alternate(LFO_STEREO, LFO_PHASE, LFO_SPIN)
                 .with_layout(layout())
                 .with_banks(&[
                     (
@@ -398,7 +421,10 @@ pub fn shifter_type() -> DeviceType {
                             "LFO Spin",
                         ],
                     ),
-                    ("LFO Shape", &["LFO Offset", "LFO Duty Cycle", "LFO Width"]),
+                    (
+                        "LFO Shape",
+                        &["LFO Offset", "LFO Duty Cycle", "LFO Width", "LFO Amount Hz"],
+                    ),
                     (
                         "Envelope",
                         &[
@@ -414,55 +440,113 @@ pub fn shifter_type() -> DeviceType {
         )
 }
 
-/// The device's layout: the shift, the delay, the LFO and the envelope
-/// follower; the MIDI sidechain's parameters in the expanded part.
+/// The device's layout, as Live draws it in Pitch mode (observed in Live
+/// 12.4.16, 2 November 2026; layout L-DEV-080): the shift and the delay down
+/// the left, the display of the LFO and the envelope follower's, the LFO's
+/// and the envelope follower's controls under them, and the mode with
+/// Dry/Wet at the right. Freq and Ring modes show Shift, Env Amount and LFO
+/// Amount in Hz in the places of Coarse, Env Amount and LFO Amount (the
+/// alternates of the description). What Live shows for Spread, Drive and
+/// Morph isn't recorded: they and the MIDI source's parameters sit in the
+/// expanded part.
 fn layout() -> DeviceLayout {
-    use Widget::{Chooser, Knob, Toggle};
+    use Widget::{Chooser, Knob, SmallKnob};
     let band = |controls: &[(ParamId, Widget)]| {
         LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, controls))
     };
     DeviceLayout::new(LayoutNode::Row(vec![
-        band(&[
-            (MODE, Chooser),
-            (COARSE, Knob),
-            (FINE, Knob),
-            (WINDOW, Knob),
-            (SHIFT, Knob),
-            (DRIVE, Knob),
-            (SPREAD, Knob),
-            (WIDE, Toggle),
+        LayoutNode::Band(ControlBand::free(
+            100.0,
+            BODY_HEIGHT,
+            vec![
+                Control::new(COARSE, Knob, 7.4, 4.0),
+                Control::new(FINE, SmallKnob, 59.6, 4.0),
+                Control::new(WIDE, Widget::Toggle, 54.0, 54.0).sized(43.3, BOX_HEIGHT),
+                Control::new(WINDOW, Widget::Slider, 6.1, 73.5).sized(43.0, 21.0),
+                Control::new(TONE, Widget::Slider, 54.0, 73.5).sized(43.3, 21.0),
+                Control::new(DELAY_ON, Widget::Toggle, 6.1, 106.5).sized(43.0, BOX_HEIGHT),
+                Control::new(DELAY_MS, Widget::Number, 6.1, 123.0)
+                    .unnamed()
+                    .sized(43.0, BOX_HEIGHT),
+                Control::new(DELAY_MODE, Widget::IconSegments(2), 6.1, 139.5).sized(43.0, 12.5),
+                Control::new(FEEDBACK, SmallKnob, 59.6, 107.5),
+            ],
+        )),
+        LayoutNode::Column(vec![
+            LayoutNode::Row(vec![
+                LayoutNode::Cell(
+                    DisplayCell::new("LFO", 141.6, 106.5, 1.0)
+                        .with_inset(2.0)
+                        .with_bottom(ControlBand::free(
+                            137.6,
+                            36.0,
+                            vec![
+                                Control::new(LFO_STEREO, Widget::Cycle, 50.0, 4.0)
+                                    .sized(39.6, 11.0),
+                                Control::new(LFO_PHASE, Widget::Bare, 50.0, 18.0)
+                                    .unnamed()
+                                    .sized(45.0, BOX_HEIGHT),
+                            ],
+                        )),
+                ),
+                LayoutNode::Cell(
+                    DisplayCell::new("Envelope", 54.7, 106.5, 1.0)
+                        .with_inset(2.0)
+                        .with_top(ControlBand::free(
+                            50.7,
+                            45.0,
+                            vec![
+                                Control::new(ENV_ATTACK, Widget::Bare, 6.0, 8.0)
+                                    .captioned("Attack")
+                                    .sized(40.0, 21.0),
+                            ],
+                        ))
+                        .with_bottom(ControlBand::free(
+                            50.7,
+                            30.0,
+                            vec![
+                                Control::new(ENV_RELEASE, Widget::Bare, 6.0, 4.0)
+                                    .captioned("Release")
+                                    .sized(40.0, 21.0),
+                            ],
+                        )),
+                ),
+            ]),
+            LayoutNode::Band(ControlBand::free(
+                197.3,
+                51.5,
+                vec![
+                    Control::new(LFO_WAVE, Chooser, 9.6, 9.5)
+                        .captioned("LFO")
+                        .sized(41.0, 21.0),
+                    Control::new(LFO_MODE, Widget::IconSegments(2), 9.6, 34.2).sized(41.0, 12.5),
+                    Control::new(LFO_HZ, SmallKnob, 58.5, 2.5).captioned("Rate"),
+                    Control::new(LFO_AMOUNT, SmallKnob, 101.3, 2.5).captioned("Amount"),
+                    Control::new(ENV_ON, Widget::Toggle, 148.6, 2.5).sized(38.4, BOX_HEIGHT),
+                    Control::new(ENV_SEMITONES, Widget::Marked, 148.6, 22.5)
+                        .captioned("Amount")
+                        .sized(38.4, 21.0),
+                ],
+            )),
         ]),
-        band(&[
-            (DELAY_ON, Toggle),
-            (DELAY_MODE, Chooser),
-            (DELAY_HZ, Knob),
-            (DELAY_DIVISION, Chooser),
-            (FEEDBACK, Knob),
-            (TONE, Knob),
-        ]),
-        band(&[
-            (LFO_WAVE, Chooser),
-            (LFO_MODE, Chooser),
-            (LFO_AMOUNT, Knob),
-            (LFO_HZ, Knob),
-            (LFO_DIVISION, Chooser),
-            (LFO_STEREO, Chooser),
-            (LFO_PHASE, Knob),
-            (LFO_SPIN, Knob),
-            (LFO_OFFSET, Knob),
-            (LFO_DUTY, Knob),
-            (LFO_WIDTH, Knob),
-        ]),
-        band(&[
-            (ENV_ON, Toggle),
-            (ENV_ATTACK, Knob),
-            (ENV_RELEASE, Knob),
-            (ENV_SEMITONES, Knob),
-            (ENV_HZ, Knob),
-            (DRY_WET, Knob),
+        LayoutNode::Column(vec![
+            LayoutNode::Heading(Heading::new("Mode", 49.7).centered()),
+            LayoutNode::Band(ControlBand::free(
+                49.7,
+                146.0,
+                vec![
+                    Control::new(MODE, Widget::Stack(3), 2.0, 3.4).sized(43.3, 42.0),
+                    Control::new(DRY_WET, SmallKnob, 7.5, 98.0),
+                ],
+            )),
         ]),
     ]))
     .with_expanded(band(&[
+        (SPREAD, Knob),
+        (DRIVE, Knob),
+        (LFO_OFFSET, Knob),
+        (LFO_DUTY, Knob),
+        (LFO_WIDTH, Knob),
         (PITCH_SOURCE, Chooser),
         (GLIDE, Knob),
         (BEND_RANGE, Knob),
@@ -997,18 +1081,17 @@ impl NativeDevice for Shifter {
         let tempo = audio.tempo();
         let bpm = audio.bpm();
         let delay_time = if choice(DELAY_MODE) == 0 {
-            rate / target(DELAY_HZ).max(1e-3)
+            target(DELAY_MS).max(1e-3) * 0.001 * rate
         } else {
             DELAY_DIVISIONS[choice(DELAY_DIVISION).min(DELAY_DIVISION_COUNT - 1)].1 * 60.0 / bpm
                 * rate
         }
         .min(MAX_DELAY_SECONDS * rate);
         let delay_glide = 1.0 - (-1.0 / (DELAY_GLIDE_SECONDS * rate)).exp();
-        let tone = target(TONE) / 100.0;
-        let tone_coefficient = if tone <= 0.0 {
+        let cutoff = target(TONE);
+        let tone_coefficient = if cutoff >= TONE_OPEN {
             1.0
         } else {
-            let cutoff = 20_000.0 * (500.0f64 / 20_000.0).powf(tone);
             1.0 - (-TAU * cutoff / rate).exp()
         };
         self.events.clear();
@@ -1027,8 +1110,8 @@ impl NativeDevice for Shifter {
         let (coarse, fine, shift) = (ramp(COARSE), ramp(FINE), ramp(SHIFT));
         let (spread, drive) = (ramp(SPREAD), ramp(DRIVE));
         let wide = on(WIDE);
-        let (lfo_amount, env_semitones, env_hertz) =
-            (ramp(LFO_AMOUNT), ramp(ENV_SEMITONES), ramp(ENV_HZ));
+        let (lfo_semitones, lfo_hertz) = (ramp(LFO_AMOUNT), ramp(LFO_AMOUNT_HZ));
+        let (env_semitones, env_hertz) = (ramp(ENV_SEMITONES), ramp(ENV_HZ));
         let (feedback, wet) = (ramp(FEEDBACK), ramp(DRY_WET));
         let delay_on = on(DELAY_ON);
         for ch in 0..channels {
@@ -1046,7 +1129,6 @@ impl NativeDevice for Shifter {
             let pitch = self.pitch.next(range);
             let mut lfo = self.lfo.step(tempo, i, shape);
             lfo[1] *= 1.0 - 2.0 * width;
-            let amount = f64::from(lfo_amount[i]) / 100.0;
             for (ch, &swing) in lfo.iter().enumerate().take(channels) {
                 let x = self.input[ch][i];
                 let chan = &mut self.channels[ch];
@@ -1069,14 +1151,14 @@ impl NativeDevice for Shifter {
                         };
                         let semitones = base
                             + spread * SPREAD_CENTS / 100.0
-                            + amount * LFO_SEMITONES * swing
+                            + f64::from(lfo_semitones[i]) * swing
                             + f64::from(env_semitones[i]) * level;
                         chan.pitch(semitones, window, latency, fade)
                     }
                     _ => {
                         let hertz = f64::from(shift[i])
                             + spread * SPREAD_HERTZ
-                            + amount * LFO_HERTZ * swing
+                            + f64::from(lfo_hertz[i]) * swing
                             + f64::from(env_hertz[i]) * level;
                         if mode == 1 {
                             chan.frequency(hertz, rate, latency, &self.taps)

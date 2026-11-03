@@ -24,7 +24,9 @@ pub mod carrier;
 use bl_dsp::pitch::{Config, Tracker};
 use bl_engine::{DeviceType, NodeConfig, Registry};
 use bl_model::Device;
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{
+    BODY_HEIGHT, BOX_HEIGHT, Control, ControlBand, DisplayCell, Heading, LayoutNode, Widget,
+};
 use bl_model::{
     DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayHandle,
     DisplayMarker, DisplaySeries, OrdMap, ParamDescriptor, ParamId, ParamUnit,
@@ -50,7 +52,8 @@ pub const DEPTH: ParamId = ParamId(3);
 pub const ATTACK: ParamId = ParamId(4);
 /// Release: the time an envelope takes to cover 63 % of a fall, in ms.
 pub const RELEASE: ParamId = ParamId(5);
-/// Unvoiced: the noise added to the upper bands for hissing sounds.
+/// Unvoiced: the noise added to the upper bands for hissing sounds, a gain
+/// from −∞ dB to 0 dB (full).
 pub const UNVOICED: ParamId = ParamId(6);
 /// Dry/Wet: the balance between the input and the vocoded signal.
 pub const DRY_WET: ParamId = ParamId(7);
@@ -62,7 +65,8 @@ pub const RANGE_HIGH: ParamId = ParamId(9);
 pub const BW: ParamId = ParamId(10);
 /// Precise or Retro filters.
 pub const FILTER_MODE: ParamId = ParamId(11);
-/// Gate: the level under which a band is silenced, in dBFS.
+/// Gate: the level under which a band is silenced, a gain from −∞ dB (open)
+/// to 0 dB.
 pub const GATE: ParamId = ParamId(12);
 /// Level: the output's gain.
 pub const LEVEL: ParamId = ParamId(13);
@@ -150,7 +154,7 @@ pub fn vocoder_type() -> DeviceType {
         ),
         ParamDescriptor::choice(BANDS, "Bands", &counts, DEFAULT_BANDS)
             .describe("How many bands each filter bank has."),
-        ParamDescriptor::continuous(FORMANT, "Formant", (-12.0, 12.0), 0.0, ParamUnit::Semitones)
+        ParamDescriptor::continuous(FORMANT, "Formant", (-12.0, 12.0), 0.0, ParamUnit::None)
             .describe(
                 "Moves the carrier's bands against the modulator's, changing the voice's size.",
             ),
@@ -159,19 +163,19 @@ pub fn vocoder_type() -> DeviceType {
                 "How far the modulator's levels shape the carrier: none at 0 %, classic at \
                  100 %, only the peaks at 200 %.",
             ),
-        ParamDescriptor::continuous(ATTACK, "Attack", (1.0, 300.0), 5.0, ParamUnit::Milliseconds)
+        ParamDescriptor::continuous(ATTACK, "Attack", (1.0, 300.0), 1.0, ParamUnit::Milliseconds)
             .logarithmic()
             .describe("How quickly the bands follow a rise in the modulator."),
         ParamDescriptor::continuous(
             RELEASE,
             "Release",
             (5.0, 3_000.0),
-            100.0,
+            150.0,
             ParamUnit::Milliseconds,
         )
         .logarithmic()
         .describe("How quickly the bands follow a fall in the modulator."),
-        ParamDescriptor::continuous(UNVOICED, "Unvoiced", (0.0, 100.0), 0.0, ParamUnit::Percent)
+        ParamDescriptor::gain(UNVOICED, "Unvoiced", 0.0, f64::NEG_INFINITY)
             .describe("Adds noise to the upper bands while the modulator hisses."),
         ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 100.0, ParamUnit::Percent)
             .describe("The balance between the input and the vocoded signal."),
@@ -197,7 +201,7 @@ pub fn vocoder_type() -> DeviceType {
             .describe("The bands' bandwidth against the spacing between them."),
         ParamDescriptor::choice(FILTER_MODE, "Precise/Retro", &["Precise", "Retro"], 0)
             .describe("Precise filters, or the gentler boosted filters of older vocoders."),
-        ParamDescriptor::continuous(GATE, "Gate", (-80.0, 0.0), -80.0, ParamUnit::Decibels)
+        ParamDescriptor::gain(GATE, "Gate", 0.0, f64::NEG_INFINITY)
             .describe("Silences a band whose modulator level is below it."),
         ParamDescriptor::gain(LEVEL, "Level", 24.0, 0.0)
             .describe("The output's level, down to silence."),
@@ -287,48 +291,94 @@ pub fn vocoder_type() -> DeviceType {
         )
 }
 
-/// The device's layout: the choices on the left, the filters' and the
-/// envelopes' knobs, the band display with the level and gate beside it, and
-/// the noise's and the oscillator's knobs on the right.
+/// The device's layout, as Live draws it (observed in Live 12.4.16, 2
+/// November 2026; layout L-DEV-079): the carrier's column, the band display
+/// with its controls along its foot, and the column of Depth, Attack,
+/// Release, the channel mode, Formant and Dry/Wet. The noise's and the
+/// oscillator's controls sit in the expanded part, where Beatlayer keeps what
+/// Live shows in the carrier's display for each carrier.
 fn layout() -> DeviceLayout {
-    let band = |controls: &[(ParamId, Widget)]| {
-        LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, controls))
-    };
     DeviceLayout::new(LayoutNode::Row(vec![
-        band(&[
-            (CARRIER, Widget::Chooser),
-            (BANDS, Widget::Chooser),
-            (CHANNEL_MODE, Widget::Chooser),
-            (FILTER_MODE, Widget::Chooser),
-            (ENHANCE, Widget::Toggle),
-            (WAVEFORM, Widget::Chooser),
-            (FAST_SLOW, Widget::Chooser),
+        LayoutNode::Column(vec![
+            LayoutNode::Row(vec![
+                LayoutNode::Heading(Heading::new("Carrier", 46.0)),
+                LayoutNode::Band(ControlBand::free(
+                    44.6,
+                    16.0,
+                    vec![Control::new(ENHANCE, Widget::Toggle, 0.0, 5.0).sized(41.0, 11.0)],
+                )),
+            ]),
+            LayoutNode::Band(ControlBand::free(
+                90.6,
+                14.5,
+                vec![
+                    Control::new(CARRIER, Widget::Chooser, 4.8, 3.0)
+                        .unnamed()
+                        .sized(82.6, 11.0),
+                ],
+            )),
+            LayoutNode::Cell(DisplayCell::new("Carrier", 90.6, 74.5, 1.0).with_inset(4.0)),
+            LayoutNode::Band(ControlBand::free(
+                90.6,
+                53.0,
+                vec![
+                    Control::new(UNVOICED, Widget::SmallKnob, 10.0, 5.0),
+                    Control::new(SENS, Widget::Slider, 50.0, 5.0).sized(36.7, 21.0),
+                    Control::new(FAST_SLOW, Widget::Cycle, 50.0, 38.0).sized(36.7, 11.0),
+                ],
+            )),
         ]),
-        band(&[
-            (DEPTH, Widget::Knob),
-            (ATTACK, Widget::Knob),
-            (RELEASE, Widget::Knob),
-            (FORMANT, Widget::Knob),
-            (UNVOICED, Widget::Knob),
-            (SENS, Widget::Knob),
-        ]),
-        LayoutNode::Cell(DisplayCell::new("Band Display", 300.0, BODY_HEIGHT, 1.0)),
-        band(&[
-            (RANGE_LOW, Widget::Knob),
-            (RANGE_HIGH, Widget::Knob),
-            (GATE, Widget::Knob),
-            (LEVEL, Widget::Knob),
-            (BW, Widget::Knob),
-            (DRY_WET, Widget::Knob),
-        ]),
-        band(&[
-            (NOISE_X, Widget::Knob),
-            (NOISE_Y, Widget::Knob),
-            (PITCH_LOW, Widget::Knob),
-            (PITCH_HIGH, Widget::Knob),
-            (PITCH, Widget::Knob),
-        ]),
+        LayoutNode::Cell(
+            DisplayCell::new("Band Display", 224.6, BODY_HEIGHT, 1.0)
+                .with_inset(4.0)
+                .with_bottom(ControlBand::free(
+                    216.6,
+                    40.0,
+                    vec![
+                        Control::new(BANDS, Widget::BareChooser, 7.0, 1.0).sized(32.0, 21.0),
+                        Control::new(RANGE_HIGH, Widget::Bare, 47.7, 1.0)
+                            .captioned("Range")
+                            .sized(45.0, 21.0),
+                        Control::new(RANGE_LOW, Widget::Bare, 47.7, 25.0)
+                            .unnamed()
+                            .sized(45.0, BOX_HEIGHT),
+                        Control::new(BW, Widget::Bare, 93.6, 1.0)
+                            .captioned("Width")
+                            .sized(30.0, 21.0),
+                        Control::new(FILTER_MODE, Widget::Cycle, 93.0, 26.0).sized(35.0, 11.0),
+                        Control::new(GATE, Widget::Bare, 134.0, 1.0).sized(38.0, 21.0),
+                        Control::new(LEVEL, Widget::Bare, 174.5, 1.0)
+                            .captioned("Output")
+                            .sized(36.0, 21.0),
+                    ],
+                )),
+        ),
+        LayoutNode::Band(ControlBand::free(
+            88.0,
+            BODY_HEIGHT,
+            vec![
+                Control::new(DEPTH, Widget::SmallKnob, 4.4, 5.5),
+                Control::new(CHANNEL_MODE, Widget::Stack(3), 47.3, 5.0).sized(36.4, 42.0),
+                Control::new(ATTACK, Widget::SmallKnob, 4.4, 63.0),
+                Control::new(FORMANT, Widget::SmallKnob, 50.4, 58.6),
+                Control::new(RELEASE, Widget::SmallKnob, 4.4, 111.0),
+                Control::new(DRY_WET, Widget::SmallKnob, 50.4, 111.0),
+            ],
+        )),
     ]))
+    .with_expanded(LayoutNode::Row(vec![LayoutNode::Band(
+        ControlBand::stacked(
+            BODY_HEIGHT,
+            &[
+                (NOISE_X, Widget::Knob),
+                (NOISE_Y, Widget::Knob),
+                (PITCH_LOW, Widget::Knob),
+                (PITCH_HIGH, Widget::Knob),
+                (PITCH, Widget::Knob),
+                (WAVEFORM, Widget::Chooser),
+            ],
+        ),
+    )]))
 }
 
 /// Adds the Vocoder to `registry`.
@@ -547,12 +597,12 @@ impl NativeDevice for Vocoder {
         let step_of = |ms: f64| 1.0 - (-1.0 / (ms * 0.001 * self.rate)).exp();
         let (attack, release) = (step_of(get(ATTACK)), step_of(get(RELEASE)));
         let depth = get(DEPTH) * 0.01;
-        let gate = 10f64.powf(get(GATE) / 20.0);
+        let gate = get(GATE);
         let enhance = (get(ENHANCE) >= 0.5)
             .then(|| 1.0 - (-(TICK as f64) / (ENHANCE_SECONDS * self.rate)).exp());
         let noise_x = get(NOISE_X) * 0.01;
         let noise_y = get(NOISE_Y) * 0.01;
-        let unvoiced = get(UNVOICED) * 0.01;
+        let unvoiced = get(UNVOICED);
         let sens = get(SENS);
         let frame = (if get(FAST_SLOW) >= 0.5 {
             FRAME_SLOW
@@ -760,7 +810,7 @@ pub fn display(
             name: name.to_owned(),
             series: "Bands".to_owned(),
             x: hz as f32,
-            y: FLOOR_DB + 14.0,
+            y: FLOOR_DB + 45.0,
             text: format!("{name} {}", hertz(hz)),
             handle: Some(DisplayHandle { x: id, y: None }),
         });
@@ -772,7 +822,10 @@ pub fn display(
         view: None,
         series: vec![
             axis("Bands", Vec::new()),
-            axis("Gate", vec![value(GATE) as f32; 2]),
+            axis(
+                "Gate",
+                vec![(20.0 * value(GATE).log10() as f32).max(FLOOR_DB); 2],
+            ),
         ],
         markers,
         readings: Vec::new(),

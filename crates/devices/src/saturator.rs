@@ -15,7 +15,9 @@ use core::f32::consts::{FRAC_PI_2, PI};
 
 use bl_dsp::Oversampler;
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{
+    BODY_HEIGHT, BOX_HEIGHT, Control, ControlBand, DisplayCell, LayoutNode, Widget,
+};
 use bl_model::param::db_to_gain;
 use bl_model::{
     Device, DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayMarker,
@@ -249,7 +251,7 @@ pub fn saturator_type() -> DeviceType {
     let params = vec![
         ParamDescriptor::choice(CURVE, "Curve", &CURVES, 0)
             .describe("The curve that shapes each sample of the signal."),
-        ParamDescriptor::continuous(DRIVE, "Drive", (-36.0, 36.0), 5.0, ParamUnit::Decibels)
+        ParamDescriptor::continuous(DRIVE, "Drive", (-36.0, 36.0), 0.0, ParamUnit::Decibels)
             .describe("The gain applied before the curve."),
         ParamDescriptor::continuous(
             THRESHOLD,
@@ -264,13 +266,13 @@ pub fn saturator_type() -> DeviceType {
         ),
         ParamDescriptor::gain(OUTPUT, "Output", 6.0, 0.0)
             .describe("The level of the shaped signal, and the level Post Clip holds it under."),
-        ParamDescriptor::choice(POST_CLIP, "Post Clip", &["Off", "Soft", "Hard"], 0).describe(
+        ParamDescriptor::choice(POST_CLIP, "Post Clip", &["No Clip", "Soft Clip", "Hard Clip"], 0).describe(
             "A clipping stage after the curve and the Color filters, at the Output level: \
              Soft rounds the peaks and Hard cuts them.",
         ),
         percent(DRY_WET, "Dry/Wet", 100.0)
             .describe("The balance between the dry signal and the saturated one."),
-        ParamDescriptor::toggle(COLOR, "Color", false).describe(
+        ParamDescriptor::toggle(COLOR, "Color", true).describe(
             "Switches on two filters that shape the signal before the curve, and their inverse \
              after it.",
         ),
@@ -306,26 +308,34 @@ pub fn saturator_type() -> DeviceType {
         ParamDescriptor::toggle(PRE_DC, "Pre-DC Filter", false)
             .describe("Removes a DC offset from the input before the curve."),
     ];
-    let layout = DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (CURVE, Widget::Chooser),
-                (THRESHOLD, Widget::Knob),
-                (POST_CLIP, Widget::Chooser),
-            ],
-        )),
+    let layout = DeviceLayout::new(LayoutNode::Column(vec![
         LayoutNode::Cell(
-            DisplayCell::new("Shaper Curve", 150.0, BODY_HEIGHT, 1.0)
-                .with_bottom(ControlBand::stacked(60.0, &[(DRIVE, Widget::Knob)])),
+            DisplayCell::new("Shaper Curve", 210.0, 108.0, 1.0)
+                .with_inset(4.0)
+                .with_top(ControlBand::free(
+                    101.0,
+                    15.0,
+                    vec![Control::new(CURVE, Widget::LitChooser, 3.0, 3.0).sized(98.0, BOX_HEIGHT)],
+                ))
+                .with_bottom(ControlBand::free(
+                    202.0,
+                    17.0,
+                    vec![
+                        Control::new(POST_CLIP, Widget::BareChooser, 16.0, 2.0)
+                            .unnamed()
+                            .sized(56.0, BOX_HEIGHT),
+                        Control::new(COLOR, Widget::Toggle, 82.0, 2.0).sized(38.0, BOX_HEIGHT),
+                        Control::new(AMT_LO, Widget::Readout, 131.0, 2.0).sized(66.0, BOX_HEIGHT),
+                    ],
+                )),
         ),
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (OUTPUT, Widget::Knob),
-                (DRY_WET, Widget::Knob),
-                (COLOR, Widget::Toggle),
-                (AMT_LO, Widget::Knob),
+        LayoutNode::Band(ControlBand::free(
+            210.0,
+            50.0,
+            vec![
+                Control::new(DRIVE, Widget::SmallKnob, 26.0, 2.0),
+                Control::new(OUTPUT, Widget::SmallKnob, 89.0, 2.0),
+                Control::new(DRY_WET, Widget::SmallKnob, 152.0, 2.0),
             ],
         )),
     ]))
@@ -333,6 +343,7 @@ pub fn saturator_type() -> DeviceType {
         LayoutNode::Band(ControlBand::stacked(
             BODY_HEIGHT,
             &[
+                (THRESHOLD, Widget::Knob),
                 (AMT_HI, Widget::Knob),
                 (FREQUENCY, Widget::Knob),
                 (WIDTH, Widget::Knob),

@@ -12,7 +12,7 @@ use std::f64::consts::TAU;
 
 use bl_dsp::Random;
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{BOX_HEIGHT, Control, ControlBand, DisplayCell, LayoutNode, Widget};
 use bl_model::{
     Device, DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, ParamDescriptor,
     ParamId, ParamUnit,
@@ -31,7 +31,7 @@ pub const FREQ: ParamId = ParamId(0);
 pub const AMOUNT: ParamId = ParamId(1);
 /// Noise Blend: 0 % is the sine alone, 100 % the noise alone.
 pub const NOISE_BLEND: ParamId = ParamId(2);
-/// Filter Width: the noise band's width.
+/// Width: the noise band's width, in octaves.
 pub const FILTER_WIDTH: ParamId = ParamId(3);
 /// Stereo Width: 0 % modulates both channels alike, 100 % independently.
 pub const STEREO_WIDTH: ParamId = ParamId(4);
@@ -47,7 +47,7 @@ const STEREO_INDEX: usize = 4;
 pub const LATENCY_SECONDS: f64 = 0.002;
 /// The most the modulation moves the delay either way at Amount 100 %.
 const DEPTH_SECONDS: f64 = 0.0015;
-/// The noise band's width in octaves at Filter Width 0 % and at 100 %.
+/// The noise band's width in octaves at its narrowest and its widest.
 const NARROWEST_OCTAVES: f64 = 0.25;
 const WIDEST_OCTAVES: f64 = 4.0;
 /// The RMS of the noise carrier, against the sine's peak of 1.
@@ -59,46 +59,61 @@ const REFRESH_FRAMES: u64 = 16;
 #[must_use]
 pub fn degrade_type() -> DeviceType {
     let params = vec![
-        ParamDescriptor::continuous(FREQ, "Freq", (20.0, 20_000.0), 1_000.0, ParamUnit::Hertz)
+        ParamDescriptor::continuous(FREQ, "Freq", (20.0, 20_000.0), 500.0, ParamUnit::Hertz)
             .logarithmic()
             .describe("The modulation's frequency: the sine's, and the centre of the noise band."),
-        ParamDescriptor::continuous(AMOUNT, "Amount", (0.0, 100.0), 50.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(AMOUNT, "Amount", (0.0, 100.0), 20.0, ParamUnit::Percent)
             .describe("How far the modulation moves the delay."),
         ParamDescriptor::continuous(
             NOISE_BLEND,
             "Noise Blend",
             (0.0, 100.0),
-            0.0,
+            50.0,
             ParamUnit::Percent,
         )
         .describe("The balance between sine and noise modulation: 0 % is sine only."),
         ParamDescriptor::continuous(
             FILTER_WIDTH,
-            "Filter Width",
-            (0.0, 100.0),
-            50.0,
-            ParamUnit::Percent,
+            "Width",
+            (NARROWEST_OCTAVES, WIDEST_OCTAVES),
+            1.0,
+            ParamUnit::None,
         )
-        .describe("The width of the noise band. It does nothing at a Noise Blend of 0 %."),
+        .logarithmic()
+        .describe(
+            "The width of the noise band, in octaves. It does nothing at a Noise Blend of 0 %.",
+        ),
         ParamDescriptor::continuous(
             STEREO_WIDTH,
-            "Stereo Width",
+            "Stereo",
             (0.0, 100.0),
-            0.0,
+            25.0,
             ParamUnit::Percent,
         )
         .describe("From the same modulation in both channels (0 %) to a different one in each."),
     ];
-    let layout = DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Cell(DisplayCell::new("Spectrum", 150.0, BODY_HEIGHT, 1.0)),
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (FREQ, Widget::Knob),
-                (AMOUNT, Widget::Knob),
-                (NOISE_BLEND, Widget::Knob),
-                (FILTER_WIDTH, Widget::Knob),
-                (STEREO_WIDTH, Widget::Knob),
+    let layout = DeviceLayout::new(LayoutNode::Column(vec![
+        LayoutNode::Cell(
+            DisplayCell::new("Spectrum", 190.0, 92.0, 1.0)
+                .with_inset(4.0)
+                .with_bottom(ControlBand::free(
+                    182.0,
+                    20.0,
+                    vec![
+                        Control::new(FILTER_WIDTH, Widget::Readout, 8.5, 4.0)
+                            .sized(60.0, BOX_HEIGHT),
+                        Control::new(STEREO_WIDTH, Widget::Readout, 117.5, 4.0)
+                            .sized(64.0, BOX_HEIGHT),
+                    ],
+                )),
+        ),
+        LayoutNode::Band(ControlBand::free(
+            190.0,
+            66.0,
+            vec![
+                Control::new(FREQ, Widget::SmallKnob, 22.0, 10.0),
+                Control::new(NOISE_BLEND, Widget::Knob, 75.0, 4.0),
+                Control::new(AMOUNT, Widget::SmallKnob, 135.5, 10.0),
             ],
         )),
     ]));
@@ -107,13 +122,7 @@ pub fn degrade_type() -> DeviceType {
             .with_layout(layout)
             .with_banks(&[(
                 "Degrade",
-                &[
-                    "Freq",
-                    "Amount",
-                    "Noise Blend",
-                    "Filter Width",
-                    "Stereo Width",
-                ],
+                &["Freq", "Amount", "Noise Blend", "Width", "Stereo"],
             )]),
     )
 }
@@ -127,11 +136,6 @@ pub fn register(registry: &mut Registry) {
 /// points.
 pub(crate) fn q_for_octaves(octaves: f64) -> f64 {
     1.0 / (2.0 * (std::f64::consts::LN_2 / 2.0 * octaves).sinh())
-}
-
-/// The noise band's width in octaves for Filter Width `percent`.
-fn width_octaves(percent: f64) -> f64 {
-    NARROWEST_OCTAVES * (WIDEST_OCTAVES / NARROWEST_OCTAVES).powf(percent / 100.0)
 }
 
 /// One channel's delay line: written a sample a frame, read between two.
@@ -227,7 +231,7 @@ impl NativeDevice for Degrade {
         );
         for i in 0..frames {
             if self.frames_run.is_multiple_of(REFRESH_FRAMES) {
-                let q = q_for_octaves(width_octaves(f64::from(width[i])));
+                let q = q_for_octaves(f64::from(width[i]));
                 for band in &mut self.band {
                     band.set(f64::from(freq[i]).min(self.rate * 0.45), q, self.rate);
                 }
@@ -308,9 +312,8 @@ mod tests {
 
     // Spec: digital-degradation R4
     #[test]
-    fn filter_width_runs_from_a_quarter_octave_to_four() {
-        assert!((width_octaves(0.0) - 0.25).abs() < 1e-12);
-        assert!((width_octaves(100.0) - 4.0).abs() < 1e-12);
+    fn width_runs_from_a_quarter_octave_to_four() {
+        assert_eq!((NARROWEST_OCTAVES, WIDEST_OCTAVES), (0.25, 4.0));
         // An octave-wide band-pass has a Q of 1.414.
         assert!((q_for_octaves(1.0) - 2f64.sqrt()).abs() < 1e-9);
     }

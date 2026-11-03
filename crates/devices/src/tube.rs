@@ -16,7 +16,7 @@
 
 use bl_dsp::{EnvelopeFollower, Oversampler};
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{BOX_HEIGHT, Control, ControlBand, DisplayCell, LayoutNode, Widget};
 use bl_model::param::db_to_gain;
 use bl_model::{
     Device, DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayMarker,
@@ -24,7 +24,7 @@ use bl_model::{
 };
 
 use crate::eq::{Type, coeffs};
-use crate::framework::{Audio, NativeDevice, ParamBank, add};
+use crate::framework::{Audio, DelayLine, NativeDevice, ParamBank, add};
 use crate::saturator::soft_knee;
 use crate::sections::Biquad;
 
@@ -33,8 +33,8 @@ pub const TUBE: &str = "beatlayer.valve";
 
 /// Model: A, B or C.
 pub const MODEL: ParamId = ParamId(0);
-/// Tone, per cent: the distortion toward the lows at 0, toward the highs at
-/// 100.
+/// Tone, from -1 to 1: the distortion toward the lows below 0, toward the
+/// highs above.
 pub const TONE: ParamId = ParamId(1);
 /// Drive: the gain before the tube, in dB.
 pub const DRIVE: ParamId = ParamId(2);
@@ -50,14 +50,16 @@ pub const RELEASE: ParamId = ParamId(6);
 pub const OUTPUT: ParamId = ParamId(7);
 /// Hi-Quality, a menu item.
 pub const HI_QUALITY: ParamId = ParamId(8);
+/// Dry/Wet, per cent.
+pub const DRY_WET: ParamId = ParamId(9);
 
 /// The models' knees and built-in offsets, A to C.
 pub const MODELS: [&str; 3] = ["A", "B", "C"];
 const KNEES: [f32; 3] = [0.5, 0.2, 0.0];
 const OFFSETS: [f32; 3] = [0.0, 0.05, 0.15];
 
-/// Tone: the shelf's corner, and its gain at 0 % and 100 % (the negative of
-/// it and itself), in dB.
+/// Tone: the shelf's corner, and its gain at -1 and 1 (the negative of it and
+/// itself), in dB.
 const TONE_HZ: f64 = 1_500.0;
 const TONE_RANGE_DB: f64 = 12.0;
 /// Frames between coefficient updates, counted from the device's first
@@ -89,45 +91,68 @@ pub fn tube_type() -> DeviceType {
             "The tube's character: A is clean until the signal reaches a threshold, C always \
              distorts, and B is between.",
         ),
-        ParamDescriptor::continuous(TONE, "Tone", (0.0, 100.0), 50.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(TONE, "Tone", (-1.0, 1.0), 0.0, ParamUnit::None)
             .describe("Steers the distortion toward the lows and mids (low) or the highs (high)."),
-        ParamDescriptor::continuous(DRIVE, "Drive", (0.0, 36.0), 6.0, ParamUnit::Decibels)
+        ParamDescriptor::continuous(DRIVE, "Drive", (0.0, 36.0), 0.0, ParamUnit::Decibels)
             .describe("How much signal reaches the tube; more is dirtier."),
-        ParamDescriptor::continuous(BIAS, "Bias", (0.0, 100.0), 20.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(BIAS, "Bias", (0.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("Pushes the signal into the tube's curve; very high values break it up."),
         ParamDescriptor::continuous(ENVELOPE, "Envelope", (-100.0, 100.0), 0.0, ParamUnit::Percent)
             .describe(
                 "How much the input's level moves the Bias: above 0 loud sounds get dirtier, \
                  below 0 they get cleaner.",
             ),
-        ParamDescriptor::continuous(ATTACK, "Attack", (0.1, 1_000.0), 10.0, ParamUnit::Milliseconds)
+        ParamDescriptor::continuous(ATTACK, "Attack", (0.1, 1_000.0), 5.0, ParamUnit::Milliseconds)
             .logarithmic()
             .describe("How quickly the envelope follows a rise in level; it does nothing at Envelope 0."),
-        ParamDescriptor::continuous(RELEASE, "Release", (1.0, 5_000.0), 100.0, ParamUnit::Milliseconds)
+        ParamDescriptor::continuous(RELEASE, "Release", (1.0, 5_000.0), 35.0, ParamUnit::Milliseconds)
             .logarithmic()
             .describe("How quickly the envelope follows a fall in level; it does nothing at Envelope 0."),
         ParamDescriptor::gain(OUTPUT, "Output", 6.0, 0.0)
             .describe("The level after the tube."),
         ParamDescriptor::toggle(HI_QUALITY, "Hi-Quality", false)
             .describe("Runs the tube at eight times the rate so its harmonics don't alias; it delays the output."),
+        ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 100.0, ParamUnit::Percent)
+            .describe("The balance between the dry signal and the distorted one."),
     ];
     let layout = DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[(MODEL, Widget::Chooser), (TONE, Widget::Knob)],
+        LayoutNode::Band(ControlBand::free(
+            46.0,
+            158.0,
+            vec![
+                Control::new(DRY_WET, Widget::SmallKnob, 8.0, 4.0),
+                Control::new(OUTPUT, Widget::SmallKnob, 8.0, 50.0),
+                Control::new(DRIVE, Widget::SmallKnob, 8.0, 103.0),
+            ],
         )),
-        LayoutNode::Cell(
-            DisplayCell::new("Tube Curve", 130.0, BODY_HEIGHT, 1.0)
-                .with_bottom(ControlBand::stacked(60.0, &[(DRIVE, Widget::Knob)])),
-        ),
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (BIAS, Widget::Knob),
-                (ENVELOPE, Widget::Knob),
-                (ATTACK, Widget::Knob),
-                (RELEASE, Widget::Knob),
-                (OUTPUT, Widget::Knob),
+        LayoutNode::Column(vec![
+            LayoutNode::Cell(DisplayCell::new("Tube Curve", 84.0, 80.0, 1.0).with_inset(4.0)),
+            LayoutNode::Band(ControlBand::free(
+                84.0,
+                78.0,
+                vec![
+                    Control::new(
+                        MODEL,
+                        Widget::Grid {
+                            columns: 3,
+                            rows: 1,
+                        },
+                        19.0,
+                        2.0,
+                    )
+                    .sized(46.0, BOX_HEIGHT),
+                    Control::new(TONE, Widget::SmallKnob, 6.5, 23.0),
+                    Control::new(BIAS, Widget::SmallKnob, 47.0, 23.0),
+                ],
+            )),
+        ]),
+        LayoutNode::Band(ControlBand::free(
+            49.0,
+            158.0,
+            vec![
+                Control::new(ENVELOPE, Widget::SmallKnob, 11.0, 5.0),
+                Control::new(ATTACK, Widget::SmallKnob, 11.0, 61.0),
+                Control::new(RELEASE, Widget::SmallKnob, 11.0, 110.0),
             ],
         )),
     ]));
@@ -136,7 +161,10 @@ pub fn tube_type() -> DeviceType {
             .with_layout(layout)
             .with_menu_options(&[HI_QUALITY])
             .with_banks(&[
-                ("Valve", &["Tube", "Tone", "Drive", "Bias", "Output"]),
+                (
+                    "Valve",
+                    &["Tube", "Tone", "Drive", "Bias", "Output", "Dry/Wet"],
+                ),
                 ("Envelope", &["Envelope", "Attack", "Release"]),
             ]),
     )
@@ -168,6 +196,9 @@ pub struct Valve {
     work: [Vec<f32>; 2],
     offsets: Vec<f32>,
     oversamplers: [Oversampler; 2],
+    /// The input as it came, and delayed by the latency, for the dry signal.
+    dry: [Vec<f32>; 2],
+    delay: [DelayLine; 2],
     /// Frames processed so far, which the Tone refresh counts.
     ticks: u64,
     hi_quality: bool,
@@ -193,6 +224,11 @@ impl Valve {
             tone_after: [flat; 2],
             work: [vec![0.0; frames], vec![0.0; frames]],
             offsets: vec![0.0; frames],
+            dry: [vec![0.0; frames], vec![0.0; frames]],
+            delay: [
+                DelayLine::new(oversamplers[0].latency() as usize),
+                DelayLine::new(oversamplers[0].latency() as usize),
+            ],
             latency: if hi_quality {
                 oversamplers[0].latency()
             } else {
@@ -234,19 +270,20 @@ impl NativeDevice for Valve {
             );
         }
         let ramp = |id: ParamId| params.ramp(id.0 as usize);
-        let (tone, drive, bias, envelope, output) = (
+        let (tone, drive, bias, envelope, output, mix) = (
             ramp(TONE),
             ramp(DRIVE),
             ramp(BIAS),
             ramp(ENVELOPE),
             ramp(OUTPUT),
+            ramp(DRY_WET),
         );
 
         // 1. Per frame: the envelope moves the operating point, and the
         // input goes through Tone's shelf and the Drive gain.
         for i in 0..frames {
             if (self.ticks + i as u64).is_multiple_of(REFRESH_FRAMES) {
-                let gain = TONE_RANGE_DB * (f64::from(tone[i]) - 50.0) / 50.0;
+                let gain = TONE_RANGE_DB * f64::from(tone[i]);
                 for channel in 0..channels {
                     self.tone_before[channel].c =
                         coeffs(Type::HighShelf, TONE_HZ, gain, 0.71, self.rate);
@@ -258,6 +295,7 @@ impl NativeDevice for Valve {
             let mut level = 0.0f32;
             for channel in 0..channels {
                 let x = audio.channel_mut(channel)[i];
+                self.dry[channel][i] = x;
                 self.peak = self.peak.max(x.abs());
                 level = level.max(self.followers[channel].process(x) as f32);
                 self.work[channel][i] = self.tone_before[channel].process(x) * drive_gain;
@@ -289,8 +327,16 @@ impl NativeDevice for Valve {
         // 3. Tone's inverse and Output.
         for channel in 0..channels {
             let out = audio.channel_mut(channel);
+            let latency = self.latency;
             for (i, sample) in out.iter_mut().enumerate() {
-                *sample = self.tone_after[channel].process(self.work[channel][i]) * output[i];
+                let wet = self.tone_after[channel].process(self.work[channel][i]) * output[i];
+                let dry = if latency > 0 {
+                    self.delay[channel].read(latency as usize)
+                } else {
+                    self.dry[channel][i]
+                };
+                self.delay[channel].write(self.dry[channel][i]);
+                *sample = dry + (wet - dry) * (mix[i] / 100.0);
             }
         }
         self.ticks += frames as u64;

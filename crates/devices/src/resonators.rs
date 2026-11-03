@@ -12,7 +12,7 @@ use core::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_4, PI, TAU};
 use bl_dsp::LinearSmoother;
 use bl_dsp::smooth::DEFAULT_SMOOTHING_SECONDS;
 use bl_engine::{DeviceType, KeyPitches, NodeConfig, NodeData, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, LayoutNode, Widget};
+use bl_model::device_layout::{BODY_HEIGHT, Control, ControlBand, Heading, LayoutNode, Widget};
 use bl_model::{
     Device, DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit, Scale,
 };
@@ -25,17 +25,19 @@ use crate::sections::{Biquad, Coeffs};
 /// Resonators' device type.
 pub const RESONATORS: &str = "beatlayer.resonators";
 
-/// The input filter's type: low-pass, band-pass, high-pass or notch (R2).
+/// The input filter's type: low-pass, high-pass, band-pass or notch (R2).
 pub const FILTER_TYPE: ParamId = ParamId(0);
 /// The input filter's frequency.
 pub const FILTER_FREQ: ParamId = ParamId(1);
 /// Mode A or B (R9).
 pub const MODE: ParamId = ParamId(2);
-/// How long the resonators ring, in seconds (R7).
+/// How long the resonators ring, from 0 to 100 (R7): [`decay_seconds`] reads
+/// it as seconds.
 pub const DECAY: ParamId = ParamId(3);
 /// Const: every resonator rings for Decay, whatever its pitch.
 pub const CONST: ParamId = ParamId(4);
-/// Color: the loops' low-pass and the high shelf after them (R8).
+/// Color, from 0 to 100: the loops' low-pass and the high shelf after them
+/// (R8); [`color_percent`] reads it as the law's per cent.
 pub const COLOR: ParamId = ParamId(5);
 /// Reads the pitches in degrees of the current scale (R4); the title bar
 /// draws it.
@@ -46,6 +48,9 @@ pub const WIDTH: ParamId = ParamId(7);
 pub const GAIN: ParamId = ParamId(8);
 /// The balance between the dry signal and the resonators.
 pub const DRY_WET: ParamId = ParamId(9);
+
+/// Filter On: whether the input filter acts (R2).
+pub const FILTER_ON: ParamId = ParamId(FIRST + VOICES as u32 * FIELDS);
 
 /// A resonator's switch, as its offset among the resonator's parameters.
 pub const ON: u32 = 0;
@@ -63,7 +68,32 @@ const VOICES: usize = 5;
 /// The first resonator's parameters follow the global ones.
 const FIRST: u32 = 10;
 /// How many parameters the device has.
-const PARAMS: usize = FIRST as usize + VOICES * FIELDS as usize;
+const PARAMS: usize = FIRST as usize + VOICES * FIELDS as usize + 1;
+
+/// The ring time Decay 0 means, in seconds, and the decades it climbs: 100
+/// is four decades above, and 50 is one second.
+const DECAY_FROM_SECONDS: f64 = 0.01;
+const DECAY_DECADES: f64 = 4.0;
+
+/// The seconds Decay `value` (0 to 100) means: a straight line in the
+/// logarithm of the time.
+#[must_use]
+pub fn decay_seconds(value: f64) -> f64 {
+    DECAY_FROM_SECONDS * 10f64.powf(DECAY_DECADES * value / 100.0)
+}
+
+/// The Decay value (0 to 100) that means `seconds`.
+#[must_use]
+pub fn decay_value(seconds: f64) -> f64 {
+    100.0 * (seconds / DECAY_FROM_SECONDS).log10() / DECAY_DECADES
+}
+
+/// The per cent (−100 to 100) of the Color law that Color `value` (0 to 100)
+/// means: 50 is neutral.
+#[must_use]
+pub fn color_percent(value: f64) -> f64 {
+    (value - 50.0) * 2.0
+}
 
 /// Parameter `field` of resonator `voice` (0 for I to 4 for V).
 #[must_use]
@@ -72,16 +102,16 @@ pub const fn voice_param(voice: usize, field: u32) -> ParamId {
 }
 
 /// The Filter Type choices.
-pub const FILTER_TYPES: [&str; 4] = ["Low-pass", "Band-pass", "High-pass", "Notch"];
+pub const FILTER_TYPES: [&str; 4] = ["Low-pass", "High-pass", "Band-pass", "Notch"];
 /// The Mode choices.
 pub const MODES: [&str; 2] = ["A", "B"];
 
 /// The resonators' names.
 const NAMES: [&str; VOICES] = ["I", "II", "III", "IV", "V"];
 /// The Pitch each of II to V starts at.
-const PITCHES: [i64; VOICES - 1] = [12, 19, 24, -12];
+const PITCHES: [i64; VOICES - 1] = [0; VOICES - 1];
 /// The resonators that start switched on.
-const ON_AT_START: [bool; VOICES] = [true, true, true, false, false];
+const ON_AT_START: [bool; VOICES] = [true; VOICES];
 /// Where each resonator sits at Width 100 %, from −1 (left) to +1 (right).
 const PLACES: [f64; VOICES] = [0.0, -1.0, 1.0, -1.0, 1.0];
 
@@ -114,13 +144,13 @@ const SIZED_FOR_RATE: f64 = 192_000.0;
 #[must_use]
 pub fn resonators_type() -> DeviceType {
     let mut params = vec![
-        ParamDescriptor::choice(FILTER_TYPE, "Filter Type", &FILTER_TYPES, 1)
+        ParamDescriptor::choice(FILTER_TYPE, "Filter Type", &FILTER_TYPES, 2)
             .describe("The input filter: low-pass, band-pass, high-pass or notch."),
         ParamDescriptor::continuous(
             FILTER_FREQ,
             "Filter Frequency",
             (50.0, 18_000.0),
-            1_000.0,
+            500.0,
             ParamUnit::Hertz,
         )
         .logarithmic()
@@ -129,21 +159,20 @@ pub fn resonators_type() -> DeviceType {
             "A rings each resonator as one comb; B adds a second a fifth above, for a clearer \
              pitch from a low Resonator I.",
         ),
-        ParamDescriptor::continuous(DECAY, "Decay", (0.01, 30.0), 1.0, ParamUnit::Seconds)
-            .logarithmic()
+        ParamDescriptor::continuous(DECAY, "Decay", (0.0, 100.0), 50.0, ParamUnit::None)
             .describe("How long the resonators take to fall 60 dB."),
-        ParamDescriptor::toggle(CONST, "Const", false).describe(
+        ParamDescriptor::toggle(CONST, "Const", true).describe(
             "Keeps the decay time the same at every pitch; off, higher resonators ring shorter.",
         ),
-        ParamDescriptor::continuous(COLOR, "Color", (-100.0, 100.0), 0.0, ParamUnit::Percent)
-            .describe("Darkens the resonators below zero and brightens them above."),
+        ParamDescriptor::continuous(COLOR, "Color", (0.0, 100.0), 90.0, ParamUnit::None)
+            .describe("Darkens the resonators below the middle and brightens them above."),
         ParamDescriptor::toggle(USE_SCALE, "Use Current Scale", false).describe(
             "Counts Note and Pitch in degrees of the current scale instead of semitones.",
         ),
         ParamDescriptor::continuous(WIDTH, "Width", (0.0, 100.0), 100.0, ParamUnit::Percent)
             .describe("Spreads the resonators between the left and the right channel."),
         ParamDescriptor::gain(GAIN, "Gain", 12.0, 0.0).describe("The resonators' output level."),
-        ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 100.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 50.0, ParamUnit::Percent)
             .describe("The balance between the unprocessed signal and the resonators."),
     ];
     for (voice, name) in NAMES.iter().enumerate() {
@@ -157,7 +186,7 @@ pub fn resonators_type() -> DeviceType {
                 .describe("The resonator's level."),
         );
         params.push(if voice == 0 {
-            ParamDescriptor::integer(id(PITCH), "I Note", (0, HIGHEST_NOTE), 60, ParamUnit::None)
+            ParamDescriptor::integer(id(PITCH), "I Note", (0, HIGHEST_NOTE), 48, ParamUnit::None)
                 .describe("Resonator I's note, from C-1 to C5 (C3 is key 60).")
         } else {
             ParamDescriptor::integer(
@@ -175,11 +204,15 @@ pub fn resonators_type() -> DeviceType {
                 &format!("{name} Fine"),
                 (-50.0, 50.0),
                 0.0,
-                ParamUnit::Cents,
+                ParamUnit::None,
             )
             .describe("Tunes the resonator in cents."),
         );
     }
+    params.push(
+        ParamDescriptor::toggle(FILTER_ON, "Filter On", true)
+            .describe("Switches the input filter on and off."),
+    );
     DeviceType::native(RESONATORS, "Resonators", DeviceRole::AudioEffect).with_description(
         DeviceDescription::new(params)
             .with_layout(layout())
@@ -214,16 +247,10 @@ pub fn resonators_type() -> DeviceType {
                 (
                     "Detail",
                     &[
-                        "Filter Type",
-                        "Const",
-                        "I On",
-                        "II On",
-                        "III On",
-                        "IV On",
-                        "V On",
-                        "I Gain",
+                        "Const", "I On", "II On", "III On", "IV On", "V On", "I Gain",
                     ],
                 ),
+                ("Filter", &["Filter Type", "Filter On"]),
                 (
                     "Fines",
                     &["I Fine", "II Fine", "III Fine", "IV Fine", "V Fine"],
@@ -232,42 +259,71 @@ pub fn resonators_type() -> DeviceType {
     )
 }
 
-/// The filter, the global controls, a column for each resonator, and the
-/// output.
+/// The panel as Live lays it out (observed in Live 12.4.16, 2 November 2026;
+/// layout L-DEV-078): the filter's column, the global one, a column for each
+/// resonator, and the output's. Every column holds a heading over its band.
 fn layout() -> DeviceLayout {
+    let column = |title: &str, width: f32, controls: Vec<Control>| {
+        LayoutNode::Column(vec![
+            LayoutNode::Heading(Heading::new(title, width).centered()),
+            LayoutNode::Band(ControlBand::free(width, 146.0, controls)),
+        ])
+    };
     let mut parts = vec![
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[(FILTER_TYPE, Widget::Chooser), (FILTER_FREQ, Widget::Knob)],
-        )),
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (MODE, Widget::Chooser),
-                (CONST, Widget::Toggle),
-                (DECAY, Widget::Knob),
-                (COLOR, Widget::Knob),
+        column(
+            "Filter",
+            55.0,
+            vec![
+                Control::new(FILTER_ON, Widget::Toggle, 16.5, 3.4)
+                    .captioned("On")
+                    .sized(22.0, 11.0),
+                Control::new(FILTER_FREQ, Widget::SmallKnob, 11.5, 27.0).captioned("Frequency"),
+                Control::new(FILTER_TYPE, Widget::IconColumn(4), 16.5, 85.0).sized(22.0, 55.0),
             ],
-        )),
+        ),
+        column(
+            "Mode",
+            42.8,
+            vec![
+                Control::new(MODE, Widget::Cycle, 11.0, 3.4).sized(20.0, 11.0),
+                Control::new(DECAY, Widget::SmallKnob, 5.0, 23.0),
+                Control::new(CONST, Widget::Toggle, 7.5, 76.0).sized(27.5, 11.0),
+                Control::new(COLOR, Widget::SmallKnob, 5.0, 97.0),
+            ],
+        ),
     ];
-    for voice in 0..VOICES {
+    for (voice, name) in NAMES.iter().enumerate() {
         let id = |field| voice_param(voice, field);
-        parts.push(LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (id(ON), Widget::Toggle),
-                (id(PITCH), Widget::Number),
-                (id(FINE), Widget::Knob),
-                (id(LEVEL), Widget::Knob),
+        parts.push(column(
+            name,
+            44.4,
+            vec![
+                Control::new(id(ON), Widget::Toggle, 11.2, 3.4)
+                    .captioned("On")
+                    .sized(22.0, 11.0),
+                Control::new(id(PITCH), Widget::SmallKnob, 6.2, 18.0).captioned(if voice == 0 {
+                    "Note"
+                } else {
+                    "Pitch"
+                }),
+                Control::new(id(FINE), Widget::Number, 10.2, 77.0)
+                    .unnamed()
+                    .sized(24.0, 11.0),
+                Control::new(id(LEVEL), Widget::SmallKnob, 6.2, 96.0).captioned(if voice == 0 {
+                    "Output"
+                } else {
+                    "Gain"
+                }),
             ],
-        )));
+        ));
     }
-    parts.push(LayoutNode::Band(ControlBand::stacked(
+    parts.push(LayoutNode::Band(ControlBand::free(
+        43.0,
         BODY_HEIGHT,
-        &[
-            (WIDTH, Widget::Knob),
-            (GAIN, Widget::Knob),
-            (DRY_WET, Widget::Knob),
+        vec![
+            Control::new(WIDTH, Widget::SmallKnob, 5.0, 4.3),
+            Control::new(GAIN, Widget::SmallKnob, 5.0, 54.0).captioned("Output"),
+            Control::new(DRY_WET, Widget::SmallKnob, 5.0, 108.0),
         ],
     )));
     DeviceLayout::new(LayoutNode::Row(parts))
@@ -283,7 +339,7 @@ pub fn register(registry: &mut Registry) {
 fn filter_coeffs(kind: usize, freq: f64, rate: f64) -> Coeffs {
     match kind {
         0 => coeffs(Type::HighCut12, freq, 0.0, FILTER_Q, rate),
-        2 => coeffs(Type::LowCut12, freq, 0.0, FILTER_Q, rate),
+        1 => coeffs(Type::LowCut12, freq, 0.0, FILTER_Q, rate),
         3 => coeffs(Type::Notch, freq, 0.0, FILTER_Q, rate),
         _ => {
             let w0 = TAU * (freq / rate).clamp(1.0e-6, 0.49);
@@ -599,6 +655,7 @@ impl NativeDevice for Resonators {
         let ramp = |id: ParamId| params.ramp(ix[id.0 as usize]);
         let voice_ramp = |v: usize, field| ramp(voice_param(v, field));
         let filter_type = params.value(ix[FILTER_TYPE.0 as usize]) as usize;
+        let filter_on = params.value(ix[FILTER_ON.0 as usize]) >= 0.5;
         let mode_b = params.value(ix[MODE.0 as usize]) >= 0.5;
         let constant = params.value(ix[CONST.0 as usize]) >= 0.5;
         let use_scale = use_current_scale(audio, params, USE_SCALE);
@@ -640,9 +697,11 @@ impl NativeDevice for Resonators {
                 self.filter
                     .set(filter_coeffs(kind.0, f64::from(kind.1), self.rate));
             }
-            let heard = f64::from(self.filter.process(((l + r) / 2.0) as f32));
+            let mono = ((l + r) / 2.0) as f32;
+            let filtered = self.filter.process(mono);
+            let heard = f64::from(if filter_on { filtered } else { mono });
             let (dark, boost) = {
-                let c = f64::from(color[i]) / 100.0;
+                let c = color_percent(f64::from(color[i])) / 100.0;
                 ((-c).max(0.0), c.max(0.0))
             };
             let (mut wet_left, mut wet_right) = (0.0, 0.0);
@@ -666,9 +725,9 @@ impl NativeDevice for Resonators {
                 // Spec: resonators R7. The loop's feedback makes the ring
                 // fall 60 dB in Decay at the pitch it is set for: its own
                 // with Const on, Resonator I's with it off.
-                let fall = |at: f64| {
-                    (-LN_1000 / (f64::from(decay[i]) * if constant { at } else { reference })).exp()
-                };
+                let seconds = decay_seconds(f64::from(decay[i]));
+                let fall =
+                    |at: f64| (-LN_1000 / (seconds * if constant { at } else { reference })).exp();
                 voice.combs[0].tune(hz, fall(hz), dark);
                 let mut out = voice.combs[0].run(heard);
                 // Spec: resonators R9

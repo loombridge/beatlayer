@@ -7,10 +7,10 @@
 use crate::common;
 use bl_core::time::{Bpm, Frames, SampleRate, TempoMap, TempoSegment, Ticks};
 use bl_devices::shifter::{
-    self, BEND_RANGE, COARSE, DELAY_DIVISION, DELAY_HZ, DELAY_MODE, DELAY_ON, DRIVE, DRY_WET,
-    ENV_ATTACK, ENV_HZ, ENV_ON, ENV_RELEASE, FEEDBACK, FINE, GLIDE, LFO_AMOUNT, LFO_DIVISION,
-    LFO_HZ, LFO_MODE, LFO_WAVE, LFO_WIDTH, MODE, PITCH_SOURCE, SHIFT, SHIFTER, SPREAD, TONE, WIDE,
-    WINDOW, shifter_type,
+    self, BEND_RANGE, COARSE, DELAY_DIVISION, DELAY_MODE, DELAY_MS, DELAY_ON, DRIVE, DRY_WET,
+    ENV_ATTACK, ENV_HZ, ENV_ON, ENV_RELEASE, FEEDBACK, FINE, GLIDE, LFO_AMOUNT, LFO_AMOUNT_HZ,
+    LFO_DIVISION, LFO_HZ, LFO_MODE, LFO_WAVE, LFO_WIDTH, MODE, PITCH_SOURCE, SHIFT, SHIFTER,
+    SPREAD, TONE, WIDE, WINDOW, shifter_type,
 };
 use bl_engine::{
     Block, DeviceType, Node, NoteBuffer, NoteEvent, NoteKind, Registry, TransportInfo,
@@ -267,7 +267,7 @@ fn a_fast_lfo_through_a_shift_of_nothing_keeps_the_heads_inside_the_line() {
     // turns back inside its run; the output must stay finite and bounded.
     for window in [2.0, 10.0, 20.0] {
         let params = [
-            (LFO_AMOUNT, 100.0),
+            (LFO_AMOUNT, 12.0),
             (LFO_WAVE, 7.0),
             (LFO_HZ, 40.0),
             (WINDOW, window),
@@ -371,7 +371,7 @@ fn a_synced_lfos_cycle_lands_on_the_beat_at_two_tempos_and_across_a_change() {
     let params = [
         (MODE, 2.0),
         (SHIFT, 4_000.0),
-        (LFO_AMOUNT, 100.0),
+        (LFO_AMOUNT_HZ, 1_000.0),
         (LFO_WAVE, 7.0),
         (LFO_MODE, 1.0),
         (LFO_DIVISION, 8.0),
@@ -422,7 +422,7 @@ fn random_s_and_h_width_mirrors_the_channels_at_full_width() {
         [
             (MODE, 2.0),
             (SHIFT, 4_000.0),
-            (LFO_AMOUNT, 100.0),
+            (LFO_AMOUNT_HZ, 1_000.0),
             (LFO_WAVE, 9.0),
             (LFO_HZ, 100.0),
             (LFO_WIDTH, width),
@@ -518,7 +518,7 @@ fn the_synced_delays_repeat_lands_on_its_frame() {
     }
 
     // Free: 4 Hz is a quarter of a second.
-    let params = [(DELAY_ON, 1.0), (DELAY_HZ, 4.0)];
+    let params = [(DELAY_ON, 1.0), (DELAY_MODE, 0.0), (DELAY_MS, 250.0)];
     let mut node = veer(&params, 4096);
     let out = stream(node.as_mut(), &impulse[..40_000], 4096);
     assert_eq!(out[0][LATENCY + 12_000], 1.0);
@@ -542,7 +542,7 @@ fn tone_cuts_the_highs_of_the_repeats_beyond_the_first() {
         let mut node = veer(&params, 4096);
         stream(node.as_mut(), &burst, 4096).remove(0)
     };
-    let (open, dark) = (render(0.0), render(100.0));
+    let (open, dark) = (render(22_000.0), render(500.0));
     // 1/8 at 120 BPM is 12,000 frames. The repeats sit at that many frames
     // past the dry burst, each 2,000 long.
     let band = |signal: &[f32], repeat: usize| -> f64 {
@@ -699,8 +699,8 @@ fn renders_are_the_same_at_every_block_size() {
             (SPREAD, 40.0),
             (DELAY_ON, 1.0),
             (FEEDBACK, 40.0),
-            (TONE, 30.0),
-            (LFO_AMOUNT, 30.0),
+            (TONE, 6_600.0),
+            (LFO_AMOUNT, 3.6),
             (ENV_ON, 1.0),
             (ENV_HZ, 100.0),
             (DRY_WET, 70.0),
@@ -709,7 +709,7 @@ fn renders_are_the_same_at_every_block_size() {
             (MODE, 1.0),
             (SHIFT, 123.0),
             (SPREAD, 40.0),
-            (LFO_AMOUNT, 30.0),
+            (LFO_AMOUNT_HZ, 300.0),
             (LFO_WAVE, 9.0),
             (ENV_ON, 1.0),
             (ENV_HZ, 100.0),
@@ -759,4 +759,35 @@ fn the_sample_rate_sets_the_latency_in_frames() {
             .unwrap();
         assert_eq!(node.latency(), expected);
     }
+}
+
+// Spec: device-framework R72
+#[test]
+fn a_new_shifter_pairs_its_unit_controls_through_its_switches() {
+    use bl_devices::shifter::{ENV_SEMITONES, LFO_AMOUNT_HZ, LFO_DIVISION, LFO_PHASE, LFO_SPIN};
+    let description = shifter_type().description;
+    description.check().unwrap();
+    let mut values = bl_model::OrdMap::new();
+    // In Pitch mode the panel's controls are the semitone ones.
+    assert_eq!(description.drawn(&values, COARSE), COARSE);
+    assert_eq!(description.drawn(&values, ENV_SEMITONES), ENV_SEMITONES);
+    assert_eq!(description.drawn(&values, LFO_AMOUNT), LFO_AMOUNT);
+    // In Freq mode (and Ring) they read in Hz.
+    values.insert(MODE, 1.0);
+    assert_eq!(description.drawn(&values, COARSE), SHIFT);
+    assert_eq!(description.drawn(&values, ENV_SEMITONES), ENV_HZ);
+    assert_eq!(description.drawn(&values, LFO_AMOUNT), LFO_AMOUNT_HZ);
+    // The delay and the LFO's rate are a time or a rate with a sync switch,
+    // and the LFO's stereo choice puts Phase or Spin in one place.
+    values.insert(DELAY_MODE, 1.0);
+    values.insert(LFO_MODE, 1.0);
+    assert_eq!(description.drawn(&values, DELAY_MS), DELAY_DIVISION);
+    assert_eq!(description.drawn(&values, LFO_HZ), LFO_DIVISION);
+    assert_eq!(
+        description.drawn(&values, LFO_PHASE),
+        LFO_SPIN,
+        "Spin, as Live starts it"
+    );
+    values.insert(bl_devices::shifter::LFO_STEREO, 0.0);
+    assert_eq!(description.drawn(&values, LFO_PHASE), LFO_PHASE);
 }

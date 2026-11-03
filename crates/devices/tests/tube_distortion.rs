@@ -5,7 +5,8 @@
 
 use crate::common;
 use bl_devices::tube::{
-    ATTACK, BIAS, DRIVE, ENVELOPE, HI_QUALITY, MODEL, OUTPUT, RELEASE, TONE, TUBE, tube_type,
+    ATTACK, BIAS, DRIVE, DRY_WET, ENVELOPE, HI_QUALITY, MODEL, OUTPUT, RELEASE, TONE, TUBE,
+    tube_type,
 };
 use bl_engine::{DeviceType, Node, Registry};
 use bl_model::ParamId;
@@ -238,7 +239,7 @@ fn tone_steers_the_distortion_and_leaves_the_clean_signal_alone() {
         params.push((TONE, tone));
         two_tone(&params, 0.05)
     };
-    let (dark, bright) = (small(0.0), small(100.0));
+    let (dark, bright) = (small(-1.0), small(1.0));
     for hz in [300.0, 5_000.0] {
         let (a, b) = (dark(hz), bright(hz));
         assert!((a / b - 1.0).abs() < 1e-3, "{hz} Hz: {a} against {b}");
@@ -253,10 +254,10 @@ fn tone_steers_the_distortion_and_leaves_the_clean_signal_alone() {
         heard(10_000.0) / heard(600.0)
     };
     assert!(
-        hard(100.0) > 1.5 * hard(0.0),
+        hard(1.0) > 1.5 * hard(-1.0),
         "{} against {}",
-        hard(100.0),
-        hard(0.0)
+        hard(1.0),
+        hard(-1.0)
     );
 }
 
@@ -316,6 +317,24 @@ fn output_scales_the_result() {
     }
 }
 
+// Spec: tube-distortion R9
+#[test]
+fn dry_wet_at_zero_is_the_input_and_the_halves_add() {
+    let input = sine(1_000.0, 0.3, 4_800);
+    let render = |mix: f64| {
+        run(
+            valve(&[(MODEL, MODEL_C), (DRY_WET, mix)], 4_800).as_mut(),
+            &input,
+            &[],
+        )
+    };
+    let (dry, wet, half) = (render(0.0), render(100.0), render(50.0));
+    for i in 0..input.len() {
+        assert!((dry[0][i] - input[i]).abs() < 1e-6, "dry is the input");
+        assert!((half[0][i] - (dry[0][i] + wet[0][i]) / 2.0).abs() < 1e-6);
+    }
+}
+
 // Spec: tube-distortion R10
 #[test]
 fn the_display_holds_the_curve_and_the_inputs_level() {
@@ -353,7 +372,7 @@ fn renders_are_bit_identical_at_any_block_size() {
     let input = noise(8192);
     let params = [
         (MODEL, MODEL_B),
-        (TONE, 70.0),
+        (TONE, 0.4),
         (DRIVE, 14.0),
         (BIAS, 35.0),
         (ENVELOPE, 60.0),

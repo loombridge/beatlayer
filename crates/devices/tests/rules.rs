@@ -299,7 +299,7 @@ fn a_clip_modulation_reaches_a_parameter_a_device_reads_by_value() {
             collector.handle(),
         );
         let update: Update = compiler.sync(editor.document());
-        let mut node = node(&registry(), &device(device_type, &[]), 2048);
+        let mut node = node(&registry(), &device(device_type, &[(param, 50.0)]), 2048);
         if let Some((_, data)) = update
             .data
             .into_iter()

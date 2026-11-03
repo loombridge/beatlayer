@@ -7,7 +7,9 @@ use core::f64::consts::{PI, TAU};
 use bl_core::time::SampleRate;
 use bl_dsp::EnvelopeFollower;
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{
+    BODY_HEIGHT, BOX_HEIGHT, Control, ControlBand, DisplayCell, LayoutNode, PADDING, Unit, Widget,
+};
 use bl_model::{
     Device, DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplaySeries,
     OrdMap, ParamDescriptor, ParamId, ParamUnit,
@@ -153,7 +155,7 @@ pub fn phaser_flanger_type() -> DeviceType {
     let params = vec![
         ParamDescriptor::choice(MODE, "Mode", &MODES, 0)
             .describe("The effect algorithm: Phaser, Flanger, or Doubler."),
-        ParamDescriptor::continuous(AMOUNT, "Amount", (0.0, 100.0), 50.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(AMOUNT, "Amount", (0.0, 100.0), 75.0, ParamUnit::Percent)
             .describe("How much modulation moves the notches or delay time."),
         ParamDescriptor::continuous(FEEDBACK, "Feedback", (0.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("How much of the wet signal feeds back into the input."),
@@ -163,20 +165,14 @@ pub fn phaser_flanger_type() -> DeviceType {
             .describe("The output level, reaching silence."),
         ParamDescriptor::continuous(WARMTH, "Warmth", (0.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("Adds subtle saturation and gentle high-frequency rolloff."),
-        ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 50.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 100.0, ParamUnit::Percent)
             .describe("The balance between unprocessed and processed signals."),
-        ParamDescriptor::integer(NOTCHES, "Notches", (1, 16), 4, ParamUnit::None)
+        ParamDescriptor::integer(NOTCHES, "Notches", (1, 16), 2, ParamUnit::None)
             .describe("The number of notch filter stages in Phaser mode."),
-        ParamDescriptor::continuous(
-            CENTER,
-            "Center",
-            (20.0, 20_000.0),
-            1_000.0,
-            ParamUnit::Hertz,
-        )
-        .logarithmic()
-        .describe("Center frequency of the notch filters."),
-        ParamDescriptor::continuous(SPREAD, "Spread", (0.0, 100.0), 50.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(CENTER, "Center", (20.0, 20_000.0), 400.0, ParamUnit::Hertz)
+            .logarithmic()
+            .describe("Center frequency of the notch filters."),
+        ParamDescriptor::continuous(SPREAD, "Spread", (0.0, 100.0), 35.0, ParamUnit::Percent)
             .describe("Distance between notches in Phaser mode."),
         ParamDescriptor::continuous(BLEND, "Blend", (0.0, 1.0), 0.0, ParamUnit::None)
             .describe("Modulation balance between Center (0.0) and Spread (1.0)."),
@@ -198,9 +194,9 @@ pub fn phaser_flanger_type() -> DeviceType {
         .describe("Base delay time in Doubler mode."),
         ParamDescriptor::choice(LFO_WAVE, "LFO Wave", &WAVES, 1)
             .describe("The waveform of the main LFO."),
-        ParamDescriptor::choice(LFO_MODE, "LFO Mode", &RATE_MODES, 0)
-            .describe("Whether the main LFO rate is in Hertz or tempo-synced."),
-        ParamDescriptor::continuous(LFO_HZ, "LFO Freq", (0.01, 40.0), 0.5, ParamUnit::Hertz)
+        ParamDescriptor::toggle(LFO_MODE, "LFO Sync", false)
+            .describe("Whether the main LFO rate is tempo-synced rather than in Hertz."),
+        ParamDescriptor::continuous(LFO_HZ, "LFO Freq", (0.01, 40.0), 0.15, ParamUnit::Hertz)
             .logarithmic()
             .describe("The main LFO rate in Hertz."),
         ParamDescriptor::choice(LFO_DIVISION, "LFO Rate", &divisions, 4)
@@ -274,6 +270,7 @@ pub fn phaser_flanger_type() -> DeviceType {
 
     DeviceType::native(PHASER_FLANGER, "Phaser-Flanger", DeviceRole::AudioEffect).with_description(
         DeviceDescription::new(params)
+            .with_alternate(LFO_MODE, LFO_HZ, LFO_DIVISION)
             .with_layout(layout())
             .with_banks(&[
                 (
@@ -304,7 +301,7 @@ pub fn phaser_flanger_type() -> DeviceType {
                     "LFO",
                     &[
                         "LFO Wave",
-                        "LFO Mode",
+                        "LFO Sync",
                         "LFO Freq",
                         "LFO Rate",
                         "LFO Stereo",
@@ -322,61 +319,94 @@ pub fn phaser_flanger_type() -> DeviceType {
     )
 }
 
+/// Phaser-Flanger as Live draws it: the display with the three modes as tabs
+/// and, along its foot, the mode's own values (Phaser's Notches, Center,
+/// Spread and Blend); under it Rate with its Hz and sync buttons, Amount and
+/// Feedback with its Ø; at the right Output, Warmth and Dry/Wet. The title
+/// bar's expand toggle shows the rest of the LFOs, the envelope and Safe Bass.
 fn layout() -> DeviceLayout {
-    use Widget::{Chooser, Knob, Toggle};
-    let band = |controls: &[(ParamId, Widget)]| {
-        LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, controls))
+    use Widget::{Readout, SmallKnob, Tabs, Toggle};
+    const CELL: f32 = 197.0;
+    const CELL_HEIGHT: f32 = 102.0;
+    const FOOT: f32 = 46.0;
+    let at = Control::new;
+    let phaser = |control: Control| control.shown_only_while(MODE, 0);
+    let readout = |param, x| at(param, Readout, x, 16.0).sized(40.0, 2.0 * BOX_HEIGHT);
+    let foot = ControlBand::free(
+        CELL,
+        FOOT,
+        vec![
+            at(MODE, Tabs(3), 1.0, 0.0).sized(CELL - 2.0, BOX_HEIGHT),
+            phaser(readout(NOTCHES, 4.0)),
+            phaser(readout(CENTER, 45.0)),
+            phaser(readout(SPREAD, 97.0)),
+            phaser(readout(BLEND, 140.0)),
+            readout(FLANGER_TIME, 4.0).shown_only_while(MODE, 1),
+            readout(DOUBLER_TIME, 4.0).shown_only_while(MODE, 2),
+        ],
+    );
+    let cell = DisplayCell::new("Phaser-Flanger", CELL, CELL_HEIGHT, 1.0).with_bottom(foot);
+    let knobs = ControlBand::free(
+        CELL + 2.0 * PADDING,
+        BODY_HEIGHT - CELL_HEIGHT - PADDING,
+        vec![
+            at(LFO_HZ, SmallKnob, 10.0, 6.0)
+                .with_unit(LFO_MODE, [Unit::Hz, Unit::Sync])
+                .labelled("Rate"),
+            at(AMOUNT, SmallKnob, 85.5, 6.0),
+            at(FEEDBACK, SmallKnob, 133.0, 6.0),
+            at(FEEDBACK_INVERT, Toggle, 177.6, 22.0)
+                .sized(14.0, BOX_HEIGHT)
+                .labelled("Ø"),
+        ],
+    );
+    let output = ControlBand::free(
+        54.0,
+        BODY_HEIGHT,
+        vec![
+            at(OUTPUT, SmallKnob, 7.6, 5.0),
+            at(WARMTH, SmallKnob, 7.6, 57.0),
+            at(DRY_WET, SmallKnob, 7.6, 110.8),
+        ],
+    );
+    let expanded = {
+        use Widget::{Chooser, Knob};
+        let band = |controls: &[(ParamId, Widget)]| {
+            LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, controls))
+        };
+        LayoutNode::Row(vec![
+            band(&[
+                (LFO_WAVE, Chooser),
+                (LFO_STEREO, Chooser),
+                (LFO_PHASE, Knob),
+                (LFO_SPIN, Knob),
+                (LFO_DUTY, Knob),
+            ]),
+            band(&[
+                (LFO2_MIX, Knob),
+                (LFO2_MODE, Chooser),
+                (LFO2_HZ, Knob),
+                (LFO2_DIVISION, Chooser),
+            ]),
+            band(&[
+                (ENV_ON, Toggle),
+                (ENV_AMOUNT, Knob),
+                (ENV_ATTACK, Knob),
+                (ENV_RELEASE, Knob),
+            ]),
+            band(&[(SAFE_BASS, Knob)]),
+        ])
     };
-
-    let collapsed = LayoutNode::Row(vec![
-        band(&[(MODE, Chooser), (AMOUNT, Knob)]),
-        LayoutNode::Cell(DisplayCell::new("Phaser-Flanger", 160.0, BODY_HEIGHT, 1.0)),
-        band(&[
-            (NOTCHES, Knob),
-            (CENTER, Knob),
-            (SPREAD, Knob),
-            (BLEND, Knob),
+    DeviceLayout::new(LayoutNode::Row(vec![
+        LayoutNode::Column(vec![
+            LayoutNode::Cell(cell).inset(PADDING, PADDING, PADDING, 0.0),
+            LayoutNode::Band(knobs),
         ]),
-        band(&[(FLANGER_TIME, Knob), (DOUBLER_TIME, Knob)]),
-        band(&[
-            (FEEDBACK, Knob),
-            (FEEDBACK_INVERT, Toggle),
-            (WARMTH, Knob),
-            (OUTPUT, Knob),
-            (DRY_WET, Knob),
-        ]),
-    ]);
-
-    let expanded = LayoutNode::Row(vec![
-        band(&[
-            (LFO_WAVE, Chooser),
-            (LFO_MODE, Chooser),
-            (LFO_HZ, Knob),
-            (LFO_DIVISION, Chooser),
-            (LFO_STEREO, Chooser),
-            (LFO_PHASE, Knob),
-            (LFO_SPIN, Knob),
-            (LFO_DUTY, Knob),
-        ]),
-        band(&[
-            (LFO2_MIX, Knob),
-            (LFO2_MODE, Chooser),
-            (LFO2_HZ, Knob),
-            (LFO2_DIVISION, Chooser),
-        ]),
-        band(&[
-            (ENV_ON, Toggle),
-            (ENV_AMOUNT, Knob),
-            (ENV_ATTACK, Knob),
-            (ENV_RELEASE, Knob),
-        ]),
-        band(&[(SAFE_BASS, Knob)]),
-    ]);
-
-    DeviceLayout::new(collapsed).with_expanded(expanded)
+        LayoutNode::Band(output),
+    ]))
+    .with_expanded(expanded)
 }
 
-/// Adds Phaser-Flanger to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, phaser_flanger_type(), make);
 }

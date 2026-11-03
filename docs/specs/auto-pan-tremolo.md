@@ -42,6 +42,7 @@ Tremolo mode adds Harmonic (modulating high and low frequencies in antiphase acr
 - **R14.** The display cell publishes the current pan position and tremolo level after each block, readable headlessly via `device.display`. (S1, S4)
 - **R15.** Processing allocates, locks, and blocks nothing on the audio thread. Renders are bit-identical at block sizes 1, 64, 512, and 4,096, and repeat run after run. (S4, S5)
 - **R16.** Every parameter can be inserted, set by ID, and read back through the agent API, is automatable and modulatable, and a set saves and reopens with every parameter. (S3, S5)
+- **R17.** The panel is Live's (observed in Live 12.4.16, 2 November 2026): the two modes as tabs across the top, the display, and under it a row of the waveform, the rate's kind, the stereo offset's kind with its phase or spin, Invert and the phase offset; then Amount, Rate (one knob that reads the rate in the kind chosen: hertz, time, a division, or sixteenths), Morph (the Shape control) and, at the right under Att | Mod, the attack time and the dynamic modulation. Tremolo's Harmonic and Vintage sit along the display's foot while that mode is on. A new Auto Pan-Tremolo has an Amount of 50 %. (Layout L-DEV-079)
 
 ## Tests
 
@@ -63,6 +64,7 @@ Tremolo mode adds Harmonic (modulating high and low frequencies in antiphase acr
 | R14 | `crates/devices/tests/auto_pan_tremolo.rs`, `pan_position_is_readable_headlessly_through_display` | unit |
 | R15 | `crates/devices/tests/auto_pan_tremolo.rs`, `renders_are_bit_identical_at_various_block_sizes_and_runs`; `rtsan/tests/devices.rs`, `auto_pan_tremolo_passes_under_rtsan` | unit, RTSan |
 | R16 | `crates/devices/tests/rules.rs` over shipped types; `crates/cli/tests/agent.rs`, `an_agent_inserts_auto_pan_tremolo_by_type_and_sets_and_reads_parameters`; `crates/devices/tests/auto_pan_tremolo.rs`, `a_set_with_auto_pan_tremolo_saves_and_reopens` | unit, MCP |
+| R17 | `crates/devices/tests/live_panels.rs`, `auto_pan_tremolo_holds_lives_controls_in_lives_order` | unit |
 
 ## Not built yet
 

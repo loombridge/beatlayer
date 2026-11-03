@@ -178,7 +178,11 @@ fn panel(name: &str) -> Vec<String> {
             let shown = c
                 .label
                 .map_or_else(|| description.param(c.param).unwrap().name.as_str(), |l| l);
-            let kind = if c.unnamed { "unnamed " } else { "" };
+            let kind = match (c.unnamed, c.titled) {
+                (true, _) => "unnamed ",
+                (_, true) => "titled ",
+                _ => "",
+            };
             format!("{shown}: {kind}{:?}", c.widget)
         })
         .collect()
@@ -535,4 +539,325 @@ fn grain_delay_holds_lives_controls_in_lives_order() {
             "DryWet"
         ]
     );
+}
+
+// Spec: reverb R16
+#[test]
+fn reverb_holds_lives_controls_in_lives_order() {
+    use bl_devices::reverb::*;
+    assert_eq!(
+        panel("Reverb"),
+        [
+            "Lo Cut: Outlined",
+            "Hi Cut: Outlined",
+            ": Inline",
+            ": Inline",
+            "Spin: Toggle",
+            "Amount: Readout",
+            "Rate: Readout",
+            "Shape: Spread",
+            "High: Toggle",
+            ": Inline",
+            "Low: Outlined",
+            ": Inline",
+            "Diffusion: Readout",
+            "Scale: Readout",
+            "Chorus: Toggle",
+            "Amount: Readout",
+            "Rate: Readout",
+            "Predelay: SmallKnob",
+            "Smooth: Chooser",
+            "Size: SmallKnob",
+            "Decay: SmallKnob",
+            "Freeze: Toggle",
+            "Flat: Outlined",
+            "Cut: Outlined",
+            "Stereo: SmallKnob",
+            "Density: Chooser",
+            "Reflect: SmallKnob",
+            "Diffuse: SmallKnob",
+            "Dry/Wet: SmallKnob",
+        ]
+    );
+    // Live's new Reverb: the high cut on, Spin at 0.30 Hz, the tail's high
+    // damping on, Diffusion 60 % and Scale 40 %, Chorus at 0.02 Hz, a 2.5 ms
+    // predelay, Smooth Fast, a 1.2 s Decay, Freeze's Flat and Cut on, the
+    // lowest Density, 0 dB Reflect and Diffuse and 55 % wet.
+    let db = bl_model::param::db_to_gain;
+    for (id, value) in [
+        (LOW_CUT, 0.0),
+        (HIGH_CUT, 1.0),
+        (SPIN, 0.0),
+        (SPIN_RATE, 0.3),
+        (HIGH_DAMP, 1.0),
+        (LOW_DAMP, 0.0),
+        (DIFFUSION, 60.0),
+        (SCALE, 40.0),
+        (CHORUS, 0.0),
+        (CHORUS_RATE, 0.02),
+        (PREDELAY, 2.5),
+        (SMOOTH, 1.0),
+        (DECAY, 1.2),
+        (FREEZE, 0.0),
+        (FLAT, 1.0),
+        (CUT, 1.0),
+        (DENSITY, 0.0),
+        (REFLECT, db(0.0)),
+        (DIFFUSE, db(0.0)),
+        (DRY_WET, 55.0),
+    ] {
+        assert_eq!(default_of("Reverb", id), value, "parameter {}", id.0);
+    }
+    assert_eq!(DENSITIES, ["Low", "Mid", "High"]);
+}
+
+// Spec: chorus-ensemble R10
+#[test]
+fn chorus_ensemble_holds_lives_controls_in_lives_order() {
+    use bl_devices::chorus_ensemble::*;
+    assert_eq!(
+        panel("Chorus-Ensemble"),
+        [
+            "Mode: Tabs(3)",
+            ": Inline",
+            "Width: Readout",
+            "Time: Chooser",
+            "Taps: titled Segments(2)",
+            "Rate: SmallKnob",
+            "Amount: SmallKnob",
+            "Feedback: SmallKnob",
+            "Ø: Toggle",
+            "Output: SmallKnob",
+            "Warmth: SmallKnob",
+            "Dry/Wet: SmallKnob",
+        ]
+    );
+    // Live's new Chorus-Ensemble: Chorus at 0.90 Hz, 50 %, a 50 Hz high-pass,
+    // 100 % wide, 20 ms on two taps, no feedback or warmth and 50 % wet.
+    for (id, value) in [
+        (MODE, 0.0),
+        (RATE, 0.9),
+        (AMOUNT, 50.0),
+        (FEEDBACK, 0.0),
+        (FEEDBACK_INVERT, 0.0),
+        (HP_FREQ, 50.0),
+        (WIDTH, 100.0),
+        (CHORUS_TIME, 3.0),
+        (CHORUS_TAPS, 1.0),
+        (WARMTH, 0.0),
+        (DRY_WET, 50.0),
+    ] {
+        assert_eq!(
+            default_of("Chorus-Ensemble", id),
+            value,
+            "parameter {}",
+            id.0
+        );
+    }
+    assert_eq!(CHORUS_TIMES[3], "20 ms");
+    assert_eq!(TAPS, ["1", "2"]);
+}
+
+// Spec: phaser-flanger R15
+#[test]
+fn phaser_flanger_holds_lives_controls_in_lives_order() {
+    use bl_devices::phaser_flanger::*;
+    assert_eq!(
+        panel("Phaser-Flanger"),
+        [
+            "Mode: Tabs(3)",
+            "Notches: Readout",
+            "Center: Readout",
+            "Spread: Readout",
+            "Blend: Readout",
+            "Rate: SmallKnob",
+            "Amount: SmallKnob",
+            "Feedback: SmallKnob",
+            "Ø: Toggle",
+            "Output: SmallKnob",
+            "Warmth: SmallKnob",
+            "Dry/Wet: SmallKnob",
+        ]
+    );
+    // Rate is one knob that reads Hz, or the division while its sync
+    // button is on, never both.
+    let description = device("Phaser-Flanger").description;
+    assert!(
+        description
+            .alternates
+            .iter()
+            .any(|a| { (a.switch, a.off, a.on) == (LFO_MODE, LFO_HZ, LFO_DIVISION) })
+    );
+    let placed = description.layout.place(description.layout.docked_size());
+    let rate = placed.controls.iter().find(|c| c.param == LFO_HZ).unwrap();
+    assert_eq!(
+        rate.unit.map(|u| u.units),
+        Some([
+            bl_model::device_layout::Unit::Hz,
+            bl_model::device_layout::Unit::Sync
+        ])
+    );
+    assert!(placed.controls.iter().all(|c| c.param != LFO_DIVISION));
+    // Live's new Phaser-Flanger: a Phaser of 2 notches at 400 Hz, a 35 %
+    // spread and no blend, 0.15 Hz, 75 %, no feedback, 100 % wet.
+    for (id, value) in [
+        (MODE, 0.0),
+        (NOTCHES, 2.0),
+        (CENTER, 400.0),
+        (SPREAD, 35.0),
+        (BLEND, 0.0),
+        (LFO_MODE, 0.0),
+        (LFO_HZ, 0.15),
+        (AMOUNT, 75.0),
+        (FEEDBACK, 0.0),
+        (FEEDBACK_INVERT, 0.0),
+        (WARMTH, 0.0),
+        (DRY_WET, 100.0),
+    ] {
+        assert_eq!(
+            default_of("Phaser-Flanger", id),
+            value,
+            "parameter {}",
+            id.0
+        );
+    }
+}
+
+// Spec: auto-pan-tremolo R17
+#[test]
+fn auto_pan_tremolo_holds_lives_controls_in_lives_order() {
+    use bl_devices::auto_pan_tremolo::*;
+    assert_eq!(
+        panel("Auto Pan-Tremolo"),
+        [
+            "Mode: Tabs(2)",
+            "Waveform: unnamed Chooser",
+            "Time Mode: unnamed Chooser",
+            "Stereo Offset: unnamed Chooser",
+            ": Inline",
+            "Invert: IconToggle",
+            ": Inline",
+            "Amount: SmallKnob",
+            "Rate: SmallKnob",
+            "Morph: SmallKnob",
+            "Attack Time: unnamed Number",
+            "Dynamic FM: unnamed Number",
+        ]
+    );
+    // Live's new Auto Pan-Tremolo: Panning with a sine at 1.00 Hz, 180
+    // degrees of phase, no offset, 50 % Amount, no Morph, attack or
+    // modulation.
+    for (id, value) in [
+        (MODE, 0.0),
+        (WAVE, 0.0),
+        (TIME_MODE, 0.0),
+        (RATE_HZ, 1.0),
+        (STEREO_MODE, 0.0),
+        (PHASE, 180.0),
+        (PHASE_OFFSET, 0.0),
+        (INVERT, 0.0),
+        (AMOUNT, 50.0),
+        (SHAPE, 0.0),
+        (ATTACK_TIME, 0.0),
+        (DYNAMIC_FM, 0.0),
+    ] {
+        assert_eq!(
+            default_of("Auto Pan-Tremolo", id),
+            value,
+            "parameter {}",
+            id.0
+        );
+    }
+}
+
+// Spec: auto-filter R17
+#[test]
+fn auto_filter_holds_lives_controls_in_lives_order() {
+    use bl_devices::auto_filter::*;
+    assert_eq!(
+        panel("Auto Filter"),
+        [
+            "Freq: Knob",
+            "Type: unnamed Chooser",
+            "Slope: Segments(2)",
+            "Res: SmallKnob",
+            "LFO Stereo: unnamed Chooser",
+            "Ø: Inline",
+            ": Inline",
+            "LFO Quantize: unnamed Chooser",
+            ": Inline",
+            "Amount: SmallKnob",
+            "Rate: SmallKnob",
+            "LFO Wave: unnamed Chooser",
+            "LFO Morph: unnamed Slider",
+            "LFO Mode: unnamed Chooser",
+            "Envelope: SmallKnob",
+            "Drive: SmallKnob",
+            "Circuit: unnamed Chooser",
+            "Clip: Toggle",
+            "Output: unnamed Slider",
+            "Dry/Wet: SmallKnob",
+        ]
+    );
+    // Live's new Auto Filter: a low-pass at 10.0 kHz, 24 dB, no resonance, the
+    // LFO's Phase at 4 degrees with no amount, an SVF circuit.
+    for (id, value) in [
+        (TYPE, 0.0),
+        (SLOPE, 2.0),
+        (FREQ, 10_000.0),
+        (RES, 0.0),
+        (CIRCUIT, 0.0),
+        (LFO_AMOUNT, 0.0),
+        (LFO_HZ, 1.0),
+        (LFO_MODE, 0.0),
+        (LFO_MORPH, 0.0),
+        (LFO_STEREO, 0.0),
+        (LFO_PHASE, 4.0),
+        (LFO_OFFSET, 0.0),
+        (LFO_QUANTIZE, 0.0),
+        (LFO_STEPS, 8.0),
+        (ENV_AMOUNT, 0.0),
+        (DRIVE, 0.0),
+        (CLIP, 0.0),
+        (DRY_WET, 100.0),
+    ] {
+        assert_eq!(default_of("Auto Filter", id), value, "parameter {}", id.0);
+    }
+    assert_eq!(RATE_MODES[0], "Rate");
+}
+
+// Spec: looper R29
+#[test]
+fn looper_holds_lives_parameter_controls_in_lives_order() {
+    use bl_devices::looper::*;
+    assert_eq!(
+        panel("Looper"),
+        [
+            "Transport: IconSegments(4)",
+            "Quantization: Chooser",
+            "Record Length: unnamed Chooser",
+            "Play/Overdub: IconToggle",
+            "Song Control: Chooser",
+            "Tempo Control: Chooser",
+            "Speed: SmallKnob",
+            "Reverse: Toggle",
+            "Feedback: SmallKnob",
+            "Input → Output: Chooser",
+        ]
+    );
+    // Live's new Looper: stopped, recording for as many bars as it takes and
+    // then overdubbing, starting the song and setting its tempo, with the
+    // input always heard and a Feedback of 100 %.
+    for (id, value) in [
+        (TRANSPORT, 3.0),
+        (RECORD_LENGTH, 0.0),
+        (AFTER_RECORD, 1.0),
+        (SONG_CONTROL, 1.0),
+        (TEMPO_CONTROL, 2.0),
+        (REVERSE, 0.0),
+        (FEEDBACK, 100.0),
+        (INPUT_OUTPUT, 0.0),
+    ] {
+        assert_eq!(default_of("Looper", id), value, "parameter {}", id.0);
+    }
 }

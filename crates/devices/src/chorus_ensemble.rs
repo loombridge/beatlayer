@@ -6,7 +6,9 @@ use core::f64::consts::{PI, TAU};
 
 use bl_core::time::SampleRate;
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{
+    BODY_HEIGHT, BOX_HEIGHT, Control, ControlBand, DisplayCell, LayoutNode, PADDING, Widget,
+};
 use bl_model::{
     Device, DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplaySeries,
     OrdMap, ParamDescriptor, ParamId, ParamUnit,
@@ -51,7 +53,7 @@ pub const VIBRATO_SHAPE: ParamId = ParamId(13);
 
 pub const MODES: [&str; 3] = ["Chorus", "Ensemble", "Vibrato"];
 pub const CHORUS_TIMES: [&str; 6] = ["Auto", "7 ms", "10 ms", "20 ms", "35 ms", "50 ms"];
-pub const TAPS: [&str; 2] = ["1 Tap", "2 Taps"];
+pub const TAPS: [&str; 2] = ["1", "2"];
 
 const MAX_DELAY_SECS: f64 = 0.5;
 
@@ -64,7 +66,7 @@ pub fn chorus_ensemble_type() -> DeviceType {
     let params = vec![
         ParamDescriptor::choice(MODE, "Mode", &MODES, 0)
             .describe("The effect algorithm: Chorus, Ensemble, or Vibrato."),
-        ParamDescriptor::continuous(RATE, "Rate", (0.01, 20.0), 1.0, ParamUnit::Hertz)
+        ParamDescriptor::continuous(RATE, "Rate", (0.01, 20.0), 0.9, ParamUnit::Hertz)
             .logarithmic()
             .describe("The LFO modulation rate in Hertz."),
         ParamDescriptor::continuous(AMOUNT, "Amount", (0.0, 100.0), 50.0, ParamUnit::Percent)
@@ -73,7 +75,7 @@ pub fn chorus_ensemble_type() -> DeviceType {
             .describe("How much of the wet signal feeds back into the input."),
         ParamDescriptor::toggle(FEEDBACK_INVERT, "Feedback Invert", false)
             .describe("Inverts the polarity of the feedback signal."),
-        ParamDescriptor::continuous(HP_FREQ, "High-Pass", (20.0, 2000.0), 20.0, ParamUnit::Hertz)
+        ParamDescriptor::continuous(HP_FREQ, "High-Pass", (20.0, 2000.0), 50.0, ParamUnit::Hertz)
             .logarithmic()
             .describe("High-pass filter cutoff on the wet effect signal."),
         ParamDescriptor::continuous(WIDTH, "Width", (0.0, 200.0), 100.0, ParamUnit::Percent)
@@ -84,7 +86,7 @@ pub fn chorus_ensemble_type() -> DeviceType {
             .describe("The output level, reaching silence."),
         ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 50.0, ParamUnit::Percent)
             .describe("The balance between unprocessed and processed signals."),
-        ParamDescriptor::choice(CHORUS_TIME, "Time", &CHORUS_TIMES, 0)
+        ParamDescriptor::choice(CHORUS_TIME, "Time", &CHORUS_TIMES, 3)
             .describe("Auto scaling or a fixed delay time in Chorus mode."),
         ParamDescriptor::choice(CHORUS_TAPS, "Taps", &TAPS, 1)
             .describe("Single or dual tap delay in Chorus mode."),
@@ -133,32 +135,69 @@ pub fn chorus_ensemble_type() -> DeviceType {
         )
 }
 
+/// Chorus-Ensemble as Live draws it: the display, with the three modes as
+/// tabs and the mode's own values along its foot (the high-pass's frequency,
+/// Width, and in Chorus Time and Taps, in Vibrato Offset and Shape); under it
+/// Rate, Amount and Feedback with its Ø; at the right Output, Warmth and
+/// Dry/Wet.
 fn layout() -> DeviceLayout {
-    use Widget::{Chooser, Knob, Toggle};
-    let band = |controls: &[(ParamId, Widget)]| {
-        LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, controls))
-    };
-
-    let collapsed = LayoutNode::Row(vec![
-        band(&[(MODE, Chooser), (RATE, Knob), (AMOUNT, Knob)]),
-        LayoutNode::Cell(DisplayCell::new("Chorus-Ensemble", 160.0, BODY_HEIGHT, 1.0)),
-        band(&[(CHORUS_TIME, Chooser), (CHORUS_TAPS, Chooser)]),
-        band(&[(VIBRATO_OFFSET, Knob), (VIBRATO_SHAPE, Knob)]),
-        band(&[
-            (HP_FREQ, Knob),
-            (WIDTH, Knob),
-            (FEEDBACK, Knob),
-            (FEEDBACK_INVERT, Toggle),
-            (WARMTH, Knob),
-            (OUTPUT, Knob),
-            (DRY_WET, Knob),
+    use Widget::{Chooser, Readout, SmallKnob, Tabs, Toggle};
+    const CELL: f32 = 171.0;
+    const CELL_HEIGHT: f32 = 97.0;
+    const FOOT: f32 = 44.0;
+    let at = Control::new;
+    let chorus = |control: Control| control.shown_only_while(MODE, 0);
+    let vibrato = |control: Control| control.shown_only_while(MODE, 2);
+    let foot = ControlBand::free(
+        CELL,
+        FOOT,
+        vec![
+            at(MODE, Tabs(3), 1.0, 3.0).sized(166.0, BOX_HEIGHT),
+            at(HP_FREQ, Widget::Inline, 1.0, 31.0)
+                .sized(40.0, BOX_HEIGHT)
+                .labelled(""),
+            at(WIDTH, Readout, 47.0, 19.0).sized(38.0, 2.0 * BOX_HEIGHT),
+            chorus(at(CHORUS_TIME, Chooser, 89.0, 19.0).sized(42.0, 21.0)),
+            chorus(
+                at(CHORUS_TAPS, Widget::Segments(2), 135.0, 19.0)
+                    .titled()
+                    .sized(32.0, 21.0),
+            ),
+            vibrato(at(VIBRATO_OFFSET, Readout, 89.0, 19.0).sized(42.0, 2.0 * BOX_HEIGHT)),
+            vibrato(at(VIBRATO_SHAPE, Readout, 135.0, 19.0).sized(32.0, 2.0 * BOX_HEIGHT)),
+        ],
+    );
+    let cell = DisplayCell::new("Chorus-Ensemble", CELL, CELL_HEIGHT, 1.0).with_bottom(foot);
+    let knobs = ControlBand::free(
+        CELL + 2.0 * PADDING,
+        BODY_HEIGHT - CELL_HEIGHT - PADDING,
+        vec![
+            at(RATE, SmallKnob, 8.6, 10.0),
+            at(AMOUNT, SmallKnob, 55.0, 10.0),
+            at(FEEDBACK, SmallKnob, 104.0, 10.0),
+            at(FEEDBACK_INVERT, Toggle, 149.0, 26.0)
+                .sized(14.0, BOX_HEIGHT)
+                .labelled("Ø"),
+        ],
+    );
+    let output = ControlBand::free(
+        55.0,
+        BODY_HEIGHT,
+        vec![
+            at(OUTPUT, SmallKnob, 6.0, 5.0),
+            at(WARMTH, SmallKnob, 6.0, 57.0),
+            at(DRY_WET, SmallKnob, 6.0, 110.8),
+        ],
+    );
+    DeviceLayout::new(LayoutNode::Row(vec![
+        LayoutNode::Column(vec![
+            LayoutNode::Cell(cell).inset(PADDING, PADDING, PADDING, 0.0),
+            LayoutNode::Band(knobs),
         ]),
-    ]);
-
-    DeviceLayout::new(collapsed)
+        LayoutNode::Band(output),
+    ]))
 }
 
-/// Adds Chorus-Ensemble to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, chorus_ensemble_type(), make);
 }

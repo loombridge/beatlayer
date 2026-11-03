@@ -399,9 +399,6 @@ pub fn show(
     for heading in &laid.headings {
         parts::heading(ui, theme, heading, body.min);
     }
-    for caption in &laid.captions {
-        parts::caption(ui, theme, caption, body.min);
-    }
     for placed in pages.iter().filter(|p| !p.buttons.is_empty()) {
         let rects: Vec<Rect> = placed
             .buttons
@@ -555,6 +552,9 @@ pub fn show(
             }
         });
     }
+    for caption in &laid.captions {
+        parts::caption(ui, theme, caption, body.min);
+    }
     for (at, (param, widget, whole)) in controls.into_iter().enumerate() {
         let extra = laid.controls.get(at);
         // A control put away while another's value says so: its place is
@@ -647,16 +647,25 @@ pub fn show(
             },
             label: extra.and_then(|e| e.label),
             steps: extra.and_then(|e| e.steps),
-            at_left: matches!(
-                widget,
-                Widget::Number | Widget::Slider | Widget::Marked | Widget::Chooser
-            ),
+            at_left: extra.is_some_and(|e| e.titled)
+                || matches!(
+                    widget,
+                    Widget::Number | Widget::Slider | Widget::Marked | Widget::Chooser
+                ),
         };
         // Spec: scales R16. A parameter the device takes from its current
         // scale is drawn disabled.
         let locked = panel.locked.contains(&param);
         let glyph = extra.and_then(|e| e.glyph);
         let named = !extra.is_some_and(|e| e.unnamed);
+        let titled = extra.is_some_and(|e| e.titled);
+        // The buttons of a row, stack or grid: all of the control, or what is
+        // left under its name.
+        let buttons = if titled {
+            control.label(ui, theme)
+        } else {
+            rect
+        };
         let mut draw = |ui: &mut Ui| match widget {
             Widget::Knob => control.knob(ui, theme, events, (false, named)),
             Widget::SmallKnob => control.knob(ui, theme, events, (true, named)),
@@ -665,29 +674,28 @@ pub fn show(
             Widget::Marked => control.number(ui, theme, events, (false, true, named)),
             Widget::Inline => control.inline(ui, theme, events),
             Widget::Tick => control.tick(ui, theme, events),
+            Widget::Readout => control.readout(ui, theme, events, false),
+            Widget::Spread => control.readout(ui, theme, events, true),
             Widget::Toggle => control.toggle(ui, theme, events, false),
             Widget::Outlined => control.toggle(ui, theme, events, true),
             Widget::IconToggle => control.icon_toggle(ui, theme, events, (glyph, false)),
             Widget::Round => control.icon_toggle(ui, theme, events, (glyph, true)),
             Widget::Chooser => control.chooser(ui, theme, events, named),
-            Widget::Segments(n) => {
-                let cells = button_cells(rect, usize::from(n), 1);
-                control.choice_buttons(ui, theme, events, (&cells, false, false));
-            }
-            Widget::Tabs(n) => {
-                let cells = button_cells(rect, usize::from(n), 1);
-                control.choice_buttons(ui, theme, events, (&cells, false, true));
-            }
-            Widget::IconSegments(n) => {
-                let cells = button_cells(rect, usize::from(n), 1);
-                control.choice_buttons(ui, theme, events, (&cells, true, false));
+            Widget::Segments(n) | Widget::Tabs(n) | Widget::IconSegments(n) => {
+                let cells = button_cells(buttons, usize::from(n), 1);
+                let (icons, outlined) = match widget {
+                    Widget::Segments(_) => (false, false),
+                    Widget::Tabs(_) => (false, true),
+                    _ => (true, false),
+                };
+                control.choice_buttons(ui, theme, events, (&cells, icons, outlined));
             }
             Widget::Stack(n) => {
-                let cells = button_cells(rect, 1, usize::from(n));
+                let cells = button_cells(buttons, 1, usize::from(n));
                 control.choice_buttons(ui, theme, events, (&cells, false, false));
             }
             Widget::Grid { columns, rows } => {
-                let cells = button_cells(rect, usize::from(columns), usize::from(rows));
+                let cells = button_cells(buttons, usize::from(columns), usize::from(rows));
                 control.choice_buttons(ui, theme, events, (&cells, false, false));
             }
         };

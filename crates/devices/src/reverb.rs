@@ -16,7 +16,9 @@
 use core::f64::consts::TAU;
 
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, LayoutNode, Widget};
+use bl_model::device_layout::{
+    BODY_HEIGHT, BOX_HEIGHT, Caption, Control, ControlBand, DisplayCell, LayoutNode, Widget,
+};
 use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
@@ -87,7 +89,7 @@ pub const DRY_WET: ParamId = ParamId(28);
 const PARAMS: usize = 29;
 
 /// The Damping chooser's choices.
-pub const DENSITIES: [&str; 3] = ["Sparse", "Normal", "High"];
+pub const DENSITIES: [&str; 3] = ["Low", "Mid", "High"];
 /// The Smooth chooser's choices.
 pub const SMOOTHS: [&str; 3] = ["None", "Fast", "Slow"];
 
@@ -121,6 +123,9 @@ const SIZE_LARGE: f64 = 2.0;
 
 /// Frames between updates of the coefficients that follow the continuous
 /// parameters.
+/// The most Reflect and Diffuse raise their part of the wet signal, in dB.
+const REFLECT_MAX_DB: f64 = 6.0;
+
 const COEFF_GRID: u64 = 32;
 /// Scale at its bottom scales the allpass delays by this.
 const SCALE_SMALL: f64 = 0.5;
@@ -167,7 +172,7 @@ pub fn reverb_type() -> DeviceType {
         )
         .logarithmic()
         .describe("The frequency below which the input's low-cut filter removes the input."),
-        ParamDescriptor::toggle(HIGH_CUT, "High Cut", false)
+        ParamDescriptor::toggle(HIGH_CUT, "High Cut", true)
             .describe("Filters frequencies above High Cut out of the input."),
         ParamDescriptor::continuous(
             HIGH_CUT_HZ,
@@ -188,7 +193,7 @@ pub fn reverb_type() -> DeviceType {
             ParamUnit::Percent,
         )
         .describe("How far Spin moves the early reflections."),
-        ParamDescriptor::continuous(SPIN_RATE, "Spin Rate", (0.01, 10.0), 1.0, ParamUnit::Hertz)
+        ParamDescriptor::continuous(SPIN_RATE, "Spin Rate", (0.01, 10.0), 0.3, ParamUnit::Hertz)
             .logarithmic()
             .describe("How fast Spin moves the early reflections."),
         ParamDescriptor::continuous(SHAPE, "Shape", (0.0, 100.0), 50.0, ParamUnit::Percent)
@@ -207,11 +212,11 @@ pub fn reverb_type() -> DeviceType {
             DIFFUSION,
             "Diffusion",
             (0.0, 100.0),
-            50.0,
+            60.0,
             ParamUnit::Percent,
         )
         .describe("How much the allpass stages diffuse the tail."),
-        ParamDescriptor::continuous(SCALE, "Scale", (0.0, 100.0), 50.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(SCALE, "Scale", (0.0, 100.0), 40.0, ParamUnit::Percent)
             .describe("The diffusion's coarseness: the lower the finer."),
         ParamDescriptor::toggle(CHORUS, "Chorus", false)
             .describe("Adds modulation and motion to the tail."),
@@ -227,7 +232,7 @@ pub fn reverb_type() -> DeviceType {
             CHORUS_RATE,
             "Chorus Rate",
             (0.01, 10.0),
-            0.5,
+            0.02,
             ParamUnit::Hertz,
         )
         .logarithmic()
@@ -236,34 +241,34 @@ pub fn reverb_type() -> DeviceType {
             PREDELAY,
             "Predelay",
             (0.0, MAX_PREDELAY_MILLISECONDS),
-            10.0,
+            2.5,
             ParamUnit::Milliseconds,
         )
         .describe("The time before the onset of the first early reflection."),
-        ParamDescriptor::choice(SMOOTH, "Smooth", &SMOOTHS, 0).describe(
+        ParamDescriptor::choice(SMOOTH, "Smooth", &SMOOTHS, 1).describe(
             "How a change of Size is smoothed: not at all, or over a short or long time.",
         ),
         ParamDescriptor::continuous(SIZE, "Size", (0.0, 100.0), 50.0, ParamUnit::Percent)
             .describe("The room's volume, which scales the delay lines."),
-        ParamDescriptor::continuous(DECAY, "Decay", (0.1, 60.0), 2.0, ParamUnit::Seconds)
+        ParamDescriptor::continuous(DECAY, "Decay", (0.1, 60.0), 1.2, ParamUnit::Seconds)
             .logarithmic()
             .describe("The time the tail takes to fall by 60 dB."),
         ParamDescriptor::toggle(FREEZE, "Freeze", false)
             .describe("Holds the tail, letting the reverberation sustain."),
-        ParamDescriptor::toggle(FLAT, "Flat", false)
+        ParamDescriptor::toggle(FLAT, "Flat", true)
             .describe("Bypasses the damping filters while Freeze is on."),
         ParamDescriptor::toggle(CUT, "Cut", true)
             .describe("Stops the input adding to the frozen tail."),
         ParamDescriptor::continuous(STEREO, "Stereo", (0.0, 120.0), 120.0, ParamUnit::None)
             .decimals(0)
             .describe("The width of the output, in degrees: 0 is mono."),
-        ParamDescriptor::choice(DENSITY, "Density", &DENSITIES, 1)
+        ParamDescriptor::choice(DENSITY, "Density", &DENSITIES, 0)
             .describe("The tradeoff between the tail's quality and the device's cost."),
-        ParamDescriptor::continuous(REFLECT, "Reflect", (0.0, 100.0), 100.0, ParamUnit::Percent)
+        ParamDescriptor::gain(REFLECT, "Reflect", REFLECT_MAX_DB, 0.0)
             .describe("The amplitude of the early reflections."),
-        ParamDescriptor::continuous(DIFFUSE, "Diffuse", (0.0, 100.0), 100.0, ParamUnit::Percent)
+        ParamDescriptor::gain(DIFFUSE, "Diffuse", REFLECT_MAX_DB, 0.0)
             .describe("The amplitude of the diffuse tail."),
-        ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 100.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 55.0, ParamUnit::Percent)
             .describe("The balance between the dry and the reverberated signal."),
     ];
     DeviceType::native(REVERB, "Reverb", DeviceRole::AudioEffect).with_description(
@@ -297,79 +302,133 @@ pub fn reverb_type() -> DeviceType {
     )
 }
 
-/// A layout of fixed control bands, in the device's sections.
+/// The height of the four sections along the top, in points.
+const SECTIONS: f32 = 107.0;
+
+/// A section of the panel as Live draws it: a black cell with its name over
+/// its controls, which sit in it where they are drawn.
+fn section(name: &str, width: f32, captions: Vec<Caption>, controls: Vec<Control>) -> LayoutNode {
+    let band = ControlBand::free(width, SECTIONS, controls).with_captions(captions);
+    LayoutNode::Cell(DisplayCell::new(name, width, SECTIONS, 1.0).with_top(band))
+}
+
+/// A gap of `width` points between the sections.
+fn gap(width: f32) -> LayoutNode {
+    LayoutNode::Band(ControlBand::free(width, SECTIONS, Vec::new()))
+}
+
+/// Reverb as Live draws it: four sections along the top, Input Filter, Early
+/// Reflections, Diffusion Network and Chorus, each with its switch, its values
+/// and a display; under them Predelay, Smooth, Size, Decay, Freeze with Flat
+/// and Cut, Stereo and Density; at the right Reflect, Diffuse and Dry/Wet.
 fn layout() -> DeviceLayout {
-    let input = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (LOW_CUT, Widget::Toggle),
-            (LOW_CUT_HZ, Widget::Knob),
-            (HIGH_CUT, Widget::Toggle),
-            (HIGH_CUT_HZ, Widget::Knob),
+    use Widget::{Chooser, Outlined, Readout, SmallKnob, Toggle};
+    let at = Control::new;
+    // A value alone, as Live prints the frequencies and amounts under a
+    // display: no name, no box.
+    let value = |param, x, y, width: f32| {
+        at(param, Widget::Inline, x, y)
+            .sized(width, BOX_HEIGHT)
+            .labelled("")
+    };
+    let input = section(
+        "Input Filter",
+        96.0,
+        vec![Caption::new("Input Filter", 2.0, 2.0, 80.0)],
+        vec![
+            at(LOW_CUT, Outlined, 3.7, 18.7)
+                .sized(42.0, BOX_HEIGHT)
+                .labelled("Lo Cut"),
+            at(HIGH_CUT, Outlined, 49.4, 18.7)
+                .sized(42.0, BOX_HEIGHT)
+                .labelled("Hi Cut"),
+            value(LOW_CUT_HZ, 1.0, 92.0, 40.0),
+            value(HIGH_CUT_HZ, 55.0, 92.0, 40.0),
         ],
     );
-    let early = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (SPIN, Widget::Toggle),
-            (SPIN_AMOUNT, Widget::Knob),
-            (SPIN_RATE, Widget::Knob),
-            (SHAPE, Widget::Knob),
+    let early = section(
+        "Early Reflections",
+        92.0,
+        vec![Caption::new("Early Reflections", 2.0, 2.0, 88.0)],
+        vec![
+            at(SPIN, Toggle, 26.5, 29.0).sized(39.0, BOX_HEIGHT),
+            at(SPIN_AMOUNT, Readout, 4.0, 47.5)
+                .sized(40.0, 2.0 * BOX_HEIGHT)
+                .labelled("Amount"),
+            at(SPIN_RATE, Readout, 47.0, 47.5)
+                .sized(41.0, 2.0 * BOX_HEIGHT)
+                .labelled("Rate"),
+            at(SHAPE, Widget::Spread, 8.0, 92.0).sized(76.0, BOX_HEIGHT),
         ],
     );
-    let diffusion = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (HIGH_DAMP, Widget::Toggle),
-            (HIGH, Widget::Knob),
-            (LOW_DAMP, Widget::Toggle),
-            (LOW, Widget::Knob),
-            (DIFFUSION, Widget::Knob),
-            (SCALE, Widget::Knob),
+    let diffusion = section(
+        "Diffusion Network",
+        180.0,
+        vec![Caption::new("Diffusion Network", 2.0, 2.0, 120.0)],
+        vec![
+            at(HIGH_DAMP, Toggle, 3.7, 18.0)
+                .sized(26.5, BOX_HEIGHT)
+                .labelled("High"),
+            value(HIGH, 108.0, 18.0, 30.0),
+            at(LOW_DAMP, Outlined, 3.7, 91.8)
+                .sized(26.5, BOX_HEIGHT)
+                .labelled("Low"),
+            value(LOW, 108.0, 92.0, 30.0),
+            at(DIFFUSION, Readout, 137.0, 31.3).sized(35.0, 2.0 * BOX_HEIGHT),
+            at(SCALE, Readout, 137.0, 64.3).sized(35.0, 2.0 * BOX_HEIGHT),
         ],
     );
-    let chorus = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (CHORUS, Widget::Toggle),
-            (CHORUS_AMOUNT, Widget::Knob),
-            (CHORUS_RATE, Widget::Knob),
+    let chorus = section(
+        "Chorus",
+        49.0,
+        Vec::new(),
+        vec![
+            at(CHORUS, Toggle, 3.4, 3.7).sized(42.5, BOX_HEIGHT),
+            at(CHORUS_AMOUNT, Readout, 3.0, 31.7)
+                .sized(43.0, 2.0 * BOX_HEIGHT)
+                .labelled("Amount"),
+            at(CHORUS_RATE, Readout, 3.0, 64.5)
+                .sized(43.0, 2.0 * BOX_HEIGHT)
+                .labelled("Rate"),
         ],
     );
-    let global = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (PREDELAY, Widget::Knob),
-            (SIZE, Widget::Knob),
-            (DECAY, Widget::Knob),
-            (SMOOTH, Widget::Chooser),
+    let bottom = ControlBand::free(
+        427.0,
+        BODY_HEIGHT - SECTIONS,
+        vec![
+            at(PREDELAY, SmallKnob, 32.0, 4.5),
+            at(SMOOTH, Chooser, 103.0, 13.0).sized(36.0, 21.0),
+            at(SIZE, SmallKnob, 150.6, 4.5),
+            at(DECAY, SmallKnob, 202.0, 4.5),
+            at(FREEZE, Toggle, 256.0, 13.0).sized(47.0, BOX_HEIGHT),
+            at(FLAT, Outlined, 256.0, 28.7).sized(21.0, BOX_HEIGHT),
+            at(CUT, Outlined, 281.0, 28.7).sized(22.0, BOX_HEIGHT),
+            at(STEREO, SmallKnob, 325.0, 4.5),
+            at(DENSITY, Chooser, 375.0, 13.0).sized(42.0, 21.0),
         ],
     );
-    let freeze = ControlBand::stacked(
+    let output = ControlBand::free(
+        55.0,
         BODY_HEIGHT,
-        &[
-            (FREEZE, Widget::Toggle),
-            (FLAT, Widget::Toggle),
-            (CUT, Widget::Toggle),
-            (DENSITY, Widget::Chooser),
-            (STEREO, Widget::Knob),
-        ],
-    );
-    let output = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (REFLECT, Widget::Knob),
-            (DIFFUSE, Widget::Knob),
-            (DRY_WET, Widget::Knob),
+        vec![
+            at(REFLECT, SmallKnob, 9.0, 4.5),
+            at(DIFFUSE, SmallKnob, 9.0, 57.0),
+            at(DRY_WET, SmallKnob, 9.0, 110.8),
         ],
     );
     DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Band(input),
-        LayoutNode::Band(early),
-        LayoutNode::Band(diffusion),
-        LayoutNode::Band(chorus),
-        LayoutNode::Band(global),
-        LayoutNode::Band(freeze),
+        LayoutNode::Column(vec![
+            LayoutNode::Row(vec![
+                input,
+                gap(3.0),
+                early,
+                gap(3.0),
+                diffusion,
+                gap(3.0),
+                chorus,
+            ]),
+            LayoutNode::Band(bottom),
+        ]),
         LayoutNode::Band(output),
     ]))
 }
@@ -700,8 +759,8 @@ impl Reverb {
             }
             // The Stereo control's width, then the output controls.
             let degrees = f64::from(settings.ramp(params, STEREO)[i]) / 120.0;
-            let reflect = settings.ramp(params, REFLECT)[i] / 100.0;
-            let diffuse = settings.ramp(params, DIFFUSE)[i] / 100.0;
+            let reflect = settings.ramp(params, REFLECT)[i];
+            let diffuse = settings.ramp(params, DIFFUSE)[i];
             let dry_wet = settings.ramp(params, DRY_WET)[i] / 100.0;
             let wet_left = reflect * early[0] + diffuse * tail[0];
             let wet_right = reflect * early[1] + diffuse * tail[1];

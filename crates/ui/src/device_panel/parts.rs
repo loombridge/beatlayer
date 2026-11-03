@@ -395,6 +395,64 @@ impl Control<'_> {
         self.describe(ui, &response, Role::SpinButton);
     }
 
+    /// The name over the value, both centred, or (`spread`) the name at the
+    /// left and the value at the right of one line; the value in blue,
+    /// dragged or typed like a box's.
+    pub(super) fn readout(
+        &self,
+        ui: &mut Ui,
+        theme: &Theme,
+        events: &mut Vec<UiEvent>,
+        spread: bool,
+    ) {
+        let response = ui.interact(self.rect, self.id(), Sense::click_and_drag());
+        crate::focus::register(ui.ctx(), self.id(), bl_shell::Area::Detail, None);
+        self.value_input(ui, &response, events);
+        let c = &theme.colors;
+        let painter = ui.painter();
+        let value = self.descriptor.format(self.shown());
+        let ink = if self.enabled {
+            c.value_fill.0
+        } else {
+            super::highlight(theme, false)
+        };
+        if spread {
+            painter.text(
+                self.rect.left_center(),
+                Align2::LEFT_CENTER,
+                self.name(),
+                font(),
+                c.text_dim.0,
+            );
+            painter.text(
+                self.rect.right_center(),
+                Align2::RIGHT_CENTER,
+                value,
+                font(),
+                ink,
+            );
+        } else {
+            let half = self.rect.height() / 2.0;
+            let (top, bottom) = (
+                Rect::from_min_size(self.rect.min, vec2(self.rect.width(), half)),
+                Rect::from_min_size(
+                    pos2(self.rect.left(), self.rect.top() + half),
+                    vec2(self.rect.width(), half),
+                ),
+            );
+            painter.text(
+                top.center(),
+                Align2::CENTER_CENTER,
+                self.name(),
+                font(),
+                c.text.0,
+            );
+            painter.text(bottom.center(), Align2::CENTER_CENTER, value, font(), ink);
+        }
+        focus_ring(ui, theme, self.rect, &response);
+        self.describe(ui, &response, Role::SpinButton);
+    }
+
     /// A small box, filled while on, with the name after it.
     pub(super) fn tick(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
         let on = self.on();
@@ -603,6 +661,14 @@ pub fn glyph_for(choice: &str) -> Option<Glyph> {
         Some(Glyph::BandPass)
     } else if name.contains("notch") || name == "n" {
         Some(Glyph::Notch)
+    } else if name == "record" {
+        Some(Glyph::Record)
+    } else if name == "overdub" {
+        Some(Glyph::Plus)
+    } else if name == "play" {
+        Some(Glyph::Play)
+    } else if name == "stop" {
+        Some(Glyph::Stop)
     } else {
         None
     }
@@ -685,6 +751,10 @@ pub fn paint_glyph(painter: &Painter, rect: Rect, glyph: Glyph, ink: Color32) {
             line(&[(-0.7, -0.4), (0.7, 0.4)]);
             line(&[(-0.7, 0.4), (0.7, -0.4)]);
         }
+        Glyph::Record => {
+            painter.circle_filled(at(0.0, 0.0), s * 0.6, ink);
+        }
+        Glyph::Stop => fill(&[(-0.6, -0.6), (0.6, -0.6), (0.6, 0.6), (-0.6, 0.6)]),
         Glyph::PhaseInvert => {
             painter.circle_stroke(at(0.0, 0.0), s * 0.6, stroke);
             line(&[(-0.7, 0.7), (0.7, -0.7)]);

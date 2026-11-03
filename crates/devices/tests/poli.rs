@@ -566,6 +566,10 @@ fn the_chorus_is_chorus_ensembles_in_stereo_after_the_amplifier() {
                 &[
                     (chorus_ensemble::MODE, 0.0),
                     (chorus_ensemble::CHORUS_TAPS, 1.0),
+                    // The values Poli's chorus uses; Live's Chorus-Ensemble
+                    // starts with a 50 Hz high-pass and a 20 ms time.
+                    (chorus_ensemble::HP_FREQ, 20.0),
+                    (chorus_ensemble::CHORUS_TIME, 0.0),
                     (chorus_ensemble::RATE, 1.7),
                     (chorus_ensemble::AMOUNT, 60.0),
                     (chorus_ensemble::DRY_WET, 100.0),

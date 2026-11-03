@@ -204,6 +204,12 @@ pub enum Widget {
     /// A small box that is filled while the switch is on, with the name
     /// after it (the Filter switch along the foot of a display).
     Tick,
+    /// The name over the value, both centred, the value in blue and dragged
+    /// or typed, with no box (Reverb's Amount and Rate).
+    Readout,
+    /// The name at the left and the value at the right of one line, the
+    /// value in blue (Reverb's Shape).
+    Spread,
     /// A row of that many tabs, one for each choice of a choice parameter,
     /// outlined in orange while off and filled while on (Chorus-Ensemble's
     /// Chorus, Ensemble and Vibrato).
@@ -234,7 +240,8 @@ impl Widget {
             Self::Number | Self::Slider | Self::Marked | Self::Chooser => {
                 Size::new(53.0, LABEL_HEIGHT + BOX_HEIGHT)
             }
-            Self::Inline | Self::Tick => Size::new(53.0, BOX_HEIGHT),
+            Self::Inline | Self::Tick | Self::Spread => Size::new(53.0, BOX_HEIGHT),
+            Self::Readout => Size::new(40.0, 2.0 * BOX_HEIGHT),
             Self::Toggle | Self::Outlined => Size::new(SEGMENT_WIDTH, BOX_HEIGHT),
             Self::IconToggle => Size::new(CELL_WIDTH, BOX_HEIGHT),
             Self::Round => Size::new(BOX_HEIGHT, BOX_HEIGHT),
@@ -305,6 +312,10 @@ pub enum Glyph {
     Freeze,
     /// A circle struck through: invert the phase.
     PhaseInvert,
+    /// A filled circle: record.
+    Record,
+    /// A filled square: stop.
+    Stop,
 }
 
 /// A unit a knob's two parameters read in.
@@ -421,6 +432,10 @@ pub struct Control {
     /// is (Delay's offset under its grid), and the control is its box alone.
     #[serde(default, skip_serializing_if = "is_false")]
     pub unnamed: bool,
+    /// Set for a row, stack or grid of buttons with its parameter's name above
+    /// it, left-aligned (Chorus-Ensemble's Taps).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub titled: bool,
 }
 
 fn is_false(flag: &bool) -> bool {
@@ -445,7 +460,15 @@ impl Control {
             label: None,
             steps: None,
             unnamed: false,
+            titled: false,
         }
+    }
+
+    /// The same row, stack or grid of buttons with its name above it.
+    #[must_use]
+    pub const fn titled(mut self) -> Self {
+        self.titled = true;
+        self
     }
 
     /// The same box without its name above it.
@@ -520,6 +543,9 @@ impl Control {
             let mut size = self.widget.size();
             if self.unnamed {
                 size.height -= LABEL_HEIGHT;
+            }
+            if self.titled {
+                size.height += LABEL_HEIGHT;
             }
             if self.unit.is_some() {
                 Size::new(size.width + UNIT_PAIR_WIDTH + PADDING, size.height)
@@ -1243,6 +1269,7 @@ fn place_band(band: &ControlBand, x: f32, y: f32, slot: u32, placed: &mut Placed
             label: control.label,
             steps: control.steps,
             unnamed: control.unnamed,
+            titled: control.titled,
         }));
 }
 
@@ -1357,6 +1384,9 @@ pub struct PlacedControl {
     /// Whether it is drawn without its name above it.
     #[serde(default)]
     pub unnamed: bool,
+    /// Whether its buttons have its name above them.
+    #[serde(default)]
+    pub titled: bool,
 }
 
 /// A section heading where a layout placed it.
@@ -2451,26 +2481,36 @@ mod tests {
                 vec![
                     Control::new(ParamId(0), Widget::Knob, 4.0, 4.0).hidden_while(ParamId(by), 1),
                     Control::new(ParamId(1), Widget::Toggle, 50.0, 4.0),
+                    Control::new(ParamId(2), Widget::Toggle, 50.0, 20.0)
+                        .shown_only_while(ParamId(by), 1),
                 ],
             )))
         };
-        layout(1).check(&params(2)).unwrap();
+        layout(1).check(&params(3)).unwrap();
         assert!(
             layout(9)
-                .check(&params(2))
+                .check(&params(3))
                 .unwrap_err()
                 .contains("put away by"),
             "a switch the device doesn't have"
         );
         let placed = layout(1).place(layout(1).docked_size());
+        let when = Some(GreyWhen {
+            param: ParamId(1),
+            value: 1,
+        });
         assert_eq!(
-            placed.controls[0].hide,
-            Some(GreyWhen {
-                param: ParamId(1),
-                value: 1
-            })
+            (placed.controls[0].hide, placed.controls[0].only),
+            (when, None)
         );
-        assert_eq!(placed.controls[1].hide, None);
+        assert_eq!(
+            (placed.controls[1].hide, placed.controls[1].only),
+            (None, None)
+        );
+        assert_eq!(
+            (placed.controls[2].hide, placed.controls[2].only),
+            (None, when)
+        );
     }
 
     // Spec: device-framework R56

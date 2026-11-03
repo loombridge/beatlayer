@@ -228,7 +228,7 @@ pub(crate) const QUICK_TAGS: Reason = Equivalent(
 // sidebar and the header row's Content Options button.
 pub(crate) const FILTERS: Reason = Equivalent(
     "the browser's Filter View: its tag buttons (the arrow keys, Enter and Cmd-Enter), the \
-         Filter View Menu's group items, the Results bar's Clear and Add Label buttons, Esc and \
+         Filter View Menu's group items and its Enable Auto Tags item, the Results bar's Clear and Add Label buttons, Esc and \
          Cmd-F in the search field (the browser tags spec, R20 to R23)",
 );
 
@@ -236,6 +236,17 @@ pub(crate) const LABELS: Reason = Equivalent(
     "the browser's sidebar: the Library section's Edit mode and its check boxes, a label's \
          context menu (Rename, also Cmd-R, Choose Icon, Remove), the Library heading's Reset \
          Label Order item, and dragging a label (the browser tags spec, R24 to R26)",
+);
+
+pub(crate) const NESTED_COLLECTIONS: Reason = Equivalent(
+    "the browser's sidebar: a collection's context menu (New Collection) and a nested \
+         collection's (Rename, New Collection, Delete, which asks first when it holds items), \
+         its fold triangle, and dragging its label (the browser tags spec, R45 to R47)",
+);
+
+pub(crate) const HIDE_PLUG_IN: Reason = Equivalent(
+    "a plug-in row's context menu in the browser, which ends with Hide Plug-In or Show \
+         Plug-In (the browser tags spec, R41)",
 );
 
 pub(crate) const COLUMNS: Reason = Equivalent(
@@ -420,7 +431,12 @@ fn every_m1_command_is_reachable_from_the_keyboard() {
     assert_eq!(
         gaps,
         [
+            "arranger.copy_section",
+            "arranger.resize_section",
+            "browser.set_analysis_paused",
             "chain.save_preset",
+            "chord_lane.add_region",
+            "chord_lane.move_region",
             "clip.save_file",
             "device.add_layers",
             "device.add_slice",

@@ -9,6 +9,8 @@
 //! where Live lists them, disabled, and name the package. MIDI From lists the
 //! MIDI input ports the computer offers (WP-2.2).
 
+use std::collections::HashMap;
+
 use bl_model::{
     Chain, Channel, CvPort, Device, DeviceId, DeviceOutput, DeviceRole, Document, External, Input,
     MidiTo, Monitor, Output, RackKind, Tap, TrackId, TrackKind,
@@ -44,6 +46,19 @@ pub struct Interface {
     /// one of the eight-slot drum sampler's individual outputs (WP-5.45).
     /// A device that offers none is left out.
     pub device_outputs: std::collections::BTreeMap<DeviceId, Vec<String>>,
+    /// The peers in the Link session that have Link Audio on, with the
+    /// channels each offers, in the order Link lists them: Audio From's
+    /// peers and their channels (the Link Audio spec, R5; routing R37).
+    pub link_audio: Vec<LinkPeer>,
+}
+
+/// A Link Audio peer and its channels, as Audio From lists them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkPeer {
+    /// The peer's name.
+    pub name: String,
+    /// The channels it offers, in its order.
+    pub channels: Vec<String>,
 }
 
 /// One line of a chooser's list.
@@ -301,6 +316,53 @@ pub fn track_label(doc: &Document, track: TrackId) -> String {
     }
 }
 
+/// [`track_label`] of every track, numbered in one pass over the set, for a
+/// chooser that lists many. The two must agree: a routing test holds them
+/// equal.
+#[must_use]
+pub fn track_labels(doc: &Document) -> HashMap<TrackId, String> {
+    let mut labels = HashMap::new();
+    let mut number = 0;
+    for id in doc.track_order() {
+        let Some(t) = doc.track(id) else { continue };
+        let label = match t.kind() {
+            TrackKind::Main => "Main".to_owned(),
+            // Lettered below, by their order among the returns.
+            TrackKind::Return => continue,
+            kind => {
+                let number = if kind.can_be_grouped() {
+                    number += 1;
+                    number
+                } else {
+                    0
+                };
+                let name = t
+                    .name()
+                    .split_once(' ')
+                    .filter(|(n, _)| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+                    .map_or(t.name(), |(_, rest)| rest);
+                format!("{number}-{name}")
+            }
+        };
+        labels.insert(id, label);
+    }
+    for (index, id) in doc.returns().enumerate() {
+        let Some(t) = doc.track(id) else { continue };
+        let letter = return_letter(index);
+        let name = t
+            .name()
+            .strip_prefix(letter.as_str())
+            .and_then(|rest| rest.strip_prefix(' '))
+            .unwrap_or(t.name());
+        labels.insert(id, format!("{letter}-{name}"));
+    }
+    labels
+}
+
+fn label(labels: &HashMap<TrackId, String>, track: TrackId) -> String {
+    labels.get(&track).cloned().unwrap_or_default()
+}
+
 pub use bl_model::return_letter;
 
 fn set_input(track: TrackId, input: Value) -> Invocation {
@@ -338,7 +400,7 @@ fn configure(page: &str) -> Entry {
     )
 }
 
-const fn tap_label(tap: Tap) -> &'static str {
+pub(crate) const fn tap_label(tap: Tap) -> &'static str {
     match tap {
         Tap::PreFx => "Pre FX",
         Tap::PostFx => "Post FX",
@@ -352,9 +414,10 @@ const fn tap_label(tap: Tap) -> &'static str {
 #[must_use]
 pub fn in_out(doc: &Document, track: TrackId, interface: &Interface) -> Option<InOut> {
     let t = doc.track(track)?;
+    let labels = track_labels(doc);
     Some(match t.kind() {
         TrackKind::Audio => InOut::Clips {
-            input: audio_from(doc, track),
+            input: audio_from(doc, track, interface, &labels),
             input_channel: input_channel(
                 doc,
                 track,
@@ -364,13 +427,13 @@ pub fn in_out(doc: &Document, track: TrackId, interface: &Interface) -> Option<I
                 interface,
             ),
             monitor: monitor(track, t.routing().monitor),
-            output: audio_to(doc, track),
+            output: audio_to(doc, track, &labels),
             output_channel: output_channel(track, t.routing().output, interface.outputs),
             tuning_bypass: None,
             tuning_layout: None,
         },
         TrackKind::Midi => InOut::Clips {
-            input: midi_from(doc, track, &interface.midi_inputs),
+            input: midi_from(doc, track, &interface.midi_inputs, &labels),
             input_channel: input_channel(
                 doc,
                 track,
@@ -380,7 +443,7 @@ pub fn in_out(doc: &Document, track: TrackId, interface: &Interface) -> Option<I
                 interface,
             ),
             monitor: monitor(track, t.routing().monitor),
-            output: midi_to(doc, track, &interface.midi_outputs),
+            output: midi_to(doc, track, &interface.midi_outputs, &labels),
             output_channel: midi_to_channel(track, t.routing().midi_output.as_ref()),
             // Spec: tunings R14. A Drum Rack's track shows the switch on
             // and can't change it.
@@ -406,7 +469,7 @@ pub fn in_out(doc: &Document, track: TrackId, interface: &Interface) -> Option<I
             }),
         },
         TrackKind::Group | TrackKind::Return => InOut::Output {
-            output: audio_to(doc, track),
+            output: audio_to(doc, track, &labels),
             output_channel: output_channel(track, t.routing().output, interface.outputs),
         },
         TrackKind::Main => InOut::Main {
@@ -478,10 +541,24 @@ fn interface_channels(
         .collect()
 }
 
-/// Audio From (observed): Ext. In · Configure… ─ Resampling ─ the group,
-/// audio, and return tracks, the MIDI tracks that hold an instrument, and
-/// Main, in display order, without the track itself ─ No Input.
-fn audio_from(doc: &Document, track: TrackId) -> Chooser {
+/// A `Link Audio` input as the routing commands' JSON takes it.
+fn link_audio_value(peer: &str, channel: &str) -> Value {
+    json!({ "type": "link_audio", "peer": peer, "channel": channel })
+}
+
+/// Audio From (observed): Ext. In · Configure… ─ the Link Audio peers ─
+/// Resampling ─ the group, audio, and return tracks, the MIDI tracks that
+/// hold an instrument, and Main, in display order, without the track itself
+/// ─ No Input. The peers are a group of their own after Ext. In's and before
+/// Resampling, each choosing its first channel; a peer the track names that
+/// the session doesn't have now is listed too, chosen and dimmed, because the
+/// track keeps the name (the Link Audio spec, R10).
+fn audio_from(
+    doc: &Document,
+    track: TrackId,
+    interface: &Interface,
+    labels: &HashMap<TrackId, String>,
+) -> Chooser {
     let input = doc.track(track).map(|t| t.routing().input.clone());
     let current_from = match input {
         Some(Input::Track { track, .. }) => Some(track),
@@ -502,13 +579,39 @@ fn audio_from(doc: &Document, track: TrackId) -> Chooser {
         ),
         configure("audio"),
         Entry::Separator,
-        Entry::choice(
-            "Resampling",
-            set_input(track, json!({ "type": "resampling" })),
-            input == Some(Input::Resampling),
-        ),
-        Entry::Separator,
     ];
+    let kept = match &input {
+        Some(Input::LinkAudio { peer, .. }) => Some(peer.as_str()),
+        _ => None,
+    };
+    let absent = kept.filter(|name| !interface.link_audio.iter().any(|p| p.name == *name));
+    for peer in &interface.link_audio {
+        let Some(first) = peer.channels.first() else {
+            continue;
+        };
+        entries.push(Entry::choice(
+            peer.name.clone(),
+            set_input(track, link_audio_value(&peer.name, first)),
+            kept == Some(peer.name.as_str()),
+        ));
+    }
+    if let Some(name) = absent {
+        entries.push(Entry::Choice {
+            label: name.to_owned(),
+            run: None,
+            chosen: true,
+            pending: None,
+        });
+    }
+    if !interface.link_audio.is_empty() || absent.is_some() {
+        entries.push(Entry::Separator);
+    }
+    entries.push(Entry::choice(
+        "Resampling",
+        set_input(track, json!({ "type": "resampling" })),
+        input == Some(Input::Resampling),
+    ));
+    entries.push(Entry::Separator);
     for id in doc.track_order() {
         let Some(source) = doc.track(id) else {
             continue;
@@ -524,7 +627,7 @@ fn audio_from(doc: &Document, track: TrackId) -> Chooser {
             continue;
         }
         entries.push(Entry::choice(
-            track_label(doc, id),
+            label(labels, id),
             set_input(track, json!({ "type": "track", "track": id })),
             current_from == Some(id),
         ));
@@ -542,7 +645,12 @@ fn audio_from(doc: &Document, track: TrackId) -> Chooser {
 /// Configure… ─ the other MIDI tracks ─ No Input (the MIDI I/O spec, R7). A
 /// port the track names that the computer doesn't offer now is listed too,
 /// chosen, because the track keeps the name (R8).
-fn midi_from(doc: &Document, track: TrackId, ports: &[String]) -> Chooser {
+fn midi_from(
+    doc: &Document,
+    track: TrackId,
+    ports: &[String],
+    labels: &HashMap<TrackId, String>,
+) -> Chooser {
     let input = doc.track(track).map(|t| t.routing().input.clone());
     let current_from = match input {
         Some(Input::Track { track, .. }) => Some(track),
@@ -577,7 +685,7 @@ fn midi_from(doc: &Document, track: TrackId, ports: &[String]) -> Chooser {
     for id in doc.track_order() {
         if id != track && doc.track(id).map(bl_model::Track::kind) == Some(TrackKind::Midi) {
             entries.push(Entry::choice(
-                track_label(doc, id),
+                label(labels, id),
                 set_input(track, json!({ "type": "track", "track": id })),
                 current_from == Some(id),
             ));
@@ -687,6 +795,40 @@ fn input_channel(
             }),
             pending: None,
         },
+        // Spec: link-audio R5, R10. The peer's channels, in its order; the
+        // one the track keeps is listed, chosen and dimmed, while the peer
+        // or the channel isn't there.
+        Input::LinkAudio { peer, channel } => {
+            let offered = interface
+                .link_audio
+                .iter()
+                .find(|p| p.name == peer)
+                .map_or(&[][..], |p| p.channels.as_slice());
+            let mut entries: Vec<Entry> = offered
+                .iter()
+                .map(|name| {
+                    Entry::choice(
+                        name.clone(),
+                        set_input(track, link_audio_value(&peer, name)),
+                        *name == channel,
+                    )
+                })
+                .collect();
+            if !offered.contains(&channel) {
+                entries.push(Entry::Choice {
+                    label: channel.clone(),
+                    run: None,
+                    chosen: true,
+                    pending: None,
+                });
+            }
+            Chooser {
+                name: "Input Channel",
+                text: channel,
+                entries,
+                pending: None,
+            }
+        }
         // Spec: midi-io R28. A port with MPE on is taken on every channel: the
         // chooser reads All Channels and can't be changed; the channel the
         // track had chosen stays in the set for when MPE is off again.
@@ -751,7 +893,7 @@ fn monitor(track: TrackId, chosen: Monitor) -> MonitorSwitch {
 /// and the audio tracks in display order, without the track itself ─
 /// Sends Only. A group's list puts a separator after Main. Choosing Ext. Out
 /// again keeps the channel it has.
-fn audio_to(doc: &Document, track: TrackId) -> Chooser {
+fn audio_to(doc: &Document, track: TrackId, labels: &HashMap<TrackId, String>) -> Chooser {
     let Some(t) = doc.track(track) else {
         return chooser("Output Type", Vec::new());
     };
@@ -783,7 +925,7 @@ fn audio_to(doc: &Document, track: TrackId) -> Chooser {
     }
     if let Some(group) = doc.parent(track) {
         entries.push(Entry::choice(
-            track_label(doc, group),
+            label(labels, group),
             set_output(track, json!({ "type": "track", "track": group })),
             goes_to == Some(group),
         ));
@@ -791,7 +933,7 @@ fn audio_to(doc: &Document, track: TrackId) -> Chooser {
     for id in doc.track_order() {
         if id != track && doc.track(id).map(bl_model::Track::kind) == Some(TrackKind::Audio) {
             entries.push(Entry::choice(
-                track_label(doc, id),
+                label(labels, id),
                 set_output(track, json!({ "type": "track", "track": id })),
                 goes_to == Some(id),
             ));
@@ -812,7 +954,12 @@ fn audio_to(doc: &Document, track: TrackId) -> Chooser {
 /// port that is away or has Track off lists it too, dimmed (R2). Choosing
 /// a port takes channel 1, and choosing the same port again keeps its
 /// channel.
-fn midi_to(doc: &Document, track: TrackId, ports: &[String]) -> Chooser {
+fn midi_to(
+    doc: &Document,
+    track: TrackId,
+    ports: &[String],
+    labels: &HashMap<TrackId, String>,
+) -> Chooser {
     let to = doc
         .track(track)
         .and_then(|t| t.routing().midi_output.clone());
@@ -856,7 +1003,7 @@ fn midi_to(doc: &Document, track: TrackId, ports: &[String]) -> Chooser {
     for id in doc.track_order() {
         if id != track && doc.track(id).map(bl_model::Track::kind) == Some(TrackKind::Midi) {
             entries.push(Entry::choice(
-                track_label(doc, id),
+                label(labels, id),
                 set(json!(id)),
                 to == Some(MidiTo::Track(id)),
             ));
@@ -1089,6 +1236,7 @@ pub fn sidechain_source(doc: &Document, device: DeviceId) -> Option<Chooser> {
         Input::Track { track, .. } => Some(track),
         _ => None,
     };
+    let labels = track_labels(doc);
     let mut entries = Vec::new();
     for id in doc.track_order() {
         let listed = doc.track(id).is_some_and(|t| {
@@ -1099,7 +1247,7 @@ pub fn sidechain_source(doc: &Document, device: DeviceId) -> Option<Chooser> {
         });
         if listed {
             entries.push(Entry::choice(
-                track_label(doc, id),
+                label(&labels, id),
                 set_sidechain_input(
                     device,
                     json!({ "type": "track", "track": id, "tap": tap_name(Tap::PostFx) }),
@@ -1337,17 +1485,51 @@ fn set_midi_sidechain_source(device: DeviceId, track: Value) -> Invocation {
     Invocation::new("device.set_midi_sidechain_source", args)
 }
 
+/// The same, taking the notes at `tap` (the routing spec, R39).
+fn set_midi_sidechain_tap(device: DeviceId, track: Option<TrackId>, tap: Tap) -> Invocation {
+    let mut args = json!({ "device": device, "tap": tap_name(tap) });
+    if let Some(track) = track {
+        args["track"] = json!(track);
+    }
+    Invocation::new("device.set_midi_sidechain_source", args)
+}
+
+/// A device's MIDI sidechain tapping point chooser (the routing spec, R39):
+/// Pre FX · Post FX · Post Mixer, under the source's. `None` for a device
+/// whose MIDI sidechain has no tapping point.
+#[must_use]
+pub fn midi_sidechain_tap(doc: &Document, device: DeviceId) -> Option<Chooser> {
+    let sidechain = doc.device(device)?.midi_sidechain.as_ref()?;
+    let current = sidechain.tap?;
+    Some(Chooser {
+        name: "MIDI Sidechain Tapping Point",
+        text: tap_label(current).to_owned(),
+        entries: [Tap::PreFx, Tap::PostFx, Tap::PostMixer]
+            .into_iter()
+            .map(|tap| {
+                Entry::choice(
+                    tap_label(tap),
+                    set_midi_sidechain_tap(device, sidechain.source, tap),
+                    tap == current,
+                )
+            })
+            .collect(),
+        pending: None,
+    })
+}
+
 /// A device's MIDI sidechain source chooser (WP-5.27; the routing spec,
 /// R34): the MIDI tracks in display order, the device's own among them,
 /// then ─ No Input. `None` for a device without a MIDI sidechain input.
 #[must_use]
 pub fn midi_sidechain_source(doc: &Document, device: DeviceId) -> Option<Chooser> {
     let current = doc.device(device)?.midi_sidechain.as_ref()?.source;
+    let labels = track_labels(doc);
     let mut entries = Vec::new();
     for id in doc.track_order() {
         if doc.track(id).map(bl_model::Track::kind) == Some(TrackKind::Midi) {
             entries.push(Entry::choice(
-                track_label(doc, id),
+                label(&labels, id),
                 set_midi_sidechain_source(device, json!(id)),
                 current == Some(id),
             ));

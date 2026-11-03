@@ -5,6 +5,7 @@
 use bl_core::id::Id;
 use bl_model::{
     Command, ContentHash, Device, DeviceId, DeviceKind, Editor, MAX_MEDIA_SLOTS, TrackKind,
+    WavetableChoice,
 };
 use serde_json::{Value, json};
 
@@ -134,4 +135,86 @@ fn set_device_sample_sets_one_slot_as_one_undo_step() {
         editor.document().device(id).unwrap().media_at(0),
         Some(hash(5))
     );
+}
+
+// Spec: wavetable R7, R8
+#[test]
+fn set_device_wavetable_keeps_a_user_table_in_its_oscillators_slot() {
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let id = editor.new_id();
+    let mut bench = device();
+    bench.id = id;
+    editor
+        .apply(Command::InsertDevice {
+            track,
+            index: 0,
+            device: bench,
+        })
+        .unwrap();
+    let user = WavetableChoice::User {
+        raw: false,
+        frames: 3,
+    };
+    let factory = WavetableChoice::Factory {
+        category: "Additive".to_owned(),
+        name: "Odd Rise".to_owned(),
+    };
+    let set = |editor: &mut Editor, oscillator, choice: &WavetableChoice, media| {
+        editor
+            .apply(Command::SetDeviceWavetable {
+                device: id,
+                oscillator,
+                choice: choice.clone(),
+                media,
+            })
+            .map(|_| ())
+    };
+    let current = |editor: &Editor| editor.document().device(id).unwrap().clone();
+
+    set(&mut editor, 2, &user, Some(hash(5))).unwrap();
+    assert_eq!(current(&editor).wavetable_at(1), Some(&user));
+    assert_eq!(
+        current(&editor).media_at(1),
+        Some(hash(5)),
+        "oscillator 2's slot"
+    );
+    assert_eq!(current(&editor).wavetable_at(0), None);
+    assert_eq!(editor.undo_history().next(), Some("Load Wavetable"));
+
+    // The saved set keeps both, and reloads the same.
+    let saved = serde_json::to_value(current(&editor)).unwrap();
+    assert_eq!(
+        saved["wavetables"],
+        json!([null, { "kind": "user", "raw": false, "frames": 3 }])
+    );
+    assert_eq!(
+        serde_json::from_value::<Device>(saved).unwrap(),
+        current(&editor)
+    );
+
+    // A factory table takes the file's slot back; a user table needs its
+    // file, a factory table has none, and the oscillator is 1 or 2.
+    set(&mut editor, 2, &factory, None).unwrap();
+    assert_eq!(current(&editor).media_at(1), None);
+    assert!(set(&mut editor, 1, &user, None).is_err());
+    assert!(set(&mut editor, 1, &factory, Some(hash(5))).is_err());
+    assert!(set(&mut editor, 0, &factory, None).is_err());
+    assert!(set(&mut editor, 3, &factory, None).is_err());
+    editor.undo().unwrap();
+    assert_eq!(
+        current(&editor).wavetable_at(1),
+        Some(&user),
+        "one undo step"
+    );
+    assert_eq!(current(&editor).media_at(1), Some(hash(5)));
 }

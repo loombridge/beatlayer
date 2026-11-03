@@ -14,11 +14,15 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ("browser.clear_filters", Exception(FILTERS)),
         ("browser.filter", Exception(FILTERS)),
         ("browser.set_filter_groups", Exception(FILTERS)),
+        ("browser.set_include_auto_tags", Exception(FILTERS)),
         ("browser.move_label", Exception(LABELS)),
         ("browser.remove_label", Exception(LABELS)),
         ("browser.reset_label_order", Exception(LABELS)),
         ("browser.set_label_icon", Exception(LABELS)),
         ("browser.set_label_shown", Exception(LABELS)),
+        ("browser.add_collection", Exception(NESTED_COLLECTIONS)),
+        ("browser.delete_collection", Exception(NESTED_COLLECTIONS)),
+        ("browser.move_collection", Exception(NESTED_COLLECTIONS)),
         ("browser.set_columns", Exception(COLUMNS)),
         // The browser's tags (browser-tags R10 to R16).
         ("browser.add_tag", Exception(TAG_EDITOR)),
@@ -35,6 +39,18 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             main(nothing, browser_search, "Search Field", Key::K),
         ),
         ("browser.state", Exception(Query)),
+        ("browser.analysis_state", Exception(Query)),
+        // Show Similar Files' list, which `browser.show_similar` puts in the
+        // content pane (sound-similarity R16).
+        ("browser.similar", Exception(Query)),
+        // Sound analysis's Pause and Resume (sound-similarity R6).
+        (
+            "browser.set_analysis_paused",
+            Exception(Gap(
+                "the Status Bar's Pause button is a pointer button outside the Tab order; it \
+                 joins the Status Bar's order in the work that gives the bar one",
+            )),
+        ),
         ("browser.tags", Exception(Query)),
         // The File Manager (WP-6.63): its own rows and buttons reach
         // these, and its views open from the File and View menus.

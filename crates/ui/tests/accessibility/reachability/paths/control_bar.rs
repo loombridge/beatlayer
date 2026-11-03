@@ -6,7 +6,7 @@ use egui::Key;
 
 pub(crate) fn entries() -> Vec<(&'static str, Path)> {
     use Path::Exception;
-    use Reason::{Equivalent, LaterView, Live, Query};
+    use Reason::{Equivalent, Gap, LaterView, Live, Query};
     vec![
         (
             "transport.play",
@@ -47,6 +47,13 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ),
         ("transport.set_metronome_sound", Exception(METRONOME_MENU)),
         ("transport.set_metronome_rhythm", Exception(METRONOME_MENU)),
+        (
+            "transport.play_selection",
+            Exception(Equivalent(
+                "an agent's explicit form of Space and Option-Space with a time selection, \
+                 which the keys run from the selection (transport R35, R36)",
+            )),
+        ),
         (
             "transport.phase_nudge",
             Exception(Live(
@@ -166,6 +173,21 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             Exception(Equivalent(
                 "the Delete key while a time-signature marker is selected, which the \
                  Arrangement's keyboard runs directly (the time editing spec, R32)",
+            )),
+        ),
+        // The loop brace (WP-6.73).
+        (
+            "arrangement.select_loop_brace",
+            Exception(Equivalent(
+                "Tab reaches the brace in the Arrangement's Tab order and Enter selects it \
+                 (the transport spec, R32)",
+            )),
+        ),
+        (
+            "arrangement.set_loop_brace",
+            Exception(Equivalent(
+                "a drag of the brace's ends or bar, which the brace's keys do from the \
+                 keyboard (`arrangement.nudge_loop_brace`, the transport spec, R33)",
             )),
         ),
         // The time-signature lane (WP-6.61).
@@ -336,6 +358,115 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                  editing spec, R9 and R13)",
             )),
         ),
+        // The arranger track's commands (the arranger track spec, R14).
+        (
+            "arranger.add_section",
+            Exception(Equivalent(
+                "Create Section in the arranger track's context menu, which the context-menu \
+                 key opens while the lane has the keyboard (the arranger track spec, R5, R14)",
+            )),
+        ),
+        (
+            "arranger.sections_from_locators",
+            Exception(Equivalent(
+                "Create Sections From Locators in the arranger track's context menu, which the \
+                 context-menu key opens while the lane has the keyboard (the arranger track \
+                 spec, R5, R14)",
+            )),
+        ),
+        (
+            "arranger.rename_section",
+            Exception(Equivalent(
+                "Cmd-R while a section is selected, which the Arrangement's keyboard runs \
+                 directly (the arranger track spec, R7, R14)",
+            )),
+        ),
+        (
+            "arranger.duplicate_section",
+            Exception(Equivalent(
+                "Cmd-D while a section is selected, which the Arrangement's keyboard runs \
+                 directly (the arranger track spec, R10, R14)",
+            )),
+        ),
+        (
+            "arranger.delete_section",
+            Exception(Equivalent(
+                "the Delete key while a section is selected, which the Arrangement's keyboard \
+                 runs directly (the arranger track spec, R11, R14)",
+            )),
+        ),
+        (
+            "arranger.remove_section",
+            Exception(Equivalent(
+                "Remove Section in a section's context menu, which the context-menu key opens \
+                 (the arranger track spec, R11, R14)",
+            )),
+        ),
+        (
+            "arranger.set_section_colour",
+            Exception(Equivalent(
+                "the colour palette in a section's context menu, which the context-menu key \
+                 opens (the arranger track spec, R7, R14)",
+            )),
+        ),
+        (
+            "arranger.move_section",
+            Exception(Equivalent(
+                "Move Earlier and Move Later in a section's context menu, which the \
+                 context-menu key opens (the arranger track spec, R12, R14)",
+            )),
+        ),
+        (
+            "arranger.select_section",
+            Exception(Equivalent(
+                "Tab reaches the sections in the Arrangement's Tab order and selects the one \
+                 reached (the arranger track spec, R14)",
+            )),
+        ),
+        (
+            "arranger.copy_section",
+            Exception(Gap(
+                "copying a section to another place is Option-dragging it; Duplicate (Cmd-D) \
+                 is its keyboard form, after the section; the spec gives the keyboard no \
+                 other way (the arranger track spec, R9, R14)",
+            )),
+        ),
+        (
+            "arranger.resize_section",
+            Exception(Gap(
+                "an edge is dragged with the pointer; the spec gives the keyboard no way to \
+                 resize a section (the arranger track spec, R7, R14)",
+            )),
+        ),
+        (
+            "song.add_section",
+            Exception(Equivalent(
+                "the shell's arranger.add_section, which dragging across the lane and Create \
+                 Section run (the arranger track spec, R5, R15)",
+            )),
+        ),
+        (
+            "song.edit_section",
+            Exception(Equivalent(
+                "the shell's arranger.rename_section, arranger.set_section_colour and \
+                 arranger.resize_section, which Cmd-R, a section's menu and dragging an edge \
+                 run (the arranger track spec, R7, R15)",
+            )),
+        ),
+        (
+            "song.remove_section",
+            Exception(Equivalent(
+                "the shell's arranger.remove_section, which a section's context menu runs (the \
+                 arranger track spec, R11, R15)",
+            )),
+        ),
+        (
+            "song.set_arranger_track",
+            Exception(Equivalent(
+                "arrangement.arranger_track, which View ▸ Arranger Track runs (the arranger \
+                 track spec, R1, R15)",
+            )),
+        ),
         (
             "song.set_start",
             Exception(Equivalent(
@@ -352,6 +483,54 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         (
             "link.set_show_toggle",
             settings("link", nothing, "Show Link Toggle", Key::ArrowUp),
+        ),
+        ("tempo_follower.state", Exception(Query)),
+        (
+            "tempo_follower.set_enabled",
+            main(
+                the_follow_toggle_shown,
+                control_bar,
+                "Tempo Follower",
+                Key::Enter,
+            ),
+        ),
+        (
+            "settings.set_show_tempo_follower_toggle",
+            settings(
+                "tempo-midi",
+                nothing,
+                "Show Tempo Follower Toggle",
+                Key::ArrowUp,
+            ),
+        ),
+        (
+            "settings.set_tempo_follower_input",
+            settings(
+                "tempo-midi",
+                the_follow_toggle_shown,
+                "Input Channel",
+                Key::ArrowDown,
+            ),
+        ),
+        // Link Audio (the Link Audio spec, R2): the Link page's section.
+        (
+            "link.set_audio",
+            settings("link", nothing, "Link Audio", Key::Enter),
+        ),
+        (
+            "link.set_audio_latency",
+            settings("link", nothing, "Latency", Key::ArrowRight),
+        ),
+        (
+            "link.set_audio_name",
+            Exception(Equivalent(
+                "the Name field, typed into and then committed with Enter or by leaving it: \
+                 it sends its text once, so a typed space isn't trimmed away",
+            )),
+        ),
+        (
+            "link.set_sync_to_incoming_audio",
+            settings("link", nothing, "Sync to Incoming Audio", Key::Enter),
         ),
         ("song.scales", Exception(Query)),
         (

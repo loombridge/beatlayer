@@ -22,6 +22,7 @@
 //!
 //! The behaviour is in the browser spec.
 
+pub mod analysis;
 pub mod arrange;
 pub mod catalogue;
 pub mod collections;
@@ -35,7 +36,10 @@ pub mod index;
 pub mod labels;
 pub mod listing;
 pub mod places;
+pub mod plugin_presets;
 pub mod preview;
+mod similar;
+pub mod swap;
 pub mod tags;
 pub mod tunings;
 
@@ -50,16 +54,18 @@ use bl_media::MediaStore;
 use bl_model::{Editor, TrackId};
 pub use bl_shell_spec::browser::Part;
 use bl_shell_spec::browser::{
-    self as ids, AddTagArgs, AddTagGroupArgs, AddToArrangementArgs, BrowserState,
-    ClearCollectionsArgs, ClearFiltersArgs, ClipFileKind, ColumnsState, DeleteTagArgs, FilterArgs,
-    FocusArgs, FolderArgs, IndexState, Item, ItemKind, ItemTag, Label, LabelInfo,
-    MAX_PREVIEW_VOLUME, MoveLabelArgs, MoveTagArgs, OpenFolderArgs, OpenPlaceArgs, PreviewArgs,
-    PreviewState, QuickTag, RemoveLabelArgs, RenameFileArgs, RenameLabelArgs, RenameTagArgs,
-    RevealArgs, SaveClipFileArgs, SaveClipFileResult, ScrubPreviewArgs, SearchArgs, Section,
-    SelectArgs, SetCollectionArgs, SetColumnsArgs, SetFilterGroupsArgs, SetFilterViewArgs,
-    SetLabelIconArgs, SetLabelShownArgs, SetPreviewArgs, SetRawArgs, ShowFileArgs,
-    ShowQuickTagsArgs, ShowTagEditorArgs, StateArgs, TagEditorRow, TagEditorRowKind, TagGroupInfo,
-    TagInfo, TagItemsArgs, TagSource, TagState, TaggedItem, TagsArgs, TagsState,
+    self as ids, AddCollectionArgs, AddTagArgs, AddTagGroupArgs, AddToArrangementArgs,
+    BrowserState, ClearCollectionsArgs, ClearFiltersArgs, ClipFileKind, ColumnsState,
+    DeleteCollectionArgs, DeleteTagArgs, FilterArgs, FocusArgs, FolderArgs, IndexState, Item,
+    ItemKind, ItemTag, Label, LabelInfo, MAX_PREVIEW_VOLUME, MoveCollectionArgs, MoveLabelArgs,
+    MoveTagArgs, OpenFolderArgs, OpenPlaceArgs, PreviewArgs, PreviewState, QuickTag,
+    RemoveLabelArgs, RenameFileArgs, RenameLabelArgs, RenameTagArgs, RevealArgs, SaveClipFileArgs,
+    SaveClipFileResult, ScrubPreviewArgs, SearchArgs, Section, SelectArgs, SetAnalysisPausedArgs,
+    SetCollectionArgs, SetColumnsArgs, SetFilterGroupsArgs, SetFilterViewArgs,
+    SetIncludeAutoTagsArgs, SetLabelIconArgs, SetLabelShownArgs, SetPreviewArgs, SetRawArgs,
+    ShowFileArgs, ShowQuickTagsArgs, ShowSimilarArgs, ShowTagEditorArgs, SimilarArgs, StateArgs,
+    TagEditorRow, TagEditorRowKind, TagGroupInfo, TagInfo, TagItemsArgs, TagSource, TagState,
+    TaggedItem, TagsArgs, TagsState,
 };
 use bl_shell_spec::commands::{BROWSER_WIDTH, clamp_browser_width};
 use bl_shell_spec::settings::CollectFiles;
@@ -77,6 +83,7 @@ use self::history::{History, Step};
 use self::index::{Index, Scope, Snapshot};
 use self::labels::{LabelPrefs, SavedLabel};
 use self::listing::{Entry, file_kind};
+pub use self::plugin_presets::{PluginPreset, Reveal};
 use self::preview::{Loader, MediaSamples};
 use self::tags::{Source, TagStore};
 use crate::audio::AudioHost;
@@ -314,6 +321,14 @@ pub struct BrowserView {
     /// The plug-ins the scanner found (WP-2.9), already filtered by the
     /// hidden and format preferences; the Plug-Ins label lists them.
     plugins: Vec<ScannedPlugin>,
+    /// The hidden plug-ins' keys (spec: browser-tags R41): in `plugins` only
+    /// while Show Hidden Plug-Ins is on, drawn dimmed; hot-swap never lists
+    /// them.
+    hidden_plugins: BTreeSet<String>,
+    /// The folders of Audio Units presets (plugin scanning R15), and the
+    /// Beatlayer presets found for the plug-ins under the index last read.
+    au_preset_folders: Vec<PathBuf>,
+    plugin_presets: Option<plugin_presets::Cache>,
     /// The tag groups, the tags in them, and the items that carry them
     /// (spec: browser-tags R6 to R9).
     tags: TagStore,
@@ -333,6 +348,10 @@ pub struct BrowserView {
     pending_hashes: HashSet<String>,
     /// The thread that hashes files.
     hasher: Hasher,
+    /// Sound analysis in the background (spec: sound-similarity R5).
+    analysis: analysis::Analysis,
+    /// The sound tags of analysed samples that wait to be given, by path.
+    sound_pending: Vec<(String, Vec<String>)>,
     /// Whether the Tag Editor is open.
     tag_editor: bool,
     /// Whether Quick Tags shows.
@@ -342,6 +361,9 @@ pub struct BrowserView {
     /// The file whose name is open for editing after `clip.save_file` saved
     /// it (clip files R4).
     renaming: Option<PathBuf>,
+    /// The similarity search under way, when one is (spec: sound-similarity
+    /// R12).
+    similar: Option<similar::Similar>,
     /// The tags selected in the Filter View (spec: browser-tags R20).
     filter: BTreeSet<i64>,
     /// The Filter View and the groups each label shows.
@@ -365,6 +387,9 @@ pub struct BrowserView {
     /// The tags some item under a label carries, worked out for one
     /// generation and label.
     available: Mutex<Option<AvailableTags>>,
+    /// The similar list sample swapping goes by, worked out for one
+    /// reference, index and analysis (spec: sound-similarity R21).
+    swaps: Mutex<swap::SwapCache>,
     /// What was read from disk about files for the columns.
     details: Mutex<DetailsCache>,
     /// The thread that probes audio files for the sort.
@@ -534,6 +559,10 @@ pub fn plugin_key(plugin: &ScannedPlugin) -> String {
     format!("{}#{}", plugin.path.to_string_lossy(), plugin.plugin_id)
 }
 
+/// How many analysed samples' sound tags are given at once while analysis is
+/// still going on (spec: browser-tags R58).
+const SOUND_TAG_BATCH: usize = 25;
+
 /// A vendor folder's key in the Plug-Ins label.
 fn vendor_key(vendor: &str) -> String {
     format!("{PLUGIN_FOLDER}{vendor}")
@@ -566,6 +595,8 @@ impl BrowserView {
             selected: Vec::new(),
             cursor: None,
             index: Index::new(waker.clone()),
+            analysis: analysis::Analysis::new(waker.clone()),
+            sound_pending: Vec::new(),
             indexing: false,
             loader: Loader::new(waker.clone()),
             preview_on: prefs.preview,
@@ -581,6 +612,9 @@ impl BrowserView {
             focus_requests: 0,
             waker,
             plugins: Vec::new(),
+            hidden_plugins: BTreeSet::new(),
+            au_preset_folders: plugin_presets::default_au_preset_folders(),
+            plugin_presets: None,
             tags: TagStore::new(),
             db: None,
             saved_files: HashMap::new(),
@@ -592,6 +626,7 @@ impl BrowserView {
             quick_tags: prefs.quick_tags,
             message: None,
             renaming: None,
+            similar: None,
             filter: BTreeSet::new(),
             filter_prefs: prefs.filters.clone(),
             collections: CollectionStore::default(),
@@ -608,6 +643,7 @@ impl BrowserView {
             }),
             generation: 0,
             available: Mutex::new(None),
+            swaps: Mutex::default(),
             details: Mutex::new(DetailsCache::default()),
             prober: columns::Prober::default(),
             full_height: prefs.full_height,
@@ -628,9 +664,10 @@ impl BrowserView {
 
     /// Sets the plug-ins the Plug-Ins label lists (WP-2.9). The shell
     /// passes what the scanner found, already filtered by the hidden and
-    /// format preferences.
-    pub fn set_plugins(&mut self, plugins: Vec<ScannedPlugin>) {
+    /// format preferences, and the keys of the hidden ones.
+    pub fn set_plugins(&mut self, plugins: Vec<ScannedPlugin>, hidden: BTreeSet<String>) {
         self.plugins = plugins;
+        self.hidden_plugins = hidden;
         self.generation += 1;
         // Beatlayer gives each plug-in's vendor a tag in the Creator group
         // (spec: browser-tags R7).
@@ -653,10 +690,52 @@ impl BrowserView {
                 }
             }
         }
+        // Spec: browser-tags R49. A plug-in's categories give it Function
+        // tags, each time the scanner reports it.
+        ops.extend(self.give_plugin_auto_tags());
         self.save_tags(ops);
-        if self.label == Label::PlugIns {
+        // A collection or a saved label can list plug-ins too.
+        if matches!(
+            self.label,
+            Label::PlugIns | Label::Collection(_) | Label::Saved(_)
+        ) {
             self.rebuild();
         }
+    }
+
+    /// The IDs of the Function group's tags, by name.
+    fn function_ids(&self) -> HashMap<&'static str, i64> {
+        tags::FUNCTION_TAGS
+            .iter()
+            .filter_map(|name| {
+                let id = self
+                    .tags
+                    .find(&format!("{}|{name}", tags::FUNCTION_GROUP))
+                    .first()
+                    .copied()?;
+                Some((*name, id))
+            })
+            .collect()
+    }
+
+    /// Gives each plug-in the Function tags its format's categories map to
+    /// (spec: browser-tags R49, R50), leaving out the ones a person took
+    /// off (R51).
+    fn give_plugin_auto_tags(&mut self) -> Vec<db::TagOp> {
+        let function = self.function_ids();
+        let mut ops = Vec::new();
+        for plugin in &self.plugins {
+            let given: Vec<i64> =
+                bl_plugin_host::categories::function_tags(plugin.format, &plugin.categories)
+                    .into_iter()
+                    .filter_map(|name| function.get(name).copied())
+                    .collect();
+            ops.extend(
+                self.tags
+                    .set_auto_tags(&plugin.key(), tags::AutoSource::Plugin, given),
+            );
+        }
+        ops
     }
 
     /// Opens the browser's database (spec: browser-tags R1): the index of
@@ -672,14 +751,21 @@ impl BrowserView {
         // The file is open before anything is written to it.
         self.db = Some(db);
         // The tags the file holds, and the ones Beatlayer gives.
-        let ops = self.tags.load(loaded.groups, loaded.tags, loaded.item_tags);
+        let ops = self.tags.load(
+            loaded.groups,
+            loaded.tags,
+            loaded.item_tags,
+            loaded.auto_tags,
+            loaded.removed_auto_tags,
+        );
         // The files the file holds, so search finds them from the first
         // frame.
         self.db_files = loaded.files.clone();
         // The saved labels the file holds (spec: browser-tags R24).
         self.saved = loaded.saved_labels.clone();
         // The collections the file holds (spec: browser-tags R35).
-        self.collections.load(loaded.item_collections);
+        self.collections
+            .load(loaded.item_collections, loaded.nested_collections);
         // The files that carried a tag keep their hash, so a file moved
         // outside Beatlayer finds them again (spec: browser-tags R5).
         for row in &loaded.tagged_files {
@@ -696,7 +782,12 @@ impl BrowserView {
             .iter()
             .map(|row| (row.path.clone(), row.clone()))
             .collect();
+        self.analysis
+            .load(loaded.analysed.clone(), loaded.descriptor_keys.clone());
         self.adopt_index();
+        // Plug-ins reported before the database opened get their tags now.
+        let mut ops = ops;
+        ops.extend(self.give_plugin_auto_tags());
         self.save_tags(ops);
     }
 
@@ -905,6 +996,24 @@ impl BrowserView {
         for id in self.builtin_tags(key) {
             push(id, Source::Beatlayer, &mut carried);
         }
+        // Spec: browser-tags R51. Automatic tags come last, apart from the
+        // person's.
+        if let Some(auto) = self.tags.auto_tags_ref(key) {
+            for id in auto.keys() {
+                push(*id, Source::Auto, &mut carried);
+            }
+        }
+        carried
+    }
+
+    /// The tags an item carries for filters and `#` search: all of them,
+    /// less the automatic ones while Include Auto Tags is off (spec:
+    /// browser-tags R55).
+    fn searchable_tags(&self, key: &str) -> Vec<(i64, Source)> {
+        let mut carried = self.carried_tags(key);
+        if !self.filter_prefs.include_auto_tags {
+            carried.retain(|(_, source)| *source != Source::Auto);
+        }
         carried
     }
 
@@ -914,7 +1023,7 @@ impl BrowserView {
         if tags.is_empty() {
             return true;
         }
-        let carried = self.carried_tags(key);
+        let carried = self.searchable_tags(key);
         tags.iter()
             .all(|tag| carried.iter().any(|(id, _)| id == tag))
     }
@@ -933,7 +1042,9 @@ impl BrowserView {
                 .find(|(id, _)| *id == tag)
                 .map(|(_, source)| *source)
             {
-                Some(Source::Own) => own += 1,
+                // An automatic tag ticks and unticks as a person's does:
+                // unticking it takes it off for good (R51).
+                Some(Source::Own | Source::Auto) => own += 1,
                 Some(_) => fixed += 1,
                 None => {}
             }
@@ -949,6 +1060,16 @@ impl BrowserView {
         } else {
             TagState::Some
         }
+    }
+
+    /// Whether some of the items carry the tag automatically.
+    fn tag_is_auto(&self, tag: i64, keys: &[String]) -> bool {
+        keys.iter().any(|key| {
+            self.tags
+                .auto_tags_ref(key)
+                .is_some_and(|auto| auto.contains_key(&tag))
+                && !self.tags.item_tags(key).contains(&tag)
+        })
     }
 
     /// Whether the Tag Editor is open beside the content pane (spec:
@@ -1018,7 +1139,16 @@ impl BrowserView {
                                 Source::Own => TagSource::Own,
                                 Source::Folder => TagSource::Folder,
                                 Source::Beatlayer => TagSource::Beatlayer,
+                                Source::Auto => TagSource::Auto,
                             },
+                            origin: (source == Source::Auto)
+                                .then(|| {
+                                    self.tags
+                                        .auto_tags_ref(&key)
+                                        .and_then(|auto| auto.get(&id))
+                                        .map(|from| from.name().to_owned())
+                                })
+                                .flatten(),
                         })
                         .collect(),
                 }
@@ -1079,6 +1209,7 @@ impl BrowserView {
                 builtin: group.builtin,
                 has_subtags: !self.tags.tags_in(group.id).is_empty(),
                 marked,
+                auto: false,
             });
             for tag in self.tags.tags_in(group.id) {
                 self.tag_editor_row(&mut rows, tag.id, 1, &keys);
@@ -1092,6 +1223,7 @@ impl BrowserView {
                 builtin: false,
                 has_subtags: false,
                 marked: false,
+                auto: false,
             });
         }
         rows.push(TagEditorRow {
@@ -1103,6 +1235,7 @@ impl BrowserView {
             builtin: false,
             has_subtags: false,
             marked: false,
+            auto: false,
         });
         rows
     }
@@ -1127,6 +1260,7 @@ impl BrowserView {
             builtin: tag.builtin,
             has_subtags: !subtags.is_empty(),
             marked,
+            auto: self.tag_is_auto(id, keys),
         });
         for sub in subtags {
             self.tag_editor_row(rows, sub.id, depth + 1, keys);
@@ -1137,21 +1271,27 @@ impl BrowserView {
     /// browser-tags R13).
     pub fn quick_tags(&self) -> Vec<QuickTag> {
         let keys = self.selected_keys();
-        let mut tags: Vec<(i64, bool, bool)> = Vec::new();
+        // Each tag, whether every item carries it, whether it can be taken
+        // off them (a person's own and an automatic one can), and whether
+        // some carry it automatically.
+        let mut tags: Vec<(i64, bool, bool, bool)> = Vec::new();
         for key in &keys {
             for (id, source) in self.carried_tags(key) {
-                match tags.iter_mut().find(|(other, _, _)| *other == id) {
-                    Some((_, all, removable)) => {
-                        *all = *all && source == Source::Own;
-                        *removable = *removable && source == Source::Own;
+                let removable = matches!(source, Source::Own | Source::Auto);
+                let auto = source == Source::Auto;
+                match tags.iter_mut().find(|(other, ..)| *other == id) {
+                    Some((_, all, can, any_auto)) => {
+                        *all = *all && removable;
+                        *can = *can && removable;
+                        *any_auto |= auto;
                     }
-                    None => tags.push((id, source == Source::Own, source == Source::Own)),
+                    None => tags.push((id, removable, removable, auto)),
                 }
             }
         }
         let mut tags: Vec<QuickTag> = tags
             .into_iter()
-            .filter_map(|(id, all, removable)| {
+            .filter_map(|(id, all, removable, auto)| {
                 let tag = self.tags.tag(id)?;
                 let group = self.tags.group(tag.group)?;
                 Some(QuickTag {
@@ -1160,6 +1300,7 @@ impl BrowserView {
                     group: group.name.clone(),
                     all,
                     removable,
+                    auto,
                 })
             })
             .collect();
@@ -1250,7 +1391,13 @@ impl BrowserView {
     /// what's inside it, at any depth (spec: browser-tags R9).
     fn items_with_tag(&self, tag: i64) -> HashSet<String> {
         let mut keys: HashSet<String> = self.tags.items_with_tag(tag).into_iter().collect();
-        if keys.is_empty() {
+        let own = !keys.is_empty();
+        // Spec: browser-tags R55. Automatic tags answer `#` search while
+        // Include Auto Tags is on.
+        if self.filter_prefs.include_auto_tags {
+            keys.extend(self.tags.items_with_auto_tag(tag));
+        }
+        if !own {
             return keys;
         }
         let snapshot = self.index.snapshot();
@@ -1443,6 +1590,10 @@ impl BrowserView {
                 .iter()
                 .find(|saved| saved.id == *id)
                 .map_or_else(|| label.name(), |saved| saved.name.clone()),
+            Label::Collection(number) if label.is_nested_collection() => self
+                .collections
+                .name_of(*number)
+                .map_or_else(|| label.name(), str::to_owned),
             other => self
                 .label_prefs
                 .name(other)
@@ -1456,20 +1607,10 @@ impl BrowserView {
     pub fn labels(&self) -> Vec<LabelInfo> {
         // Spec: browser-tags R34. The collections come first, as the
         // sidebar lists them.
-        let mut labels: Vec<LabelInfo> = (1..=7)
-            .map(|number| {
-                let label = Label::Collection(number);
-                LabelInfo {
-                    available: true,
-                    name: self.label_name(&label),
-                    section: Section::Collections,
-                    path: None,
-                    icon: None,
-                    shown: self.label_prefs.shown(&label),
-                    label,
-                }
-            })
-            .collect();
+        let mut labels: Vec<LabelInfo> = Vec::new();
+        for number in 1..=7 {
+            self.collection_labels(number, None, &mut labels);
+        }
         labels.extend(
             self.label_prefs
                 .ordered(&self.saved)
@@ -1482,6 +1623,8 @@ impl BrowserView {
                     icon: self.label_icon(&label),
                     shown: self.label_prefs.shown(&label),
                     label,
+                    parent: None,
+                    open: false,
                 }),
         );
         let mut places = vec![Label::UserLibrary, Label::CurrentProject];
@@ -1500,9 +1643,36 @@ impl BrowserView {
                 icon: self.label_icon(&label),
                 shown: true,
                 label,
+                parent: None,
+                open: false,
             });
         }
         labels
+    }
+
+    /// A collection's sidebar entry, then the entries of the collections
+    /// nested in it (spec: browser-tags R45, R48).
+    fn collection_labels(&self, number: u32, parent: Option<u32>, out: &mut Vec<LabelInfo>) {
+        let label = Label::Collection(number);
+        let children = self.collections.children(number);
+        out.push(LabelInfo {
+            available: true,
+            name: self.label_name(&label),
+            section: Section::Collections,
+            path: None,
+            icon: None,
+            shown: self.label_prefs.shown(&label),
+            open: !children.is_empty()
+                && self.open.contains(Path::new(&format!(
+                    "{}{number}",
+                    collections::FOLDER_PREFIX
+                ))),
+            parent: parent.map(Label::Collection),
+            label,
+        });
+        for child in children {
+            self.collection_labels(child, Some(number), out);
+        }
     }
 
     /// The icon a label has: a saved label's own, or the person's.
@@ -1609,6 +1779,9 @@ impl BrowserView {
                 clip_kind: entry.clip,
                 details: None,
                 collections: Vec::new(),
+                hidden: false,
+                presets: false,
+                nested: Vec::new(),
             });
             if open && entry.kind == ItemKind::Set {
                 self.set_rows(&entry.path, depth.saturating_add(1), out);
@@ -1640,6 +1813,9 @@ impl BrowserView {
             clip_kind: None,
             details: None,
             collections: Vec::new(),
+            hidden: false,
+            presets: false,
+            nested: Vec::new(),
         });
     }
 
@@ -1726,6 +1902,12 @@ impl BrowserView {
     /// Works out the content pane's rows again, keeping the selection.
     fn rebuild(&mut self) {
         self.note = None;
+        // A similarity search belongs to the All label it chose (spec:
+        // sound-similarity R12).
+        if self.label != Label::All {
+            self.similar = None;
+        }
+        let reference = self.reference().map(Path::to_path_buf);
         // A saved label lists what its words and tags find under the label
         // it was made under (spec: browser-tags R24).
         let label = self.base_label();
@@ -1763,6 +1945,9 @@ impl BrowserView {
                     clip_kind: None,
                     details: None,
                     collections: Vec::new(),
+                    hidden: false,
+                    presets: false,
+                    nested: Vec::new(),
                 })
                 .filter(|item| self.item_passes(&selection, &builtin, item))
                 .collect();
@@ -1786,12 +1971,19 @@ impl BrowserView {
         }
         if label == Label::PlugIns {
             let items = self.plugin_rows();
+            let mut shown = true;
             let items = items
                 .into_iter()
+                // Spec: plugin-scanning R15. The presets listed under an open
+                // plug-in's row stay with it, shown or filtered out.
                 .filter(|item| {
-                    tags.is_empty() || self.carries_all(&self.tag_key(&item.path), &tags)
+                    if item.kind != ItemKind::Preset {
+                        shown = (tags.is_empty()
+                            || self.carries_all(&self.tag_key(&item.path), &tags))
+                            && self.item_passes(&selection, &builtin, item);
+                    }
+                    shown
                 })
-                .filter(|item| self.item_passes(&selection, &builtin, item))
                 .collect();
             self.rows = Rows::Items(items);
             self.cursor = self.selected.last().and_then(|path| self.position_of(path));
@@ -1799,12 +1991,28 @@ impl BrowserView {
         }
         if !self.search.trim().is_empty()
             || !selection.is_empty()
+            || reference.is_some()
             || matches!(label, Label::Samples | Label::Clips)
         {
             match self.scope(&label) {
                 Some((scope, only)) => {
                     let snapshot = Arc::clone(self.index.snapshot());
-                    let mut hits = self.search_hits(&snapshot, scope, only);
+                    let mut similar_note = None;
+                    let mut hits = if let Some(reference) = &reference {
+                        // Spec: sound-similarity R12. Most similar first,
+                        // whatever the columns sort by.
+                        self.similar_hits(&snapshot, reference)
+                            .unwrap_or_else(|error| {
+                                let (BrowserError::InvalidArgs(why)
+                                | BrowserError::Unavailable(why)
+                                | BrowserError::Failed(why)) = error;
+                                similar_note =
+                                    Some(format!("Similar files aren't available: {why}."));
+                                Vec::new()
+                            })
+                    } else {
+                        self.search_hits(&snapshot, scope, only)
+                    };
                     if !selection.is_empty() {
                         hits.retain(|&hit| {
                             let ids = self.file_ids(
@@ -1815,9 +2023,13 @@ impl BrowserView {
                             selection.matches(&ids)
                         });
                     }
-                    self.sort_hits(&snapshot, &mut hits);
+                    if reference.is_none() {
+                        self.sort_hits(&snapshot, &mut hits);
+                    }
                     if hits.is_empty() {
-                        self.note = Some(if self.index.indexing() {
+                        self.note = Some(if let Some(note) = similar_note {
+                            note
+                        } else if self.index.indexing() {
                             "Indexing the places\u{2026}".to_owned()
                         } else if self.search.trim().is_empty() && !selection.is_empty() {
                             "Nothing carries the selected tags.".to_owned()
@@ -1890,6 +2102,9 @@ impl BrowserView {
                             clip_kind: None,
                             details: None,
                             collections: Vec::new(),
+                            hidden: false,
+                            presets: false,
+                            nested: Vec::new(),
                         });
                         if open {
                             self.list_into(&path, 1, &mut items);
@@ -1982,6 +2197,9 @@ impl BrowserView {
             clip_kind: None,
             details: None,
             collections: Vec::new(),
+            hidden: false,
+            presets: false,
+            nested: Vec::new(),
         };
         let mut items: Vec<Item> = tunings::BUNDLED
             .iter()
@@ -2026,6 +2244,8 @@ impl BrowserView {
     /// each naming its vendor.
     fn plugin_rows(&mut self) -> Vec<Item> {
         let query = self.search.trim().to_lowercase();
+        let hidden = self.hidden_plugins.clone();
+        let presets = self.presets_by_plugin();
         let row = |p: &ScannedPlugin, depth: u16, folder: Option<String>| Item {
             path: plugin_key(p),
             name: p.name.clone(),
@@ -2037,6 +2257,14 @@ impl BrowserView {
             clip_kind: None,
             details: None,
             collections: Vec::new(),
+            hidden: hidden.contains(&p.key()),
+            presets: false,
+            nested: Vec::new(),
+        };
+        // Spec: plugin-scanning R15. A plug-in with presets has a fold
+        // triangle, and lists them under its row while it is open.
+        let rows = |p: &ScannedPlugin, depth: u16, folder: Option<String>| {
+            self.plugin_with_presets(row(p, depth, folder), presets.get(&plugin_key(p)))
         };
         let mut items = Vec::new();
         if !query.is_empty() || !self.applied_selection().is_empty() {
@@ -2044,7 +2272,7 @@ impl BrowserView {
                 self.plugins
                     .iter()
                     .filter(|p| p.name.to_lowercase().contains(&query))
-                    .map(|p| row(p, 0, p.vendor.clone())),
+                    .flat_map(|p| rows(p, 0, p.vendor.clone())),
             );
             if items.is_empty() {
                 self.note = Some(format!(
@@ -2071,13 +2299,16 @@ impl BrowserView {
                 clip_kind: None,
                 details: None,
                 collections: Vec::new(),
+                hidden: false,
+                presets: false,
+                nested: Vec::new(),
             });
             if open {
                 items.extend(
                     self.plugins
                         .iter()
                         .filter(|p| vendor_of(p) == Some(vendor))
-                        .map(|p| row(p, 1, None)),
+                        .flat_map(|p| rows(p, 1, None)),
                 );
             }
         }
@@ -2085,7 +2316,7 @@ impl BrowserView {
             self.plugins
                 .iter()
                 .filter(|p| vendor_of(p).is_none())
-                .map(|p| row(p, 0, None)),
+                .flat_map(|p| rows(p, 0, None)),
         );
         if items.is_empty() {
             self.note = Some(
@@ -2109,16 +2340,19 @@ impl BrowserView {
     #[must_use]
     pub fn selected_plugin(&self) -> Option<&ScannedPlugin> {
         match self.selected.as_slice() {
-            [one] => self.plugin(one),
+            // Spec: plugin-scanning R17. A preset of a plug-in loads it.
+            [one] => self.plugin_of_row(&one.to_string_lossy()),
             _ => None,
         }
     }
 
-    /// Whether `key` names a Plug-Ins row: a vendor folder or a plug-in.
+    /// Whether `key` names a Plug-Ins row: a vendor folder, a plug-in or one
+    /// of its presets.
     fn is_plugin_row(&self, key: &str) -> bool {
         key.strip_prefix(PLUGIN_FOLDER)
             .is_some_and(|vendor| self.plugins.iter().any(|p| vendor_of(p) == Some(vendor)))
             || self.plugin(Path::new(key)).is_some()
+            || self.plugin_preset(key).is_some()
     }
 
     /// How many rows the content pane has.
@@ -2149,17 +2383,22 @@ impl BrowserView {
                     clip_kind: clip_kind_of(entry.kind, &snapshot.path(hit)),
                     details: None,
                     collections: Vec::new(),
+                    hidden: false,
+                    presets: false,
+                    nested: Vec::new(),
                 }
             }
         };
         // Spec: browser-tags R27. What the shown columns say about it.
         item.details = self.details_for(&item);
         // Spec: browser-tags R37. The collections it is in.
-        item.collections = if item.kind == ItemKind::Plugin {
-            self.collections.of(&self.tag_key(&item.path))
+        let key = if item.kind == ItemKind::Plugin {
+            self.tag_key(&item.path)
         } else {
-            self.collections.of(&item.path)
+            item.path.clone()
         };
+        item.collections = self.collections.colours_of(&key);
+        item.nested = self.collections.nested_of(&key);
         Some(item)
     }
 
@@ -2182,6 +2421,24 @@ impl BrowserView {
     #[must_use]
     pub fn selected(&self) -> &[PathBuf] {
         &self.selected
+    }
+
+    /// The collection at the top of `number`'s chain: itself for one of the
+    /// seven, which gives a nested collection its colour (spec: browser-tags
+    /// R46).
+    #[must_use]
+    pub fn collection_top(&self, number: u32) -> u8 {
+        self.collections.top_of(number)
+    }
+
+    /// The keys, as `plugin.hide` takes them, of the selected plug-in rows.
+    #[must_use]
+    pub fn selected_plugin_keys(&self) -> Vec<String> {
+        self.selected
+            .iter()
+            .filter_map(|path| self.plugin(path))
+            .map(ScannedPlugin::key)
+            .collect()
     }
 
     /// Whether an item is selected.
@@ -2207,12 +2464,75 @@ impl BrowserView {
         }
     }
 
+    /// How far sound analysis has got (spec: sound-similarity R6, R7).
+    #[must_use]
+    pub fn analysis_state(&self) -> bl_shell_spec::browser::AnalysisState {
+        self.analysis.state()
+    }
+
+    /// The media store whose decoded audio sound analysis reuses.
+    pub fn set_analysis_media(&mut self, media: Arc<bl_media::MediaStore>) {
+        self.analysis.set_media(media);
+    }
+
+    /// Paces sound analysis by hand, for tests: it analyses a file only
+    /// when [`BrowserView::release_analysis`] allows it.
+    pub fn pace_analysis_by_hand(&mut self) {
+        self.analysis.pace_by_hand();
+    }
+
+    /// Lets sound analysis begin `files` more files, and waits for each to
+    /// be done unless it's paused, for tests that pace it by hand.
+    pub fn release_analysis(&mut self, files: usize) {
+        for _ in 0..files {
+            self.analysis.release(1);
+            self.analysis.poll(self.db.as_ref());
+            self.analysis.wait_for_current(self.db.as_ref());
+        }
+        self.apply_sound_tags(true);
+    }
+
+    /// Gives the samples analysis has finished their sound tags (spec:
+    /// browser-tags R49, R58). They come in batches so the Filter View's
+    /// tags, which are worked out afresh each time the tags change, aren't
+    /// worked out for every file; `force` takes what's waiting now.
+    fn apply_sound_tags(&mut self, force: bool) -> bool {
+        self.sound_pending.extend(self.analysis.take_tagged());
+        if self.sound_pending.is_empty()
+            || !(force || self.sound_pending.len() >= SOUND_TAG_BATCH || self.analysis.idle())
+        {
+            return false;
+        }
+        let function = self.function_ids();
+        let mut ops = Vec::new();
+        for (path, names) in std::mem::take(&mut self.sound_pending) {
+            let given: Vec<i64> = names
+                .iter()
+                .filter_map(|name| function.get(name.as_str()).copied())
+                .collect();
+            ops.extend(
+                self.tags
+                    .set_auto_tags(&path, tags::AutoSource::Sound, given),
+            );
+        }
+        let changed = !ops.is_empty();
+        self.save_tags(ops);
+        if changed && self.results_bar() {
+            self.rebuild();
+        }
+        changed
+    }
+
     /// Waits for indexing to finish, up to `timeout`, for tests and tools.
     /// Returns whether it finished.
     pub fn wait_for_index(&mut self, timeout: Duration) -> bool {
         let done = self.index.wait(timeout);
         self.indexing = self.index.indexing();
         self.rebuild();
+        if done {
+            // As `poll` does when indexing finishes.
+            self.save_index();
+        }
         done
     }
 
@@ -2284,6 +2604,9 @@ impl BrowserView {
             columns: self.columns.clone(),
             can_back: self.can_back(),
             can_forward: self.can_forward(),
+            similar: self
+                .reference()
+                .map(|path| path.to_string_lossy().into_owned()),
         }
     }
 
@@ -2352,6 +2675,8 @@ impl BrowserView {
             self.hash_ready(hashed);
             polled.changed = true;
         }
+        polled.changed |= self.analysis.poll(self.db.as_ref());
+        polled.changed |= self.apply_sound_tags(false);
         if self.take_probed() {
             self.rebuild();
             polled.changed = true;
@@ -2873,7 +3198,9 @@ impl BrowserView {
                     .get("label")
                     .and_then(|label| serde_json::from_value::<Label>(label.clone()).ok())
                     .unwrap_or_else(|| self.label.clone());
-                label.is_library() || label.is_collection()
+                label.is_library()
+                    || label.is_collection()
+                    || matches!(&label, Label::Collection(n) if self.collections.exists(*n))
             }
             ids::SET_COLLECTION | ids::CLEAR_COLLECTIONS => {
                 let items: Option<Vec<String>> = args
@@ -2890,6 +3217,12 @@ impl BrowserView {
             ids::BACK => self.can_back(),
             ids::FORWARD => self.can_forward(),
             ids::ADD_LABEL => self.results_bar(),
+            ids::SHOW_SIMILAR => {
+                args.get("end").and_then(Value::as_bool) == Some(true)
+                    || args.get("path").is_some()
+                    || self.selected_reference().is_ok()
+            }
+            ids::SIMILAR => args.get("path").is_some() || self.selected_reference().is_ok(),
             ids::REMOVE_FOLDER => args
                 .get("path")
                 .and_then(Value::as_str)
@@ -2981,6 +3314,7 @@ impl BrowserView {
                     self.choose_saved(id)?;
                 } else {
                     self.label = label;
+                    self.similar = None;
                     self.search.clear();
                 }
                 // A place is read afresh when it's chosen.
@@ -2996,7 +3330,32 @@ impl BrowserView {
                     open,
                     keep_others,
                 } = parse(args)?;
-                let path = if path.starts_with(PLUGIN_FOLDER) && self.is_plugin_row(&path) {
+                let path = if let Some(rest) = path.strip_prefix(collections::FOLDER_PREFIX) {
+                    // Spec: browser-tags R47. A nested collection opens in
+                    // place, and the sidebar's fold follows.
+                    let number = rest
+                        .parse::<u32>()
+                        .ok()
+                        .filter(|n| self.collections.exists(*n))
+                        .ok_or_else(|| {
+                            BrowserError::InvalidArgs(format!("{path} isn't a collection"))
+                        })?;
+                    let row = PathBuf::from(format!("{}{number}", collections::FOLDER_PREFIX));
+                    if open.unwrap_or(!self.open.contains(&row)) {
+                        self.open.insert(row);
+                    } else {
+                        self.open.remove(&row);
+                    }
+                    self.rebuild();
+                    outcome.value = state(self, ctx.audio);
+                    return Ok(outcome);
+                } else if self.plugin(Path::new(&path)).is_some() {
+                    // Spec: plugin-scanning R15. A plug-in's presets open in
+                    // place, and the ones open under another plug-in close.
+                    self.toggle_plugin_presets(Path::new(&path), open);
+                    outcome.value = state(self, ctx.audio);
+                    return Ok(outcome);
+                } else if path.starts_with(PLUGIN_FOLDER) && self.is_plugin_row(&path) {
                     PathBuf::from(path)
                 } else if self.is_set_row(&path) {
                     // Spec: set-exchange R1. A track of an opened set opens
@@ -3065,6 +3424,7 @@ impl BrowserView {
                             || is_bundled(p)
                             || self.is_plugin_row(p)
                             || self.is_set_row(p)
+                            || p.starts_with(collections::FOLDER_PREFIX)
                         {
                             Ok(PathBuf::from(p))
                         } else {
@@ -3079,6 +3439,7 @@ impl BrowserView {
                         && !is_bundled(&name)
                         && !self.is_plugin_row(&name)
                         && !self.is_set_row(&name)
+                        && !name.starts_with(collections::FOLDER_PREFIX)
                 }) {
                     return Err(BrowserError::InvalidArgs(format!(
                         "{} doesn't exist",
@@ -3446,10 +3807,9 @@ impl BrowserView {
                     for item in &items {
                         let key = self.tag_key(item);
                         for &tag in &wanted {
-                            let fixed = self
-                                .carried_tags(&key)
-                                .iter()
-                                .any(|(id, source)| *id == tag && *source != Source::Own);
+                            let fixed = self.carried_tags(&key).iter().any(|(id, source)| {
+                                *id == tag && !matches!(source, Source::Own | Source::Auto)
+                            });
                             if fixed {
                                 return Err(BrowserError::Unavailable(format!(
                                     "{} can't be taken off {}: Beatlayer gives it, or it comes \
@@ -3466,6 +3826,10 @@ impl BrowserView {
                     let key = self.tag_key(item);
                     let mut carried = self.tags.item_tags(&key);
                     for &tag in &wanted {
+                        // Spec: browser-tags R51, R57. Taking an automatic
+                        // tag off, or making it the person's own, leaves it
+                        // out of the automatic tags for good.
+                        ops.extend(self.tags.remove_auto_tag(&key, tag));
                         if attach {
                             if !carried.contains(&tag) {
                                 carried.push(tag);
@@ -3654,6 +4018,15 @@ impl BrowserView {
                 outcome.prefs_changed = true;
                 outcome.value = to_value(&self.filter_view());
             }
+            ids::SET_INCLUDE_AUTO_TAGS => {
+                let SetIncludeAutoTagsArgs { include } = parse(args)?;
+                self.filter_prefs.include_auto_tags =
+                    include.unwrap_or(!self.filter_prefs.include_auto_tags);
+                self.generation += 1;
+                self.rebuild();
+                outcome.prefs_changed = true;
+                outcome.value = to_value(&self.filter_view());
+            }
             ids::SET_FILTER_GROUPS => {
                 let args: SetFilterGroupsArgs = parse(args)?;
                 self.set_filter_groups(args)?;
@@ -3670,7 +4043,13 @@ impl BrowserView {
             ids::CLEAR_FILTERS => {
                 let ClearFiltersArgs { words, tags } = parse(args)?;
                 if words.unwrap_or(true) {
-                    self.search.clear();
+                    // Spec: sound-similarity R14. Ending a similarity search
+                    // goes back to the words the browser had before it.
+                    if self.reference().is_some() {
+                        self.end_similar();
+                    } else {
+                        self.search.clear();
+                    }
                 }
                 if tags.unwrap_or(true) {
                     self.filter.clear();
@@ -3722,10 +4101,46 @@ impl BrowserView {
                 outcome.prefs_changed = self.set_collection(args)?;
                 outcome.value = state(self, ctx.audio);
             }
+            ids::ADD_COLLECTION => {
+                let args: AddCollectionArgs = parse(args)?;
+                self.add_collection(args)?;
+                outcome.value = state(self, ctx.audio);
+            }
+            ids::MOVE_COLLECTION => {
+                let args: MoveCollectionArgs = parse(args)?;
+                self.move_collection(args)?;
+                outcome.value = state(self, ctx.audio);
+            }
+            ids::DELETE_COLLECTION => {
+                let args: DeleteCollectionArgs = parse(args)?;
+                self.delete_collection(args)?;
+                outcome.value = state(self, ctx.audio);
+            }
             ids::CLEAR_COLLECTIONS => {
                 let args: ClearCollectionsArgs = parse(args)?;
                 self.clear_collections(args)?;
                 outcome.value = state(self, ctx.audio);
+            }
+            ids::ANALYSIS_STATE => {
+                parse::<bl_commands::NoArgs>(args)?;
+                outcome.value = to_value(&self.analysis.state());
+            }
+            ids::SIMILAR => {
+                let SimilarArgs { path } = parse(args)?;
+                outcome.value = to_value(&self.similar_list(path)?);
+            }
+            ids::SHOW_SIMILAR => {
+                let args: ShowSimilarArgs = parse(args)?;
+                self.show_similar(args)?;
+                outcome.value = state(self, ctx.audio);
+            }
+            ids::SET_ANALYSIS_PAUSED => {
+                let SetAnalysisPausedArgs { paused } = parse(args)?;
+                self.analysis
+                    .set_paused(paused.unwrap_or(!self.analysis.paused()));
+                self.analysis.poll(self.db.as_ref());
+                self.apply_sound_tags(false);
+                outcome.value = to_value(&self.analysis.state());
             }
             ids::REVEAL => {
                 let args: RevealArgs = parse(args)?;
@@ -3869,6 +4284,7 @@ impl BrowserView {
         for item in items {
             let key = self.tag_key(item);
             if self.tags.item_tags_ref(&key).is_none()
+                && self.tags.removed_auto_tags(&key).is_empty()
                 && self.collections.of(&key).is_empty()
                 && self.tagged_files.remove(&key).is_some()
                 && let Some(db) = &self.db
@@ -3898,7 +4314,8 @@ impl BrowserView {
         for old in orphans {
             let tags = self.tags.item_tags(&old);
             let collected = self.collections.of(&old);
-            if tags.is_empty() && collected.is_empty() {
+            let removed = !self.tags.removed_auto_tags(&old).is_empty();
+            if tags.is_empty() && collected.is_empty() && !removed {
                 continue;
             }
             // The hash moves first, so clearing the old tags below doesn't
@@ -3912,6 +4329,10 @@ impl BrowserView {
                     }]);
                 }
             }
+            if removed {
+                let ops = self.tags.move_removed_auto_tags(&old, path);
+                self.save_tags(ops);
+            }
             if !tags.is_empty() {
                 let mut merged: BTreeSet<i64> = self.tags.item_tags(path).into_iter().collect();
                 merged.extend(tags);
@@ -3921,7 +4342,7 @@ impl BrowserView {
             }
             // Spec: browser-tags R5. Collections pass with the tags.
             if !collected.is_empty() {
-                let mut kept: BTreeSet<u8> = self.collections.of(path).into_iter().collect();
+                let mut kept: BTreeSet<u32> = self.collections.of(path).into_iter().collect();
                 kept.extend(collected);
                 let ops = [
                     self.collections.set(path, kept),
@@ -3961,6 +4382,24 @@ impl BrowserView {
         }
         self.saved_files = saved;
         db.save_files(ops);
+        // Sound analysis starts once indexing has finished with the places
+        // (spec: sound-similarity R5).
+        if !db.is_newer() {
+            self.analysis.enqueue(
+                self.saved_files
+                    .values()
+                    .filter_map(|row| {
+                        let preset = analysis::analysed_kind(db::kind_from_name(&row.kind)?)?;
+                        Some(analysis::Item {
+                            path: PathBuf::from(&row.path),
+                            size: row.size,
+                            modified: row.modified,
+                            preset,
+                        })
+                    })
+                    .collect(),
+            );
+        }
         // A tagged file that isn't there any more: its tags pass to the
         // same content, if it turns up (spec: browser-tags R5).
         let orphans: Vec<(String, u64)> = self
@@ -4065,12 +4504,8 @@ impl BrowserView {
     }
 
     fn check_label(&self, label: &Label) -> Result<(), BrowserError> {
-        if let Label::Collection(number) = label
-            && !label.is_collection()
-        {
-            return Err(BrowserError::InvalidArgs(format!(
-                "{number} isn't a collection: they are 1 (Favorites) to 7 (Gray)"
-            )));
+        if let Label::Collection(number) = label {
+            self.check_collection(*number)?;
         }
         if let Label::Saved(id) = label
             && !self.saved.iter().any(|saved| saved.id == *id)
@@ -4090,5 +4525,71 @@ impl BrowserView {
             )));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bl_model::{DeviceRole, PluginFormat};
+
+    fn plugin(format: PluginFormat, id: &str, categories: &[&str]) -> ScannedPlugin {
+        ScannedPlugin {
+            format,
+            path: PathBuf::from(format!("/plug-ins/{id}")),
+            plugin_id: id.to_owned(),
+            name: id.to_owned(),
+            vendor: None,
+            version: None,
+            role: DeviceRole::AudioEffect,
+            note_output: false,
+            categories: categories.iter().map(|c| (*c).to_owned()).collect(),
+        }
+    }
+
+    // Spec: browser-tags R49, R50. Plug-ins of every format, whichever this
+    // platform scans, get the Function tags their categories map to, each
+    // marked automatic; a category with no row gives none.
+    #[test]
+    fn plug_ins_of_every_format_get_the_tags_their_categories_map_to() {
+        let mut view = BrowserView::new(&BrowserPrefs::default(), Waker::default());
+        view.set_plugins(
+            vec![
+                plugin(PluginFormat::Clap, "a", &["audio-effect", "reverb"]),
+                plugin(PluginFormat::Vst3, "b", &["Fx", "Dynamics"]),
+                plugin(PluginFormat::AudioUnit, "aufx/dely/appl", &["aufx", "dely"]),
+                plugin(PluginFormat::Lv2, "urn:d", &["FilterPlugin"]),
+                plugin(PluginFormat::Clap, "none", &["audio-effect", "glitch"]),
+            ],
+            BTreeSet::new(),
+        );
+        let function = |key: &str| -> Vec<String> {
+            view.carried_tags(key)
+                .into_iter()
+                .filter(|(_, source)| *source == Source::Auto)
+                .map(|(id, _)| view.tags.full_name(id))
+                .collect()
+        };
+        assert_eq!(function("clap/a"), ["Function|Reverb"]);
+        assert_eq!(function("vst3/b"), ["Function|Dynamics"]);
+        assert_eq!(function("au/aufx/dely/appl"), ["Function|Delay"]);
+        assert_eq!(function("lv2/urn:d"), ["Function|Filter"]);
+        assert!(function("clap/none").is_empty());
+    }
+    // Spec: browser-tags R42. Hot-swap's lists never offer a hidden plug-in,
+    // even while Show Hidden Plug-Ins lists it in the browser.
+    #[test]
+    fn hot_swap_never_lists_a_hidden_plug_in() {
+        use bl_control::browse::Catalogue as _;
+        let mut view = BrowserView::new(&BrowserPrefs::default(), Waker::default());
+        let shown = plugin(PluginFormat::Clap, "a", &[]);
+        let hidden = plugin(PluginFormat::Clap, "b", &[]);
+        let keys = BTreeSet::from([hidden.key()]);
+        view.set_plugins(vec![shown, hidden], keys);
+        assert_eq!(view.plugin_rows().len(), 2, "the browser lists both");
+        let listed = view
+            .catalogue()
+            .children(Label::PlugIns.key().as_str(), None);
+        assert_eq!(listed.len(), 1, "{listed:?}");
     }
 }

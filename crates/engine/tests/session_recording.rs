@@ -394,3 +394,44 @@ fn a_recorded_clip_plays_in_step_with_where_the_take_ended() {
     // A quarter into each bar after the take ended at bar 1.
     assert_eq!(on, vec![BAR_FRAMES + 24_000, 2 * BAR_FRAMES + 24_000]);
 }
+
+const BAR: Ticks = Ticks(4 * bl_core::time::TICKS_PER_QUARTER);
+
+// Spec: push-2-notes R51. A fixed-length take ends on its own at the clip's
+// length, and the clip's slot plays on from there.
+#[test]
+fn a_fixed_length_take_ends_by_itself() {
+    let mut take = Take::new(|_| {});
+    take.session(SessionCommand::RecordFixed {
+        length: BAR,
+        phrase_sync: false,
+    });
+    take.blocks(2 * BAR_BLOCKS + 10);
+    assert_eq!(
+        take.take(),
+        Some(TakeBounds {
+            start: Frames(0),
+            end: Frames(BAR_FRAMES),
+            wrap: None,
+            frames: BAR_FRAMES as u64,
+        })
+    );
+    assert_eq!(take.slot(), Some(SlotState::Playing));
+}
+
+// Spec: push-2-notes R51. With Phrase Sync, a take started at bar 7 with a
+// phrase of 4 bars lasts to the phrase's end, 2 bars on.
+#[test]
+fn phrase_sync_ends_the_take_at_the_end_of_the_phrase() {
+    let mut take = Take::new(|_| {});
+    take.rig.sender.transport(TransportCommand::Play);
+    take.blocks(5 * BAR_BLOCKS + 10);
+    take.session(SessionCommand::RecordFixed {
+        length: Ticks(4 * BAR.0),
+        phrase_sync: true,
+    });
+    take.blocks(3 * BAR_BLOCKS + 10);
+    let bounds = take.take().expect("a take");
+    assert_eq!(bounds.start, Frames(6 * BAR_FRAMES));
+    assert_eq!(bounds.end, Frames(8 * BAR_FRAMES));
+}

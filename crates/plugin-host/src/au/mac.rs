@@ -480,8 +480,10 @@ impl AuHost {
                 sidechain: false,
                 external: false,
                 midi_sidechain: false,
+                midi_tap: false,
                 note_output: has_note_output(&unit, role),
                 outputs: Vec::new(),
+                matrix: None,
             },
             vendor,
             version: has_version.then(|| version_text(version)),
@@ -560,6 +562,19 @@ impl AuHost {
             path: String::new(),
             data,
         })
+    }
+
+    /// Gives the device's unit a state it saved before, or an `.aupreset`
+    /// file's property list. The unit keeps the state it had if it refuses.
+    ///
+    /// # Errors
+    ///
+    /// [`AuError::NoInstance`] if the device has no unit running, and
+    /// [`AuError::Refused`] if the data isn't a property list.
+    pub fn load_state(&self, device: DeviceId, data: &[u8]) -> Result<(), AuError> {
+        let mut guard = lock(&self.inner.main);
+        let instance = instance(guard.get()?, device)?;
+        load_state(&instance.unit, data).map_err(|_| AuError::Refused("that state".to_owned()))
     }
 
     /// What the device's unit is doing, or `None` if the device has no
@@ -1037,6 +1052,9 @@ pub(super) fn scan_file(path: &Path) -> Result<Vec<ScannedPlugin>, AuError> {
             version: unit.version,
             role: unit.device_type.role,
             note_output: unit.device_type.note_output,
+            // Spec: browser-tags R49. An Audio Unit's categories are the
+            // four characters of its type and of its subtype.
+            categories: vec![kind.clone(), subtype.clone()],
         });
     }
     Ok(found)

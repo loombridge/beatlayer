@@ -80,6 +80,8 @@ pub const SHOW_TAG_EDITOR: &str = "browser.show_tag_editor";
 pub const SHOW_QUICK_TAGS: &str = "browser.show_quick_tags";
 /// `browser.set_filter_view`: show or hide the Filter View (Cmd-Option-G).
 pub const SET_FILTER_VIEW: &str = "browser.set_filter_view";
+/// `browser.set_include_auto_tags`: the Filter View Menu's Include Auto Tags.
+pub const SET_INCLUDE_AUTO_TAGS: &str = "browser.set_include_auto_tags";
 /// `browser.set_filter_groups`: which filter groups a label shows.
 pub const SET_FILTER_GROUPS: &str = "browser.set_filter_groups";
 /// `browser.filter`: select filter tags.
@@ -107,6 +109,20 @@ pub const SET_COLUMNS: &str = "browser.set_columns";
 pub const SET_COLLECTION: &str = "browser.set_collection";
 /// `browser.clear_collections`: take items out of every collection.
 pub const CLEAR_COLLECTIONS: &str = "browser.clear_collections";
+/// `browser.add_collection`: make a collection inside a collection.
+pub const ADD_COLLECTION: &str = "browser.add_collection";
+/// `browser.move_collection`: move a nested collection into another.
+pub const MOVE_COLLECTION: &str = "browser.move_collection";
+/// `browser.delete_collection`: delete a nested collection and the ones in it.
+pub const DELETE_COLLECTION: &str = "browser.delete_collection";
+/// `browser.analysis_state`: how far sound analysis has got.
+pub const ANALYSIS_STATE: &str = "browser.analysis_state";
+/// `browser.set_analysis_paused`: pause or resume sound analysis.
+pub const SET_ANALYSIS_PAUSED: &str = "browser.set_analysis_paused";
+/// `browser.similar`: the items most like a sample or preset.
+pub const SIMILAR: &str = "browser.similar";
+/// `browser.show_similar`: Show Similar Files, or end it.
+pub const SHOW_SIMILAR: &str = "browser.show_similar";
 /// `browser.reveal`: show items in the system's file manager.
 pub const REVEAL: &str = "browser.reveal";
 /// `browser.back`: go back one step in the browser's history.
@@ -148,6 +164,7 @@ pub const IDS: &[&str] = &[
     SHOW_TAG_EDITOR,
     SHOW_QUICK_TAGS,
     SET_FILTER_VIEW,
+    SET_INCLUDE_AUTO_TAGS,
     SET_FILTER_GROUPS,
     FILTER,
     CLEAR_FILTERS,
@@ -161,6 +178,13 @@ pub const IDS: &[&str] = &[
     SET_COLUMNS,
     SET_COLLECTION,
     CLEAR_COLLECTIONS,
+    ADD_COLLECTION,
+    MOVE_COLLECTION,
+    DELETE_COLLECTION,
+    ANALYSIS_STATE,
+    SET_ANALYSIS_PAUSED,
+    SIMILAR,
+    SHOW_SIMILAR,
     REVEAL,
     BACK,
     FORWARD,
@@ -190,7 +214,8 @@ pub const MAX_PREVIEW_VOLUME: f64 = 1.995_262_314_968_879_5;
                    `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place \
                    (`user_library`, `current_project`), or a folder added to Places, as \
                    `{\"folder\": \"/its/path\"}`, or a saved label, as `{\"saved\": 3}`, or a \
-                   collection, 1 (Favorites) to 7 (Gray), as `{\"collection\": 3}`."
+                   collection, 1 (Favorites) to 7 (Gray), as `{\"collection\": 3}`, or a \
+                   collection of the person's own inside one, numbered from 8."
 )]
 pub enum Label {
     /// Everything: the places as folders, searched together.
@@ -228,8 +253,9 @@ pub enum Label {
     /// A saved label, by its ID (spec: browser-tags R24).
     Saved(i64),
     /// A collection, by its number: 1 is Favorites, 7 Gray (spec:
-    /// browser-tags R34).
-    Collection(u8),
+    /// browser-tags R34); a collection inside another is numbered from 8
+    /// (R45).
+    Collection(u32),
 }
 
 impl Label {
@@ -276,7 +302,7 @@ impl Label {
                 .map_or_else(|| path.clone(), |n| n.to_string_lossy().into_owned()),
             Self::Saved(_) => "Saved Label".to_owned(),
             Self::Collection(number) => COLLECTIONS
-                .get(usize::from(*number).wrapping_sub(1))
+                .get((*number as usize).wrapping_sub(1))
                 .map_or_else(|| "Collection".to_owned(), |name| (*name).to_owned()),
         }
     }
@@ -322,6 +348,12 @@ impl Label {
     #[must_use]
     pub const fn is_collection(&self) -> bool {
         matches!(self, Self::Collection(number) if *number >= 1 && *number <= 7)
+    }
+
+    /// Whether it's a collection inside another (spec: browser-tags R45).
+    #[must_use]
+    pub const fn is_nested_collection(&self) -> bool {
+        matches!(self, Self::Collection(number) if *number > 7)
     }
 
     /// For a Library label Beatlayer has no content for yet, what will fill
@@ -395,6 +427,14 @@ pub struct LabelInfo {
     /// saved labels (spec: browser-tags R26).
     #[serde(default = "shown_by_default")]
     pub shown: bool,
+    /// For a collection inside another, the one it is in (spec:
+    /// browser-tags R45, R48).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<Label>,
+    /// For a collection that holds others, whether its list is open in the
+    /// sidebar.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub open: bool,
 }
 
 fn shown_by_default() -> bool {
@@ -508,6 +548,19 @@ pub struct Item {
     /// order; left out while it is in none (spec: browser-tags R35, R40).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub collections: Vec<u8>,
+    /// The collections of the person's own it is in, by their numbers (8
+    /// and up); left out while it is in none (spec: browser-tags R46, R48).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nested: Vec<u32>,
+    /// For a plug-in, whether it is hidden, which the row draws dimmed while
+    /// Show Hidden Plug-Ins is on (spec: browser-tags R43); left out otherwise.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
+    /// For a plug-in, whether it has presets listed under its row, which its
+    /// fold triangle opens (the plug-in scanning spec, R15); `open` says
+    /// whether they are listed. Left out otherwise.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub presets: bool,
 }
 
 /// What an item's optional columns show (spec: browser-tags R27); a value
@@ -625,6 +678,10 @@ pub struct BrowserState {
     pub can_back: bool,
     /// Whether Browse Forward can go forward a step.
     pub can_forward: bool,
+    /// The file the content pane lists the neighbours of, shown in the
+    /// search field as a token (spec: sound-similarity R12).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub similar: Option<String>,
 }
 
 /// A column of the content pane (spec: browser-tags R27). Name always shows,
@@ -668,7 +725,7 @@ impl Column {
             Self::Name => "Name",
             Self::DateModified => "Date Modified",
             Self::Size => "Size",
-            Self::Kind => "Kind",
+            Self::Kind => "Type",
             Self::Length => "Length",
             Self::SampleRate => "Sample Rate",
             Self::Channels => "Channels",
@@ -731,6 +788,85 @@ pub struct FilterGroupChoice {
     pub shown: bool,
 }
 
+/// How far sound analysis has got (spec: sound-similarity R6, R7).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AnalysisState {
+    /// The audio files and presets that have a descriptor.
+    pub analysed: usize,
+    /// The audio files and presets waiting to be analysed, the one under
+    /// way included.
+    pub waiting: usize,
+    /// The files that couldn't be analysed, and aren't tried again until
+    /// they change.
+    pub skipped: usize,
+    /// Whether analysis is paused: the file under way is finished, and no
+    /// other is begun until it resumes.
+    pub paused: bool,
+    /// The path of the file under way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current: Option<String>,
+    /// The share of the files that were waiting when this run began that
+    /// are done, from 0 to 1; left out when nothing waits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub share: Option<f64>,
+    /// The descriptors computed since Beatlayer started: a file whose
+    /// content already had one, such as a moved copy, doesn't add to it.
+    pub computed: usize,
+}
+
+/// Arguments of `browser.similar` (spec: sound-similarity R16).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SimilarArgs {
+    /// The reference: a sample or an instrument or drum preset. Left out,
+    /// the selected item.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+/// Arguments of `browser.show_similar`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ShowSimilarArgs {
+    /// The reference. Left out, the selected item.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// End the similarity search and go back to the browser as it was,
+    /// as deleting the reference's token does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<bool>,
+}
+
+/// One item of `browser.similar`'s list.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SimilarItem {
+    /// Its path.
+    pub path: String,
+    /// What it is.
+    pub kind: ItemKind,
+    /// Its distance from the reference: 0 for the reference, up to 0.35.
+    pub distance: f32,
+}
+
+/// What `browser.similar` gives (spec: sound-similarity R16).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SimilarList {
+    /// The reference.
+    pub reference: SimilarItem,
+    /// The reference first, then the nearest items of its own kind, most
+    /// similar first.
+    pub items: Vec<SimilarItem>,
+}
+
+/// Arguments of `browser.set_analysis_paused`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetAnalysisPausedArgs {
+    /// Whether analysis is paused. Left out, it toggles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paused: Option<bool>,
+}
+
 /// The Filter View (spec: browser-tags R18 to R22).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct FilterViewState {
@@ -742,6 +878,13 @@ pub struct FilterViewState {
     pub menu: Vec<FilterGroupChoice>,
     /// The selected tags' full names.
     pub selected: Vec<String>,
+    /// Whether the Filter View Menu's Include Auto Tags is on: automatic
+    /// tags show in the Filter View, filter and answer `#` search (spec:
+    /// browser-tags R55).
+    pub include_auto_tags: bool,
+    /// Whether the chosen label's groups differ from its default ones, which
+    /// Reset Filter Groups to Default would undo.
+    pub customized: bool,
 }
 
 /// A saved label (spec: browser-tags R24).
@@ -760,6 +903,10 @@ pub struct SavedLabelInfo {
     pub search: String,
     /// The tags it keeps, by their full names.
     pub tags: Vec<String>,
+    /// The file it lists the neighbours of, first (spec: sound-similarity
+    /// R15).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
 }
 
 /// How a tag sits on the selection (spec: browser-tags R11).
@@ -786,6 +933,10 @@ pub enum TagSource {
     Folder,
     /// Beatlayer gave it, from what it knows of the item.
     Beatlayer,
+    /// Beatlayer gave it automatically, from a plug-in's categories or a
+    /// sample's sound (spec: browser-tags R49); a person can take it off or
+    /// make it their own.
+    Auto,
 }
 
 /// A tag, as `browser.tags` reports it.
@@ -822,6 +973,10 @@ pub struct ItemTag {
     pub tag: String,
     /// Where it comes from.
     pub source: TagSource,
+    /// For an automatic tag, what it was found from: `plugin` (its
+    /// categories) or `sound` (the sample's sound).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
 }
 
 /// An item and the tags it carries.
@@ -866,6 +1021,10 @@ pub struct TagEditorRow {
     pub has_subtags: bool,
     /// Whether the selection carries one of its tags, for a folded row.
     pub marked: bool,
+    /// Whether some selected item carries the tag automatically, which the
+    /// row marks (spec: browser-tags R51); unticking it takes it off those
+    /// items for good.
+    pub auto: bool,
 }
 
 /// What a row of the Tag Editor is.
@@ -896,8 +1055,11 @@ pub struct QuickTag {
     /// asterisk.
     pub all: bool,
     /// Whether it can be taken off the selected items: the person's own
-    /// tags can, Beatlayer's and a folder's can't.
+    /// tags and automatic ones can, Beatlayer's and a folder's can't.
     pub removable: bool,
+    /// Whether some selected item carries it automatically (spec:
+    /// browser-tags R51).
+    pub auto: bool,
 }
 
 /// Arguments of `browser.tags`.
@@ -928,8 +1090,8 @@ pub struct TagItemsArgs {
 #[serde(deny_unknown_fields)]
 pub struct SetCollectionArgs {
     /// The collection: 1 is Favorites, 2 Orange, 3 Yellow, 4 Green, 5 Blue,
-    /// 6 Purple, 7 Gray.
-    pub collection: u8,
+    /// 6 Purple, 7 Gray, or the number of a nested collection (8 and up).
+    pub collection: u32,
     /// The items, by their keys as `browser.tag_items` names them. Left out,
     /// the selected items.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -939,6 +1101,45 @@ pub struct SetCollectionArgs {
     /// come out, otherwise they all go in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub member: Option<bool>,
+}
+
+/// Arguments of `browser.add_collection`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AddCollectionArgs {
+    /// The collection to make it in: 1 to 7, or a nested one.
+    pub parent: u32,
+    /// Its name. Left out, "New Collection", numbered when the name is
+    /// taken in that collection, with its name open for editing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// Arguments of `browser.move_collection`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MoveCollectionArgs {
+    /// The nested collection to move.
+    pub collection: u32,
+    /// The collection to move it into: 1 to 7, or a nested one that isn't
+    /// inside the one moved.
+    pub parent: u32,
+    /// Its place among the collections already there, from 0. Left out, at
+    /// the end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
+}
+
+/// Arguments of `browser.delete_collection`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteCollectionArgs {
+    /// The nested collection to delete, with the collections inside it.
+    pub collection: u32,
+    /// Delete although they hold items: they leave them out. Otherwise the
+    /// command is refused, naming how many (spec: browser-tags R47).
+    #[serde(default)]
+    pub confirm: bool,
 }
 
 /// Arguments of `browser.clear_collections`.
@@ -1056,8 +1257,18 @@ pub struct SetFilterViewArgs {
     pub show: Option<bool>,
 }
 
-/// Arguments of `browser.set_filter_groups`. Give `group`, `show_all` or
-/// `reset`.
+/// Arguments of `browser.set_include_auto_tags`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetIncludeAutoTagsArgs {
+    /// Whether automatic tags show in the Filter View, filter and answer
+    /// `#` search. Left out, it toggles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include: Option<bool>,
+}
+
+/// Arguments of `browser.set_filter_groups`. Give `group`, `show_all`,
+/// `hide_all` or `reset`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SetFilterGroupsArgs {
@@ -1073,6 +1284,9 @@ pub struct SetFilterGroupsArgs {
     /// Show every group.
     #[serde(default)]
     pub show_all: bool,
+    /// Hide every group.
+    #[serde(default)]
+    pub hide_all: bool,
     /// Put the label's groups back to its default ones.
     #[serde(default)]
     pub reset: bool,
@@ -1846,13 +2060,27 @@ fn specs() -> Vec<CommandSpec> {
             .binding("S-BRW-013")
             .args::<SetFilterViewArgs>()
             .result::<FilterViewState>(),
+        CommandSpec::new(SET_INCLUDE_AUTO_TAGS, "Include Auto Tags")
+            .description(
+                "Switches the Filter View Menu's Include Auto Tags on or off. On, which is how \
+                 a new install starts, the automatic tags Beatlayer gives plug-ins from their \
+                 categories and samples from their sound show in the Filter View, filter the \
+                 list and answer `#` search; off, only a person's tags and Beatlayer's own \
+                 four groups' do. Left out, `include` toggles. Kept for the next start. Read \
+                 it in `browser.state`'s `filter_view.include_auto_tags`; `browser.tags` marks \
+                 each tag on an item `auto` or not.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Browser])
+            .args::<SetIncludeAutoTagsArgs>()
+            .result::<FilterViewState>(),
         CommandSpec::new(SET_FILTER_GROUPS, "Set Filter Groups")
             .description(
                 "Chooses which filter groups a label shows in the Filter View (`label`, or the \
                  chosen one): `group` with `shown` true (the default) or false shows or hides \
-                 that group; `show_all` shows every group; `reset` puts the label's groups \
-                 back to the default ones. Give one of `group`, `show_all` and `reset`. Kept \
-                 for the next start.",
+                 that group; `show_all` shows every group; `hide_all` hides every group; \
+                 `reset` puts the label's groups back to the default ones. Give one of \
+                 `group`, `show_all`, `hide_all` and `reset`. Kept for the next start.",
             )
             .permission(Permission::Edit)
             .contexts([Global, Browser])
@@ -1877,7 +2105,7 @@ fn specs() -> Vec<CommandSpec> {
             .description(
                 "Clears the selected filter tags and the search words (`words` and `tags`, both \
                  true if left out), as the Results bar's Clear button and Esc in the search \
-                 field do. Changes nothing, but lists files outside the project.",
+                 field do; clearing the words also ends a similarity search. Changes nothing, but lists files outside the project.",
             )
             .permission(Permission::External)
             .contexts([Global, Browser, BrowserSearch])
@@ -1935,7 +2163,8 @@ fn specs() -> Vec<CommandSpec> {
         CommandSpec::new(SET_COLLECTION, "Set Collection")
             .description(
                 "Puts items in one of the seven collections (`collection`: 1 Favorites, 2 \
-                 Orange, 3 Yellow, 4 Green, 5 Blue, 6 Purple, 7 Gray), or takes them out, as the \
+                 Orange, 3 Yellow, 4 Green, 5 Blue, 6 Purple, 7 Gray) or a nested one (8 and \
+                 up), or takes them out, as the \
                  keys 1 to 7 and the items of a browser item's context menu do. The items are \
                  named by their keys as `browser.tag_items` names them (`items`; left out, the \
                  selected items). With `member` true they go in, with false they come out; left \
@@ -1948,6 +2177,43 @@ fn specs() -> Vec<CommandSpec> {
             .contexts([Global, Browser])
             .args::<SetCollectionArgs>()
             .result::<BrowserState>(),
+        CommandSpec::new(ADD_COLLECTION, "New Collection")
+            .description(
+                "Makes a collection of the person's own inside a collection (`parent`: 1 to 7, \
+                 or a nested one, to any depth), as New Collection in a collection's context \
+                 menu does. Its number is 8 or more and stays with it; `name` is \"New \
+                 Collection\" when left out, numbered when that name is taken in the parent, \
+                 and then its name opens for editing. A nested collection takes the colour of \
+                 the collection at its top. Kept in the browser's database. Returns the \
+                 browser's state, whose labels list it under its parent.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Browser, BrowserSidebar])
+            .args::<AddCollectionArgs>()
+            .result::<BrowserState>(),
+        CommandSpec::new(MOVE_COLLECTION, "Move Collection")
+            .description(
+                "Moves a nested collection, with the collections inside it, into another \
+                 collection (`parent`), at `index` among the ones there (the end if left out), \
+                 as dragging its label in the sidebar does. A collection can't go inside \
+                 itself or one of its own. The items in it stay in it. Returns the browser's \
+                 state.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Browser, BrowserSidebar])
+            .args::<MoveCollectionArgs>()
+            .result::<BrowserState>(),
+        CommandSpec::new(DELETE_COLLECTION, "Delete Collection")
+            .description(
+                "Deletes a nested collection and the collections inside it from the browser, \
+                 as Delete in its context menu does. It never touches a file: the items \
+                 simply leave them. When they hold items the command is refused unless \
+                 `confirm` is true. Returns the browser's state.",
+            )
+            .permission(Permission::Destructive)
+            .contexts([Global, Browser, BrowserSidebar])
+            .args::<DeleteCollectionArgs>()
+            .result::<BrowserState>(),
         CommandSpec::new(CLEAR_COLLECTIONS, "Clear All Colors")
             .description(
                 "Takes items out of every collection, as the key 0 and Clear All Colors in a \
@@ -1959,6 +2225,61 @@ fn specs() -> Vec<CommandSpec> {
             .contexts([Global, Browser])
             .args::<ClearCollectionsArgs>()
             .result::<BrowserState>(),
+        CommandSpec::new(ANALYSIS_STATE, "Sound Analysis State")
+            .description(
+                "Reports how far the browser's sound analysis has got: the audio files and \
+                 presets analysed, waiting and skipped, whether analysis is paused, the file \
+                 under way and the share done. Beatlayer describes every audio file of 60 \
+                 seconds or less and every instrument and drum preset in the background, for \
+                 finding similar sounds. Changes nothing.",
+            )
+            .permission(Permission::Read)
+            .contexts([Global, Browser])
+            .args::<NoArgs>()
+            .result::<AnalysisState>(),
+        CommandSpec::new(SIMILAR, "Similar Files")
+            .description(
+                "Lists the sounds most like a reference, from every place: `path`, or the \
+                 selected item, which must be an analysed audio file of 60 seconds or less, or \
+                 an analysed instrument or drum preset. The list holds the reference, then the \
+                 100 nearest items of its own kind whose distance from it is under 0.35, most \
+                 similar first, each with its path, kind and distance. It comes from the \
+                 database alone, with no new analysis. Refused for an item that isn't analysed \
+                 yet or can't be a reference. Changes nothing.",
+            )
+            .permission(Permission::Read)
+            .contexts([Global, Browser])
+            .args::<SimilarArgs>()
+            .result::<SimilarList>(),
+        CommandSpec::new(SHOW_SIMILAR, "Show Similar Files")
+            .description(
+                "Shows the similar files of `path`, or the selected item, in the browser, as the \
+                 icon beside the selected file, the item menu's and the View menu's Show Similar \
+                 Files and Cmd-Shift-F (Ctrl-Shift-F) do: chooses the All label, puts the \
+                 reference in the search field as a token, and lists `browser.similar`'s items \
+                 in the content pane, the reference first. Search words typed after it and the \
+                 filter tags narrow the list. With `end` true, ends the similarity search and \
+                 goes back to the browser as it was, as deleting the token or Esc does. Add \
+                 Label keeps the list as a saved label with the reference first. Refused for an \
+                 item that isn't analysed yet or can't be a reference. Changes nothing, but \
+                 lists files outside the project.",
+            )
+            .permission(Permission::External)
+            .contexts([Global, Browser])
+            .binding("S-BRW-010")
+            .args::<ShowSimilarArgs>()
+            .result::<BrowserState>(),
+        CommandSpec::new(SET_ANALYSIS_PAUSED, "Pause Sound Analysis")
+            .description(
+                "Pauses sound analysis, as the Status Bar's Pause button does, or resumes it: \
+                 `paused` true or false; left out, it toggles. Pausing stops analysis once the \
+                 file under way is finished. The pause lasts until it is resumed or Beatlayer \
+                 quits. Read the result in `browser.analysis_state`.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Browser])
+            .args::<SetAnalysisPausedArgs>()
+            .result::<AnalysisState>(),
         CommandSpec::new(REVEAL, "Show in Finder")
             .description(
                 "Shows files and folders in the system's file manager (Finder on macOS, File \
@@ -2103,6 +2424,7 @@ mod tests {
             RESET_TAG_ORDER,
             SHOW_QUICK_TAGS,
             SET_FILTER_VIEW,
+            SET_INCLUDE_AUTO_TAGS,
             SET_FILTER_GROUPS,
             ADD_LABEL,
             RENAME_LABEL,
@@ -2113,18 +2435,23 @@ mod tests {
             SET_COLUMNS,
             SET_COLLECTION,
             CLEAR_COLLECTIONS,
+            ADD_COLLECTION,
+            MOVE_COLLECTION,
         ] {
             assert_eq!(class(id), Permission::Edit, "{id}");
         }
         // Spec: browser-tags R32. These change what the browser lists.
-        for id in [FILTER, CLEAR_FILTERS, BACK, FORWARD] {
+        for id in [FILTER, CLEAR_FILTERS, BACK, FORWARD, SHOW_SIMILAR] {
             assert_eq!(class(id), Permission::External, "{id} lists files outside");
         }
-        for id in [DELETE_TAG, REMOVE_LABEL] {
+        for id in [DELETE_TAG, REMOVE_LABEL, DELETE_COLLECTION] {
             assert_eq!(class(id), Permission::Destructive, "{id}");
         }
         assert_eq!(class(TAGS), Permission::External);
         assert_eq!(class(SHOW_TAG_EDITOR), Permission::Read);
+        assert_eq!(class(ANALYSIS_STATE), Permission::Read);
+        assert_eq!(class(SIMILAR), Permission::Read);
+        assert_eq!(class(SET_ANALYSIS_PAUSED), Permission::Edit);
         for id in [FOCUS_SEARCH, STOP_PREVIEW, FOCUS_BROWSER] {
             assert_eq!(class(id), Permission::Read, "{id}");
         }
@@ -2159,5 +2486,6 @@ mod tests {
         );
         assert!(Label::Collection(1).is_collection() && !Label::Collection(1).is_library());
         assert!(!Label::Collection(8).is_collection());
+        assert!(Label::Collection(8).is_nested_collection());
     }
 }

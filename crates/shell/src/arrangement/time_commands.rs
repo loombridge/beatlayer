@@ -9,7 +9,8 @@ use std::collections::BTreeMap;
 
 use bl_core::time::{Bpm, Ticks, TimeSignatureChange};
 use bl_model::{
-    AutomationTarget, Breakpoint, Clip, Command, Document, Editor, Locator, TakeLaneId, TrackId,
+    AutomationTarget, Breakpoint, Clip, Command, Document, Editor, Locator, SongSection,
+    TakeLaneId, TrackId,
 };
 use bl_shell_spec::arrangement::Lane;
 use bl_shell_spec::editing::{
@@ -60,6 +61,8 @@ pub struct TimeMaterial {
     pub time_signatures: Vec<TimeSignatureChange>,
     /// The locators inside it.
     pub locators: Vec<Locator>,
+    /// The sections inside it, cut to it (the arranger track spec, R13).
+    pub sections: Vec<SongSection>,
 }
 
 impl TimeMaterial {
@@ -114,7 +117,7 @@ impl TimeMaterial {
 }
 
 /// What the span `start..end` holds on every track, from `start`.
-fn time_material(doc: &Document, start: Ticks, end: Ticks) -> TimeMaterial {
+pub(super) fn time_material(doc: &Document, start: Ticks, end: Ticks) -> TimeMaterial {
     let tempo = &doc.settings().tempo;
     let parts = |clips: &mut dyn Iterator<Item = &Clip>| -> Vec<Clip> {
         let mut parts: Vec<Clip> = clips
@@ -171,12 +174,22 @@ fn time_material(doc: &Document, start: Ticks, end: Ticks) -> TimeMaterial {
                 ..l.clone()
             })
             .collect(),
+        sections: doc
+            .sections()
+            .iter()
+            .filter(|s| s.start < end && s.end() > start)
+            .map(|s| SongSection {
+                start: s.start.max(start) - start,
+                length: s.end().min(end) - s.start.max(start),
+                ..s.clone()
+            })
+            .collect(),
     }
 }
 
 /// Opens `material.length` of time at `at` and puts the material in it
-/// (time editing R19, R20).
-fn paste_material(
+/// (time editing R19, R20). The sections it carries take new IDs.
+pub(super) fn paste_material(
     editor: &mut Editor,
     material: &TimeMaterial,
     at: Ticks,
@@ -292,11 +305,53 @@ fn paste_material(
         };
         apply(editor, Command::AddLocator { locator })?;
     }
+    paste_sections(editor, material, at)
+}
+
+/// Puts the sections the material carries where it landed, leaving out the
+/// parts that fall where a section already is (the arranger track spec, R13,
+/// R16).
+fn paste_sections(
+    editor: &mut Editor,
+    material: &TimeMaterial,
+    at: Ticks,
+) -> Result<(), EditFailure> {
+    for section in &material.sections {
+        let (start, end) = (at + section.start, at + section.start + section.length);
+        let held: Vec<(Ticks, Ticks)> = editor
+            .document()
+            .sections()
+            .iter()
+            .map(|other| (other.start, other.end()))
+            .collect();
+        let (mut free, mut from) = (Vec::new(), start);
+        for (other_start, other_end) in held {
+            if other_end <= from || other_start >= end {
+                continue;
+            }
+            if other_start > from {
+                free.push((from, other_start));
+            }
+            from = from.max(other_end);
+        }
+        if from < end {
+            free.push((from, end));
+        }
+        for (from, to) in free {
+            let piece = SongSection {
+                id: editor.new_id(),
+                start: from,
+                length: to - from,
+                ..section.clone()
+            };
+            apply(editor, Command::AddSection { section: piece })?;
+        }
+    }
     Ok(())
 }
 
 /// The span the arguments name, or the time selection.
-fn span(
+pub(super) fn span(
     doc: &Document,
     view: &ArrangementView,
     args: TimeSpanArgs,
@@ -325,7 +380,7 @@ fn span(
 }
 
 /// Selects `start..end` on the lanes already selected, with no clips.
-fn select_time(view: &mut ArrangementView, start: Ticks, end: Ticks) {
+pub(super) fn select_time(view: &mut ArrangementView, start: Ticks, end: Ticks) {
     let lanes = if view.time_selection_lanes.is_empty() {
         view.selected
             .iter()
@@ -339,7 +394,7 @@ fn select_time(view: &mut ArrangementView, start: Ticks, end: Ticks) {
 
 /// The insert marker at `at` with no time selected, as Delete Time leaves it
 /// (R15).
-fn leave_marker(view: &mut ArrangementView, at: Ticks) {
+pub(super) fn leave_marker(view: &mut ArrangementView, at: Ticks) {
     view.selected_clips.clear();
     view.time_selection = None;
     view.time_selection_lanes.clear();

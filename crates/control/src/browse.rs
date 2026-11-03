@@ -35,6 +35,12 @@ pub enum Load {
         /// What it is in a chain.
         role: DeviceRole,
     },
+    /// An audio file, which `session.drop_files` puts in an empty slot
+    /// (push-2-tracks R43).
+    Sample {
+        /// The file.
+        path: String,
+    },
 }
 
 impl Load {
@@ -44,6 +50,7 @@ impl Load {
         match self {
             Self::Device { role, .. } | Self::Plugin { role, .. } => Some(*role),
             Self::Preset { role, .. } => *role,
+            Self::Sample { .. } => None,
         }
     }
 }
@@ -72,6 +79,12 @@ pub trait Catalogue: Send + Sync + Debug {
 
     /// What the entry with `key` holds, folders first.
     fn children(&self, key: &str, role: Option<DeviceRole>) -> Vec<Entry>;
+
+    /// The audio files Clip Mode offers an empty audio slot, by name
+    /// (push-2-tracks R43).
+    fn samples(&self) -> Vec<Entry> {
+        Vec::new()
+    }
 }
 
 /// The browser as a surface sees it each tick.

@@ -5,6 +5,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeSet, VecDeque};
 
 use bl_core::id::{Id, IdAllocator};
+use bl_core::time::Ticks;
 
 use crate::changes::ChangeSet;
 use crate::command::Command;
@@ -83,6 +84,11 @@ struct Step {
     /// a step that didn't change the tempo leaves it as it is (the Link
     /// spec, R3).
     tempo: Option<bl_core::time::TempoMap>,
+    /// The loop brace's start and length the step set, when the step changed
+    /// them: redoing brings them back. Dragging or nudging the brace is no
+    /// undo step, so a step that didn't change the brace leaves it as it is
+    /// (the transport spec, R16, R31).
+    brace: Option<(Ticks, Ticks)>,
 }
 
 /// Who made a step in the history: the person, an agent by the name the
@@ -370,6 +376,22 @@ impl Editor {
         ChangeSet::between(&before, &self.document)
     }
 
+    /// Arms or disarms `track` as a control surface does that arms by
+    /// selection (the notes on Push 2 spec, R3): no undo step, and the set
+    /// isn't marked as changed. A track that isn't an audio or MIDI track
+    /// changes nothing.
+    ///
+    /// It isn't a command: no person asked for it, so it is the app
+    /// following the selection, as [`Editor::follow_scale`] follows the
+    /// scale.
+    pub fn follow_arm(&mut self, track: crate::TrackId, arm: bool) -> ChangeSet {
+        let before = self.document.clone();
+        if self.document.follow_arm(track, arm).is_err() {
+            return ChangeSet::between(&before, &before);
+        }
+        ChangeSet::between(&before, &self.document)
+    }
+
     /// Sets the set's tempo to the constant tempo `bpm`, as a peer in a Link
     /// session setting it does (the Link spec, R3): that is no undo step,
     /// though the set is marked as changed.
@@ -383,6 +405,26 @@ impl Editor {
         // As in [`Editor::follow_scale`].
         for open in &mut self.open {
             open.start.settings.tempo = self.document.settings.tempo.clone();
+        }
+        ChangeSet::between(&before, &self.document)
+    }
+
+    /// Moves the Arrangement loop brace to `start` and `length`, as dragging
+    /// or nudging it does: that is no undo step (the transport spec, R31),
+    /// though the set is marked as changed. The caller has checked the brace
+    /// starts at 1.1.1 or later and is longer than zero.
+    ///
+    /// It isn't a command, as [`Editor::follow_tempo`] isn't: it's a
+    /// gesture's result, and Loop Selection and the Control Bar's fields,
+    /// which are undo steps, stay `transport.set_loop`.
+    pub fn move_loop_brace(&mut self, start: Ticks, length: Ticks) -> ChangeSet {
+        let before = self.document.clone();
+        let brace = &mut self.document.settings.arrangement_loop;
+        (brace.start, brace.length) = (start, length);
+        // As in [`Editor::follow_scale`].
+        for open in &mut self.open {
+            let brace = &mut open.start.settings.arrangement_loop;
+            (brace.start, brace.length) = (start, length);
         }
         ChangeSet::between(&before, &self.document)
     }
@@ -451,10 +493,16 @@ impl Editor {
             outer.keep |= open.keep;
             return Ok(false);
         }
-        if open.start == self.document && !open.keep {
+        // Cue mode and the pad layout are no undo step, so a transaction
+        // that changed only those records none: an agent's call runs in one.
+        let mut start = open.start;
+        start.settings.cue_mode = self.document.settings.cue_mode;
+        start.settings.pad_layout = self.document.settings.pad_layout;
+        start.settings.arranger_track = self.document.settings.arranger_track;
+        if start == self.document && !open.keep {
             return Ok(false);
         }
-        self.record(open.label, open.maker, open.start);
+        self.record(open.label, open.maker, start);
         Ok(true)
     }
 
@@ -555,10 +603,14 @@ impl Editor {
             document,
             scale,
             tempo,
+            brace,
         } = self.undo.pop_back().ok_or(EditError::NothingToUndo)?;
         let mut document = *document;
         // Cue mode is no undo step, so undoing keeps it as it is.
         document.settings.cue_mode = self.document.settings.cue_mode;
+        // Nor is the pad layout, or whether the arranger track shows.
+        document.settings.pad_layout = self.document.settings.pad_layout;
+        document.settings.arranger_track = self.document.settings.arranger_track;
         // The current scale follows a selection or a clip that starts, and
         // that is no undo step either, so a step that didn't change the
         // scale leaves it as it is.
@@ -569,6 +621,10 @@ impl Editor {
         if tempo.is_none() {
             document.settings.tempo = self.document.settings.tempo.clone();
         }
+        // The brace moved by hand is no undo step either.
+        if brace.is_none() {
+            keep_brace(&mut document, &self.document);
+        }
         let after = std::mem::replace(&mut self.document, document);
         self.redo.push(Step {
             label,
@@ -576,6 +632,7 @@ impl Editor {
             document: Box::new(after),
             scale,
             tempo,
+            brace,
         });
         Ok(())
     }
@@ -605,9 +662,12 @@ impl Editor {
             document,
             scale,
             tempo,
+            brace,
         } = self.redo.pop().ok_or(EditError::NothingToRedo)?;
         let mut document = *document;
         document.settings.cue_mode = self.document.settings.cue_mode;
+        document.settings.pad_layout = self.document.settings.pad_layout;
+        document.settings.arranger_track = self.document.settings.arranger_track;
         // A step that changed the scale brings it back; one that didn't
         // leaves it as it is.
         match scale {
@@ -617,6 +677,13 @@ impl Editor {
         document.settings.tempo = tempo
             .clone()
             .unwrap_or_else(|| self.document.settings.tempo.clone());
+        match brace {
+            Some((start, length)) => {
+                document.settings.arrangement_loop.start = start;
+                document.settings.arrangement_loop.length = length;
+            }
+            None => keep_brace(&mut document, &self.document),
+        }
         let before = std::mem::replace(&mut self.document, document);
         self.undo.push_back(Step {
             label,
@@ -624,6 +691,7 @@ impl Editor {
             document: Box::new(before),
             scale,
             tempo,
+            brace,
         });
         Ok(())
     }
@@ -749,12 +817,19 @@ impl Editor {
             .then_some(self.document.settings.scale);
         let tempo = (before.settings.tempo != self.document.settings.tempo)
             .then(|| self.document.settings.tempo.clone());
+        let (was, now) = (
+            before.settings.arrangement_loop,
+            self.document.settings.arrangement_loop,
+        );
+        let brace =
+            ((was.start, was.length) != (now.start, now.length)).then_some((now.start, now.length));
         self.undo.push_back(Step {
             label,
             maker,
             document: Box::new(before),
             scale,
             tempo,
+            brace,
         });
         self.trim();
     }
@@ -766,6 +841,13 @@ impl Editor {
             }
         }
     }
+}
+
+/// Gives `document` the loop brace `current` has.
+fn keep_brace(document: &mut Document, current: &Document) {
+    let brace = current.settings.arrangement_loop;
+    document.settings.arrangement_loop.start = brace.start;
+    document.settings.arrangement_loop.length = brace.length;
 }
 
 impl Default for Editor {
@@ -1334,6 +1416,45 @@ mod tests {
         assert_eq!(bpm(&editor), 130.0);
     }
 
+    fn brace(editor: &Editor) -> (Ticks, Ticks) {
+        let brace = editor.document().settings().arrangement_loop;
+        (brace.start, brace.length)
+    }
+
+    #[test]
+    fn moving_the_loop_brace_is_no_undo_step_and_survives_undo_of_an_earlier_step() {
+        // Spec: transport R31
+        let mut editor = Editor::new();
+        midi_track(&mut editor);
+        let steps = editor.undo_history().len();
+        let changes = editor.move_loop_brace(Ticks(1000), Ticks(500));
+        assert!(!changes.is_empty());
+        assert_eq!(editor.undo_history().len(), steps);
+        assert_eq!(brace(&editor), (Ticks(1000), Ticks(500)));
+        editor.undo().unwrap();
+        assert_eq!(brace(&editor), (Ticks(1000), Ticks(500)));
+        editor.redo().unwrap();
+        assert_eq!(brace(&editor), (Ticks(1000), Ticks(500)));
+    }
+
+    #[test]
+    fn a_step_that_set_the_loop_brace_brings_it_back_on_redo_past_a_later_move() {
+        // Spec: transport R16, R31
+        let mut editor = Editor::new();
+        let first = brace(&editor);
+        editor
+            .apply(Command::SetLoop {
+                start: Ticks(100),
+                length: Ticks(200),
+            })
+            .unwrap();
+        editor.move_loop_brace(Ticks(300), Ticks(400));
+        editor.undo().unwrap();
+        assert_eq!(brace(&editor), first);
+        editor.redo().unwrap();
+        assert_eq!(brace(&editor), (Ticks(100), Ticks(200)));
+    }
+
     #[test]
     fn a_step_that_set_the_tempo_brings_it_back_on_redo_and_a_taps_amend_is_kept() {
         use bl_core::time::{Bpm, TempoMap};
@@ -1389,6 +1510,73 @@ mod tests {
         editor.follow_tempo(Bpm::new(140.0).unwrap());
         editor.redo().unwrap();
         assert_eq!(bpm(&editor), 140.0);
+    }
+
+    // Spec: push-2-notes R37. The pad layout is no undo step, undoing and
+    // redoing leave it as it is, and a set at the default doesn't write it.
+    #[test]
+    fn the_pad_layout_is_no_undo_step_and_survives_undo() {
+        use crate::{PadDirection, PadSpacing};
+        let mut editor = Editor::new();
+        let track = midi_track(&mut editor);
+        let steps = editor.undo_history().len();
+        editor
+            .apply(Command::SetPadLayout {
+                in_key: Some(false),
+                fixed: Some(true),
+                spacing: Some(PadSpacing::Sequent),
+                direction: Some(PadDirection::Horizontal),
+            })
+            .unwrap();
+        assert_eq!(editor.undo_history().len(), steps, "no undo step");
+        let saved = serde_json::to_value(editor.document().settings()).unwrap();
+        assert_eq!(saved["pad_layout"]["spacing"], "sequent");
+        editor
+            .apply(Command::SetVolume { track, volume: 0.5 })
+            .unwrap();
+        editor.undo().unwrap();
+        editor.undo().unwrap();
+        editor.redo().unwrap();
+        let layout = editor.document().settings().pad_layout;
+        assert!(!layout.in_key && layout.fixed);
+        assert_eq!(layout.spacing, PadSpacing::Sequent);
+        editor
+            .apply(Command::SetPadLayout {
+                in_key: Some(true),
+                fixed: Some(false),
+                spacing: Some(PadSpacing::Fourths),
+                direction: Some(PadDirection::Vertical),
+            })
+            .unwrap();
+        let saved = serde_json::to_value(editor.document().settings()).unwrap();
+        assert!(saved.get("pad_layout").is_none());
+    }
+
+    // Spec: push-2-notes R37. A transaction, such as an agent's call, that
+    // sets only the pad layout or cue mode records no step either.
+    #[test]
+    fn a_transaction_that_sets_only_the_pad_layout_records_no_step() {
+        use crate::PadDirection;
+        let mut editor = Editor::new();
+        editor
+            .transact_by(
+                Maker::Agent("a".to_owned()),
+                "a: Set Pad Layout",
+                |editor| {
+                    editor.apply(Command::SetPadLayout {
+                        in_key: None,
+                        fixed: None,
+                        spacing: None,
+                        direction: Some(PadDirection::Horizontal),
+                    })
+                },
+            )
+            .unwrap();
+        assert_eq!(editor.undo_history().len(), 0);
+        assert_eq!(
+            editor.document().settings().pad_layout.direction,
+            PadDirection::Horizontal
+        );
     }
 
     #[test]

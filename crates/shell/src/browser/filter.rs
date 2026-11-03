@@ -31,6 +31,10 @@ pub struct FilterPrefs {
     pub shown: bool,
     /// What the person changed for each label, by [`Label::key`].
     pub groups: BTreeMap<String, GroupChoice>,
+    /// Whether the Filter View Menu's Include Auto Tags is on: automatic
+    /// tags show in the Filter View, filter and answer `#` search (spec:
+    /// browser-tags R55). On in a new install.
+    pub include_auto_tags: bool,
 }
 
 impl Default for FilterPrefs {
@@ -38,6 +42,7 @@ impl Default for FilterPrefs {
         Self {
             shown: true,
             groups: BTreeMap::new(),
+            include_auto_tags: true,
         }
     }
 }
@@ -93,6 +98,19 @@ impl FilterPrefs {
         for (name, builtin) in groups {
             self.set_group(label, name, *builtin, true);
         }
+    }
+
+    /// Makes `label` hide every group of these.
+    pub fn hide_all(&mut self, label: &Label, groups: &[(String, bool)]) {
+        for (name, builtin) in groups {
+            self.set_group(label, name, *builtin, false);
+        }
+    }
+
+    /// Whether a label's groups differ from the default ones.
+    #[must_use]
+    pub fn customized(&self, label: &Label) -> bool {
+        self.groups.contains_key(&label.key())
     }
 
     /// Puts a label's groups back to the default ones.
@@ -179,7 +197,7 @@ impl BrowserView {
     /// browser-tags R22).
     #[must_use]
     pub fn results_bar(&self) -> bool {
-        !self.search.trim().is_empty() || !self.filter.is_empty()
+        !self.search.trim().is_empty() || !self.filter.is_empty() || self.reference().is_some()
     }
 
     /// The tags selected in the groups the chosen label shows.
@@ -250,6 +268,13 @@ impl BrowserView {
             _ => None,
         };
         ids.extend(given);
+        // Spec: browser-tags R55. A sample's automatic tags, while Include
+        // Auto Tags is on.
+        if self.filter_prefs.include_auto_tags
+            && let Some(auto) = self.tags.auto_tags_ref(&path.to_string_lossy())
+        {
+            ids.extend(auto.keys().copied());
+        }
         ids
     }
 
@@ -265,7 +290,7 @@ impl BrowserView {
         }
         let carried: Vec<i64> = match item.kind {
             ItemKind::Plugin | ItemKind::Device => self
-                .carried_tags(&self.tag_key(&item.path))
+                .searchable_tags(&self.tag_key(&item.path))
                 .into_iter()
                 .map(|(id, _)| id)
                 .collect(),
@@ -299,12 +324,16 @@ impl BrowserView {
         let devices = label_devices(base);
         if !devices.is_empty() {
             for device in devices {
-                found.extend(self.carried_tags(&device.id).into_iter().map(|(id, _)| id));
+                found.extend(
+                    self.searchable_tags(&device.id)
+                        .into_iter()
+                        .map(|(id, _)| id),
+                );
             }
         } else if *base == Label::PlugIns {
             for plugin in &self.plugins {
                 found.extend(
-                    self.carried_tags(&plugin.key())
+                    self.searchable_tags(&plugin.key())
                         .into_iter()
                         .map(|(id, _)| id),
                 );
@@ -400,6 +429,8 @@ impl BrowserView {
             groups: shown_groups,
             menu,
             selected: self.filter_tags(),
+            include_auto_tags: self.filter_prefs.include_auto_tags,
+            customized: self.filter_prefs.customized(&self.label),
         }
     }
 
@@ -420,22 +451,27 @@ impl BrowserView {
         }
         let modes = usize::from(args.group.is_some())
             + usize::from(args.show_all)
+            + usize::from(args.hide_all)
             + usize::from(args.reset);
         if modes != 1 {
             return Err(BrowserError::InvalidArgs(
-                "give one of `group`, `show_all` and `reset`".to_owned(),
+                "give one of `group`, `show_all`, `hide_all` and `reset`".to_owned(),
             ));
         }
         if args.reset {
             self.filter_prefs.reset(&label);
-        } else if args.show_all {
+        } else if args.show_all || args.hide_all {
             let groups: Vec<(String, bool)> = self
                 .tags
                 .groups()
                 .iter()
                 .map(|group| (group.name.clone(), group.builtin))
                 .collect();
-            self.filter_prefs.show_all(&label, &groups);
+            if args.show_all {
+                self.filter_prefs.show_all(&label, &groups);
+            } else {
+                self.filter_prefs.hide_all(&label, &groups);
+            }
         } else if let Some(group) = args.group {
             let found = self
                 .tags
@@ -513,10 +549,11 @@ mod tests {
     fn labels_show_the_groups_the_spec_gives_them() {
         let prefs = FilterPrefs::default();
         let shown = |label: &Label, group: &str| prefs.group_shown(label, group, true);
-        for group in ["Content", "Format", "Creator", "Devices"] {
+        for group in ["Content", "Format", "Creator", "Devices", "Function"] {
             assert!(shown(&Label::All, group), "{group} under All");
         }
         assert!(shown(&Label::PlugIns, "Devices"));
+        assert!(!shown(&Label::PlugIns, "Function"), "R19 doesn't list it");
         assert!(shown(&Label::PlugIns, "Format"));
         assert!(shown(&Label::PlugIns, "Creator"));
         assert!(!shown(&Label::PlugIns, "Content"));

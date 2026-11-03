@@ -62,7 +62,11 @@ fn every_gain_parameter_reaches_minus_infinity() {
             };
             let group: Vec<_> = if device_type.name == "EQ Three" {
                 BAND_GAINS.to_vec()
-            } else if device_type.name == "Multiband Dynamics" && band_gain(param).is_some() {
+            } else if matches!(
+                device_type.name.as_str(),
+                "Multiband Dynamics" | "Re-Enveloper"
+            ) && band_gain(param).is_some()
+            {
                 let same = |p: &&bl_model::ParamDescriptor| {
                     p.is_gain() && band_gain(p) == band_gain(param)
                 };
@@ -71,6 +75,16 @@ fn every_gain_parameter_reaches_minus_infinity() {
                     .params
                     .iter()
                     .filter(same)
+                    .map(|p| p.id)
+                    .collect()
+            } else if device_type.name == "Resonators" && param.name != "Gain" {
+                // Each resonator's gain acts on one of five.
+                let resonator = |p: &&bl_model::ParamDescriptor| p.is_gain() && p.name != "Gain";
+                device_type
+                    .description
+                    .params
+                    .iter()
+                    .filter(resonator)
                     .map(|p| p.id)
                     .collect()
             } else {

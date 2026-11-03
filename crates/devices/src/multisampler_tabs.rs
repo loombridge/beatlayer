@@ -6,6 +6,8 @@
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, LayoutNode, Widget};
 use bl_model::{ParamDescriptor, ParamId, ParamUnit, SamplerTab};
 
+use crate::instrument_filter::CIRCUITS;
+
 /// The longest envelope time, in milliseconds.
 const ENVELOPE_MAX_MS: f64 = 20_000.0;
 
@@ -117,6 +119,9 @@ pub const FILTER_DRIVE: ParamId = ParamId(186);
 pub const FENV_ON: ParamId = ParamId(187);
 /// The filter envelope's Amount, in semitones (R38).
 pub const FENV_AMOUNT: ParamId = ParamId(188);
+/// The filter's circuit: Clean, OSR, MS2, SMP or PRD (the instrument filter
+/// spec, R2). Older sets lack it and open on Clean.
+pub const FILTER_CIRCUIT: ParamId = ParamId(193);
 /// The shaper's switch (R39).
 pub const SHAPER_ON: ParamId = ParamId(189);
 /// Soft, Hard, Sine or 4bit (R39).
@@ -540,6 +545,11 @@ pub fn params() -> Vec<ParamDescriptor> {
         ),
         ParamDescriptor::choice(FILTER_SLOPE, "Filter Slope", &FILTER_SLOPES, 0)
             .describe("The filter's steepness, 12 or 24 dB per octave."),
+        ParamDescriptor::choice(FILTER_CIRCUIT, "Filter Circuit", &CIRCUITS, 0).describe(
+            "The filter's circuit: Clean has no distortion of its own; OSR, MS2, SMP and PRD \
+             part as the signal and Res rise. MS2, SMP and PRD play low-pass and high-pass \
+             only; on other types the circuit plays Clean.",
+        ),
         ParamDescriptor::continuous(FILTER_FREQ, "Filter Freq", (20.0, 20_000.0), 1000.0, ParamUnit::Hertz)
             .logarithmic()
             .describe("The filter's cutoff frequency."),
@@ -549,7 +559,10 @@ pub fn params() -> Vec<ParamDescriptor> {
             "Where the Morph type sits: low-pass at 0, band-pass at 25 %, high-pass at 50 %, notch at 75 %, and low-pass again at 100 %.",
         ),
         ParamDescriptor::continuous(FILTER_DRIVE, "Filter Drive", (0.0, 24.0), 0.0, ParamUnit::Decibels)
-            .describe("Drives the signal into the low-pass, high-pass and band-pass filter."),
+            .describe(
+                "Drives the signal into the filter's circuit, for low-pass, high-pass and \
+                 band-pass; Clean ignores it.",
+            ),
         ParamDescriptor::toggle(FENV_ON, "Filter Env On", false)
             .describe("Lets the filter envelope move the cutoff."),
         ParamDescriptor::continuous(FENV_AMOUNT, "Filter Env Amount", (0.0, 72.0), 0.0, ParamUnit::Semitones)
@@ -677,6 +690,7 @@ pub fn filter_bands() -> Vec<LayoutNode> {
             (FILTER_ON, Widget::Toggle),
             (FILTER_TYPE, Widget::Chooser),
             (FILTER_SLOPE, Widget::Chooser),
+            (FILTER_CIRCUIT, Widget::Chooser),
             (FILTER_FREQ, Widget::Knob),
             (FILTER_RES, Widget::Knob),
             (FILTER_MORPH, Widget::Knob),

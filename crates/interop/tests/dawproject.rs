@@ -746,15 +746,24 @@ fn colours_take_the_nearest_swatch_and_a_missing_colour_the_new_one() {
     let document = &imported.project.document;
     // The file's colours are swatches 21 (a clip) and 33 (a scene) as drawn.
     let scenes: Vec<_> = document.scenes().collect();
-    assert_eq!(scenes[0].colour, Some(33));
+    assert_eq!(scenes[0].colour, Some(bl_model::Colour::Swatch(33)));
     assert_eq!(scenes[1].colour, None);
     let kick = track(document, "Kick");
-    assert_eq!(kick.slot(scenes[0].id).unwrap().colour, Some(21));
+    assert_eq!(
+        kick.slot(scenes[0].id).unwrap().colour,
+        Some(bl_model::Colour::Swatch(21))
+    );
     // A track with no colour takes `id mod 14`, as a new track does.
-    assert_eq!(kick.colour(), bl_model::id_swatch(kick.id().0));
+    assert_eq!(
+        kick.colour(),
+        bl_model::Colour::Swatch(bl_model::id_swatch(kick.id().0))
+    );
     // #ff8800 is nearest the second of the top row's colours, by CIELAB.
     let imported = import_of("cubase-shaped");
-    assert_eq!(track(&imported.project.document, "Pad").colour(), 1);
+    assert_eq!(
+        track(&imported.project.document, "Pad").colour(),
+        bl_model::Colour::Swatch(1)
+    );
 }
 
 /// A fade is in seconds, a fade in beats goes through the tempo map, and a
@@ -1584,4 +1593,51 @@ fn many_distinct_unknown_attributes_are_reported_in_linear_time() {
         .filter(|entry| entry.what.starts_with("the attribute `a"))
         .count();
     assert_eq!(listed, 200_000);
+}
+
+/// A `Video` timeline's clips become video clips on their track, with their
+/// times and warps read as an audio clip's are, and a movie that can't be
+/// read is left out and listed (R89, R36).
+#[test]
+fn video_timelines_become_video_clips() {
+    use bl_core::time::Ticks;
+    use bl_model::ClipData;
+
+    let movie = r#"<File path="../video/mjpeg-24f.mov" external="true"/>"#;
+    let xml = format!(
+        r#"<?xml version="1.0"?>
+<Project version="1.0"><Application name="t" version="1"/>
+<Transport><Tempo unit="bpm" value="120" id="tempo"/></Transport>
+<Structure><Track contentType="video" id="v" name="Film"/></Structure>
+<Arrangement id="a"><Lanes id="all"><Lanes track="v" timeUnit="beats" id="lv"><Clips id="cv">
+<Clip time="0" duration="2" contentTimeUnit="seconds" name="Plain"><Video duration="1" channels="1" sampleRate="22050" id="v1">{movie}</Video></Clip>
+<Clip time="4" duration="2" name="Warped"><Warps contentTimeUnit="seconds" timeUnit="beats" id="w1"><Video duration="1" channels="1" sampleRate="22050" id="v2">{movie}</Video><Warp time="0" contentTime="0"/><Warp time="2" contentTime="1"/></Warps></Clip>
+<Clip time="8" duration="2" name="Gone"><Video duration="1" id="v3"><File path="../video/nowhere.mov" external="true"/></Video></Clip>
+</Clips></Lanes></Lanes></Arrangement><Scenes/></Project>"#
+    );
+    let imported = import_xml(&xml);
+    let document = &imported.project.document;
+    // The video track is an audio track holding the clips.
+    let film = track(document, "Film");
+    assert_eq!(film.kind(), bl_model::TrackKind::Audio);
+    let clips = clips_of(document, "Film");
+    assert_eq!(clips.len(), 2, "the unreadable movie's clip is left out");
+    let audio = |index: usize| match &clips[index].data {
+        ClipData::Audio(audio) => audio.clone(),
+        ClipData::Midi(_) => panic!("an audio clip"),
+    };
+    assert!(audio(0).video && !audio(0).warp);
+    assert_eq!(clips[0].start, Ticks::ZERO);
+    assert!(audio(1).video && audio(1).warp);
+    assert_eq!(clips[1].start, Ticks::QUARTER * 4);
+    // Neither leads: importing doesn't change the song's tempo.
+    assert!(!audio(0).tempo_leader && !audio(1).tempo_leader);
+    assert!(
+        imported
+            .report
+            .entries
+            .iter()
+            .any(|entry| entry.what.contains("nowhere.mov")),
+        "the movie that wasn't found is listed"
+    );
 }

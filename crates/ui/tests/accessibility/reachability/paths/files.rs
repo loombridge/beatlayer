@@ -6,7 +6,7 @@ use egui::Key;
 
 pub(crate) fn entries() -> Vec<(&'static str, Path)> {
     use Path::Exception;
-    use Reason::{Equivalent, Query};
+    use Reason::{AgentOnly, Equivalent, Query};
     vec![
         ("set.list_recoverable", Exception(Query)),
         ("set.backups", Exception(Query)),
@@ -65,6 +65,20 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         (
             "stems.close",
             Exception(Equivalent("the Separate Stems dialog's Cancel, or Esc")),
+        ),
+        // The Packages manager (WP-9.1).
+        ("packages.list", Exception(Query)),
+        (
+            "packages.install",
+            Exception(Equivalent(
+                "the package page's Download Required Packages Now, which Tab reaches",
+            )),
+        ),
+        (
+            "packages.remove",
+            Exception(AgentOnly(
+                "no place in the interface shows installed packages yet, so only agents remove one",
+            )),
         ),
         ("export.realtime.status", Exception(Query)),
         (

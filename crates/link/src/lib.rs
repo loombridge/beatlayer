@@ -10,9 +10,16 @@
 //! their own, except [`Audio::commit`], which ends in a condition variable's
 //! signal.
 //!
+//! Link Audio ([`streams`]) offers tracks as channels ([`Sink`]) and receives
+//! other peers' channels ([`Source`]); its switch, name and channel list are
+//! on [`Link`] (the Link Audio spec, R1, R3, R11).
+//!
 //! All times are microseconds on Link's own clock ([`Link::clock_micros`]).
 
 mod ffi;
+mod streams;
+
+pub use streams::{Channel, ChannelId, PeerId, QUANTUM, Received, Sink, Source};
 
 use std::ffi::c_void;
 use std::sync::Arc;
@@ -27,13 +34,16 @@ pub enum Event {
     Tempo(f64),
     /// The session's start and stop state changed.
     StartStop(bool),
+    /// The Link Audio channels other peers offer changed: a channel or peer
+    /// came or went, or a name changed (the Link Audio spec, R11).
+    Channels,
 }
 
 /// The Link instance and what its callbacks reach, freed together: the
 /// instance first, so no callback runs after its sender is gone.
 struct Inner {
     raw: ffi::AblLink,
-    _senders: [*mut Sender<Event>; 3],
+    _senders: [*mut Sender<Event>; 4],
 }
 
 // SAFETY: Link's functions used here are thread-safe, as `abl_link.h` says of
@@ -83,12 +93,18 @@ extern "C" fn on_start_stop(playing: bool, context: *mut c_void) {
     let _ = sender.send(Event::StartStop(playing));
 }
 
+extern "C" fn on_channels(context: *mut c_void) {
+    // SAFETY: as in `on_peers`.
+    let sender = unsafe { &*context.cast::<Sender<Event>>() };
+    let _ = sender.send(Event::Channels);
+}
+
 impl Link {
     /// Makes a Link instance, off, whose session starts at `bpm`.
     #[must_use]
     pub fn new(bpm: f64) -> Self {
         let (sender, events) = channel();
-        let senders = [(); 3].map(|()| Box::into_raw(Box::new(sender.clone())));
+        let senders = [(); 4].map(|()| Box::into_raw(Box::new(sender.clone())));
         // SAFETY: the instance is made here and owned by `Inner`; each
         // callback gets its own sender, which `Inner` frees after the
         // instance is destroyed.
@@ -97,6 +113,7 @@ impl Link {
             ffi::abl_link_set_num_peers_callback(raw, on_peers, senders[0].cast());
             ffi::abl_link_set_tempo_callback(raw, on_tempo, senders[1].cast());
             ffi::abl_link_set_start_stop_callback(raw, on_start_stop, senders[2].cast());
+            ffi::abl_link_audio_set_channels_changed_callback(raw, on_channels, senders[3].cast());
             raw
         };
         Self {
@@ -280,6 +297,13 @@ impl Audio {
     pub fn peers(&self) -> u64 {
         // SAFETY: thread-safe and real-time-safe.
         unsafe { ffi::abl_link_num_peers(self.link.raw) }
+    }
+
+    /// Whether Link Audio is switched on. Real-time-safe.
+    #[must_use]
+    pub fn audio_enabled(&self) -> bool {
+        // SAFETY: thread-safe and real-time-safe, as `abl_link.h` says.
+        unsafe { ffi::abl_link_audio_is_link_audio_enabled(self.link.raw) }
     }
 
     /// Link's clock, in microseconds. Real-time-safe.

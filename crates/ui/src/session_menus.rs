@@ -285,7 +285,7 @@ impl SessionMenus {
         let menu = context_menus::clip_title();
         for item in shown(&menu) {
             if item.is_separator() {
-                ui.separator();
+                crate::menus::separator(ui);
                 continue;
             }
             if item.row == context_menus::CLIP_TITLE_COLOUR {
@@ -293,14 +293,15 @@ impl SessionMenus {
                     .first()
                     .and_then(|clip| doc.clip(*clip))
                     .and_then(|clip| clip.colour);
-                if let Some(colour) = crate::palette::show(ui, theme, "clip-title-colour", current)
-                {
-                    events.push(UiEvent::Invoke(Invocation::new(
-                        "clip.set_colour",
-                        json!({ "clips": clips, "colour": colour }),
-                    )));
-                    ui.close();
-                }
+                crate::palette::show(
+                    ui,
+                    theme,
+                    shell,
+                    "clip-title-colour",
+                    current,
+                    crate::palette::Target::new("clip.set_colour", json!({ "clips": clips })),
+                    events,
+                );
                 continue;
             }
             let mut state = item_state_in(item, shell, &keymap, self.platform, &contexts);
@@ -316,13 +317,6 @@ impl SessionMenus {
                 }
                 crate::menus::take_focus_first(ui, &response);
                 continue;
-            }
-            // Edit Info Text opens the Info View's field for the first clip.
-            if item.row == "C-CLIPTITLE-002"
-                && let (Some(clip), Some(invocation)) = (clips.first(), state.invocation.as_mut())
-            {
-                invocation.args = json!({ "clip": clip });
-                state.enabled = shell.can_invoke_in(&invocation.id, &invocation.args, &contexts);
             }
             let response = draw_item(ui, state, self.platform, events);
             let response = pending(ui, response, item.row);
@@ -351,7 +345,7 @@ impl SessionMenus {
             .map(|clip| clip.id);
         for item in shown(menu) {
             if item.is_separator() {
-                ui.separator();
+                crate::menus::separator(ui);
                 continue;
             }
             let row = item.row;
@@ -360,15 +354,18 @@ impl SessionMenus {
                 let current = clicked_clip
                     .and_then(|clip| doc.clip(clip))
                     .and_then(|clip| clip.colour);
-                if let Some(colour) =
-                    crate::palette::show(ui, theme, "session-clip-colour", current)
-                {
-                    events.push(UiEvent::Invoke(Invocation::new(
+                crate::palette::show(
+                    ui,
+                    theme,
+                    shell,
+                    "session-clip-colour",
+                    current,
+                    crate::palette::Target::new(
                         "clip.set_colour",
-                        json!({ "clips": chosen.clips, "colour": colour }),
-                    )));
-                    ui.close();
-                }
+                        json!({ "clips": chosen.clips }),
+                    ),
+                    events,
+                );
                 continue;
             }
             if row == "C-SCENE-014" {
@@ -460,10 +457,13 @@ impl SessionMenus {
                     .slot
                     .map(|(track, scene)| json!({ "track": track, "scene": scene })),
                 "C-CLIP-SES-007" => Some(json!({ "clips": chosen.clips })),
-                "C-CLIP-SES-006" | "C-CLIP-SES-009" | "C-CLIP-SES-014" | "C-CLIP-SES-019a" => {
-                    clicked_clip.map(|clip| json!({ "clip": clip }))
-                }
+                "C-CLIP-SES-006" | "C-CLIP-SES-009" | "C-CLIP-SES-014" | "C-CLIP-SES-019a"
+                | "C-CLIP-SES-020" => clicked_clip.map(|clip| json!({ "clip": clip })),
                 "C-SCENE-006" => on.scene.map(|scene| json!({ "scene": scene })),
+                // Spec: linked-clips R1, R8. The selected slots' clips.
+                bl_shell::menus::IMP_21 | bl_shell::menus::IMP_21_UNLINK => {
+                    Some(json!({ "clips": chosen.clips }))
+                }
                 _ => None,
             };
             if let (Some(args), Some(invocation)) = (args, state.invocation.as_mut()) {
@@ -548,13 +548,15 @@ impl SessionMenus {
         let response = draw_item(ui, state, self.platform, events);
         crate::menus::take_focus_first(ui, &response);
         let current = on.scene.and_then(colour_of);
-        if let Some(colour) = crate::palette::show(ui, theme, "scene-colour", current) {
-            events.push(UiEvent::Invoke(Invocation::new(
-                "scene.set_colour",
-                json!({ "scenes": chosen.scenes, "colour": colour }),
-            )));
-            ui.close();
-        }
+        crate::palette::show(
+            ui,
+            theme,
+            shell,
+            "scene-colour",
+            current,
+            crate::palette::Target::new("scene.set_colour", json!({ "scenes": chosen.scenes })),
+            events,
+        );
     }
 }
 

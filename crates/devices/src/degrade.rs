@@ -292,6 +292,7 @@ impl NativeDevice for Degrade {
 #[must_use]
 pub fn display(device: DeviceId, data: Option<&[f32]>) -> DeviceDisplay {
     DeviceDisplay {
+        spectrograms: Vec::new(),
         device,
         live: data.is_some(),
         view: None,

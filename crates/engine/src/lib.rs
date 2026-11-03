@@ -100,6 +100,7 @@ mod gc;
 mod input;
 mod layers;
 pub mod link;
+pub mod link_audio;
 mod message;
 mod metronome;
 mod midi;
@@ -127,6 +128,7 @@ pub mod sidechain;
 mod sources;
 mod state;
 mod sync_out;
+pub mod tempo_follower;
 mod timecode_in;
 pub mod transport;
 mod tuned;
@@ -158,6 +160,7 @@ pub use gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Owned, Program};
 pub use input::{DeviceInput, NoInput};
 pub use layers::{DeviceLayers, Group, LayerAudio, LayerSample, RoundRobin};
 pub use link::{LinkFollower, Session};
+pub use link_audio::{Channel as LinkChannel, LinkAudio, frame_at};
 pub use message::{
     Action, LoopRegion, NudgeDirection, ParamEvent, Punch, Report, ScheduledCommand,
     TransportCommand, When,
@@ -169,9 +172,9 @@ pub use midi::{
 pub use midi_clips::{MidiClipList, MidiClipPlayer};
 pub use mixer::METER_RELEASE_DB_PER_SECOND;
 pub use node::{
-    Articulations, Block, Node, NodeConfig, NodeData, NodeEvent, NodeKey, NoteBuffer, NoteEvent,
-    NoteExpression, NoteKind, ParamValue, PluginMpeData, PluginTuningData, Segment, Segments,
-    TransportInfo, segments,
+    Articulations, Block, ModRoutes, Node, NodeConfig, NodeData, NodeEvent, NodeKey, NoteBuffer,
+    NoteEvent, NoteExpression, NoteKind, ParamValue, PluginMpeData, PluginTuningData, Segment,
+    Segments, TransportInfo, segments,
 };
 pub use offline::Offline;
 pub use processor::{Carry, Output, Processor};
@@ -179,7 +182,7 @@ pub use program::EngineProgram;
 pub use recording::{
     LaunchLog, MidiRecordTrack, RecordTrack, RecordedMidi, RecordingPlan, SessionTarget, TakeBounds,
 };
-pub use registry::{DeviceType, NodeFactory, Registry};
+pub use registry::{DataFn, DataItem, DeviceData, DeviceType, FileOf, NodeFactory, Registry};
 pub use render::{RenderOutput, RenderPlan};
 pub use sched::{Pool, PoolConfig, PoolMonitor};
 pub use session::{
@@ -191,6 +194,7 @@ pub use state::{
     PointReading, TrackMeter,
 };
 pub use sync_out::{MAX_SYNC_OUTPUTS, SyncOutState};
+pub use tempo_follower::{Heard, Leader, TempoFollower, Tracker};
 pub use tuned::{KeyMap, KeyPitches};
 pub use tuned_notes::TunedNotes;
 

@@ -37,6 +37,9 @@ lspk-plugin.workspace = true
 lspk-dsp.workspace = true
 lspk-voice.workspace = true
 lspk-wavetable.workspace = true
+# The factory wavetables' sines, powers and floors, which must come out the
+# same on every platform (the wavetable spec, R2).
+libm = { version = "0.2.16", default-features = false }
 lspk-example-gain = { workspace = true, optional = true }
 lspk-example-sine = { workspace = true, optional = true }
 # A kit device's processor reaches its node through a one-slot queue: the
@@ -58,6 +61,16 @@ realfft = "3.5.0"
 [[test]]
 name = "devices_tests"
 path = "tests/main.rs"
+
+# Electric against the device budget, run by hand: `cargo bench -p bl-devices --bench electric`.
+[[bench]]
+name = "electric"
+harness = false
+
+# Tension against the device budget, run by hand: `cargo bench -p bl-devices --bench tension`.
+[[bench]]
+name = "tension"
+harness = false
 
 [lints]
 workspace = true

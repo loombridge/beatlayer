@@ -907,6 +907,7 @@ impl NullEngine {
         let mut began = Instant::now();
         let mut first_block = self.blocks;
         let mut idle = false;
+        let pacer = self.pacer.clone();
         while !stop.load(Ordering::Acquire) {
             if self
                 .options
@@ -937,10 +938,17 @@ impl NullEngine {
                 first_block = self.blocks;
                 self.counters.request_resync();
             }
-            if let Some(pacer) = &self.pacer {
+            if let Some(pacer) = &pacer {
                 // Paced by hand (T199): wait for a test to ask for this block,
                 // then move the test clock to the block's start.
                 if !pacer.wait_for_block(stop) {
+                    break;
+                }
+                // The device may have gone or changed rate while the stream
+                // waited: end before the block, so the test sees it once the
+                // block it asked for returns.
+                if matches!(self.health(), Health::End) {
+                    pacer.ended();
                     break;
                 }
                 if let Some(clock) = &self.clock {

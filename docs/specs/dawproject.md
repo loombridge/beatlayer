@@ -255,4 +255,4 @@ The fixtures are written by `tests/fixtures/gen/gen_dawproject.py` into `tests/f
 | R86 | `crates/shell/tests/menus.rs`, `export_dawproject_follows_export_midi_clip_with_no_key`; `crates/shell/tests/dawproject_app.rs`, `export_dawproject_asks_where_then_writes_the_file` | unit, UI script |
 | R87 | `crates/ui/tests/dawproject_window.rs`, `the_report_window_lists_the_entries_and_copy_and_close_work`, `escape_closes_the_report_window`, `an_empty_report_opens_no_window`; `crates/shell/tests/dawproject_app.rs`, `a_report_with_entries_opens_the_window_and_close_shuts_it`, `an_empty_report_opens_no_window_and_the_status_bar_says_so` | unit, UI script |
 | R88 | an_agent_imports_a_dawproject_file_and_reads_its_report, an_agent_exports_the_open_set_and_imports_the_file_again, without_autonomous_a_dawproject_export_is_refused | unit, agent test |
-| R89 | to be written in WP-9.25 | interop test |
+| R89 | `crates/interop/tests/dawproject.rs`: `video_timelines_become_video_clips` (a bare and a warped `Video`, a movie that isn't found left out and listed, the track an audio track) | interop test |

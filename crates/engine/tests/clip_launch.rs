@@ -471,6 +471,61 @@ fn a_legato_clip_takes_over_the_clip_time_of_the_clip_on_its_track() {
     }
 }
 
+// Spec: push-2-notes R46. A Legato launch command takes over the clip time at
+// once, though the clip has neither Legato nor a quantisation of none.
+#[test]
+fn a_legato_launch_command_takes_over_at_once_whatever_the_clip_says() {
+    for block in BLOCKS {
+        let (mut rig, tracks, scenes) = rig(1);
+        let track = tracks[0];
+        let at_once = launch(Some(LaunchQuantization::None));
+        clip(
+            &mut rig.editor,
+            track,
+            scenes[0],
+            vec![Note::new(40, Ticks::ZERO, Ticks::QUARTER, 100)],
+            (1, true),
+            at_once,
+        );
+        clip(
+            &mut rig.editor,
+            track,
+            scenes[1],
+            beats(),
+            (4, true),
+            launch(Some(LaunchQuantization::Bar)),
+        );
+        let mut now = start(&mut rig);
+        send_at(&mut rig, &mut now, 1, block, press(track, scenes[0]));
+        let at = 1 + 10 * QUARTER_FRAMES;
+        send_at(
+            &mut rig,
+            &mut now,
+            at,
+            block,
+            SessionCommand::LaunchLegato {
+                track,
+                scene: scenes[1],
+            },
+        );
+        play_to(&mut rig, &mut now, at + 2 * QUARTER_FRAMES + 10, block);
+        let from_b: Vec<_> = ons_and_offs(&mut rig)
+            .0
+            .into_iter()
+            .filter(|&(_, key)| key >= 60)
+            .collect();
+        assert_eq!(
+            from_b,
+            vec![
+                (at, 70),
+                (at + QUARTER_FRAMES, 71),
+                (at + 2 * QUARTER_FRAMES, 72)
+            ],
+            "blocks of {block}"
+        );
+    }
+}
+
 // Spec: launch-quantisation R27. Without Legato the clip starts over.
 #[test]
 fn a_clip_without_legato_plays_from_its_start() {

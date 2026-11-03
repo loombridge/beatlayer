@@ -1525,9 +1525,9 @@ fn the_filters_types_and_morph_match_their_prototypes() {
             (3.0, [FilterType::Notch12, FilterType::Notch24]),
         ] {
             for (slope, prototype) in types.into_iter().enumerate() {
-                // Drive acts on low-pass, high-pass and band-pass.
-                let drive = if kind < 3.0 { 0.5 } else { 0.0 };
-                cases.push((patch(kind, slope as f64, 0.0), prototype, drive));
+                // Clean ignores Drive, which is set to 12 dB here (the
+                // instrument filter spec, R9).
+                cases.push((patch(kind, slope as f64, 0.0), prototype, 0.0));
             }
         }
         // Morph passes through low-pass, band-pass, high-pass, notch and
@@ -2152,9 +2152,13 @@ fn every_destination_is_reachable() {
     let play = |extra: &[(bl_model::ParamId, f64)], dest: usize| {
         let mut params = patch.clone();
         params.extend_from_slice(extra);
-        // Morph's own destination needs the Morph type.
+        // Morph's own destination needs the Morph type, and Drive's a circuit
+        // that isn't Clean.
         if dest == dest::FILTER_MORPH {
             params.push((FILTER_TYPE, 4.0));
+        }
+        if dest == dest::FILTER_DRIVE {
+            params.push((FILTER_CIRCUIT, 2.0));
         }
         let mut rig = Rig::new(&params, 512);
         let (mut low, a) = tone(1, 1000.0);
@@ -2179,7 +2183,7 @@ fn every_destination_is_reachable() {
             &[(midi_param(1, 0), dest as f64), (midi_param(1, 2), amount)],
             dest,
         );
-        let reference = if dest == dest::FILTER_MORPH {
+        let reference = if dest == dest::FILTER_MORPH || dest == dest::FILTER_DRIVE {
             play(&[], dest)
         } else {
             base.clone()
@@ -2372,4 +2376,146 @@ fn a_click_in_the_sample_tab_auditions_one_layer_from_its_point() {
     let silent = rig.render_with(512, &[], &[]);
     assert!(faded[0][0] > 0.0, "it faded rather than cut");
     assert!(silent[0].iter().all(|v| *v == 0.0), "and ended");
+}
+
+/// A hash of every sample's bits, to hold renders to the sample.
+fn hash_of(out: &[Vec<f32>]) -> u64 {
+    out.iter().flatten().fold(0xcbf2_9ce4_8422_2325u64, |h, x| {
+        (h ^ u64::from(x.to_bits())).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
+// Spec: multisampler R76, instrument filter R3 and R15 (a set saved before
+// the circuits renders as it did on Clean, sample for sample)
+#[test]
+fn an_older_sets_filters_render_as_they_did() {
+    // Noise as the sample, so every frequency is there to be filtered.
+    let noise = sample(9600, |i| {
+        let mut x = (i as u32 + 1).wrapping_mul(0x9E37_79B9);
+        x ^= x >> 15;
+        x = x.wrapping_mul(0x85EB_CA6B);
+        x ^= x >> 13;
+        x as f32 / u32::MAX as f32 * 1.6 - 0.8
+    });
+    let mut hashes = Vec::new();
+    for (kind, slope, morph) in [
+        (0.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0),
+        (1.0, 0.0, 0.0),
+        (1.0, 1.0, 0.0),
+        (2.0, 0.0, 0.0),
+        (2.0, 1.0, 0.0),
+        (3.0, 0.0, 0.0),
+        (3.0, 1.0, 0.0),
+        (4.0, 0.0, 0.3),
+        (4.0, 1.0, 0.6),
+    ] {
+        let mut rig = Rig::new(
+            &[
+                (FILTER_ON, 1.0),
+                (FILTER_TYPE, kind),
+                (FILTER_SLOPE, slope),
+                (FILTER_FREQ, 900.0),
+                (FILTER_RES, 55.0),
+                (FILTER_MORPH, morph * 100.0),
+                (FENV_ON, 1.0),
+                (FENV_AMOUNT, 30.0),
+            ],
+            512,
+        );
+        let mut l = layer(1, &noise);
+        l.sustain = SustainMode::Loop;
+        rig.give(vec![(l, Arc::clone(&noise))], false);
+        hashes.push(hash_of(
+            &rig.render(9_600, &[on(0, 60, 1.0), on(2_000, 67, 0.7)]),
+        ));
+    }
+    println!("{hashes:#x?}");
+    assert_eq!(hashes, OLDER_RENDERS);
+}
+
+/// The hashes of the renders above, made before the circuits.
+const OLDER_RENDERS: [u64; 10] = [
+    0x2a8f_af67_3366_2b85,
+    0x9ac1_fa38_5a50_0799,
+    0x0809_2907_b28f_b451,
+    0xf07c_0615_27f1_eb1d,
+    0x2bb0_d4c3_b9fb_f3e9,
+    0x6d5e_2b8f_8a3c_8921,
+    0xea44_7251_5f36_1991,
+    0x857d_2e56_ce35_f85d,
+    0xa5cc_aa87_41ab_fa25,
+    0x1b32_23fc_13fa_9625,
+];
+
+// Spec: multisampler R37, R76; instrument filter R2, R9, R11 (the circuits
+// play, and Res, Morph and Drive act at every frame of each voice)
+#[test]
+fn the_circuits_play_and_res_morph_and_drive_act_per_frame_at_any_block_size() {
+    let render = |extra: &[(bl_model::ParamId, f64)], block: usize| {
+        let mut params = vec![(FILTER_ON, 1.0), (FILTER_FREQ, 1_500.0), (FILTER_RES, 40.0)];
+        params.extend_from_slice(extra);
+        let mut rig = tone_rig(&params, 300.0, block);
+        rig.render(9_600, &[on(0, 60, 1.0), on(3_000, 67, 0.8)])
+    };
+    // Each circuit changes the sound from Clean's, a circuit a type doesn't
+    // offer doesn't, and Drive acts on the circuits alone.
+    let clean = render(&[], 512);
+    for circuit in 1..5 {
+        let with = |ty: f64, drive: f64| {
+            render(
+                &[
+                    (FILTER_TYPE, ty),
+                    (FILTER_CIRCUIT, f64::from(circuit)),
+                    (FILTER_DRIVE, drive),
+                ],
+                512,
+            )
+        };
+        assert_ne!(with(0.0, 0.0), clean, "circuit {circuit}");
+        assert_ne!(with(0.0, 12.0), with(0.0, 0.0), "circuit {circuit}: Drive");
+    }
+    let band = render(&[(FILTER_TYPE, 2.0)], 512);
+    assert_eq!(
+        render(&[(FILTER_TYPE, 2.0), (FILTER_CIRCUIT, 4.0)], 512),
+        band,
+        "PRD on band-pass plays Clean"
+    );
+    assert_eq!(
+        render(&[(FILTER_DRIVE, 20.0)], 512),
+        clean,
+        "Clean ignores Drive"
+    );
+    // LFO 2 moves Res, Morph or Drive at every frame: the output doesn't
+    // depend on where the blocks fall.
+    let ids = LFOS[1];
+    for (target, ty, circuit) in [
+        (dest::FILTER_RES, 0.0, 0.0),
+        (dest::FILTER_RES, 0.0, 4.0),
+        (dest::FILTER_MORPH, 4.0, 0.0),
+        (dest::FILTER_MORPH, 4.0, 1.0),
+        (dest::FILTER_DRIVE, 0.0, 2.0),
+    ] {
+        let routed = [
+            (FILTER_TYPE, ty),
+            (FILTER_CIRCUIT, circuit),
+            (ids.on, 1.0),
+            (ids.rate, 30.0),
+            (ids.extra(LFO_DEST_A), target as f64),
+            (ids.extra(LFO_AMOUNT_A), 100.0),
+        ];
+        let reference = render(&routed, 4096);
+        assert_ne!(
+            reference,
+            render(&routed[..2], 4096),
+            "destination {target} moves nothing"
+        );
+        for block in [1, 100, 512, 4096] {
+            assert_eq!(
+                render(&routed, block),
+                reference,
+                "destination {target}, circuit {circuit}, block {block}"
+            );
+        }
+    }
 }

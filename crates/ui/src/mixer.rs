@@ -452,8 +452,16 @@ impl MixerUi {
             // gives the mixer; Left and Right then move the selection.
             let group = column_id(of, track);
             let focus = column_ui.interact(clip, group, Sense::focusable_noninteractive());
+            // Spec: session-view R26. Selecting a scene highlights the Main
+            // track.
+            let main_of_scene = column.kind == ColumnKind::Main
+                && of == MixerOf::Session
+                && !shell.session().state().scenes.is_empty();
             column_ui.ctx().accesskit_node_builder(group, |node| {
                 node.set_role(Role::Group);
+                if main_of_scene {
+                    node.set_selected(true);
+                }
                 node.set_label(t.name().to_owned());
                 node.set_bounds(bounds(clip));
             });
@@ -480,7 +488,7 @@ impl MixerUi {
                     .accessibility_parent(group),
             );
             let painter = column_ui.painter();
-            let fill = if selected.contains(&track) {
+            let fill = if selected.contains(&track) || main_of_scene {
                 theme.colors.lane_selected.0
             } else {
                 theme.colors.lane.0
@@ -647,7 +655,7 @@ impl MixerUi {
                     pos2(column.rect.right() - 0.5, layout.colour.1),
                 ),
                 0.0,
-                theme.swatch(colour),
+                theme.colour(colour),
             );
         }
         if let Some(span) = layout.strip {
@@ -840,10 +848,18 @@ fn title_bars(
                 ),
             )
         });
+        // Spec: view-options R8. The mark of an empty track, at the bar's
+        // right end; a track with a rack, which has the fold button, isn't
+        // empty.
+        let mark = shell
+            .shows_empty_mark(track)
+            .then(|| crate::widgets::paint_empty_mark(&painter, bar, theme.colors.clip_text.0));
         let name = Rect::from_min_max(
             pos2(bar.left() + 4.0, bar.top()),
             pos2(
-                fold.map_or(bar.right(), |(_, _, rect)| rect.left()) - 2.0,
+                mark.or_else(|| fold.map(|(_, _, rect)| rect.left()))
+                    .unwrap_or(bar.right())
+                    - 2.0,
                 bar.bottom(),
             ),
         );
@@ -883,6 +899,10 @@ fn title_bars(
             events,
         );
         crate::info_text::describe(ui.ctx(), &response, shell, InfoTarget::Track(track));
+        // Spec: view-options R9.
+        if mark.is_some() {
+            crate::widgets::describe_empty(ui.ctx(), response.id);
+        }
     }
     // The Session View's title bars are resized by their edges (R36).
     if of == MixerOf::Session {
@@ -897,8 +917,7 @@ fn title_bars(
 /// Resizes a column by dragging its title bar's edge (R36, I-DRAG-004,
 /// I-DRAG-005): a track's or a scrolling return's right edge, and a pinned
 /// return's or Main's left, the edge that moves with the pointer. With
-/// Option (Alt) held it resizes every track's column; dragging Main's edge
-/// also shows the scene tempo and signature fields. Each step runs
+/// Option (Alt) held it resizes every track's column. Each step runs
 /// `mixer_view.set_column_width`, which is no undo step.
 fn width_drags(
     ui: &Ui,
@@ -960,14 +979,6 @@ fn width_drags(
                 json!({ "track": track, "width": start + moved })
             };
             if dx != 0.0 {
-                // Dragging Main's edge reveals the scene tempo and
-                // signature fields (I-DRAG-005).
-                if column.kind == ColumnKind::Main && !view.scene_tempo() {
-                    events.push(UiEvent::Invoke(Invocation::new(
-                        ids::SCENE_TEMPO,
-                        json!({ "shown": true }),
-                    )));
-                }
                 events.push(UiEvent::Invoke(Invocation::new(
                     ids::SET_COLUMN_WIDTH,
                     args,
@@ -2137,6 +2148,16 @@ impl StripParts<'_> {
                 }
             });
         }
+        // Spec: view-options R11 to R13.
+        if let Some(turn) = crate::wheel::input(&response, || TRACK_DELAY_GESTURE.to_owned()) {
+            let now = delay_stepped(delay, turn.steps, turn.fine);
+            if now != delay {
+                events.push(UiEvent::Invoke(Invocation::new(
+                    "mixer.set_track_delay",
+                    json!({ "track": self.track, "delay": now }),
+                )));
+            }
+        }
         let change = if reset {
             Some(TrackDelay::default())
         } else if steps != 0 {
@@ -2703,6 +2724,28 @@ impl StripParts<'_> {
             });
         }
         let doc = self.doc();
+        // Spec: view-options R11 to R13. A turn of the wheel steps it as the
+        // keys do, Shift finely, in the run's one undo step.
+        if let Some(turn) = crate::wheel::input(response, || control.gesture().to_owned()) {
+            let changes: Vec<(f64, Invocation)> = self
+                .starts(control)
+                .iter()
+                .filter_map(|(t, _)| {
+                    let value = control.step(control.value(doc, *t)?, turn.steps, turn.fine);
+                    Some((value, control.set(*t, value)))
+                })
+                .collect();
+            if control == Control::Volume
+                && let Some((volume, _)) = changes.first()
+            {
+                show_readout(ui.ctx(), volume_readout(*volume));
+            }
+            events.extend(
+                changes
+                    .into_iter()
+                    .map(|(_, change)| UiEvent::Invoke(change)),
+            );
+        }
         if reset {
             // Spec: mixer-view R6 (I-CLICK-021, S-VAL-004; observed: a
             // double-click resets the fader to 0 dB).
@@ -3173,24 +3216,9 @@ impl StripParts<'_> {
         };
         let spoken = modulated_text(pan_text(pan), modulated.map(|(_, played)| pan_text(played)));
         self.describe_value(ui, &response, name, spoken, pan, (-1.0, 1.0));
-        // The pan control's context menu (C-PAN-001, C-PAN-002): two
-        // radio-ticked items, as a device parameter's menu is.
-        let mode = track.mixer().pan_mode;
+        // The pan control's context menu (C-PAN): the pan mode to switch to,
+        // then the items every control has (the automation spec, R29).
         response.context_menu(|ui| {
-            for (item, wanted) in [
-                ("Stereo Pan Mode", PanMode::Stereo),
-                ("Split Stereo Pan Mode", PanMode::Split),
-            ] {
-                if ui.selectable_label(mode == wanted, item).clicked() {
-                    events.push(UiEvent::Invoke(Invocation::new(
-                        "mixer.set_pan_mode",
-                        json!({ "track": self.track, "mode": wanted }),
-                    )));
-                    ui.close();
-                }
-            }
-            // Spec: automation R29. The automation items come after the
-            // control's own.
             crate::param_menu::ParamMenu::new(
                 self.shell,
                 self.track,
@@ -3198,7 +3226,7 @@ impl StripParts<'_> {
                     param: MixerParam::Pan,
                 },
             )
-            .items(ui, true, events);
+            .items(ui, false, events);
         });
         // A click on the control while Automation Mode is on shows its
         // envelope.
@@ -3314,6 +3342,14 @@ impl StripParts<'_> {
                     }
                 }
             });
+        }
+        // Spec: view-options R11 to R13.
+        if let Some(turn) =
+            crate::wheel::input(&response, || controls::CUE_VOLUME_GESTURE.to_owned())
+        {
+            events.push(UiEvent::Invoke(controls::cue_volume_stepped(
+                volume, turn.steps, turn.fine,
+            )));
         }
         let change = if reset {
             Some(controls::set_cue_volume(1.0))
@@ -3502,6 +3538,11 @@ impl StripParts<'_> {
             Switch::Activator => ("Track Activator", self.activator, c.accent.0),
             Switch::Solo if cue => ("Cue", "", c.accent.0),
             Switch::Solo => ("Solo", "S", c.accent.0),
+            // Spec: push-2-notes R3. An arm a control surface made by
+            // selection is drawn in the theme's pink.
+            Switch::Arm if self.shell.armed_by_selection(self.track) => {
+                ("Arm Recording", "●", c.arm_selection.0)
+            }
             Switch::Arm => ("Arm Recording", "●", c.record.0),
         };
         let painter = ui.painter_at(rect.expand(2.0));

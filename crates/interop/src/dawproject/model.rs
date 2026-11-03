@@ -646,6 +646,8 @@ pub struct Warps {
     pub content_time_unit: Option<TimeUnit>,
     /// The file the warps play.
     pub audio: Option<MediaFile>,
+    /// Whether that file is a `Video` element, a movie (R89).
+    pub video: bool,
     /// The warp events.
     pub warps: Vec<Warp>,
 }

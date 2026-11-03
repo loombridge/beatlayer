@@ -43,7 +43,8 @@ impl Shell {
         if let Some(message) = self.browser_view.take_message() {
             self.set_message(message, true);
         }
-        let mut changed = polled.changed | self.poll_processed() | self.poll_stems();
+        let mut changed =
+            polled.changed | self.poll_processed() | self.poll_packages() | self.poll_stems();
         // Spec: device-changes R1 to R5. A device that went away, changed
         // rate or stalled shows in the Status Bar, and the stream reopens.
         if let Some((message, error)) = self.audio.poll_device() {
@@ -100,7 +101,9 @@ impl Shell {
         }
         // The open plug-in editors follow View ▸ Plug-In Windows and
         // Auto-Hide Plug-In Windows, as the tracks' floating windows do.
+        self.open_queued_plug_in_windows();
         self.apply_plug_in_windows();
+        changed |= self.apply_pending_states();
         if self.kit.idle() {
             changed = true;
         }
@@ -267,6 +270,7 @@ impl Shell {
         if running || self.modulating {
             self.modulating = running;
             self.audio.modulated_into(&mut self.modulated);
+            self.audio.matrix_played_into(&mut self.matrix_played);
             self.audio.processing_into(&mut self.processing);
         }
         if self
@@ -282,12 +286,13 @@ impl Shell {
             self.clip_view.note_follow(false);
         }
         let brace = self.editor.document().settings().arrangement_loop;
+        self.loop_suspended = engine.loop_suspended;
         self.set_transport(TransportView {
             playing: engine.playing,
             position: engine.position,
             loop_start: brace.start,
             loop_length: brace.length,
-            loop_on: brace.enabled,
+            loop_on: brace.enabled && !engine.loop_suspended,
         });
         // Spec: control-bar-transport R15. A move of the engine's insert
         // marker (the position fields, Home, a second Stop, an agent)
@@ -365,8 +370,18 @@ impl Shell {
         &self.session_states
     }
 
+    /// The first scene selected in the Session View, while it's in front:
+    /// where a slice's clip lands.
+    pub(crate) fn selected_scene(&self) -> Option<bl_model::SceneId> {
+        (self.main_view_of(WindowKind::Main) == MainView::Session)
+            .then(|| self.session.state().scenes.first().copied())
+            .flatten()
+            .filter(|scene| self.editor.document().scene(*scene).is_some())
+    }
+
     /// The scene the Scene View shows in the detail area (L-SES-011): the
-    /// first scene selected in the Session View, while it's in front.
+    /// one a double-click on its number opened, while it's still selected
+    /// in the Session View and that view is in front.
     #[must_use]
     pub fn scene_view_scene(&self) -> Option<bl_model::SceneId> {
         self.scene_view_scene_in(WindowKind::Main)
@@ -377,7 +392,7 @@ impl Shell {
     #[must_use]
     pub fn scene_view_scene_in(&self, window: WindowKind) -> Option<bl_model::SceneId> {
         (self.main_view_of(window) == MainView::Session)
-            .then(|| self.session.state().scenes.first().copied())
+            .then(|| self.session.scene_view())
             .flatten()
             .filter(|scene| self.editor.document().scene(*scene).is_some())
     }
@@ -434,6 +449,21 @@ impl Shell {
             .map(|entry| (entry.base, entry.played))
     }
 
+    /// What an instrument's modulation matrix made `target` of `track` play
+    /// for the newest sounding voice in the last block, matrix included
+    /// (the instrument modulation spec, R12; modulation R31): its base and
+    /// the value it played, in the parameter's own units. `None` while the
+    /// matrix doesn't move it. `played` and `modulation.state` never see it
+    /// (modulation R30).
+    #[must_use]
+    pub fn matrix_played(&self, track: TrackId, target: &AutomationTarget) -> Option<(f64, f64)> {
+        let (node, param) = bl_engine::target_node(track, target)?;
+        self.matrix_played
+            .iter()
+            .find(|entry| entry.node == node && entry.param == param)
+            .map(|entry| (entry.base, entry.played))
+    }
+
     /// The tracks a Session clip has taken over from the Arrangement
     /// (WP-3.6): the Main column's and the Arrangement's Back to Arrangement
     /// buttons light while it lists any, and a track's own button while it
@@ -483,17 +513,25 @@ impl Shell {
                 return Some("a recording is already under way or still being finished".to_owned());
             }
         }
-        // Spec: transport R29. A release is still accepted, so a held nudge
-        // can end.
+        // Spec: transport R29, tempo-follower R21. A release is still
+        // accepted, so a held nudge can end.
         (matches!(
             command,
             bl_engine::TransportCommand::PhaseNudge { held: true, .. }
         ) && self.audio.transport_state().following)
             .then(|| {
-                "an incoming clock or Link session leads the tempo and keeps the phase, so \
-                 Phase Nudge is refused"
+                "an incoming clock, a Link session or Tempo Follower leads the tempo and \
+                 keeps the phase, so Phase Nudge is refused"
                     .to_owned()
             })
+    }
+
+    /// Whether a Play Selection to the selection's end plays, so the Loop
+    /// switch shows off while the set's loop stays on (the transport spec,
+    /// R35).
+    #[must_use]
+    pub fn loop_suspended(&self) -> bool {
+        self.loop_suspended
     }
 
     /// Whether the transport is currently playing.
@@ -506,6 +544,29 @@ impl Shell {
     #[must_use]
     pub fn time_selection(&self) -> Option<(bl_core::time::Ticks, bl_core::time::Ticks)> {
         self.arrangement.time_selection()
+    }
+
+    /// What the engine is sent for `command` while the Arrangement has a time
+    /// selection: Play, and Play/Stop while stopped, start from the
+    /// selection's start, and Play From Insert Marker (Option-Space) plays
+    /// the selection and stops at its end (the transport spec, R35).
+    fn over_time_selection(
+        &mut self,
+        command: bl_engine::TransportCommand,
+    ) -> bl_engine::TransportCommand {
+        use bl_engine::TransportCommand::{Play, PlayFromInsertMarker, PlaySelection, PlayStop};
+        let Some((start, end)) = self.time_selection() else {
+            return command;
+        };
+        match command {
+            Play => PlaySelection { start, end: None },
+            PlayStop if !self.is_playing() => PlaySelection { start, end: None },
+            PlayFromInsertMarker => PlaySelection {
+                start,
+                end: Some(end),
+            },
+            _ => command,
+        }
     }
 
     /// Runs the commands that reach the engine's transport.
@@ -523,6 +584,7 @@ impl Shell {
                     message: error.to_string(),
                 }
             })?;
+        let command = self.over_time_selection(command);
         self.send_transport(command)
             .map_err(|reason| ShellError::Unavailable {
                 command: id.to_owned(),

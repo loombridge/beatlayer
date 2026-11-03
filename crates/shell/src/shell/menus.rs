@@ -22,6 +22,7 @@ use bl_model::TrackId;
 use bl_model::TrackKind;
 use bl_model::registry as model;
 use bl_shell_spec::arrangement as view_ids;
+use bl_shell_spec::arranger as arranger_ids;
 use bl_shell_spec::audio_editing as audio_ids;
 use bl_shell_spec::automation as automation_ids;
 use bl_shell_spec::autosampler as autosampler_ids;
@@ -37,6 +38,7 @@ use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::envelope_keys as envelope_key_ids;
 use bl_shell_spec::export as export_ids;
 use bl_shell_spec::freeze as freeze_ids;
+use bl_shell_spec::linked_clips as linked_ids;
 use bl_shell_spec::locator as locator_ids;
 use bl_shell_spec::midi_tools as tool_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
@@ -99,6 +101,11 @@ impl Shell {
                             {
                                 contexts.push(Context::Envelope);
                             }
+                            // Spec: transport R32. A selected loop brace's keys
+                            // come ahead of the Arrangement's.
+                            if self.arrangement.loop_brace_selected(self.editor.document()) {
+                                contexts.push(Context::LoopBrace);
+                            }
                             contexts.push(Context::Arrangement);
                         }
                         MainView::Session => contexts.push(Context::Session),
@@ -155,6 +162,11 @@ impl Shell {
                         if self.devices.chain_list_focus() {
                             contexts.push(Context::RackChains);
                         }
+                        // Spec: sound-similarity R24. A Simpler, a Drum
+                        // Sampler or a pad that plays one is selected.
+                        if self.can_swap(&json!({})) {
+                            contexts.push(Context::SampleSwap);
+                        }
                         contexts.push(Context::DeviceView);
                     }
                     Area::ControlBar | Area::StatusBar | Area::Assistant | Area::UndoHistory => {}
@@ -191,6 +203,9 @@ impl Shell {
             bl_shell_spec::remote::MAP_MODE => {
                 Some(self.remote.map.mode == serde_json::from_value(args["mode"].clone()).ok()?)
             }
+            bl_shell_spec::view_options::SET_NOTE_COLORS => Some(
+                self.prefs.note_colors == serde_json::from_value(args["colors"].clone()).ok()?,
+            ),
             ids::VIEW_NOTE_SPELLING => Some(
                 self.clip_view.note_spelling()
                     == serde_json::from_value(args["spelling"].clone()).ok()?,
@@ -219,11 +234,16 @@ impl Shell {
                         == selected.map(bl_model::SongStart::Locator),
                 )
             }
+            // Spec: arranger-track R1. Ticked while the lane shows.
+            arranger_ids::ARRANGER_TRACK => Some(self.editor.document().settings().arranger_track),
             ids::VIEW_FULL_SCREEN => Some(self.full_screen_of(self.acting_window())),
             ids::VIEW_TOGGLE_SECOND_WINDOW => Some(self.second.open),
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser_of(self.acting_window())),
             ids::VIEW_TOGGLE_FULL_HEIGHT_BROWSER => Some(self.browser_view.full_height()),
             ids::VIEW_TUNING_SECTION => Some(self.tuning_section),
+            bl_shell_spec::view_options::SET_MARK_EMPTY_TRACKS => {
+                Some(self.prefs.mark_empty_tracks)
+            }
             bl_shell_spec::groove::VIEW_TOGGLE_GROOVE_POOL => Some(self.groove_pool.shown),
             ids::VIEW_TOGGLE_CLIP_VIEW => Some(self.detail_of(self.acting_window()).clip_shown()),
             ids::VIEW_TOGGLE_DEVICE_VIEW => {
@@ -249,6 +269,7 @@ impl Shell {
                     }),
             ),
             ids::VIEW_HIGHLIGHT_SCALES => Some(self.clip_view.highlight_scales()),
+            bl_shell_spec::chord_lane::VIEW_CHORD_LANE => Some(self.arrangement.chord_lane()),
             panel_ids::FOLD_PANELS => Some(self.clip_view.panels_folded()),
             ids::VIEW_TOGGLE_INFO_VIEW => Some(self.info_view),
             assistant_ids::VIEW_TOGGLE_ASSISTANT => Some(self.assistant_open),
@@ -327,6 +348,16 @@ impl Shell {
         // Spec: comping R28. Edit ▸ Rename renames the selected take lanes.
         if id == "clip.rename" && !self.arrangement.selected_take_lanes().is_empty() {
             return "take_lane.rename";
+        }
+        // Spec: arranger-track R10, R11. With a section selected, Edit ▸
+        // Rename, Duplicate and Delete act on it.
+        if !self.arrangement.selected_sections().is_empty() {
+            match id {
+                "clip.rename" => return arranger_ids::RENAME_SECTION,
+                edit_ids::DUPLICATE => return arranger_ids::DUPLICATE_SECTION,
+                edit_ids::DELETE => return arranger_ids::DELETE_SECTION,
+                _ => {}
+            }
         }
         if self.arrangement.selected_locators().is_empty() {
             return id;
@@ -416,18 +447,23 @@ impl Shell {
                 Some(format!("{} {names}", if hiding { "Hide" } else { "Show" }))
             }
             // Spec: note-editing R18. The item reads Activate Note(s) when
-            // every selected note is deactivated already.
-            note_ids::DEACTIVATE => Some(
-                if self
+            // every selected note is deactivated already, and drops the
+            // (s) while one note is selected, as Live's does.
+            note_ids::DEACTIVATE => {
+                let off = self
                     .clip_view
-                    .selection_deactivated(self.editor.document(), &self.arrangement)
-                {
-                    "Activate Note(s)"
-                } else {
-                    "Deactivate Note(s)"
-                }
-                .to_owned(),
-            ),
+                    .selection_deactivated(self.editor.document(), &self.arrangement);
+                let one = self
+                    .clip_view
+                    .selected_notes(self.editor.document(), &self.arrangement)
+                    .len()
+                    == 1;
+                Some(format!(
+                    "{} Note{}",
+                    if off { "Activate" } else { "Deactivate" },
+                    if one { "" } else { "(s)" }
+                ))
+            }
             // Spec: note-editing R22. M-EDIT-014 and M-EDIT-015 read Group
             // Notes and Ungroup Notes with notes selected.
             note_ids::GROUP => Some("Group Notes".to_owned()),
@@ -506,9 +542,10 @@ impl Shell {
             return false;
         }
         // Spec: midi-clock R15. Options ▸ External Sync is enabled while an
-        // input has Sync on.
+        // input has Sync on, and disabled while Tempo Follower is on
+        // (tempo-follower R5, midi-clock R28).
         if id == transport_ids::SET_EXTERNAL_SYNC {
-            return self.sync_lamps_shown();
+            return self.sync_lamps_shown() && !self.tempo_follow_on;
         }
         // Spec: recording R21. The submenu's items are disabled while a
         // recording holds the value.
@@ -516,6 +553,16 @@ impl Shell {
             && self.record_quantization_locked().is_some()
         {
             return false;
+        }
+        // Spec: sound-similarity R24. The swap keys act on a Simpler, a Drum
+        // Sampler or a pad that plays one.
+        if matches!(
+            id,
+            device_ids::SWAP_SIMILAR
+                | device_ids::RETURN_TO_REFERENCE
+                | "device.set_similarity_reference"
+        ) {
+            return self.can_swap(args);
         }
         if info_text::is_info_command(id) && !Self::has_info_text(id, args) {
             return self.info_target_of(id, args).is_some();
@@ -554,6 +601,22 @@ impl Shell {
         match id {
             model::UNDO => return self.editor.can_undo(),
             model::REDO => return self.editor.can_redo(),
+            // Spec: linked-clips R1, R8. Duplicate as Linked Clip needs a
+            // clip; Unlink Clip a linked one.
+            linked_ids::DUPLICATE_LINKED | linked_ids::UNLINK => {
+                let clips: Vec<bl_model::ClipId> = args
+                    .get("clips")
+                    .and_then(|clips| serde_json::from_value(clips.clone()).ok())
+                    .unwrap_or_else(|| self.scale_targets());
+                let doc = self.editor.document();
+                return if id == linked_ids::UNLINK {
+                    clips
+                        .iter()
+                        .any(|clip| doc.clip(*clip).is_some_and(|clip| clip.link.is_some()))
+                } else {
+                    !clips.is_empty()
+                };
+            }
             // Spec: midi-tools R19. Apply Transformation/Generator is
             // disabled while no MIDI clip shows.
             tool_ids::APPLY => {
@@ -656,6 +719,7 @@ impl Shell {
             // while there are any.
             "clip.rename" => {
                 return self.arrangement.selected_locators().is_empty()
+                    && self.arrangement.selected_sections().is_empty()
                     && self.arrangement.selected_signature().is_none()
                     && self.arrangement.selected_take_lanes().is_empty();
             }
@@ -987,6 +1051,8 @@ impl Shell {
                 .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
                 // Spec: time-editing R4. The Delete key deletes the
                 // selected locators while there are any.
+                && !(matches!(id, edit_ids::DELETE | edit_ids::DUPLICATE)
+                    && !self.arrangement.selected_sections().is_empty())
                 && !(id == edit_ids::DELETE
                     && (!self.arrangement.selected_locators().is_empty()
                         || self.arrangement.selected_signature().is_some()
@@ -1087,6 +1153,51 @@ impl Shell {
                 // Spec: time-editing R13. The jumps need the engine.
                 locator_ids::JUMP | locator_ids::JUMP_PREVIOUS | locator_ids::JUMP_NEXT => {
                     self.audio.engine_running()
+                }
+                _ => true,
+            };
+        }
+        if arranger_ids::handles(id) {
+            let args = if args.is_null() {
+                json!({})
+            } else {
+                args.clone()
+            };
+            if !spec
+                .args
+                .as_ref()
+                .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
+            {
+                return false;
+            }
+            let doc = self.editor.document();
+            let selected = self.arrangement.selected_sections();
+            let named = args.get("section").is_some() || !selected.is_empty();
+            return match id {
+                arranger_ids::RENAME_SECTION
+                | arranger_ids::SET_SECTION_COLOUR
+                | arranger_ids::RESIZE_SECTION
+                | arranger_ids::COPY_SECTION
+                | arranger_ids::DUPLICATE_SECTION
+                | arranger_ids::REMOVE_SECTION
+                | arranger_ids::DELETE_SECTION => named,
+                // Spec: arranger-track R12. Move Earlier and Move Later are
+                // disabled where there is no section that way.
+                arranger_ids::MOVE_SECTION => {
+                    let section = args
+                        .get("section")
+                        .and_then(|v| serde_json::from_value(v.clone()).ok())
+                        .or_else(|| selected.first().copied())
+                        .and_then(|id| doc.section(id));
+                    section.is_some_and(|section| match args["with"].as_str() {
+                        Some("earlier") => doc.sections().iter().any(|s| s.start < section.start),
+                        Some("later") => doc.sections().iter().any(|s| s.start > section.start),
+                        _ => true,
+                    })
+                }
+                // Create Section needs a time selection or a span.
+                arranger_ids::ADD_SECTION => {
+                    args.get("start").is_some() || self.arrangement.time_selection().is_some()
                 }
                 _ => true,
             };

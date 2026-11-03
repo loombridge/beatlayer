@@ -4,7 +4,8 @@
 
 use crate::common;
 use bl_devices::limiter::{
-    AUTO, CEILING, CEILING_MODE, LIMITER, LINK, LOOKAHEAD, RELEASE, ROUTING, limiter_type,
+    AUTO, CEILING, CEILING_MODE, GAIN, LIMITER, LINK, LOOKAHEAD, MAXIMIZE, OUTPUT, RELEASE,
+    ROUTING, THRESHOLD, limiter_type,
 };
 use bl_dsp::Oversampler;
 use bl_engine::{Block, DeviceType, Node, Registry, TransportInfo};
@@ -284,7 +285,7 @@ fn the_limiter_is_described_and_laid_out() {
         device_type.kind,
         bl_model::DeviceKind::Native { ref device_type } if device_type == LIMITER
     ));
-    assert_eq!(device_type.description.params.len(), 8);
+    assert_eq!(device_type.description.params.len(), 11);
     assert!(
         device_type
             .description
@@ -292,4 +293,157 @@ fn the_limiter_is_described_and_laid_out() {
             .iter()
             .any(|p| p.id == CEILING && !p.is_gain())
     );
+}
+
+/// The peak of `samples` after the look-ahead's first 400 frames.
+fn settled_peak(samples: &[f32]) -> f32 {
+    samples[400..].iter().fold(0.0f32, |m, s| m.max(s.abs()))
+}
+
+// Spec: limiter R10
+#[test]
+fn maximize_is_off_in_a_new_limiter_and_threshold_and_output_have_their_own_ranges() {
+    let device_type: DeviceType = limiter_type();
+    device_type.description.check().unwrap();
+    let param = |id: ParamId| device_type.description.param(id).unwrap().clone();
+    assert_eq!(param(MAXIMIZE).default, 0.0);
+    assert_eq!(
+        (param(THRESHOLD).min(), param(THRESHOLD).max()),
+        (-24.0, 0.0)
+    );
+    assert_eq!(param(THRESHOLD).default, 0.0);
+    assert!(param(OUTPUT).is_gain() && param(GAIN).is_gain());
+    assert!((param(OUTPUT).default - db_to_gain(-0.3)).abs() < 1e-9);
+}
+
+// Spec: limiter R11
+#[test]
+fn maximize_lifts_by_output_minus_threshold_and_a_lower_threshold_is_louder_by_as_much() {
+    // A quiet sine, which nothing limits: it comes out lifted by Output minus
+    // Threshold, and 6 dB lower Threshold is 6 dB louder.
+    let input = sine(1000.0, 0.05, 24_000);
+    let render = |threshold: f64| {
+        let params = [
+            (MAXIMIZE, 1.0),
+            (THRESHOLD, threshold),
+            (OUTPUT, db_to_gain(-1.0)),
+        ];
+        settled_peak(&stream(brickwall(&params, 512).as_mut(), &input, 512))
+    };
+    let (at_minus_9, at_minus_15) = (render(-9.0), render(-15.0));
+    let lifted = 0.05 * db_to_gain(-1.0 + 9.0) as f32;
+    assert!(
+        (at_minus_9 - lifted).abs() < 1e-3,
+        "{at_minus_9} for {lifted}"
+    );
+    let ratio = f64::from(at_minus_15 / at_minus_9);
+    assert!((ratio - db_to_gain(6.0)).abs() < 0.01, "{ratio}");
+}
+
+// Spec: limiter R11
+#[test]
+fn with_maximize_the_output_never_passes_output_in_any_ceiling_mode() {
+    let input = sine(1000.0, 0.9, 48_000);
+    for mode in [0.0, 1.0, 2.0] {
+        for block in [1, 64, 4_096] {
+            let params = [
+                (MAXIMIZE, 1.0),
+                (THRESHOLD, -12.0),
+                (OUTPUT, db_to_gain(-3.0)),
+                (CEILING_MODE, mode),
+                // The ceiling and gain it would have without Maximize are
+                // set to values that would show if they were read.
+                (CEILING, -18.0),
+                (GAIN, db_to_gain(-30.0)),
+            ];
+            let out = stream(brickwall(&params, block).as_mut(), &input, block);
+            let limit = db_to_gain(-3.0) as f32;
+            let peak = settled_peak(&out);
+            let measured = if mode == 2.0 {
+                true_peak(&out[400..])
+            } else {
+                peak
+            };
+            assert!(
+                measured <= limit + 1e-3,
+                "mode {mode}, block {block}: {measured}"
+            );
+            assert!(
+                peak > limit * 0.8,
+                "it limits at Output, mode {mode}: {peak}"
+            );
+        }
+    }
+}
+
+// Spec: limiter R12
+#[test]
+fn a_limiter_saved_before_maximize_renders_identically_with_it_off() {
+    let input = sine(1000.0, 1.5, 24_000);
+    let old = [(CEILING, -6.0), (GAIN, db_to_gain(3.0)), (RELEASE, 50.0)];
+    let mut new = old.to_vec();
+    // Parameters of Maximize's own keep their values while it is off.
+    new.extend([(THRESHOLD, -20.0), (OUTPUT, db_to_gain(-12.0))]);
+    for block in [1, 64, 4_096] {
+        let reference = stream(brickwall(&old, block).as_mut(), &input, block);
+        assert_eq!(
+            stream(brickwall(&new, block).as_mut(), &input, block),
+            reference
+        );
+    }
+}
+
+// Spec: limiter R12
+#[test]
+fn maximize_turns_a_control_between_two_parameters_that_keep_their_values() {
+    let description = limiter_type().description;
+    let mut values = bl_model::OrdMap::new();
+    values.insert(CEILING, -6.0);
+    values.insert(THRESHOLD, -12.0);
+    // Off: Ceiling and Gain are shown, Threshold and Output are not.
+    assert_eq!(description.drawn(&values, CEILING), CEILING);
+    assert!(description.shown(&values, CEILING) && description.shown(&values, GAIN));
+    assert!(!description.shown(&values, THRESHOLD) && !description.shown(&values, OUTPUT));
+    // On: the controls are Threshold's and Output's, and every value stays.
+    values.insert(MAXIMIZE, 1.0);
+    assert_eq!(description.drawn(&values, CEILING), THRESHOLD);
+    assert_eq!(description.drawn(&values, GAIN), OUTPUT);
+    assert!(!description.shown(&values, CEILING) && !description.shown(&values, GAIN));
+    assert!(description.shown(&values, THRESHOLD) && description.shown(&values, OUTPUT));
+    assert_eq!(description.value(&values, CEILING), Some(-6.0));
+    assert_eq!(description.value(&values, THRESHOLD), Some(-12.0));
+    // Each of the three new parameters is in a bank.
+    let banked: Vec<ParamId> = description
+        .banks()
+        .iter()
+        .flat_map(|b| b.params.clone())
+        .collect();
+    for id in [MAXIMIZE, THRESHOLD, OUTPUT] {
+        assert!(banked.contains(&id));
+    }
+}
+
+// Spec: limiter R11
+#[test]
+fn a_maximize_render_is_the_same_at_block_sizes_1_64_and_4096() {
+    let input: Vec<f32> = sine(440.0, 0.8, 12_000)
+        .iter()
+        .zip(sine(3_100.0, 0.5, 12_000))
+        .map(|(a, b)| a + b)
+        .collect();
+    let params = [
+        (MAXIMIZE, 1.0),
+        (THRESHOLD, -10.0),
+        (OUTPUT, db_to_gain(-1.0)),
+        (RELEASE, 80.0),
+    ];
+    let reference = stream(brickwall(&params, 4_096).as_mut(), &input, 4_096);
+    assert!(settled_peak(&reference) > 0.5, "it plays");
+    for block in [1, 64] {
+        assert_eq!(
+            stream(brickwall(&params, block).as_mut(), &input, block),
+            reference,
+            "block size {block}"
+        );
+    }
 }

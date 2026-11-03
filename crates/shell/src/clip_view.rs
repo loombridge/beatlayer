@@ -49,8 +49,10 @@ use serde_json::Value;
 mod mpe;
 mod note_time;
 mod note_view;
+mod utilities;
 
 pub use note_view::{Fold, NoteView, fit_key_rows, pauses_follow, region_moved};
+pub use utilities::state as utilities_state;
 
 use crate::arrangement::ArrangementView;
 use crate::arrangement::editing::{EditFailure, transaction};
@@ -644,6 +646,8 @@ pub struct ClipView {
     /// What the note area shows of the MIDI clip the Clip View shows
     /// (WP-6.54).
     note_view: NoteView,
+    /// The Pitch and Time Utilities panel's values (WP-6.16).
+    utilities: utilities::Utilities,
     /// The MIDI Tools' panel, choices, settings and open application
     /// (WP-6.11).
     pub(crate) tools: crate::midi_tools::MidiTools,
@@ -2158,9 +2162,22 @@ fn stretch_envelopes(
     Ok(())
 }
 
+/// The name of the undo step a note command makes with these arguments:
+/// [`label`], but for the commands whose name follows them.
+#[must_use]
+pub fn label_of(id: &str, args: &Value) -> &'static str {
+    if id == ids::STRETCH {
+        return utilities::stretch_label_of(args);
+    }
+    label(id)
+}
+
 /// The name of the undo step a note command makes.
 #[must_use]
 pub fn label(id: &str) -> &'static str {
+    if let Some(name) = utilities::label(id) {
+        return name;
+    }
     match id {
         ids::ADD_NOTE => "Add note",
         ids::DELETE_NOTES => "Delete notes",
@@ -2384,6 +2401,24 @@ pub fn would_split(doc: &Document, view: &ClipView, arrangement: &ArrangementVie
     })
 }
 
+/// Whether Join Notes would join anything: two or more of the selected notes
+/// share a pitch (note-editing R39). The editor's menu draws the item dim
+/// otherwise.
+#[must_use]
+pub fn would_join(doc: &Document, view: &ClipView, arrangement: &ArrangementView) -> bool {
+    let Ok((clip, midi)) = clip_and_data(doc, view, arrangement, None) else {
+        return false;
+    };
+    let ordered = notes_in_order(&midi);
+    let mut keys = std::collections::BTreeMap::<u8, u32>::new();
+    for place in view.selection_of(clip) {
+        if let Some(note) = ordered.get(*place as usize) {
+            *keys.entry(note.key).or_default() += 1;
+        }
+    }
+    keys.values().any(|count| *count > 1)
+}
+
 /// What Split Clip runs (note-editing R41): the `arrangement.split`
 /// arguments that cut the Arrangement clip the editor shows at the time
 /// selection's edges that fall strictly inside it, and the clip's span
@@ -2475,6 +2510,9 @@ pub fn run(
     }
     if note_time::handles(id) {
         return note_time::run(id, args, doc, editor, view, arrangement);
+    }
+    if utilities::handles(id) {
+        return utilities::run(id, args, doc, editor, view, arrangement);
     }
     match id {
         ids::SELECT_NOTES => {
@@ -2888,13 +2926,30 @@ pub fn run(
                 grid,
                 target,
                 amount,
+                swing,
+                pitch,
+                or_all,
                 ..
             } = parse(args)?;
             check_grid(grid)?;
             check_amount(amount)?;
+            if swing.is_some_and(|swing| swing > 100) {
+                return Err(invalid("`swing` is a percentage from 0 to 100"));
+            }
+            let swing = swing.unwrap_or(0);
             let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
             let ordered = notes_in_order(&midi);
-            let places = places_or_selected(view, clip, notes, ordered.len())?;
+            let places = match pitch {
+                // Spec: push-2-notes R57. One pad's notes.
+                Some(pitch) => (0..ordered.len() as u32)
+                    .filter(|place| ordered[*place as usize].key == pitch)
+                    .collect(),
+                // Spec: push-2-notes R57. All of them when none is selected.
+                None if or_all && notes.is_none() && view.selection_of(clip).is_empty() => {
+                    (0..ordered.len() as u32).collect()
+                }
+                None => places_or_selected(view, clip, notes, ordered.len())?,
+            };
             let settings = view.quantize();
             let grid = grid.unwrap_or_else(|| view.quantize_grid(arrangement.grid_ticks(doc)));
             // Start and End both off move nothing (the MIDI transformations spec, R19).
@@ -2920,6 +2975,7 @@ pub fn run(
                             step,
                             signatures,
                             amount,
+                            swing,
                         )?,
                         None => quantized[*place as usize].clone(),
                     };
@@ -3705,13 +3761,25 @@ pub fn run(
             Ok(carried_result(view, clip, done, recorded))
         }
         ids::STRETCH => {
+            let args: StretchNotesArgs = parse(args)?;
+            let to = match (args.to, args.factor) {
+                (Some(to), None) => to,
+                (None, Some(_)) => {
+                    // Spec: pitch-and-time-utilities R8, R9.
+                    return utilities::stretch_by(args, doc, editor, view, arrangement);
+                }
+                _ => return Err(invalid("give `to` or `factor`, not both or neither")),
+            };
+            if args.markers.is_some() {
+                return Err(invalid("`markers` goes with `factor`"));
+            }
             let StretchNotesArgs {
                 clip,
                 notes,
                 from,
-                to,
                 point,
-            } = parse(args)?;
+                ..
+            } = args;
             let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
             let ordered = notes_in_order(&midi);
             let (start, end) = match from {
@@ -4036,7 +4104,11 @@ fn quantize_note(
     step: Step,
     signatures: &TimeSignatureMap,
     amount: u8,
+    swing: u8,
 ) -> Result<Note, EditFailure> {
+    let snap = |signatures: &TimeSignatureMap, step: Step, at: Ticks| {
+        swung(signatures, step, snap(signatures, step, at), swing)
+    };
     let mut quantized = note.clone();
     match target {
         QuantizeTarget::NoteStart => {
@@ -4065,6 +4137,16 @@ fn quantize_note(
         }
     }
     Ok(quantized)
+}
+
+/// `line` delayed by `swing` percent of half a step when it is an odd line of
+/// the step, counted from its bar's start (Spec: push-2-notes R56).
+fn swung(signatures: &TimeSignatureMap, step: Step, line: Ticks, swing: u8) -> Ticks {
+    let (_, into) = signatures.bar_at(line);
+    if step.bars.is_some() || swing == 0 || (into.get() / step.ticks.get().max(1)) % 2 == 0 {
+        return line;
+    }
+    line + Ticks(step.ticks.get() * i64::from(swing) / 200)
 }
 
 /// The first grid line after `at`, for the lines `step` lays out.
@@ -4161,7 +4243,7 @@ mod tests {
         let step = quantize_step(Ticks::QUARTER, TimeSignature::new(4, 4).unwrap());
         let signatures = TimeSignatureMap::default();
         let quantized =
-            quantize_note(&note, QuantizeTarget::NoteEnd, step, &signatures, 100).unwrap();
+            quantize_note(&note, QuantizeTarget::NoteEnd, step, &signatures, 100, 0).unwrap();
         assert_eq!(quantized.length, Ticks::QUARTER);
         assert_eq!(quantized.pressure.len(), 3);
         assert_eq!(quantized.pressure[..2], note.pressure[..2]);

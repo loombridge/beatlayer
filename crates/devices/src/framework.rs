@@ -52,6 +52,14 @@ pub trait NativeDevice: Send + 'static {
         let _ = (events, params);
     }
 
+    /// Calls `report` with the value each parameter its instrument modulation
+    /// matrix moves played for the newest sounding voice in the last stretch,
+    /// matrix included, in the parameter's own units (the instrument
+    /// modulation spec, R12; modulation R31). The default reports none.
+    fn matrix_played(&self, report: &mut dyn FnMut(ParamId, f64)) {
+        let _ = report;
+    }
+
     /// Takes data the compiler made for the device off the audio thread:
     /// the decoded audio of a device that plays media (a sampler's sample,
     /// WP-2.16). The default drops it. Dropping a [`NodeData`] here is
@@ -256,6 +264,16 @@ impl<'a> Audio<'_, 'a> {
     #[must_use]
     pub fn scale_at(&self, offset: u32) -> bl_model::Scale {
         self.block.scale_at(self.range.start + offset as usize)
+    }
+
+    /// The frames within the stretch where the device's current scale
+    /// changes, after its first.
+    pub fn scale_changes(&self) -> impl Iterator<Item = u32> + '_ {
+        let (start, end) = (self.range.start as u32, self.range.end as u32);
+        self.block
+            .scale_changes()
+            .filter(move |&at| at > start && at < end)
+            .map(move |at| at - start)
     }
 
     /// Whether the set's tuning hides the scales (the tunings spec, R16): a
@@ -676,6 +694,17 @@ impl ParamBank {
         }
     }
 
+    /// Parameter `id`'s base in the last stretch: what a clip's modulation
+    /// moved it from, else the value it played.
+    #[must_use]
+    pub fn base(&self, id: ParamId) -> Option<f64> {
+        let slot = &self.slots[self.index(id)?];
+        Some(slot.modulated.map_or_else(
+            || slot.played_last.unwrap_or_else(|| slot.smoother.value()),
+            |(base, _)| base,
+        ))
+    }
+
     /// The parameter at `index`'s value at each frame of the stretch being
     /// processed.
     ///
@@ -946,6 +975,14 @@ impl<D: NativeDevice> Node for NativeNode<D> {
         self.params.modulated(report);
     }
 
+    fn matrix_played(&self, report: &mut dyn FnMut(ParamId, f64, f64)) {
+        self.device.matrix_played(&mut |param, played| {
+            if let Some(base) = self.params.base(param) {
+                report(param, base, played);
+            }
+        });
+    }
+
     fn latency(&self) -> u32 {
         self.device.latency()
     }
@@ -977,6 +1014,20 @@ where
     D: NativeDevice,
     F: Fn(&Device, &NodeConfig) -> D + Send + Sync + 'static,
 {
+    add_with_data(registry, device_type, make, None);
+}
+
+/// [`add`], for a device type whose nodes are also sent the data `data`
+/// builds from the device off the audio thread (WP-8.9).
+pub fn add_with_data<D, F>(
+    registry: &mut Registry,
+    device_type: DeviceType,
+    make: F,
+    data: Option<bl_engine::DataFn>,
+) where
+    D: NativeDevice,
+    F: Fn(&Device, &NodeConfig) -> D + Send + Sync + 'static,
+{
     assert!(
         matches!(device_type.kind, DeviceKind::Native { .. }),
         "{} isn't a native device type",
@@ -986,12 +1037,16 @@ where
         panic!("{}: {problem}", device_type.name);
     }
     let description = device_type.description.clone();
-    registry.add_device(device_type, move |device, config| {
-        Box::new(NativeNode::new(
-            make(device, config),
-            &description,
-            device,
-            config,
-        ))
-    });
+    registry.add_device_with_data(
+        device_type,
+        move |device, config| {
+            Box::new(NativeNode::new(
+                make(device, config),
+                &description,
+                device,
+                config,
+            ))
+        },
+        data,
+    );
 }

@@ -59,4 +59,4 @@ The device provides two main views: Classic View (showing a tuner needle curve w
   - `Flats (D♭)`: Toggle (menu option), default false.
   - `Sharps and Flats (C#/D♭)`: Toggle (menu option), default false.
 - Views: `Classic` and `Histogram`.
-- Beatlayer's own choices: YIN-based monophonic time-domain pitch detector with parabolic interpolation over a 2048-sample analysis window, measured once per 2,048 samples (Beatlayer's own response time); tuning systems follow the set's tuning (R10).
+- Beatlayer's own choices: YIN-based monophonic time-domain pitch detector (`bl_dsp::pitch::Tracker`, shared with the voice effects, WP-8.32) with parabolic interpolation over a 2048-sample analysis window, measured once per 2,048 samples (Beatlayer's own response time); tuning systems follow the set's tuning (R10).

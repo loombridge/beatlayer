@@ -342,6 +342,300 @@ fn veer_passes_under_rtsan() {
     );
 }
 
+#[test]
+fn corpus_passes_under_rtsan() {
+    use bl_core::time::{TICKS_PER_QUARTER, Ticks};
+    use bl_devices::corpus::{
+        CORPUS, DECAY, FILTER_ON, FREQUENCY, INHARM, LFO_AMOUNT, LFO_WAVE, OFF_DECAY, OPENING,
+        PB_RANGE, PRIORITY, QUALITY, RATIO, SPREAD, TYPE,
+    };
+    use bl_model::{Clip, ClipData, MidiData, Note};
+
+    let config = EngineConfig::new(SampleRate::HZ_48000, 256);
+    let mut collector = Collector::new();
+    let mut registry = testing::registry();
+    bl_devices::register(&mut registry);
+    let mut compiler = Compiler::new(config, registry, collector.handle());
+    let (mut sender, mut processor, mut monitor) = channel(&config);
+
+    let mut editor = Editor::new();
+    let new_track = |editor: &mut Editor, kind| {
+        let id = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id,
+                kind,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        id
+    };
+    let (audio, keys) = (
+        new_track(&mut editor, TrackKind::Audio),
+        new_track(&mut editor, TrackKind::Midi),
+    );
+    // A note every beat for the length of the run: ten seconds at 120 BPM.
+    let beat = Ticks(TICKS_PER_QUARTER);
+    let notes = (0..20).map(|n| Note::new(48 + (n % 24) as u8, beat * n, beat, 100));
+    let clip = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track: keys,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                beat * 20,
+                ClipData::Midi(MidiData::new(notes)),
+            ),
+        })
+        .unwrap();
+    let mut tone = Device::new(
+        editor.new_id(),
+        "",
+        DeviceKind::Native {
+            device_type: TEST_TONE.to_owned(),
+        },
+    );
+    tone.params.insert(test_tone::LEVEL, -20.0);
+    let mut corpus = Device::new(
+        editor.new_id(),
+        "",
+        DeviceKind::Native {
+            device_type: CORPUS.to_owned(),
+        },
+    )
+    .with_midi_sidechain_tap();
+    for (param, value) in [
+        (FREQUENCY, 1.0),
+        (OFF_DECAY, 1.0),
+        (SPREAD, 50.0),
+        (LFO_AMOUNT, 40.0),
+        (DECAY, 60.0),
+    ] {
+        corpus.params.insert(param, value);
+    }
+    let corpus_id = corpus.id;
+    for (index, device) in [tone, corpus].into_iter().enumerate() {
+        editor
+            .apply(Command::InsertDevice {
+                track: audio,
+                index,
+                device,
+            })
+            .unwrap();
+    }
+    editor
+        .apply(Command::SetMidiSidechainSource {
+            device: corpus_id,
+            track: Some(keys),
+            tap: None,
+        })
+        .unwrap();
+    sender.send_update(compiler.sync(editor.document()));
+    sender.transport(TransportCommand::Play);
+
+    let set = |param: ParamId, value: f64| Command::SetDeviceParam {
+        device: corpus_id,
+        param,
+        value,
+    };
+    for round in 0..2_000u64 {
+        // A new setting every few blocks, so changes land mid-stream: the
+        // type (a waveguide and a modal body in turn), Ratio, Inharm and
+        // Quality, which make a new table, Opening, the LFO, the filter and
+        // the sidechain's choices.
+        let step = round / 12;
+        let command = match round % 12 {
+            0 => Some(set(TYPE, (step % 7) as f64)),
+            1 => Some(set(RATIO, (step % 11) as f64 * 10.0)),
+            2 => Some(set(INHARM, (step % 9) as f64 * 25.0 - 100.0)),
+            3 => Some(set(QUALITY, (step % 2) as f64)),
+            4 => Some(set(OPENING, (step % 5) as f64 * 25.0)),
+            5 => Some(set(LFO_WAVE, (step % 7) as f64)),
+            6 => Some(set(FILTER_ON, (step % 2) as f64)),
+            7 => Some(set(OFF_DECAY, (step % 3 != 0) as u8 as f64)),
+            8 => Some(set(PRIORITY, (step % 2) as f64)),
+            9 => Some(set(PB_RANGE, (step % 25) as f64)),
+            10 => Some(set(DECAY, (step % 11) as f64 * 10.0)),
+            11 => Some(set(FREQUENCY, (step % 4 != 0) as u8 as f64)),
+            _ => None,
+        };
+        if let Some(command) = command {
+            editor.apply(command).unwrap();
+            sender.send_update(compiler.sync(editor.document()));
+        }
+        assert!(sender.flush());
+
+        bl_rt::rt_test!({
+            processor.process(256);
+        });
+        if round % 50 == 0 {
+            collector.collect();
+        }
+    }
+
+    let state = monitor.state().clone();
+    assert_eq!(state.counters.events_overflowed, 0);
+    assert_eq!(state.counters.events_unrouted, 0);
+    assert!(state.counters.events_applied > 100);
+    eprintln!(
+        "2,000 blocks of Corpus under RealtimeSanitizer: {} parameter changes, \
+         peak engine load {:.1}%",
+        state.counters.events_applied,
+        state.cpu_load_max * 100.0
+    );
+}
+
+// Spec: spectral-resonator R12
+#[test]
+fn spectral_resonator_passes_under_rtsan() {
+    use bl_core::time::{TICKS_PER_QUARTER, Ticks};
+    use bl_devices::spectral_resonator::{
+        DECAY, GLIDE, HARMONICS, MIDI_GATE, MODULATION, MONO_POLY, PB, PITCH_MODE, POLYPHONY,
+        QUANTIZE, SPECTRAL_RESONATOR, STRETCH, UNISON, USE_SCALE,
+    };
+    use bl_model::{Clip, ClipData, MidiData, Note};
+
+    let config = EngineConfig::new(SampleRate::HZ_48000, 256);
+    let mut collector = Collector::new();
+    let mut registry = testing::registry();
+    bl_devices::register(&mut registry);
+    let mut compiler = Compiler::new(config, registry, collector.handle());
+    let (mut sender, mut processor, mut monitor) = channel(&config);
+
+    let mut editor = Editor::new();
+    let new_track = |editor: &mut Editor, kind| {
+        let id = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id,
+                kind,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        id
+    };
+    let (audio, keys) = (
+        new_track(&mut editor, TrackKind::Audio),
+        new_track(&mut editor, TrackKind::Midi),
+    );
+    // Notes every half beat for the length of the run, overlapping so that
+    // Poly takes voices from one another: ten seconds at 120 BPM.
+    let beat = Ticks(TICKS_PER_QUARTER);
+    let notes = (0..40).map(|n| Note::new(36 + (n * 5 % 36) as u8, beat * n / 2, beat * 3, 100));
+    let clip = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track: keys,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                beat * 20,
+                ClipData::Midi(MidiData::new(notes)),
+            ),
+        })
+        .unwrap();
+    let mut tone = Device::new(
+        editor.new_id(),
+        "",
+        DeviceKind::Native {
+            device_type: TEST_TONE.to_owned(),
+        },
+    );
+    tone.params.insert(test_tone::LEVEL, -20.0);
+    let mut resonator = Device::new(
+        editor.new_id(),
+        "",
+        DeviceKind::Native {
+            device_type: SPECTRAL_RESONATOR.to_owned(),
+        },
+    )
+    .with_midi_sidechain_tap();
+    for (param, value) in [
+        (PITCH_MODE, 1.0),
+        (MONO_POLY, 1.0),
+        (POLYPHONY, 4.0),
+        (HARMONICS, 32.0),
+        (UNISON, 3.0),
+        (MODULATION, 2.0),
+        (DECAY, 2.0),
+    ] {
+        resonator.params.insert(param, value);
+    }
+    let resonator_id = resonator.id;
+    for (index, device) in [tone, resonator].into_iter().enumerate() {
+        editor
+            .apply(Command::InsertDevice {
+                track: audio,
+                index,
+                device,
+            })
+            .unwrap();
+    }
+    editor
+        .apply(Command::SetMidiSidechainSource {
+            device: resonator_id,
+            track: Some(keys),
+            tap: None,
+        })
+        .unwrap();
+    sender.send_update(compiler.sync(editor.document()));
+    sender.transport(TransportCommand::Play);
+
+    let set = |param: ParamId, value: f64| Command::SetDeviceParam {
+        device: resonator_id,
+        param,
+        value,
+    };
+    for round in 0..2_000u64 {
+        // A new setting every few blocks, so changes land mid-stream: the
+        // pitch mode and the voices, the modulation mode, Unison, Stretch,
+        // Quantize and Use Current Scale, Glide, PB and the gate.
+        let step = round / 12;
+        let command = match round % 12 {
+            0 => Some(set(MODULATION, (step % 4) as f64)),
+            1 => Some(set(UNISON, 1.0 + (step % 8) as f64)),
+            2 => Some(set(STRETCH, (step % 9) as f64 * 25.0 - 100.0)),
+            3 => Some(set(QUANTIZE, (step % 2) as f64)),
+            4 => Some(set(USE_SCALE, (step % 3 == 0) as u8 as f64)),
+            5 => Some(set(MONO_POLY, (step % 4 < 2) as u8 as f64)),
+            6 => Some(set(POLYPHONY, 2.0 + (step % 15) as f64)),
+            7 => Some(set(GLIDE, (step % 4) as f64 * 200.0)),
+            8 => Some(set(PB, (step % 25) as f64)),
+            9 => Some(set(MIDI_GATE, (step % 2) as f64)),
+            10 => Some(set(PITCH_MODE, (step % 5 != 0) as u8 as f64)),
+            _ => None,
+        };
+        if let Some(command) = command {
+            editor.apply(command).unwrap();
+            sender.send_update(compiler.sync(editor.document()));
+        }
+        assert!(sender.flush());
+
+        bl_rt::rt_test!({
+            processor.process(256);
+        });
+        if round % 50 == 0 {
+            collector.collect();
+        }
+    }
+
+    let state = monitor.state().clone();
+    assert_eq!(state.counters.events_overflowed, 0);
+    assert_eq!(state.counters.events_unrouted, 0);
+    assert!(state.counters.events_applied > 100);
+    eprintln!(
+        "2,000 blocks of Spectral Resonator under RealtimeSanitizer: {} parameter changes, \
+         peak engine load {:.1}%",
+        state.counters.events_applied,
+        state.cpu_load_max * 100.0
+    );
+}
+
 /// The channel EQ, the three-band EQ, the gate and the bus compressor on a
 /// track of a test tone, with the gate's and the compressor's sidechain
 /// keyed from a second track, while their parameters move between two
@@ -666,6 +960,40 @@ fn wax_passes_under_rtsan() {
     );
 }
 
+#[test]
+fn color_limiter_passes_under_rtsan() {
+    use bl_devices::color_limiter::*;
+    run_lo_fi_device(
+        COLOR_LIMITER,
+        &[
+            (LOUDNESS, &[1.0, 15.8, 0.0]),
+            (CEILING, &[-0.3, -12.0, -24.0]),
+            (LOOKAHEAD, &[0.0, 1.0, 2.0]),
+            (RELEASE, &[1.0, 100.0, 1_000.0]),
+            (SATURATION, &[0.0, 50.0, 100.0]),
+            (COLOR, &[-100.0, 0.0, 100.0]),
+        ],
+    );
+}
+
+#[test]
+fn re_enveloper_passes_under_rtsan() {
+    use bl_devices::re_enveloper::*;
+    run_lo_fi_device(
+        RE_ENVELOPER,
+        &[
+            (LOW_CROSSOVER, &[50.0, 200.0, 2_000.0]),
+            (HIGH_CROSSOVER, &[500.0, 2_500.0, 16_000.0]),
+            (factor(LOW), &[-100.0, 0.0, 100.0]),
+            (factor(MID), &[100.0, -100.0, 30.0]),
+            (factor(HIGH), &[-50.0, 100.0]),
+            (gain(LOW), &[1.0, 0.0, 2.0]),
+            (gain(MID), &[1.0, 0.5]),
+            (OUTPUT, &[1.0, 0.0, 2.0]),
+        ],
+    );
+}
+
 /// The three delays (WP-5.25) on a track that plays, while their times,
 /// pitch, spray, feedback and modes change mid-stream.
 #[test]
@@ -935,6 +1263,90 @@ fn amp_passes_under_rtsan() {
     );
 }
 
+// Spec: roar R14
+#[test]
+fn roar_passes_under_rtsan() {
+    use bl_devices::roar::{
+        AMOUNT, COLOR_COMPENSATION, COMPRESSION, DRIVE, DRY_WET, ENV_ATTACK, ENV_THRESHOLD,
+        FB_AMOUNT, FB_GATE, FB_INVERT, FB_MODE, FB_NOTE, FB_SYNCED, FB_TIME, FILTER, FREQUENCY,
+        GLOBAL_MODULATION, HIGH_CROSSOVER, INPUT_LISTEN, LEVEL, LFO_MODE, LFO_RATE, LFO_WAVE,
+        LOW_CROSSOVER, MIDI_FB_NOTE, NOISE_TYPE, OUTPUT_GAIN, PRE, RESONANCE, ROAR, ROUTING_MODE,
+        SHAPER, SIDECHAIN_HP, TONE_AMOUNT, lfo_param, matrix_param, stage_param,
+    };
+    run_lo_fi_device(
+        ROAR,
+        &[
+            (ROUTING_MODE, &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+            (stage_param(0, SHAPER), &[0.0, 2.0, 4.0, 8.0, 10.0, 11.0]),
+            (stage_param(1, SHAPER), &[10.0, 3.0, 9.0, 5.0]),
+            (stage_param(2, SHAPER), &[7.0, 6.0, 1.0]),
+            (stage_param(0, FILTER), &[0.0, 4.0, 5.0, 6.0, 7.0, 8.0]),
+            (stage_param(1, FILTER), &[8.0, 6.0, 2.0, 3.0]),
+            (stage_param(2, FILTER), &[1.0, 4.0, 7.0]),
+            (stage_param(0, AMOUNT), &[0.0, 60.0, 100.0]),
+            (stage_param(1, AMOUNT), &[100.0, 20.0]),
+            (stage_param(0, FREQUENCY), &[20_000.0, 600.0, 90.0]),
+            (stage_param(1, RESONANCE), &[0.0, 80.0]),
+            (stage_param(2, LEVEL), &[1.0, 0.0, 2.0]),
+            (stage_param(0, PRE), &[1.0, 0.0]),
+            (DRIVE, &[0.0, 18.0, 36.0]),
+            (TONE_AMOUNT, &[-100.0, 100.0, 0.0]),
+            (COLOR_COMPENSATION, &[1.0, 0.0]),
+            (LOW_CROSSOVER, &[50.0, 2_000.0]),
+            (HIGH_CROSSOVER, &[500.0, 16_000.0]),
+            (OUTPUT_GAIN, &[0.0, 1.0, 3.9]),
+            (DRY_WET, &[100.0, 40.0]),
+            // Part 2 (WP-8.39): the feedback section in each mode, the
+            // compressor, the sources and the matrix.
+            (FB_MODE, &[0.0, 1.0, 2.0, 3.0, 4.0]),
+            (FB_TIME, &[1.0, 100.0, 2_000.0]),
+            (FB_SYNCED, &[0.0, 4.0, 8.0]),
+            (FB_NOTE, &[0.0, 69.0, 127.0]),
+            (FB_AMOUNT, &[0.0, 80.0, 100.0]),
+            (FB_INVERT, &[1.0, 0.0]),
+            (FB_GATE, &[1.0, 0.0]),
+            (MIDI_FB_NOTE, &[1.0, 0.0]),
+            (COMPRESSION, &[0.0, 50.0, 100.0]),
+            (SIDECHAIN_HP, &[1.0, 0.0]),
+            (GLOBAL_MODULATION, &[100.0, 30.0]),
+            (lfo_param(0, LFO_WAVE), &[0.0, 2.0, 4.0]),
+            (lfo_param(0, LFO_MODE), &[0.0, 1.0, 2.0, 3.0, 4.0]),
+            (lfo_param(1, LFO_RATE), &[0.01, 5.0, 40.0]),
+            (ENV_ATTACK, &[0.1, 20.0]),
+            (ENV_THRESHOLD, &[-60.0, -20.0]),
+            (INPUT_LISTEN, &[0.0, 1.0, 0.0]),
+            (NOISE_TYPE, &[0.0, 1.0, 2.0, 3.0]),
+            (matrix_param(0, 0), &[0.0, 70.0, -40.0]),
+            (matrix_param(1, 8), &[50.0, 0.0]),
+            (matrix_param(2, 27), &[-60.0, 60.0]),
+            (matrix_param(3, 28), &[40.0, 0.0]),
+        ],
+    );
+}
+
+// Spec: pedal R9
+#[test]
+fn pedal_passes_under_rtsan() {
+    use bl_devices::pedal::{
+        BASS, DRY_WET, GAIN, HI_QUALITY, MID, MID_FREQUENCY, OUTPUT, PEDAL, SUB, TREBLE, TYPE,
+    };
+    run_lo_fi_device(
+        PEDAL,
+        &[
+            (TYPE, &[0.0, 1.0, 2.0]),
+            (GAIN, &[0.0, 50.0, 100.0]),
+            (BASS, &[-15.0, 15.0, 0.0]),
+            (MID, &[15.0, -15.0]),
+            (MID_FREQUENCY, &[0.0, 2.0, 1.0]),
+            (TREBLE, &[-15.0, 15.0]),
+            (SUB, &[15.0, 0.0]),
+            (OUTPUT, &[0.0, 1.0, 3.9]),
+            (DRY_WET, &[100.0, 40.0]),
+            (HI_QUALITY, &[1.0, 0.0]),
+        ],
+    );
+}
+
 // Spec: drum-bus R1, R15
 #[test]
 fn drum_buss_passes_under_rtsan() {
@@ -1107,6 +1519,113 @@ fn the_modulation_devices_pass_under_rtsan() {
     );
 }
 
+// Spec: gated-delay R8, pitch-hack R8
+#[test]
+fn gated_delay_and_pitch_hack_pass_under_rtsan() {
+    use bl_devices::{gated_delay as gated, pitch_hack as hack};
+    run_lo_fi_device(
+        gated::GATED_DELAY,
+        &[
+            (gated::step(1), &[0.0, 1.0]),
+            (gated::step(7), &[1.0, 0.0]),
+            (gated::STEPS, &[3.0, 16.0, 11.0]),
+            (gated::RATE, &[0.0, 4.0, 11.0]),
+            (gated::DELAY_STEPS, &[1.0, 16.0]),
+            (gated::FEEDBACK, &[0.0, 90.0]),
+            (gated::RANDOM, &[0.0, 50.0, 100.0]),
+            (gated::DRY_ON_RESTS, &[0.0, 1.0]),
+            (gated::INPUT, &[0.0, 1.0, 3.98]),
+            (gated::DRY_WET, &[0.0, 100.0]),
+        ],
+    );
+    run_lo_fi_device(
+        hack::PITCH_HACK,
+        &[
+            (hack::SYNC, &[0.0, 1.0]),
+            (hack::DIVISION, &[0.0, 5.0, 13.0]),
+            (hack::TIME, &[10.0, 250.0, 2_000.0]),
+            (hack::TRANSPOSE, &[-24.0, 7.0, 24.0]),
+            (hack::CENTS, &[-50.0, 50.0]),
+            (hack::REVERSE, &[0.0, 50.0, 100.0]),
+            (hack::RANDOM, &[0.0, 50.0, 100.0]),
+            (hack::FEEDBACK, &[0.0, 100.0]),
+            (hack::INPUT, &[0.0, 1.0]),
+            (hack::DRY_WET, &[0.0, 100.0]),
+        ],
+    );
+}
+
+// Spec: echo R18
+#[test]
+fn echo_passes_under_rtsan() {
+    use bl_devices::echo::*;
+    run_lo_fi_device(
+        ECHO,
+        &[
+            (CHANNEL_MODE, &[0.0, 1.0, 2.0]),
+            (LINK, &[0.0, 1.0]),
+            (line_param(0, SYNC), &[0.0, 1.0]),
+            (line_param(0, SYNC_MODE), &[0.0, 1.0, 2.0, 3.0]),
+            (line_param(0, NOTES), &[0.0, 3.0, 10.0]),
+            (line_param(1, TIME), &[1.0, 100.0, 5_000.0]),
+            (line_param(1, OFFSET), &[-33.0, 0.0, 33.0]),
+            (INPUT, &[0.0, 1.0, 3.98]),
+            (DRIVE, &[0.0, 1.0]),
+            (FEEDBACK, &[0.0, 60.0, 100.0]),
+            (FEEDBACK_INVERT, &[0.0, 1.0]),
+            (FILTER, &[0.0, 1.0]),
+            (HP_FREQ, &[20.0, 500.0, 5_000.0]),
+            (LP_RES, &[0.0, 100.0]),
+            (WAVE, &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0]),
+            (LFO_SYNC, &[0.0, 1.0]),
+            (LFO_RATE, &[0.0, 5.0, 9.0]),
+            (MOD_DELAY, &[0.0, 100.0]),
+            (MOD_X4, &[0.0, 1.0]),
+            (MOD_FILTER, &[0.0, 100.0]),
+            (ENV_MIX, &[0.0, 50.0, 100.0]),
+            (GATE, &[0.0, 1.0]),
+            (DUCKING, &[0.0, 1.0]),
+            (NOISE, &[0.0, 1.0]),
+            (NOISE_MORPH, &[0.0, 100.0]),
+            (WOBBLE, &[0.0, 1.0]),
+            (REPITCH, &[0.0, 1.0]),
+            (REVERB, &[0.0, 100.0]),
+            (REVERB_LOCATION, &[0.0, 1.0, 2.0]),
+            (DECAY, &[0.2, 10.0]),
+            (STEREO, &[0.0, 100.0, 200.0]),
+            (EQUAL_LOUDNESS, &[0.0, 1.0]),
+            (DRY_WET, &[0.0, 50.0, 100.0]),
+        ],
+    );
+}
+
+// Spec: resonators R11
+#[test]
+fn resonators_passes_under_rtsan() {
+    use bl_devices::resonators::*;
+    run_lo_fi_device(
+        RESONATORS,
+        &[
+            (FILTER_TYPE, &[0.0, 1.0, 2.0, 3.0]),
+            (FILTER_FREQ, &[50.0, 1_000.0, 18_000.0]),
+            (MODE, &[0.0, 1.0]),
+            (DECAY, &[0.01, 1.0, 30.0]),
+            (CONST, &[0.0, 1.0]),
+            (COLOR, &[-100.0, 0.0, 100.0]),
+            (USE_SCALE, &[0.0, 1.0]),
+            (WIDTH, &[0.0, 100.0]),
+            (GAIN, &[0.0, 1.0, 3.9]),
+            (DRY_WET, &[0.0, 50.0, 100.0]),
+            (voice_param(0, PITCH), &[0.0, 60.0, 84.0]),
+            (voice_param(0, FINE), &[-50.0, 50.0]),
+            (voice_param(1, PITCH), &[-24.0, 12.0, 24.0]),
+            (voice_param(3, ON), &[1.0, 0.0]),
+            (voice_param(4, ON), &[1.0, 0.0]),
+            (voice_param(2, LEVEL), &[0.0, 1.0]),
+        ],
+    );
+}
+
 // Spec: auto-pan-tremolo R15
 #[test]
 fn auto_pan_tremolo_passes_under_rtsan() {
@@ -1153,6 +1672,40 @@ fn spectrum_passes_under_rtsan() {
     );
 }
 
+// Spec: device-framework R46
+#[test]
+fn the_test_spectrogram_passes_under_rtsan() {
+    use bl_devices::testing::{SPECTROGRAM, SPECTROGRAM_FREEZE};
+    run_lo_fi_device(SPECTROGRAM, &[(SPECTROGRAM_FREEZE, &[0.0, 1.0])]);
+}
+
+// Spec: spectral-time R17
+#[test]
+fn spectral_time_passes_under_rtsan() {
+    use bl_devices::spectral_time::*;
+    run_lo_fi_device(
+        SPECTRAL_TIME,
+        &[
+            (RESOLUTION, &[3.0, 0.0, 4.0, 1.0, 2.0]),
+            (FREEZE, &[1.0, 0.0, 1.0]),
+            (FREEZER_MODE, &[0.0, 1.0]),
+            (TRIGGER, &[0.0, 1.0]),
+            (FADE_SHAPE, &[0.0, 1.0]),
+            (INTERVAL_MODE, &[1.0, 0.0]),
+            (DELAY_MODE, &[0.0, 1.0, 2.0, 3.0, 4.0]),
+            (TIME, &[10.0, 250.0, 5_000.0]),
+            (TILT, &[-100.0, 0.0, 100.0]),
+            (SPRAY, &[0.0, 50.0, 100.0]),
+            (MASK, &[-50.0, 0.0, 50.0]),
+            (FEEDBACK, &[0.0, 50.0, 100.0]),
+            (SHIFT, &[-12.0, 0.0, 12.0]),
+            (STEREO, &[0.0, 100.0]),
+            (ORDER, &[0.0, 1.0]),
+            (ZERO_DRY_LATENCY, &[0.0, 1.0]),
+        ],
+    );
+}
+
 // Spec: tuner R8
 #[test]
 fn tuner_passes_under_rtsan() {
@@ -1183,6 +1736,109 @@ fn oscilloscope_passes_under_rtsan() {
             (FREEZE, &[0.0, 1.0]),
             (DIVISIONS, &[2.0, 4.0, 8.0]),
             (TRIGGER, &[-50.0, 0.0, 50.0]),
+        ],
+    );
+}
+
+// Spec: pitchloop89 R9
+#[test]
+fn pitchloop89_passes_under_rtsan() {
+    use bl_devices::pitchloop89::*;
+    run_lo_fi_device(
+        PITCHLOOP89,
+        &[
+            (BANDWIDTH_A, &[0.0, 2.0, 5.0]),
+            (BANDWIDTH_B, &[1.0, 3.0, 4.0]),
+            (SPEED_A, &[-200.0, -100.0, 50.0, 100.0, 200.0]),
+            (SPEED_B, &[200.0, 100.0, -50.0]),
+            (DELAY_A, &[0.0, 50.0, 100.0]),
+            (HOLD_A, &[0.0, 1.0]),
+            (HOLD_B, &[1.0, 0.0]),
+            (FEEDBACK_A, &[0.0, 60.0, 100.0]),
+            (LOW_PASS_A, &[200.0, 4_000.0, 20_000.0]),
+            (HIGH_PASS_B, &[20.0, 500.0, 5_000.0]),
+            (ROUTING, &[0.0, 1.0, 2.0]),
+            (VIBRATO_DEPTH, &[0.0, 50.0, 100.0]),
+            (POSITION_WAVE, &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+            (POSITION_DEPTH, &[0.0, 40.0, 100.0]),
+            (RANDOM, &[1.0, 0.0]),
+            (INPUT, &[0.0, 1.0, 3.98]),
+        ],
+    );
+}
+
+// Spec: vector-delay R7
+#[test]
+fn vector_delay_passes_under_rtsan() {
+    use bl_devices::vector_delay::*;
+    run_lo_fi_device(
+        VECTOR_DELAY,
+        &[
+            (TAPS, &[1.0, 8.0, 4.0]),
+            (GRAVITY, &[-100.0, 0.0, 100.0]),
+            (MAGNET, &[100.0, 0.0, -100.0]),
+            (FLOW, &[0.0, 100.0]),
+            (SPEED, &[0.0, 100.0, 400.0]),
+            (FRICTION, &[0.0, 20.0, 100.0]),
+            (FEEDBACK, &[0.0, 30.0, 100.0]),
+            (SYNC, &[0.0, 1.0]),
+            (DIVISION, &[0.0, 4.0, 12.0]),
+            (MAX_TIME, &[50.0, 1_000.0, 4_000.0]),
+            (RESET, &[1.0, 0.0]),
+            (tap_x(0), &[0.0, 0.5, 1.0]),
+            (tap_y(3), &[1.0, 0.0, 0.5]),
+        ],
+    );
+}
+
+// Spec: vocoder R16
+#[test]
+fn vocoder_passes_under_rtsan() {
+    use bl_devices::vocoder::*;
+    run_lo_fi_device(
+        VOCODER,
+        &[
+            (CARRIER, &[0.0, 1.0, 2.0, 3.0]),
+            (BANDS, &[9.0, 0.0, 4.0]),
+            (CHANNEL_MODE, &[2.0, 0.0, 1.0]),
+            (FORMANT, &[-12.0, 0.0, 12.0]),
+            (DEPTH, &[0.0, 100.0, 200.0]),
+            (ATTACK, &[1.0, 5.0, 300.0]),
+            (RELEASE, &[5.0, 100.0, 3_000.0]),
+            (UNVOICED, &[0.0, 100.0]),
+            (SENS, &[0.0, 50.0, 100.0]),
+            (FAST_SLOW, &[0.0, 1.0]),
+            (RANGE_LOW, &[20.0, 80.0, 500.0]),
+            (RANGE_HIGH, &[20_000.0, 12_000.0, 600.0]),
+            (BW, &[10.0, 100.0, 200.0]),
+            (FILTER_MODE, &[1.0, 0.0]),
+            (GATE, &[-80.0, -30.0, 0.0]),
+            (LEVEL, &[0.0, 1.0, 15.8]),
+            (ENHANCE, &[1.0, 0.0]),
+            (NOISE_X, &[0.0, 50.0, 100.0]),
+            (NOISE_Y, &[100.0, 0.0, 50.0]),
+            (PITCH_LOW, &[40.0, 50.0, 500.0]),
+            (PITCH_HIGH, &[2_000.0, 1_000.0, 100.0]),
+            (PITCH, &[-24.0, 0.0, 24.0]),
+            (WAVEFORM, &[0.0, 1.0, 2.0, 3.0]),
+        ],
+    );
+}
+
+// Spec: spectral-blur R8
+#[test]
+fn spectral_blur_passes_under_rtsan() {
+    use bl_devices::spectral_blur::*;
+    run_lo_fi_device(
+        SPECTRAL_BLUR,
+        &[
+            (LOW, &[20.0, 200.0, 4_000.0]),
+            (HIGH, &[20.0, 5_000.0, 20_000.0]),
+            (HALO, &[20.0, 1_000.0, 10_000.0]),
+            (RESIDUAL, &[0.0, 50.0, 100.0]),
+            (FREEZE, &[1.0, 0.0]),
+            (WET_GAIN, &[0.0, 1.0, 3.98]),
+            (DRY_WET, &[0.0, 50.0, 100.0]),
         ],
     );
 }

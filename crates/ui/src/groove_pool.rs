@@ -24,7 +24,7 @@ use egui::{
 };
 use serde_json::{Value, json};
 
-use crate::layout::BROWSER_ROW;
+use crate::layout::list_row;
 use crate::main_panel::{Entry, Place, field};
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
@@ -36,8 +36,6 @@ const GAP: f32 = 8.0;
 /// The column headers' height, and the footer's.
 const HEADER: f32 = 16.0;
 const FOOTER: f32 = 22.0;
-/// A row's height: the browser's.
-const ROW: f32 = BROWSER_ROW;
 /// The name column's width, a row button's side and the gap between two. The
 /// columns fit the column's default width, so every field is in reach of the
 /// keyboard and of assistive technology; a wider column leaves room at the
@@ -334,7 +332,7 @@ impl GroovePoolUi {
         );
         let content = Vec2::new(
             columns().last().map_or(0.0, |column| column.right) + MARGIN,
-            state.grooves.len() as f32 * ROW,
+            state.grooves.len() as f32 * list_row(),
         );
         self.rows_height = rows.height();
         let above_footer = Rect::from_min_max(rect.min, pos2(rect.right(), footer.top()));
@@ -369,12 +367,13 @@ impl GroovePoolUi {
                 ui.set_clip_rect(rect);
                 self.headers(ui, theme, header);
                 ui.set_clip_rect(rows);
-                let first = (self.scroll.y / ROW).floor().max(0.0) as usize;
-                let shown = ((rows.height() / ROW).ceil() as usize + 1)
+                let first = (self.scroll.y / list_row()).floor().max(0.0) as usize;
+                let shown = ((rows.height() / list_row()).ceil() as usize + 1)
                     .min(state.grooves.len().saturating_sub(first));
                 for (at, entry) in state.grooves.iter().skip(first).take(shown).enumerate() {
-                    let top = rows.top() + (first + at) as f32 * ROW - self.scroll.y;
-                    let row = Rect::from_min_size(pos2(rows.left(), top), vec2(rows.width(), ROW));
+                    let top = rows.top() + (first + at) as f32 * list_row() - self.scroll.y;
+                    let row =
+                        Rect::from_min_size(pos2(rows.left(), top), vec2(rows.width(), list_row()));
                     self.row(ui, shell, theme, &state, entry, row, events);
                 }
                 // A name typed in a row scrolled out of view is dropped, so
@@ -932,11 +931,11 @@ impl GroovePoolUi {
 
     /// Scrolls the row at `index` into view.
     fn reveal(&mut self, index: usize) {
-        let top = index as f32 * ROW;
+        let top = index as f32 * list_row();
         if top < self.scroll.y {
             self.scroll.y = top;
-        } else if top + ROW > self.scroll.y + self.rows_height {
-            self.scroll.y = top + ROW - self.rows_height;
+        } else if top + list_row() > self.scroll.y + self.rows_height {
+            self.scroll.y = top + list_row() - self.rows_height;
         }
     }
 

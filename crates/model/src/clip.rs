@@ -29,8 +29,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::automation::{AutomationTarget, Breakpoint, Envelope};
+use crate::colour::Colour;
 use crate::error::ModelError;
-use crate::ids::{ClipId, ContentHash, GrooveId, TakeLaneId};
+use crate::ids::{ClipId, ContentHash, GrooveId, LinkId, TakeLaneId};
 use crate::launch::ClipLaunch;
 use crate::scale::Scale;
 use crate::warp::{TransientEdits, WarpMarker};
@@ -87,15 +88,35 @@ pub struct Clip {
     /// nothing in the clip itself until it is committed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub groove: Option<GrooveId>,
-    /// The clip's colour, a swatch from 0 to 69 (the themes spec, R14). A
+    /// The clip's colour, a swatch from 0 to 69 or a `#RRGGBB` colour (the
+    /// themes spec, R14, R29). A
     /// clip handed to a command without one takes its track's colour as it
     /// goes in, and a set saved before colours gives each clip its track's
     /// on loading, so a clip in a document always has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub colour: Option<u8>,
+    pub colour: Option<Colour>,
     /// The user's own info text (Edit Info Text), which the Info View shows while the pointer is over the clip; empty for none, and left out of the saved set then (the Info View spec, R9).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub info_text: String,
+    /// The link the clip belongs to (WP-6.44, the linked clips spec, R2):
+    /// the clips of one link hold the same contents (R3), whatever edit
+    /// reaches one of them (R4). `None` for an independent clip, which is
+    /// what a set saved before linked clips holds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<LinkId>,
+}
+
+/// What the clips of a link share (the linked clips spec, R3): a clip's
+/// `data` in full, of which only the contents count (a MIDI clip's notes, an
+/// audio clip's file, warping, gain, HiQ and RAM; the rest of `data` is each
+/// clip's own), and a MIDI clip's controller envelopes.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LinkContents {
+    /// A clip's data, read for its contents only.
+    pub data: ClipData,
+    /// The MIDI controller envelopes, in clip order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub envelopes: Vec<ClipEnvelope>,
 }
 
 impl Clip {
@@ -116,7 +137,83 @@ impl Clip {
             groove: None,
             colour: None,
             info_text: String::new(),
+            link: None,
         }
+    }
+
+    /// What the clip shares with the clips of its link (R3).
+    #[must_use]
+    pub fn contents(&self) -> LinkContents {
+        LinkContents {
+            data: self.data.clone(),
+            envelopes: self
+                .envelopes
+                .iter()
+                .filter(|envelope| envelope.target.is_midi())
+                .cloned()
+                .collect(),
+        }
+    }
+
+    /// The clip with `contents` in place of its own and everything else as
+    /// it is (R3, R4): a clip of the other kind is left as it is.
+    #[must_use]
+    pub fn with_contents(&self, contents: &LinkContents) -> Self {
+        let mut next = self.clone();
+        match (&mut next.data, &contents.data) {
+            (ClipData::Midi(own), ClipData::Midi(shared)) => {
+                own.notes = shared.notes.clone();
+                own.groups = shared.groups.clone();
+            }
+            (ClipData::Audio(own), ClipData::Audio(shared)) => {
+                own.media = shared.media;
+                own.video = shared.video;
+                own.warp = shared.warp;
+                own.warp_markers = shared.warp_markers.clone();
+                own.tempo = shared.tempo;
+                own.warp_mode = shared.warp_mode;
+                own.warp_settings = shared.warp_settings;
+                own.transient_edits = shared.transient_edits.clone();
+                own.gain = shared.gain;
+                own.ram = shared.ram;
+                own.high_quality = shared.high_quality;
+            }
+            _ => return next,
+        }
+        next.envelopes.retain(|envelope| !envelope.target.is_midi());
+        next.envelopes.extend(contents.envelopes.iter().cloned());
+        next
+    }
+
+    /// The clip as a command makes it: in no link (R7).
+    #[must_use]
+    pub fn unlinked(&self) -> Self {
+        Self {
+            link: None,
+            ..self.clone()
+        }
+    }
+
+    /// The clip with its contents emptied, as a set saves a linked clip,
+    /// whose contents the set holds once for its link (R13).
+    #[must_use]
+    pub fn without_contents(&self) -> Self {
+        self.with_contents(&LinkContents {
+            data: self.data.blank(),
+            envelopes: Vec::new(),
+        })
+    }
+
+    /// Whether the clip holds the contents of `other` (R3): the settings
+    /// that are each clip's own don't count.
+    #[must_use]
+    pub fn shares_contents_with(&self, other: &Self) -> bool {
+        let only = |clip: &Self| {
+            let blank = Self::new(clip.id, Ticks::ZERO, Ticks(1), clip.data.blank());
+            let blank = blank.with_contents(&clip.contents());
+            (blank.data, blank.envelopes)
+        };
+        only(self) == only(other)
     }
 
     /// Whether the clip and `other` differ only in their colour, which the
@@ -133,7 +230,7 @@ impl Clip {
     /// The clip with `colour` as its colour: `None` lets it take its
     /// track's colour as it goes into the document (the themes spec, R20).
     #[must_use]
-    pub fn with_colour(self, colour: Option<u8>) -> Self {
+    pub fn with_colour(self, colour: Option<Colour>) -> Self {
         Self { colour, ..self }
     }
 
@@ -171,6 +268,42 @@ impl Clip {
     #[must_use]
     pub fn end(&self) -> Ticks {
         self.start.saturating_add(self.length)
+    }
+
+    /// The time in the movie, in seconds, that a video clip plays at the song
+    /// position `at` (the video spec, R7, R11): the position in the clip's
+    /// contents, through its warp map if it's warped, folded into its loop
+    /// brace while the loop is on, and out of the clip's form into seconds in
+    /// the file. `movie_seconds` is the movie's length, which ends a loop
+    /// brace the clip doesn't set the end of. `None` for a clip that isn't a
+    /// video clip, a position outside the clip, and a time before the movie.
+    #[must_use]
+    pub fn movie_time_at(&self, at: Ticks, tempo: &TempoMap, movie_seconds: f64) -> Option<f64> {
+        let ClipData::Audio(audio) = &self.data else {
+            return None;
+        };
+        if !audio.video || at < self.start || at >= self.end() {
+            return None;
+        }
+        // A warped clip's contents advance a tick per tick of the song, an
+        // unwarped clip's by the time between the ticks.
+        let elapsed = if audio.warp {
+            (at - self.start).get() as f64
+        } else {
+            tempo.ticks_to_seconds(at) - tempo.ticks_to_seconds(self.start)
+        };
+        let mut position = audio.start + elapsed;
+        if audio.looping {
+            let end = audio
+                .loop_end
+                .unwrap_or_else(|| audio.in_clip_form(movie_seconds));
+            let length = end - audio.loop_start;
+            if length > 0.0 && position >= end {
+                position = audio.loop_start + (position - audio.loop_start).rem_euclid(length);
+            }
+        }
+        let seconds = audio.in_file_seconds(position);
+        (seconds >= 0.0).then_some(seconds)
     }
 
     /// Where the clip's contents begin in the arrangement: its start less
@@ -448,6 +581,15 @@ pub enum ClipData {
 }
 
 impl ClipData {
+    /// Data of the same kind that holds no contents and has every setting at
+    /// its default.
+    fn blank(&self) -> Self {
+        match self {
+            Self::Audio(_) => Self::Audio(AudioData::new(ContentHash([0; 32]))),
+            Self::Midi(_) => Self::Midi(MidiData::default()),
+        }
+    }
+
     /// Whether this is audio.
     #[must_use]
     pub fn is_audio(&self) -> bool {
@@ -655,6 +797,11 @@ pub struct AudioData {
     /// unless given, a follower. Only a warped Arrangement clip can lead.
     #[serde(default, skip_serializing_if = "is_false")]
     pub tempo_leader: bool,
+    /// Whether the clip is a video clip (the video spec, R5): its media is a
+    /// QuickTime movie, whose sound the clip plays and whose picture follows
+    /// the sound's time. Off unless given; only an Arrangement clip is one.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub video: bool,
     /// The RAM switch (R11): off unless given. On, the clip's whole file is
     /// held in memory instead of streamed.
     #[serde(default, skip_serializing_if = "is_false")]
@@ -708,12 +855,36 @@ impl AudioData {
             warp_mode: WarpMode::Beats,
             warp_settings: WarpSettings::default(),
             tempo_leader: false,
+            video: false,
             ram: false,
             high_quality: true,
             transpose: 0,
             detune: 0.0,
             transient_edits: TransientEdits::default(),
         }
+    }
+
+    /// A new video clip of the movie `media` (the video spec, R5, R9): the
+    /// whole movie, warped with one marker at its start at `tempo` and
+    /// leading the set's tempo, so its sound plays at its own speed.
+    ///
+    /// # Errors
+    ///
+    /// If `tempo` is outside 1 to 1,000 BPM.
+    pub fn new_video(media: ContentHash, tempo: f64) -> Result<Self, ModelError> {
+        let data = Self::new(media).with_map(
+            vec![WarpMarker {
+                time: 0.0,
+                beat: Ticks::ZERO,
+            }],
+            tempo,
+        )?;
+        Ok(Self {
+            warp: true,
+            tempo_leader: true,
+            video: true,
+            ..data
+        })
     }
 
     /// The data of a clip whose left edge moved from `from` to `to`: its
@@ -850,6 +1021,7 @@ impl AudioData {
             next.warp_markers = markers;
             if let Some(media) = media {
                 next.media = media;
+                next.video = false;
             }
             return next;
         }
@@ -869,6 +1041,7 @@ impl AudioData {
         next.warp_markers = self.mirrored_markers(seconds);
         if let Some(media) = media {
             next.media = media;
+            next.video = false;
         }
         next
     }
@@ -1465,6 +1638,7 @@ pub fn consolidated_midi(
         groove: None,
         colour: None,
         info_text: String::new(),
+        link: None,
     }
 }
 

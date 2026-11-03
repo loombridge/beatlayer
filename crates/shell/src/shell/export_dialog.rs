@@ -676,7 +676,7 @@ impl Shell {
         self.use_peak_options(bl_media::PeakCacheOptions::platform_default());
     }
 
-    fn peak_cache(&mut self) -> Option<&bl_media::PeakCache> {
+    pub(super) fn peak_cache(&mut self) -> Option<&bl_media::PeakCache> {
         if self.peaks.is_none() {
             self.peaks =
                 bl_media::PeakCache::new(Arc::clone(&self.media), self.peak_options.clone()).ok();

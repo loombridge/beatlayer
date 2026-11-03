@@ -1093,3 +1093,45 @@ fn midi_to_lists_mpe_after_the_channels_and_offers_its_settings() {
         Some(MidiTo::Port { mpe: Some(_), .. })
     ));
 }
+
+// The choosers take their labels from one numbering of the set, not one
+// walk of the track order per label: a set with a group, two more MIDI
+// tracks and its returns labels each track as counting by hand does, and
+// the choosers list those labels.
+#[test]
+fn the_choosers_list_each_tracks_label_from_one_numbering() {
+    let Set { mut shell, .. } = observed_set();
+    for kind in ["group", "midi", "audio", "midi"] {
+        shell
+            .invoke("track.create", json!({ "kind": kind, "index": 1 }))
+            .unwrap();
+    }
+    let doc = shell.editor().document().clone();
+    let labels = routing::track_labels(&doc);
+    let order = doc.track_order();
+    assert_eq!(labels.len(), order.len());
+    let mut number = 0;
+    for id in &order {
+        let track = doc.track(*id).unwrap();
+        if track.kind().can_be_grouped() {
+            number += 1;
+            let name = track
+                .name()
+                .split_once(' ')
+                .filter(|(n, _)| n.chars().all(|c| c.is_ascii_digit()))
+                .map_or(track.name(), |(_, rest)| rest);
+            assert_eq!(labels[id], format!("{number}-{name}"));
+        }
+        assert_eq!(labels[id], track_label(&doc, *id));
+    }
+    let (input, _, _, output, _) = clips(&shell, doc.top_level().last().unwrap());
+    for chooser in [input, output] {
+        for label in chooser.labels() {
+            let track = order.iter().find(|id| labels[*id] == label);
+            assert!(
+                track.is_some() || !label.contains('-'),
+                "{label} names no track"
+            );
+        }
+    }
+}

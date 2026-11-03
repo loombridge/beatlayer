@@ -1,6 +1,6 @@
 # Pedal: overdrive, distortion and fuzz
 
-- **Status:** draft
+- **Status:** partial (R1 to R12 are built and tested; the aliasing level of R9 holds for Overdrive and Distortion at −36 dBFS and below, not at full drive, and Fuzz's stage is closed to a signal that small)
 - **Work packages:** WP-8.41 (all of it: R1 to R12). [Amp](amp.md) and [Cabinet](cabinet.md) are their own devices; the oversampler and the framework are WP-2.5's ([the native device framework](device-framework.md) R8)
 - **Parity-matrix row:** Audio effects: Amp, Cabinet, Pedal
 - **Checked against:** the Live 12 reference manual (online edition), chapter 29 "Live Audio Effect Reference", section 29.28 "Pedal" with 29.28.1, read 30 October 2026
@@ -29,17 +29,19 @@ The device takes Live's name with Beatlayer's own type ID, `beatlayer.pedal`. It
 - **R6.** Each type's static curve, measured with a slow sine sweep with the envelope held, lies within 0.01 of its formula, and its harmonic balance on a 220 Hz sine at −12 dBFS with Gain 50 % (the second against the third harmonic) is within 1 dB of its design's figure. DC after the circuit is below −80 dBFS (a 5 Hz high-pass follows it). (Beatlayer's own)
 - **R7.** The EQ, after the circuit: Bass, −15 to +15 dB, a peak at 100 Hz with Q 0.7; Mid, −15 to +15 dB, a peak with Q 1 at 500 Hz, 1 kHz or 2 kHz as its switch says (1 kHz by default); Treble, −15 to +15 dB, a shelf at 3.3 kHz; Sub, 0 to +15 dB, a low shelf below 250 Hz. Each band's measured response at small signal is within 0.5 dB of its design at every Mid position. (S1; gains and Qs are Beatlayer's own)
 - **R8.** Output is a gain from −∞ to +12 dB (0 dB by default, rule G1); Dry/Wet, 0 to 100 % (100 % by default), balances the dry signal, delayed by the latency, against the pedal's. The device reports the oversampler's latency for the chosen quality. (S1, S3)
-- **R9.** A render is bit-identical at block sizes 1, 64, 512 and 4,096 and run after run; aliasing from a 5 kHz sine at Gain 100 % stays 60 dB below the fundamental in the band below 20 kHz, and 75 dB with Hi-Quality; nothing on the audio thread allocates, locks or blocks. (S1, S3; the levels are Beatlayer's own)
+- **R9.** A render is bit-identical at block sizes 1, 64, 512 and 4,096 and run after run; aliasing from a 5 kHz sine at −36 dBFS at Gain 100 % stays 60 dB below the fundamental in the band below 20 kHz, and 75 dB with Hi-Quality (at full drive the clipped edges' harmonics past half the oversampled rate fold back and no filter removes them, so louder sines alias more: about −30 dB at −6 dBFS); nothing on the audio thread allocates, locks or blocks. (S1, S3; the levels are Beatlayer's own)
 - **R10.** Every parameter is automatable and modulatable (rule G2) and set and read back through the agent API; changing type crossfades over 20 ms. (S3)
-- **R11.** Pedal declares one bank of eight ([control surfaces](control-surfaces.md) R19): Type, Gain, Bass, Mid, Treble, Sub, Output, Dry/Wet, with the Mid frequency and Hi-Quality in a second, so every automatable parameter is in a bank. (S3; Beatlayer's own)
+- **R11.** Pedal declares one bank of eight ([control surfaces](control-surfaces.md) R19): Type, Gain, Bass, Mid, Treble, Sub, Output, Dry/Wet, with Mid Frequency in a second, and Hi-Quality, a menu option, in the Options bank the framework adds last, so every automatable parameter is in a bank. (S3; Beatlayer's own)
 - **R12.** A set with Pedal saves and reopens with every parameter and Hi-Quality. (S3)
 
 ## Tests
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1, R2 | to be written in WP-8.41 | unit (description; drive law; reported latency at both qualities) |
-| R3 to R6 | to be written in WP-8.41 | unit (each type's curve on a sweep; harmonic balance; Fuzz's sputter on a decaying tone repeats run after run; DC) |
-| R7, R8 | to be written in WP-8.41 | unit (each band's response at each Mid position; Output at −∞) |
-| R9 | to be written in WP-8.41 | unit (aliasing); real-time trap; golden renders at four block sizes |
-| R10 to R12 | to be written in WP-8.41 | `crates/devices/tests/rules.rs`; agent API; `crates/devices/tests/banks.rs`; save and reopen |
+| R1, R2 | `crates/devices/tests/pedal.rs`, `the_pedal_is_described_and_laid_out`, `gain_drives_the_circuit_by_zero_to_forty_eight_decibels`, `the_latency_is_the_oversamplers_for_the_quality_and_delays_the_dry_signal` | unit, real-time trap |
+| R3 to R6 | `crates/devices/tests/pedal.rs`, `each_types_curve_lies_within_a_hundredth_of_its_formula`, `each_types_harmonics_on_a_220_hz_sine_are_those_of_its_design_within_a_decibel`, `fuzz_sputters_on_a_decaying_tone_and_repeats_run_after_run`, `each_type_leaves_no_dc_above_minus_eighty_dbfs` | unit, real-time trap |
+| R7, R8 | `crates/devices/tests/pedal.rs`, `each_eq_band_is_within_half_a_decibel_of_its_design_at_each_mid_position`, `sub_raises_the_lows_with_a_shelf_below_250_hz`, `output_sets_the_wet_level_down_to_silence_and_dry_wet_balances_it` | unit, real-time trap |
+| R9 | `crates/devices/tests/pedal.rs`, `a_5_khz_sine_at_gain_100_aliases_less_than_60_db_and_with_hi_quality_75_db`, `renders_are_bit_identical_at_four_block_sizes_and_run_after_run`; `rtsan/tests/devices.rs`, `pedal_passes_under_rtsan` | real-time trap, RTSan, golden renders |
+| R10 | `crates/devices/tests/pedal.rs`, `a_change_of_type_crossfades_over_twenty_milliseconds`; `crates/devices/tests/rules.rs` over the shipped types; `crates/cli/tests/agent.rs`, `an_agent_inserts_pedal_and_sets_and_reads_back_its_parameters` | unit, real-time trap, agent API |
+| R11 | `crates/devices/tests/banks.rs` over the shipped types | unit |
+| R12 | `crates/shell/tests/pedal.rs`, `a_set_with_pedal_reopens_with_every_parameter` | unit |

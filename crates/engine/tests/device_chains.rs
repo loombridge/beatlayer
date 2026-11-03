@@ -110,11 +110,13 @@ fn a_chain_edit_makes_only_the_nodes_it_adds() {
         },
         Command::SetDeviceState {
             articulations: None,
+            routes: None,
             device: second,
             params: [(GAIN_PARAM, 0.25)].into_iter().collect(),
             name: "Quiet".to_owned(),
             shape: None,
             mpe: None,
+            similarity_reference: None,
         },
     ] {
         let synced = rig.apply(command.clone());

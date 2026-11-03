@@ -101,8 +101,12 @@ fn a_display_buttons_led_follows_its_label() {
     rig.tick();
     let colours = rig.shared.track_colours();
     let track_colour = |n: usize| {
-        let swatch = rig.model.document.track(rig.tracks[n]).unwrap().colour();
-        bl_model::swatch_rgb(&colours, swatch)
+        rig.model
+            .document
+            .track(rig.tracks[n])
+            .unwrap()
+            .colour()
+            .rgb(&colours)
     };
     let dim = |[r, g, b]: [u8; 3]| {
         [

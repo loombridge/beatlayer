@@ -104,6 +104,7 @@ struct Shown {
     clip: ClipId,
     name: String,
     colour: Color32,
+    scale: bl_model::Scale,
     midi: MidiData,
     clip_start: Ticks,
     length: Ticks,
@@ -250,7 +251,8 @@ impl ClipViewUi {
                     name: clip.name.clone(),
                     colour: clip
                         .colour
-                        .map_or(theme.colors.accent.0, |swatch| theme.swatch(swatch)),
+                        .map_or(theme.colors.accent.0, |swatch| theme.colour(swatch)),
+                    scale: clip.scale,
                     midi: midi.clone(),
                     clip_start: clip.start,
                     length: clip.length,
@@ -338,6 +340,13 @@ impl ClipViewUi {
             for (place, note) in c.notes.iter().enumerate() {
                 let Some(y) = rows_of_keys.y_of(grid, note.key) else {
                     continue;
+                };
+                // Spec: view-options R3, R4. Only the hue changes, and a
+                // clip that isn't active stays grey.
+                let face = if active {
+                    theme.note_face(shell.note_colors(), face, note.key, &c.scale)
+                } else {
+                    face
                 };
                 for w in &c.windows {
                     let from = note.start.max(w.from);
@@ -739,8 +748,14 @@ impl ClipViewUi {
                 if !selected {
                     invoke(events, ids::SELECT_LOOP_BARS, json!({ "clips": [c.clip] }));
                 }
-                self.menus
-                    .show(ui, shell, &context_menus::loop_bar(), events);
+                self.menus.show(
+                    ui,
+                    shell,
+                    &context_menus::loop_bar(),
+                    false,
+                    &mut |_, _, _| false,
+                    events,
+                );
             });
         }
         let pointer = ui.input(|i| i.pointer.interact_pos());
@@ -1039,8 +1054,18 @@ impl ClipViewUi {
                 }
             }
         }
+        if response.secondary_clicked()
+            && let Some(pos) = response.interact_pointer_pos()
+        {
+            self.menus.on_grid = hit(pos).is_none();
+        }
         response.context_menu(|ui| {
-            self.menus.show(ui, shell, &context_menus::note(), events);
+            let menu = context_menus::note(context_menus::NoteMenu {
+                grid: self.menus.on_grid,
+                mpe: false,
+            });
+            self.menus
+                .show(ui, shell, &menu, false, &mut |_, _, _| false, events);
         });
         // The wheel and a middle-button drag scroll the key track.
         if ui.rect_contains_pointer(grid) {

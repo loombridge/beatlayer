@@ -291,6 +291,21 @@ fn the_groups_a_label_shows_are_chosen_and_kept_between_launches() {
         json!({ "show_all": true }),
     );
     assert_eq!(shown(&mut relaunched, "Devices"), Some(true));
+    // Hide All hides every group, and the view says it differs from the
+    // default, which Reset undoes.
+    let hidden: FilterViewState = run(
+        &mut relaunched,
+        ids::SET_FILTER_GROUPS,
+        json!({ "hide_all": true }),
+    );
+    assert!(hidden.menu.iter().all(|group| !group.shown));
+    assert!(hidden.customized);
+    let reset: FilterViewState = run(
+        &mut relaunched,
+        ids::SET_FILTER_GROUPS,
+        json!({ "reset": true }),
+    );
+    assert!(!reset.customized);
     // The command wants one thing at a time.
     assert!(
         relaunched
@@ -904,6 +919,7 @@ fn the_new_commands_are_registered_with_their_classes() {
     assert_eq!(class(ids::REMOVE_LABEL), Permission::Destructive);
     for id in [
         ids::SET_FILTER_VIEW,
+        ids::SET_INCLUDE_AUTO_TAGS,
         ids::SET_FILTER_GROUPS,
         ids::ADD_LABEL,
         ids::RENAME_LABEL,

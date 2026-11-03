@@ -40,9 +40,10 @@ use bl_shell::arrangement::ArrangementView;
 use bl_shell::arrangement_commands::{AdaptiveGrid, FixedGrid};
 use bl_shell::clip_view::{Fold, move_limits, notes_in_order, resize_limit, span};
 use bl_shell::context_menus;
-use bl_shell::menus::{Action, MenuItem, shown};
+use bl_shell::menus::{MenuItem, shown};
 use bl_shell::note_commands as ids;
 use bl_shell::note_commands::{BreakpointRef, ChopStep, ClipTab, NoteField};
+use bl_shell::view_option_commands::NoteColors;
 use bl_shell::{Area, GesturePhase, Invocation, Shell};
 use egui::{
     Align2, CursorIcon, Id, Key, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, WidgetInfo, WidgetType,
@@ -228,7 +229,7 @@ pub(crate) fn title_bar(
     // Spec: themes R18. The name stands on the clip's colour; with several
     // clips selected, on stripes of theirs.
     let selected = shell.arrangement().selected_clips();
-    let swatches: Vec<u8> = if selected.len() > 1 && selected.contains(&clip) {
+    let swatches: Vec<bl_model::Colour> = if selected.len() > 1 && selected.contains(&clip) {
         selected
             .iter()
             .filter_map(|id| doc.clip(*id).and_then(|held| held.colour))
@@ -243,7 +244,7 @@ pub(crate) fn title_bar(
         ui.painter().rect_filled(
             Rect::from_min_max(pos2(x, rect.top()), pos2(x + stripe, rect.bottom())),
             0.0,
-            theme.swatch(*swatch),
+            theme.colour(*swatch),
         );
     }
     // Spec: session-context-menus R4, R9, R14. A right-click on the title
@@ -280,13 +281,26 @@ pub(crate) fn title_bar(
         events,
     );
     if !renaming {
-        ui.painter().text(
+        let name = ui.painter().text(
             pos2(rect.left() + 6.0, rect.center().y),
             Align2::LEFT_CENTER,
             &value.name,
             theme.small_font(),
             c.text.0,
         );
+        // Spec: linked-clips R10. A linked clip shows its link mark beside
+        // its name, and clicking it selects the link's clips.
+        if value.link.is_some() {
+            let area = Rect::from_min_size(
+                pos2(name.right() + 4.0, rect.top()),
+                vec2(crate::link_mark::WIDTH, rect.height()),
+            );
+            let others = doc.linked_clip_ids(clip).len();
+            let id = Id::new("clip-title-link-mark");
+            if crate::link_mark::show(ui, id, area, c.text.0, others, events) {
+                crate::link_mark::select_link(doc, clip, events);
+            }
+        }
     }
     if !audio {
         return;
@@ -857,6 +871,9 @@ struct StretchDrag {
 pub struct NoteMenus {
     keymap: Keymap,
     platform: Platform,
+    /// Whether the last right-click fell on empty grid rather than on a
+    /// note, which adds the grid's group to the menu.
+    on_grid: bool,
 }
 
 impl Default for NoteMenus {
@@ -864,52 +881,76 @@ impl Default for NoteMenus {
         Self {
             keymap: Keymap::live12(),
             platform: Platform::current(),
+            on_grid: false,
         }
     }
 }
 
+/// What a menu row the caller draws itself does with the menu it is in: it
+/// draws the row and says so.
+type OwnRow<'a> = &'a mut dyn FnMut(&mut Ui, &MenuItem, &mut Vec<UiEvent>) -> bool;
+
 impl NoteMenus {
     /// Draws the open menu's items: the ones whose command is built run
-    /// it, and the rest are drawn disabled and name their package.
-    fn show(&self, ui: &mut Ui, shell: &Shell, menu: &[MenuItem], events: &mut Vec<UiEvent>) {
+    /// it, and the rest are drawn disabled and name their package. `own`
+    /// draws the rows the caller owns (the MPE tab's), and `auto_flats` is
+    /// whether Auto spells with flats for the shown clip's scale.
+    fn show(
+        &self,
+        ui: &mut Ui,
+        shell: &Shell,
+        menu: &[MenuItem],
+        auto_flats: bool,
+        own: OwnRow<'_>,
+        events: &mut Vec<UiEvent>,
+    ) {
         let contexts = shell.note_menu_contexts();
-        let doc = shell.editor().document();
         for item in shown(menu) {
             if item.is_separator() {
-                ui.separator();
+                crate::menus::separator(ui);
                 continue;
             }
-            // Spec: note-editing R35, R41. Split Note(s) shows only while a
-            // note would be split, and Split Clip only for an Arrangement
-            // clip.
-            if (item.row == "C-NOTE-010"
-                && !bl_shell::clip_view::would_split(doc, shell.clip_view(), shell.arrangement()))
-                || (item.row == "C-NOTE-015"
-                    && shell
-                        .clip_view()
-                        .shown_session_clip(doc, shell.arrangement())
-                        .is_some())
-            {
+            if item.action == bl_shell::menus::Action::Heading {
+                crate::menus::heading(ui, item.label);
                 continue;
             }
-            // Spec: piano-roll R30, menus.md C-NOTE-014. Clip Markers is a
-            // submenu of the clip markers' commands, as M-EDIT-013 is.
-            if matches!(item.action, Action::Submenu) {
-                ui.menu_button(item.label, |ui| {
-                    self.show(ui, shell, &item.items, events);
-                });
+            // Spec: piano-roll R30. The grid's two rows of choices.
+            if crate::arrangement::context_menu::grid_row(ui, shell, item.row, events) {
                 continue;
             }
+            if own(ui, item, events) {
+                continue;
+            }
+            // Auto's label names the spelling it gives (C-KEYS-003).
+            let flats = item.row == context_menus::KEYS_AUTO_ROW && auto_flats;
+            let item = &MenuItem {
+                label: if flats {
+                    "Auto: Flats (♭)"
+                } else {
+                    item.label
+                },
+                ..item.clone()
+            };
             let package = context_menus::pending_package(item.row);
-            let response = crate::menus::item_in(
-                ui,
-                item,
-                shell,
-                &self.keymap,
-                self.platform,
-                &contexts,
-                events,
-            );
+            let mut state =
+                crate::menus::item_state_in(item, shell, &self.keymap, self.platform, &contexts);
+            // Spec: note-editing R39. Join Notes is dim unless two selected
+            // notes share a pitch.
+            if item.row == "C-NOTE-008" {
+                state.enabled &= bl_shell::clip_view::would_join(
+                    shell.editor().document(),
+                    shell.clip_view(),
+                    shell.arrangement(),
+                );
+            }
+            // Chop Note(s) on Grid shows the key the note editor reads itself.
+            if item.row == "C-NOTE-007" {
+                state.chord = self
+                    .keymap
+                    .chord_for_shortcut("S-NOTE-003", self.platform)
+                    .cloned();
+            }
+            let response = crate::menus::draw_item(ui, state, self.platform, events);
             let response = match package {
                 Some(package) => {
                     let text = format!("Not built yet: arrives with {package}.");
@@ -2166,7 +2207,7 @@ impl ClipViewUi {
         let face = doc
             .clip(clip)
             .and_then(|held| held.colour)
-            .map_or(theme.colors.accent.0, |swatch| theme.swatch(swatch));
+            .map_or(theme.colors.accent.0, |swatch| theme.colour(swatch));
         let hovered = Self::hovered_note(ui, &layout, &rows, &notes, axis, span_len);
         tuning_readout(ui, shell, clip, &layout, &rows, &notes, hovered);
         let frame = note_lanes::Frame {
@@ -2535,6 +2576,7 @@ impl ClipViewUi {
         }
         paint_row_lines(ui, theme, grid, rows, limit);
         let face = frame.face;
+        let note_colors = shell.note_colors();
         for (place, note) in notes.iter().enumerate() {
             if note.key > limit {
                 continue;
@@ -2547,12 +2589,14 @@ impl ClipViewUi {
                 continue;
             }
             let corner = theme.sizes.corner.min(2.0);
-            // Spec: piano-roll R43. The note is drawn in its clip's colour,
+            // Spec: piano-roll R43; view-options R3, R4. The note is drawn in
+            // its clip's colour, or the hue of its pitch class or degree,
             // paler the softer its velocity; a deactivated note is grey.
             let colour = if note.mute || (self.mpe_on && !frame.chosen(place)) {
                 colours.clip_muted.0
             } else {
-                crate::theme::note_colour(face, note.velocity)
+                let hue = theme.note_face(note_colors, face, note.key, &style.scale);
+                crate::theme::note_colour(hue, note.velocity)
             };
             painter.rect_filled(rect, corner, colour);
             // Spec: note-editing R4. A note that doesn't always play wears a
@@ -2579,6 +2623,30 @@ impl ClipViewUi {
                     StrokeKind::Inside,
                 );
             }
+            // Spec: view-options R5. Colour is never the only sign: the
+            // note's pitch and velocity, and with By Scale Degree its degree,
+            // reach assistive technology.
+            let id = Id::new(("clip-view-note", frame.clip, place));
+            ui.ctx().accesskit_node_builder(id, |node| {
+                node.set_role(egui::accesskit::Role::ListItem);
+                node.set_label(format!(
+                    "{} velocity {}",
+                    style.name(note.key),
+                    note.velocity
+                ));
+                if note_colors == NoteColors::ScaleDegree && style.scale.enabled {
+                    node.set_value(match style.scale.degree(note.key) {
+                        Some(degree) => format!("degree {}", degree + 1),
+                        None => "not in the scale".to_owned(),
+                    });
+                }
+                node.set_bounds(egui::accesskit::Rect {
+                    x0: rect.min.x.into(),
+                    y0: rect.min.y.into(),
+                    x1: rect.max.x.into(),
+                    y1: rect.max.y.into(),
+                });
+            });
         }
         if let Some((from, to)) = self.marquee {
             let marquee = Rect::from_two_pos(from, to).intersect(grid);
@@ -3366,6 +3434,11 @@ impl ClipViewUi {
         // one's.
         if response.secondary_clicked()
             && let Some(pos) = response.interact_pointer_pos()
+        {
+            self.menus.on_grid = hit(pos).is_none();
+        }
+        if response.secondary_clicked()
+            && let Some(pos) = response.interact_pointer_pos()
             && let Some((place, _)) = hit(pos)
             && !selected.contains(&place)
         {
@@ -3375,10 +3448,23 @@ impl ClipViewUi {
             )));
         }
         response.context_menu(|ui| {
-            self.menus.show(ui, shell, &context_menus::note(), events);
+            let menu = context_menus::note(context_menus::NoteMenu {
+                grid: self.menus.on_grid,
+                mpe: mpe.is_some(),
+            });
+            // Spec: mpe R26. Edit Value and Add Value come first, where the
+            // right-click fell on an envelope.
             if let Some(mpe) = mpe {
-                self.mpe.menu_items(ui, mpe, events);
+                self.mpe.value_items(ui, mpe);
             }
+            let mut own = |ui: &mut Ui, item: &MenuItem, events: &mut Vec<UiEvent>| match mpe {
+                Some(frame) => {
+                    let keys = (&self.menus.keymap, self.menus.platform);
+                    self.mpe.menu_row(ui, item, frame, keys, events)
+                }
+                None => false,
+            };
+            self.menus.show(ui, shell, &menu, false, &mut own, events);
         });
         // Spec: note-editing R19. Right-clicking a key selects that key's
         // notes first, so the menu's Deactivate Note(s) acts on them.
@@ -3393,7 +3479,18 @@ impl ClipViewUi {
             )));
         }
         keys_response.context_menu(|ui| {
-            self.menus.show(ui, shell, &context_menus::keys(), events);
+            // Spec: scales R24. Auto's label names the spelling it gives.
+            let scale = KeyStyle::of(shell, clip).scale;
+            let auto_flats =
+                bl_model::NoteSpelling::Auto.settled(&scale) == bl_model::NoteSpelling::Flats;
+            self.menus.show(
+                ui,
+                shell,
+                &context_menus::keys(),
+                auto_flats,
+                &mut |_, _, _| false,
+                events,
+            );
         });
         // Spec: note-editing R1 to R9. The expression lanes under the note
         // area.

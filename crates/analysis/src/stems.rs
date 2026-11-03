@@ -16,8 +16,10 @@
 //! It runs on whatever thread calls it, never an audio thread: it
 //! allocates freely.
 
+pub mod generated;
 #[cfg(feature = "stems")]
 pub mod onnx;
+pub mod transform;
 
 /// The rate the network works at, in frames per second.
 pub const RATE: u32 = 44_100;

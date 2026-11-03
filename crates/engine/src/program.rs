@@ -153,6 +153,14 @@ pub struct EngineProgram {
     pub(crate) device_input: Vec<f32>,
     /// The device's input channels; zero without a device that has input.
     pub(crate) device_input_channels: usize,
+    /// The peers' channels the tracks take (Link Audio), by the names their
+    /// inputs keep: slot `i` of `link_input` is the stereo pair `2 * i`.
+    pub(crate) link_inputs: Vec<LinkInput>,
+    /// What the peers' channels hold for the block being processed: two
+    /// channels of `max_frames` frames for each of `link_inputs`, filled by
+    /// [`Processor::process`](crate::Processor::process) before the tasks
+    /// run, as `device_input` is.
+    pub(crate) link_input: Vec<f32>,
     pub(crate) channels: usize,
     pub(crate) max_frames: usize,
     /// The task whose buffer is the engine's output: Main's.
@@ -350,6 +358,13 @@ impl Instance {
             Self::Mixer(mixer) => Node::modulated(mixer.as_ref(), report),
             Self::Route(route) => route.modulated(report),
             Self::Sidechain(_) | Self::Selector(_) | Self::Zones(_) | Self::Drum(_) => {}
+        }
+    }
+
+    /// What a device's matrix moved in the instance's last block.
+    fn matrix_played(&self, report: &mut dyn FnMut(ParamId, f64, f64)) {
+        if let Self::Device(node) = self {
+            node.matrix_played(report);
         }
     }
 
@@ -609,8 +624,21 @@ pub(crate) struct DeviceInput {
     /// The slot of the route's gain.
     pub(crate) route: u32,
     /// Which of the interface's inputs, counted from 1: one channel, or a
-    /// stereo pair.
+    /// stereo pair. For a peer's channel (`link`), its slot's pair.
     pub(crate) channel: Channel,
+    /// Whether it is a peer's channel from Link Audio, read from
+    /// `link_input`, rather than the interface's.
+    pub(crate) link: bool,
+}
+
+/// A peer's channel a track takes (the Link Audio spec, R5, R10), by the
+/// names its input keeps.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct LinkInput {
+    pub(crate) peer: String,
+    pub(crate) channel: String,
+    /// The track that takes it, for recording.
+    pub(crate) track: bl_model::TrackId,
 }
 
 /// No delay line: an input that arrives with no compensation of its own.
@@ -876,6 +904,8 @@ pub(crate) struct DeviceMidiSidechain {
     pub(crate) device: u32,
     /// The task whose notes it hears, or [`NO_TASK`].
     pub(crate) from: u32,
+    /// Where on the source it takes the notes.
+    pub(crate) tap: Tap,
     /// The source's notes in `midi_kept`, or [`NO_TASK`] with no source.
     pub(crate) kept: u32,
 }
@@ -904,6 +934,9 @@ pub(crate) struct Task {
     /// Where it keeps the notes it plays for the MIDI sidechains that
     /// listen to it, in `midi_kept`.
     pub(crate) midi_keep: Option<u32>,
+    /// Where it keeps the notes that leave its MIDI effects, for the MIDI
+    /// sidechains that tap it Post FX (the routing spec, R39).
+    pub(crate) midi_post: Option<u32>,
     /// The slot of the track's mixer.
     pub(crate) mixer: u32,
     /// The delay line its clips are held back through so they line up with
@@ -1100,6 +1133,58 @@ impl EngineProgram {
         }
     }
 
+    /// Fills `link_input` for the block that plays from `link`'s moment (a
+    /// [`frame_at`](crate::frame_at) of it): what each channel a track takes
+    /// holds, or silence for one the peers don't offer, or all of it while
+    /// there is no `link`. Real-time safe: the buffer was made with the
+    /// program, and names are compared, not made.
+    pub(crate) fn read_link_audio(
+        &mut self,
+        link: Option<(&dyn crate::LinkAudio, i64)>,
+        frames: usize,
+        rate: u32,
+    ) {
+        let stride = self.max_frames;
+        let frames = frames.min(stride);
+        for (slot, input) in self.link_inputs.iter().enumerate() {
+            let (left, right) =
+                self.link_input[slot * 2 * stride..(slot * 2 + 2) * stride].split_at_mut(stride);
+            let (left, right) = (&mut left[..frames], &mut right[..frames]);
+            let channel = link.and_then(|(link, moment)| {
+                Some((link.channel(&input.peer, &input.channel)?, moment))
+            });
+            match channel {
+                Some((channel, moment)) => {
+                    channel.read(crate::frame_at(moment, rate), left, right);
+                }
+                None => {
+                    left.fill(0.0);
+                    right.fill(0.0);
+                }
+            }
+        }
+    }
+
+    /// Gives `link` the part of the block `offset..offset + length`, of each
+    /// track it offers, as the track leaves its mixer (the Link Audio spec,
+    /// R4). Real-time safe.
+    pub(crate) fn stage_link_audio(
+        &self,
+        link: &mut dyn crate::LinkAudio,
+        offset: usize,
+        length: usize,
+    ) {
+        for i in 0..link.offered().len() {
+            let track = link.offered()[i];
+            let Some(task) = self.task_of(track) else {
+                continue;
+            };
+            let left = self.task_output(task, 0, length);
+            let right = self.task_output(task, 1.min(self.channels - 1), length);
+            link.stage(track, offset, left, right);
+        }
+    }
+
     /// Adds to `out`, up to its capacity, every parameter the last block
     /// played under modulation (WP-5.9). Real-time safe: `out` was made
     /// with room for them.
@@ -1107,6 +1192,25 @@ impl EngineProgram {
         for slot in self.slots.iter() {
             let Some(instance) = &slot.node else { continue };
             instance.modulated(&mut |param, base, played| {
+                if out.len() < out.capacity() {
+                    out.push(PlayedParam {
+                        node: slot.key,
+                        param,
+                        base,
+                        played,
+                    });
+                }
+            });
+        }
+    }
+
+    /// Adds to `out`, up to its capacity, every parameter an instrument's
+    /// matrix moved in the last block, with the value it played for the
+    /// newest voice. Real-time safe: `out` was made with room for them.
+    pub(crate) fn matrix_played(&self, out: &mut Vec<PlayedParam>) {
+        for slot in self.slots.iter() {
+            let Some(instance) = &slot.node else { continue };
+            instance.matrix_played(&mut |param, base, played| {
                 if out.len() < out.capacity() {
                     out.push(PlayedParam {
                         node: slot.key,
@@ -1642,10 +1746,15 @@ impl EngineProgram {
         // closes it (WP-2.13).
         if let Some(device) = task.device_input {
             delivered += gather(events, device.route, from, until, &mut lane.events);
+            let (input, input_channels) = if device.link {
+                (&self.link_input, self.link_inputs.len() * 2)
+            } else {
+                (&self.device_input, self.device_input_channels)
+            };
             map_device_input(
                 &mut lane.device,
-                &self.device_input,
-                self.device_input_channels,
+                input,
+                input_channels,
                 device.channel,
                 channels,
                 stride,
@@ -2511,6 +2620,26 @@ impl EngineProgram {
                 point.measure_audio(turn.buffer(buffer), channels, stride, frames);
             }
         };
+        // Spec: routing R39. The notes leaving a track's MIDI effects are
+        // the ones in front of the last point where the signal is still MIDI
+        // (the first device that isn't a MIDI effect, or the chain's end),
+        // kept for the MIDI sidechains that tap them Post FX. Only the
+        // track's own chain, in task `buffer`, keeps them.
+        let post = task
+            .midi_post
+            .filter(|_| buffer < self.tasks.len())
+            .and_then(|kept| Some((kept, points.iter().rposition(|p| p.midi)?)));
+        let keep_post = |at: usize, note_idx: usize| {
+            if let Some((kept, post_at)) = post
+                && at == post_at
+            {
+                let to = turn.keep_notes(kept);
+                to.clear();
+                for &note in turn.notes(pair + note_idx).notes() {
+                    to.push(note);
+                }
+            }
+        };
         for step_at in steps.range() {
             // Spec: device-framework R32. The note-offs of devices that left
             // the track's chain in the swap enter in front of the step that
@@ -2527,6 +2656,7 @@ impl EngineProgram {
                     turn.notes(pair + note_idx).insert(note);
                 }
             }
+            keep_post(step_at - steps.range().start, note_idx);
             measure(step_at - steps.range().start, note_idx);
             let slot = match self.steps[step_at] {
                 Step::Node(slot) => slot,
@@ -2726,6 +2856,7 @@ impl EngineProgram {
                 }
             }
         }
+        keep_post(steps.range().len(), note_idx);
         measure(steps.range().len(), note_idx);
         note_idx
     }

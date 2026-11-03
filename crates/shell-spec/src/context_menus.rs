@@ -16,20 +16,26 @@
 use crate::arrangement::{SET_GRID, SHOW_TAKE_LANES};
 use crate::audio_editing::CONSOLIDATE_TO_SCENE;
 use crate::automation::{INSERT_SHAPE, SIMPLIFY};
+use crate::clip_envelope_editing::INSERT_SHAPE as CLIP_ENVELOPE_INSERT_SHAPE;
 use crate::clip_properties::{ARRANGE_PANELS, FOLD_PANELS};
-use crate::commands::{VIEW_HIGHLIGHT_SCALES, VIEW_NOTE_SPELLING};
+use crate::commands::{VIEW_DRAW_MODE, VIEW_HIGHLIGHT_SCALES, VIEW_NOTE_SPELLING};
 use crate::comping::COPY_TO_MAIN_LANE;
 use crate::devices::{
-    COMPARE_COPY, COMPARE_SWITCH, SAVE_DEFAULT_PRESET, SET_FLOATING, SET_ROLE, UNGROUP,
+    CHAIN_CREATE, COMPARE_COPY, COMPARE_SWITCH, SAVE_DEFAULT_PRESET, SET_FLOATING, SET_ROLE,
+    UNGROUP,
 };
-use crate::menus::{Action, IMP_12, MenuItem, Row, SEPARATOR, items};
+use crate::linked_clips::{DUPLICATE_LINKED, UNLINK as UNLINK_CLIP};
+use crate::menus::{
+    Action, IMP_12, IMP_21, IMP_21_UNLINK, IMP_33_FOLLOW, MenuItem, Row, SEPARATOR, items,
+};
 use crate::midi_files::EXPORT as EXPORT_MIDI_CLIP;
-use crate::notes::{CHOP as CHOP_NOTES, SPLIT as SPLIT_NOTES};
+use crate::notes::{CHOP as CHOP_NOTES, CLEAR_EXPRESSIONS};
+use crate::pads::PAD_SAVE_DEFAULT;
 use crate::slice::OPEN as SLICE_TO_MIDI;
 use crate::stems::OPEN as SEPARATE_STEMS;
 use crate::tracks::{DUPLICATE_WITHOUT_CLIPS, LINK, SET_DEVICES_ENABLED, UNLINK};
 
-use Action::{Choice, Command as Cmd, Pending, Shortcut as Key, Submenu};
+use Action::{Choice, Command as Cmd, Heading, Pending, Shortcut as Key};
 
 /// The model's command that colours a chain.
 const SET_CHAIN_COLOUR: &str = "chain.set_colour";
@@ -39,20 +45,24 @@ const SET_CHAIN_COLOUR: &str = "chain.set_colour";
 const SET_TRACK_COLOUR: &str = "track.set_colour";
 
 /// The rows that hold the zoom-adaptive grid's settings.
-pub const ADAPTIVE_GRID_ROWS: [&str; 2] = ["C-CLIP-ARR-020", "C-TIME-013"];
+pub const ADAPTIVE_GRID_ROWS: [&str; 4] =
+    ["C-CLIP-ARR-020", "C-TIME-013", "C-NOTE-023", "C-ENV-003"];
 
 /// The rows that hold the automation shapes, as rows of buttons: the
 /// waveforms, then the ramps and the ADSR (C-TIME-021; the automation
 /// editing spec, R11).
-pub const SHAPE_ROWS: [&str; 2] = ["C-TIME-021a", "C-TIME-021b"];
+pub const SHAPE_ROWS: [&str; 4] = ["C-TIME-021a", "C-TIME-021b", "C-ENV-011", "C-ENV-012"];
 
 /// The rows that hold the fixed grid's spacings.
-pub const FIXED_GRID_ROWS: [&str; 2] = ["C-CLIP-ARR-021", "C-TIME-014"];
+pub const FIXED_GRID_ROWS: [&str; 4] = ["C-CLIP-ARR-021", "C-TIME-014", "C-NOTE-025", "C-ENV-005"];
 
 const CLIP: &[Row] = &[
     ("C-CLIP-ARR-001", "Cut", Key(&["S-EDIT-001"])),
     ("C-CLIP-ARR-002", "Copy", Key(&["S-EDIT-002"])),
     ("C-CLIP-ARR-003", "Duplicate", Key(&["S-EDIT-004"])),
+    // IMP-21 places both straight after Duplicate.
+    (IMP_21, "Duplicate as Linked Clip", Cmd(DUPLICATE_LINKED)),
+    (IMP_21_UNLINK, "Unlink Clip", Cmd(UNLINK_CLIP)),
     ("C-CLIP-ARR-004", "Delete", Key(&["S-EDIT-005"])),
     SEPARATOR,
     (
@@ -198,6 +208,66 @@ const LOCATOR: &[Row] = &[
     ),
 ];
 
+/// The row of Beatlayer's own arranger track menus (IMP-22), which hold
+/// Create Section and Create Sections From Locators in the lane's, and
+/// Rename, Move Earlier, Move Later, Remove Section and Delete Section in a
+/// section's: improvements, so not rows of menus.md.
+pub const IMP_22: &str = "IMP-22";
+
+/// The row of a section's menu that holds the colour palette, drawn by the
+/// UI (the arranger track spec, R7).
+pub const SECTION_COLOUR_ROW: &str = "IMP-22-colour";
+
+/// The arranger track's own menu (IMP-22): the lane away from a section.
+const ARRANGER: &[Row] = &[
+    (
+        "IMP-22-create",
+        "Create Section",
+        Cmd(crate::arranger::ADD_SECTION),
+    ),
+    (
+        "IMP-22-from-locators",
+        "Create Sections From Locators",
+        Cmd(crate::arranger::SECTIONS_FROM_LOCATORS),
+    ),
+];
+
+/// A section's menu (IMP-22).
+const SECTION: &[Row] = &[
+    (
+        "IMP-22-rename",
+        "Rename Section",
+        Cmd(crate::arranger::RENAME_SECTION),
+    ),
+    (
+        SECTION_COLOUR_ROW,
+        "Colour palette",
+        Cmd(crate::arranger::SET_SECTION_COLOUR),
+    ),
+    SEPARATOR,
+    (
+        "IMP-22-earlier",
+        "Move Earlier",
+        Choice(crate::arranger::MOVE_SECTION, "{\"with\":\"earlier\"}"),
+    ),
+    (
+        "IMP-22-later",
+        "Move Later",
+        Choice(crate::arranger::MOVE_SECTION, "{\"with\":\"later\"}"),
+    ),
+    SEPARATOR,
+    (
+        "IMP-22-remove",
+        "Remove Section",
+        Cmd(crate::arranger::REMOVE_SECTION),
+    ),
+    (
+        "IMP-22-delete",
+        "Delete Section",
+        Cmd(crate::arranger::DELETE_SECTION),
+    ),
+];
+
 /// The loop brace's menu (C-TIME-023).
 const BRACE: &[Row] = &[(
     "C-TIME-023c",
@@ -313,23 +383,318 @@ pub fn rack() -> Vec<MenuItem> {
     items(&rows)
 }
 
-/// The row of a chain's menu that holds the colour palette, 5 rows of 14
-/// swatches (racks spec, R26; C-TRACK-015's palette, drawn by the UI).
-pub const CHAIN_COLOUR_ROW: &str = "R26-colour";
+/// What a mixer control's or a device parameter's menu depends on (C-PAN,
+/// C-PARAM): the pan control adds the mode to switch to, an automated
+/// parameter adds Delete Automation and Re-Enable Automation, a device's
+/// parameter adds Copy Parameter Name, and one inside a rack adds the macro
+/// mapping.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ParamMenu {
+    /// The pan control's menu, with whether the split mode is in force.
+    pub pan: Option<bool>,
+    /// The parameter has an envelope.
+    pub has_envelope: bool,
+    /// Its envelope is overridden by a hand move.
+    pub overridden: bool,
+    /// The parameter is a device's.
+    pub device: bool,
+    /// The device sits in a rack.
+    pub in_rack: bool,
+}
 
-const CHAIN: &[Row] = &[
-    ("R26-rename", "Rename", Key(&["S-EDIT-008"])),
-    ("R26-info", "Edit Info Text", Cmd("chain.set_info")),
-    SEPARATOR,
-    (CHAIN_COLOUR_ROW, "Colour", Cmd(SET_CHAIN_COLOUR)),
+/// Map to Macro 1 to 16, the rows of C-PARAM-009 in a rack.
+pub const MAP_TO_MACRO: [&str; 16] = [
+    "Map to Macro 1",
+    "Map to Macro 2",
+    "Map to Macro 3",
+    "Map to Macro 4",
+    "Map to Macro 5",
+    "Map to Macro 6",
+    "Map to Macro 7",
+    "Map to Macro 8",
+    "Map to Macro 9",
+    "Map to Macro 10",
+    "Map to Macro 11",
+    "Map to Macro 12",
+    "Map to Macro 13",
+    "Map to Macro 14",
+    "Map to Macro 15",
+    "Map to Macro 16",
 ];
 
-/// The menu a chain's row in a rack's chain list opens: Rename, Edit Info
-/// Text and the colour palette (racks spec, R26; Beatlayer's own rows, as
-/// menus.md records none for chains).
+/// The row of Map to Macro 1; the others follow it in [`MAP_TO_MACRO`]'s
+/// order, with IDs `C-PARAM-009` and a letter.
+pub const MAP_TO_MACRO_ROWS: [&str; 16] = [
+    "C-PARAM-009a",
+    "C-PARAM-009b",
+    "C-PARAM-009c",
+    "C-PARAM-009d",
+    "C-PARAM-009e",
+    "C-PARAM-009f",
+    "C-PARAM-009g",
+    "C-PARAM-009h",
+    "C-PARAM-009i",
+    "C-PARAM-009j",
+    "C-PARAM-009k",
+    "C-PARAM-009l",
+    "C-PARAM-009m",
+    "C-PARAM-009n",
+    "C-PARAM-009o",
+    "C-PARAM-009p",
+];
+
+/// The rows every automatable control's menu has after its own: automation,
+/// the modulation source, and the maps.
+const PARAM_AUTOMATION: &[Row] = &[
+    (
+        "C-PARAM-003",
+        "Show Automation",
+        Cmd(crate::arrangement::SHOW_AUTOMATION),
+    ),
+    (
+        "C-PARAM-004",
+        "Show Automation In New Lane",
+        Cmd(crate::arrangement::ADD_AUTOMATION_LANE),
+    ),
+    SEPARATOR,
+    (
+        "C-PARAM-005",
+        "Show Modulation Source 1: Clip Envelope",
+        Pending(None),
+    ),
+    SEPARATOR,
+    ("C-PARAM-006", "Edit MIDI Map", Key(&["S-MAP-001"])),
+    ("C-PARAM-007", "Edit Key Map", Key(&["S-MAP-002"])),
+];
+
+/// The menu of a mixer control or a device parameter (C-PAN, C-PARAM), in
+/// Live's order.
+#[must_use]
+pub fn param(state: ParamMenu) -> Vec<MenuItem> {
+    let mut rows: Vec<Row> = Vec::new();
+    if let Some(split) = state.pan {
+        // The menu offers the mode to switch to, not the one in force.
+        rows.push((
+            "C-PAN-001",
+            if split {
+                "Select Stereo Pan Mode"
+            } else {
+                "Select Split Stereo Pan Mode"
+            },
+            Cmd("mixer.set_pan_mode"),
+        ));
+        rows.push(SEPARATOR);
+    }
+    if state.has_envelope {
+        rows.push(("C-PARAM-001", "Delete Automation", Cmd("automation.delete")));
+    }
+    if state.overridden {
+        rows.push((
+            "C-PARAM-002",
+            "Re-Enable Automation",
+            Cmd("automation.re_enable_for"),
+        ));
+    }
+    rows.extend_from_slice(PARAM_AUTOMATION);
+    if state.in_rack {
+        rows.push(("C-PARAM-008", "Edit Macro Map", Cmd("rack.map_mode")));
+        rows.push(SEPARATOR);
+        for (row, label) in MAP_TO_MACRO_ROWS.iter().zip(MAP_TO_MACRO) {
+            rows.push((row, label, Cmd("rack.map_macro")));
+        }
+    }
+    rows.push(SEPARATOR);
+    rows.push(("C-PARAM-010", "Copy Max for Live Path", Pending(None)));
+    if state.device {
+        rows.push(("C-PARAM-011", "Copy Parameter Name", Pending(None)));
+    }
+    items(&rows)
+}
+
+/// The row of a macro knob's Rename.
+pub const MACRO_RENAME_ROW: &str = "C-MACRO-009";
+
+/// The row of a macro knob's Edit Info Text.
+pub const MACRO_INFO_ROW: &str = "C-MACRO-010";
+
+/// The row of a macro knob's Exclude Macro from Randomization.
+pub const MACRO_RANDOMIZE_ROW: &str = "C-MACRO-011";
+
+/// The row of a macro knob's Exclude Macro From Variations.
+pub const MACRO_VARIATIONS_ROW: &str = "C-MACRO-012";
+
+/// The row of a macro knob's No Color.
+pub const MACRO_NO_COLOUR_ROW: &str = "C-MACRO-013";
+
+/// The row of a macro knob's colour palette.
+pub const MACRO_COLOUR_ROW: &str = "C-MACRO-014";
+
+const MACRO_KNOB: &[Row] = &[
+    (
+        "C-MACRO-001",
+        "Show Automation",
+        Cmd(crate::arrangement::SHOW_AUTOMATION),
+    ),
+    (
+        "C-MACRO-002",
+        "Show Automation In New Lane",
+        Cmd(crate::arrangement::ADD_AUTOMATION_LANE),
+    ),
+    SEPARATOR,
+    (
+        "C-MACRO-003",
+        "Show Modulation Source 1: Clip Envelope",
+        Pending(None),
+    ),
+    SEPARATOR,
+    ("C-MACRO-004", "Edit MIDI Map", Key(&["S-MAP-001"])),
+    ("C-MACRO-005", "Edit Key Map", Key(&["S-MAP-002"])),
+    SEPARATOR,
+    ("C-MACRO-006", "Copy Max for Live Path", Pending(None)),
+    ("C-MACRO-007", "Copy Parameter Name", Pending(None)),
+    SEPARATOR,
+    ("C-MACRO-008", "Show Generic 0-127 Value", Pending(None)),
+    (MACRO_RENAME_ROW, "Rename", Key(&["S-EDIT-008"])),
+    (
+        MACRO_INFO_ROW,
+        "Edit Info Text",
+        Cmd("rack.set_macro_info_text"),
+    ),
+    (
+        MACRO_RANDOMIZE_ROW,
+        "Exclude Macro from Randomization",
+        Cmd("rack.set_macro_randomize_excluded"),
+    ),
+    (
+        MACRO_VARIATIONS_ROW,
+        "Exclude Macro From Variations",
+        Cmd("rack.set_macro_variation_excluded"),
+    ),
+    SEPARATOR,
+    (
+        MACRO_NO_COLOUR_ROW,
+        "No Color",
+        Cmd("rack.set_macro_colour"),
+    ),
+    (
+        MACRO_COLOUR_ROW,
+        "Colour palette",
+        Cmd("rack.set_macro_colour"),
+    ),
+];
+
+/// The menu a macro knob opens (C-MACRO).
+#[must_use]
+pub fn macro_knob() -> Vec<MenuItem> {
+    items(MACRO_KNOB)
+}
+
+/// The row of a chain's menu that holds the colour palette, 5 rows of 14
+/// swatches (racks spec, R26; C-TRACK-015's palette, drawn by the UI).
+pub const CHAIN_COLOUR_ROW: &str = "C-CHAIN-006";
+
+/// The row of a chain's Create Chain, which adds a chain to the rack.
+pub const CHAIN_CREATE_ROW: &str = "C-CHAIN-004";
+
+const CHAIN: &[Row] = &[
+    ("C-CHAIN-001", "Duplicate", Key(&["S-EDIT-004"])),
+    SEPARATOR,
+    ("C-CHAIN-002", "Rename", Key(&["S-EDIT-008"])),
+    ("C-CHAIN-003", "Edit Info Text", Cmd("chain.set_info")),
+    (CHAIN_CREATE_ROW, "Create Chain", Cmd(CHAIN_CREATE)),
+    SEPARATOR,
+    ("C-CHAIN-005", "Color Automatically", Pending(None)),
+    (CHAIN_COLOUR_ROW, "Colour palette", Cmd(SET_CHAIN_COLOUR)),
+];
+
+/// The menu a chain's row in a rack's chain list opens (C-CHAIN, racks spec,
+/// R26), in Live's order.
 #[must_use]
 pub fn chain() -> Vec<MenuItem> {
     items(CHAIN)
+}
+
+/// The row of the Main track header's Edit Info Text.
+pub const MAIN_INFO_ROW: &str = "C-MAIN-001";
+
+const MAIN_TRACK: &[Row] = &[
+    (MAIN_INFO_ROW, "Edit Info Text", Cmd("track.set_info_text")),
+    SEPARATOR,
+    ("C-MAIN-002", "Insert Audio Track", Key(&["S-TRACK-001"])),
+    ("C-MAIN-003", "Insert MIDI Track", Key(&["S-TRACK-002"])),
+    ("C-MAIN-004", "Insert Return Track", Key(&["S-TRACK-003"])),
+    SEPARATOR,
+    ("C-MAIN-005", "Select Track Content", Pending(None)),
+    SEPARATOR,
+    ("C-MAIN-006", "Colour palette", Cmd(SET_TRACK_COLOUR)),
+];
+
+/// The row of the Main track header's colour palette.
+pub const MAIN_COLOUR_ROW: &str = "C-MAIN-006";
+
+/// The menu the Main track's header opens (C-MAIN): no rename, delete,
+/// freeze or group items, and no Color Automatically.
+#[must_use]
+pub fn main_track() -> Vec<MenuItem> {
+    items(MAIN_TRACK)
+}
+
+/// The row of a drum pad's Rename.
+pub const PAD_RENAME_ROW: &str = "C-PAD-001";
+
+/// The rows of a drum pad's menu that run on the pad's sampler.
+pub const PAD_SIMILAR_ROWS: [&str; 4] = ["C-PAD-005", "C-PAD-006", "C-PAD-007", "C-PAD-008"];
+
+const DRUM_PAD: &[Row] = &[
+    (PAD_RENAME_ROW, "Rename", Key(&["S-EDIT-008"])),
+    ("C-PAD-002", "Delete", Key(&["S-EDIT-005"])),
+    SEPARATOR,
+    ("C-PAD-003", "Save as Default Pad", Cmd(PAD_SAVE_DEFAULT)),
+    SEPARATOR,
+    ("C-PAD-005", "Next Similar", Key(&["S-SWAP-001"])),
+    ("C-PAD-006", "Previous Similar", Key(&["S-SWAP-002"])),
+    (
+        "C-PAD-007",
+        "Save as Similarity Reference",
+        Key(&["S-SWAP-003"]),
+    ),
+    ("C-PAD-008", "Return to Reference", Key(&["S-SWAP-004"])),
+];
+
+/// The menu a Drum Rack pad that holds a device opens (C-PAD); an empty pad
+/// opens none.
+#[must_use]
+pub fn drum_pad() -> Vec<MenuItem> {
+    items(DRUM_PAD)
+}
+
+const CLIP_ENVELOPE: &[Row] = &[
+    ("C-ENV-001", "Snap to Grid", Key(&["S-GRID-005"])),
+    ("C-ENV-002", "Adaptive Grid:", Heading),
+    ("C-ENV-003", "Adaptive Grid", Cmd(SET_GRID)),
+    ("C-ENV-004", "Fixed Grid:", Heading),
+    ("C-ENV-005", "Fixed Grid", Cmd(SET_GRID)),
+    SEPARATOR,
+    ("C-ENV-006", "Narrow Grid", Key(&["S-GRID-002"])),
+    ("C-ENV-007", "Widen Grid", Key(&["S-GRID-003"])),
+    SEPARATOR,
+    ("C-ENV-008", "Triplet Grid", Key(&["S-GRID-004"])),
+    SEPARATOR,
+    ("C-ENV-009", "Draw Mode", Cmd(VIEW_DRAW_MODE)),
+    SEPARATOR,
+    ("C-ENV-010", "Insert Shape:", Heading),
+    ("C-ENV-011", "Waveforms", Cmd(CLIP_ENVELOPE_INSERT_SHAPE)),
+    (
+        "C-ENV-012",
+        "Ramps and ADSR",
+        Cmd(CLIP_ENVELOPE_INSERT_SHAPE),
+    ),
+];
+
+/// The menu the clip envelope editor opens on empty space (C-ENV).
+#[must_use]
+pub fn clip_envelope() -> Vec<MenuItem> {
+    items(CLIP_ENVELOPE)
 }
 
 const TRACK: &[Row] = &[
@@ -387,6 +752,8 @@ pub struct TrackMenu {
     /// Every top-level device on the selected tracks is already off, so the
     /// Deactivate All Devices item reads Activate All Devices (IMP-25).
     pub devices_off: bool,
+    /// The track is a MIDI track, which has Follow Chord Lane (IMP-33).
+    pub midi: bool,
 }
 
 /// The rows the other states add after row `after`. menus.md doesn't
@@ -430,6 +797,15 @@ fn track_extras(after: &str, state: TrackMenu) -> Vec<Row> {
                     Cmd("take_lane.delete_unused"),
                 ));
             }
+        }
+        // Spec: chord-lane R5. A MIDI track's own switch, in a group of its own.
+        "C-TRACK-014" if state.midi => {
+            rows.push(SEPARATOR);
+            rows.push((
+                IMP_33_FOLLOW,
+                "Follow Chord Lane",
+                Cmd("track.set_follow_chord_lane"),
+            ));
         }
         "C-TRACK-016" if state.group => rows.push((
             "C-TRACK-017b",
@@ -564,6 +940,8 @@ const CLIP_SES: &[Row] = &[
     ("C-CLIP-SES-001", "Cut", Key(&["S-EDIT-001"])),
     ("C-CLIP-SES-002", "Copy", Key(&["S-EDIT-002"])),
     ("C-CLIP-SES-003", "Duplicate", Key(&["S-EDIT-004"])),
+    (IMP_21, "Duplicate as Linked Clip", Cmd(DUPLICATE_LINKED)),
+    (IMP_21_UNLINK, "Unlink Clip", Cmd(UNLINK_CLIP)),
     ("C-CLIP-SES-004", "Delete", Key(&["S-EDIT-005"])),
     SEPARATOR,
     ("C-CLIP-SES-005", "Rename", Key(&["S-EDIT-008"])),
@@ -643,7 +1021,7 @@ const CLIP_SES_AUDIO: &[Row] = &[
     (
         "C-CLIP-SES-020",
         "Separate Stems to New Audio Tracks",
-        Pending(None),
+        Cmd(SEPARATE_STEMS),
     ),
 ];
 
@@ -798,99 +1176,166 @@ pub fn scene_field(tempo: bool) -> Vec<MenuItem> {
 /// The row of the Clip View title bar's Rename (C-CLIPTITLE-001).
 pub const CLIP_TITLE_RENAME: &str = "C-CLIPTITLE-001";
 
-/// The row of the Clip View title bar's colour palette (C-CLIPTITLE-003).
-pub const CLIP_TITLE_COLOUR: &str = "C-CLIPTITLE-003";
+/// The row of the Clip View title bar's colour palette (C-CLIPTITLE-002).
+pub const CLIP_TITLE_COLOUR: &str = "C-CLIPTITLE-002";
 
 const CLIP_TITLE: &[Row] = &[
     (CLIP_TITLE_RENAME, "Rename", Key(&["S-EDIT-008"])),
-    (
-        "C-CLIPTITLE-002",
-        "Edit Info Text",
-        Cmd("clip.set_info_text"),
-    ),
     SEPARATOR,
     (CLIP_TITLE_COLOUR, "Colour palette", Cmd(SET_CLIP_COLOUR)),
     SEPARATOR,
-    ("C-CLIPTITLE-004", "Fold", Cmd(FOLD_PANELS)),
-    SEPARATOR,
     (
-        "C-CLIPTITLE-005",
+        "C-CLIPTITLE-003",
         "Arrange Clip View Panels Automatically",
         Choice(ARRANGE_PANELS, r#"{"arrangement":"automatic"}"#),
     ),
-    (
-        "C-CLIPTITLE-006",
-        "Arrange Clip View Panels Horizontally",
-        Choice(ARRANGE_PANELS, r#"{"arrangement":"horizontal"}"#),
-    ),
-    (
-        "C-CLIPTITLE-007",
-        "Arrange Clip View Panels Vertically",
-        Choice(ARRANGE_PANELS, r#"{"arrangement":"vertical"}"#),
-    ),
+    ("C-CLIPTITLE-004", "Fold", Cmd(FOLD_PANELS)),
 ];
 
-/// The menu the Clip View's title bar opens (C-CLIPTITLE), in Beatlayer's own
-/// order (the session context menus spec, R4).
+/// The menu the Clip View's title bar opens (C-CLIPTITLE), in Live's order
+/// (the session context menus spec, R4).
 #[must_use]
 pub fn clip_title() -> Vec<MenuItem> {
     items(CLIP_TITLE)
 }
 
-/// The menu a note or the empty grid in the MIDI Note Editor opens
-/// (C-NOTE), as the piano roll spec's R30 says. Live's order and
-/// separators weren't recorded, so the rows are the manual's and the release
-/// notes' in the order menus.md lists them.
-const NOTE: &[Row] = &[
-    ("C-NOTE-001", "Cut", Key(&["S-EDIT-001"])),
-    ("C-NOTE-002", "Copy", Key(&["S-EDIT-002"])),
-    ("C-NOTE-003", "Paste", Key(&["S-EDIT-003"])),
-    ("C-NOTE-004", "Duplicate", Key(&["S-EDIT-004"])),
-    ("C-NOTE-005", "Delete", Key(&["S-EDIT-005"])),
-    ("C-NOTE-006", "Invert Selection", Key(&["S-NOTE-034"])),
-    ("C-NOTE-007", "Deactivate Note(s)", Key(&["S-NOTE-041"])),
-    ("C-NOTE-008", "Group Notes", Key(&["S-NOTE-031"])),
-    ("C-NOTE-009", "Ungroup Notes", Key(&["S-NOTE-032"])),
-    ("C-NOTE-010", "Split Note(s)", Cmd(SPLIT_NOTES)),
-    ("C-NOTE-011", "Chop Note(s) on Grid", Cmd(CHOP_NOTES)),
-    ("C-NOTE-012", "Join Notes", Key(&["S-NOTE-007"])),
-    ("C-NOTE-013", "Fit to Time Range", Key(&["S-NOTE-008"])),
-    ("C-NOTE-014", "Clip Markers", Submenu),
-    ("C-NOTE-014a", "Set Start Marker", Key(&["S-LOOP-001"])),
-    ("C-NOTE-014b", "Set Loop Start", Key(&["S-LOOP-002"])),
-    ("C-NOTE-014c", "Set Loop End", Key(&["S-LOOP-003"])),
-    ("C-NOTE-014d", "Set End Marker", Key(&["S-LOOP-004"])),
-    ("C-NOTE-015", "Split Clip", Key(&["S-NOTE-036"])),
-    ("C-NOTE-016", "Highlight Scales", Cmd(VIEW_HIGHLIGHT_SCALES)),
+/// The rows of the MIDI Note Editor's menu that are always there (C-NOTE,
+/// C-MPE), in Live's order, and the groups an empty grid and the MPE tab
+/// add. The piano roll spec's R30 says when each shows.
+const NOTE_SELECT: &[Row] = &[
+    ("C-NOTE-001", "Invert Selection", Key(&["S-NOTE-034"])),
+    ("C-NOTE-002", "Duplicate", Key(&["S-EDIT-004"])),
+    SEPARATOR,
 ];
 
-/// The menu a key in the MIDI Note Editor's piano ruler opens (C-KEYS).
+/// What the MPE tab adds after Duplicate: its envelopes' clearing.
+const NOTE_MPE_CLEAR: &[Row] = &[
+    (
+        "C-MPE-001",
+        "Clear Envelope (Pitch Bend)",
+        Cmd(CLEAR_EXPRESSIONS),
+    ),
+    (
+        "C-MPE-002",
+        "Clear All MPE Envelopes",
+        Cmd(CLEAR_EXPRESSIONS),
+    ),
+    SEPARATOR,
+];
+
+const NOTE_EDIT: &[Row] = &[
+    ("C-NOTE-003", "Quantize", Key(&["S-NOTE-011"])),
+    ("C-NOTE-004", "Quantize Settings...", Key(&["S-NOTE-012"])),
+    ("C-NOTE-005", "Deactivate Note", Key(&["S-NOTE-041"])),
+    ("C-NOTE-006", "Extract Groove(s)", Cmd(EXTRACT_GROOVE)),
+    SEPARATOR,
+    ("C-NOTE-007", "Chop Note(s) on Grid", Cmd(CHOP_NOTES)),
+    ("C-NOTE-008", "Join Notes", Key(&["S-NOTE-007"])),
+    ("C-NOTE-009", "Fit to Time Range", Key(&["S-NOTE-008"])),
+    SEPARATOR,
+    (
+        "C-NOTE-010",
+        "Crop Clip to Time Selection",
+        Key(&["S-ARR-003", "S-SES-028"]),
+    ),
+    SEPARATOR,
+];
+
+/// What the empty grid adds after Crop Clip to Time Selection.
+const NOTE_ORIGIN: &[Row] = &[("C-NOTE-011", "Set 1.1.1 Here", Pending(None)), SEPARATOR];
+
+const NOTE_MARKERS: &[Row] = &[
+    ("C-NOTE-012", "Loop Selection", Key(&["S-ARR-011"])),
+    ("C-NOTE-013", "Set Start Marker", Key(&["S-LOOP-001"])),
+    ("C-NOTE-014", "Set Loop Start", Key(&["S-LOOP-002"])),
+    ("C-NOTE-015", "Set Loop End", Key(&["S-LOOP-003"])),
+    ("C-NOTE-016", "Set End Marker", Key(&["S-LOOP-004"])),
+    SEPARATOR,
+    ("C-NOTE-017", "Zoom to Clip Selection", Key(&["S-NOTE-023"])),
+    (
+        "C-NOTE-018",
+        "Zoom Out Clip Completely",
+        Key(&["S-NOTE-024"]),
+    ),
+    (
+        "C-NOTE-019",
+        "Fit Content To View Width",
+        Key(&["S-NOTE-009"]),
+    ),
+    (
+        "C-NOTE-020",
+        "Fit Content To View Height",
+        Key(&["S-NOTE-010"]),
+    ),
+    SEPARATOR,
+];
+
+/// What the empty grid adds after the zoom group: the grid's settings, as
+/// the Arrangement's menus lay them out, each choice row under its heading.
+const NOTE_GRID: &[Row] = &[
+    ("C-NOTE-021", "Snap to Grid", Key(&["S-GRID-005"])),
+    ("C-NOTE-022", "Adaptive Grid:", Heading),
+    ("C-NOTE-023", "Adaptive Grid", Cmd(SET_GRID)),
+    ("C-NOTE-024", "Fixed Grid:", Heading),
+    ("C-NOTE-025", "Fixed Grid", Cmd(SET_GRID)),
+    SEPARATOR,
+    ("C-NOTE-026", "Narrow Grid", Key(&["S-GRID-002"])),
+    ("C-NOTE-027", "Widen Grid", Key(&["S-GRID-003"])),
+    SEPARATOR,
+    ("C-NOTE-028", "Triplet Grid", Key(&["S-GRID-004"])),
+    SEPARATOR,
+];
+
+/// The Draw Mode item. Beatlayer has no Pitch Lock, so it is always off.
+const NOTE_DRAW: &[Row] = &[
+    (
+        "C-NOTE-029",
+        "Draw Mode (Pitch Lock Off)",
+        Cmd(VIEW_DRAW_MODE),
+    ),
+    SEPARATOR,
+];
+
+/// What the MPE tab adds before Highlight Scales.
+const NOTE_MPE_RANGE: &[Row] = &[
+    ("C-MPE-003", "Pitch Bend Range Settings...", Pending(None)),
+    SEPARATOR,
+];
+
+const NOTE_SCALES: &[Row] = &[("C-NOTE-030", "Highlight Scales", Cmd(VIEW_HIGHLIGHT_SCALES))];
+
+/// The rows of the piano ruler's menu (C-KEYS), in Live's order. The
+/// choices are one radio group; Auto's label names the spelling it gives.
+pub const KEYS_AUTO_ROW: &str = "C-KEYS-003";
+
 const KEYS: &[Row] = &[
-    ("C-KEYS-001", "Deactivate Note(s)", Key(&["S-NOTE-041"])),
-    ("C-KEYS-002", "Note spelling", Submenu),
+    ("C-KEYS-001", "Deactivate Note", Key(&["S-NOTE-041"])),
+    SEPARATOR,
+    ("C-KEYS-002", "Accidentals", Heading),
     (
-        "C-KEYS-002a",
-        "Sharps",
-        Choice(VIEW_NOTE_SPELLING, r#"{"spelling":"sharps"}"#),
-    ),
-    (
-        "C-KEYS-002b",
-        "Flats",
-        Choice(VIEW_NOTE_SPELLING, r#"{"spelling":"flats"}"#),
-    ),
-    (
-        "C-KEYS-002c",
-        "Sharps and Flats",
-        Choice(VIEW_NOTE_SPELLING, r#"{"spelling":"sharps_and_flats"}"#),
-    ),
-    (
-        "C-KEYS-002d",
-        "Auto",
+        KEYS_AUTO_ROW,
+        "Auto: Sharps (♯)",
         Choice(VIEW_NOTE_SPELLING, r#"{"spelling":"auto"}"#),
     ),
     (
-        "C-KEYS-002e",
-        "MIDI Note Numbers",
+        "C-KEYS-004",
+        "Sharps (♯)",
+        Choice(VIEW_NOTE_SPELLING, r#"{"spelling":"sharps"}"#),
+    ),
+    (
+        "C-KEYS-005",
+        "Flats (♭)",
+        Choice(VIEW_NOTE_SPELLING, r#"{"spelling":"flats"}"#),
+    ),
+    (
+        "C-KEYS-006",
+        "Sharps and Flats (♯/♭)",
+        Choice(VIEW_NOTE_SPELLING, r#"{"spelling":"sharps_and_flats"}"#),
+    ),
+    SEPARATOR,
+    (
+        "C-KEYS-007",
+        "MIDI Note Number",
         Choice(VIEW_NOTE_SPELLING, r#"{"spelling":"note_numbers"}"#),
     ),
 ];
@@ -905,11 +1350,39 @@ pub fn loop_bar() -> Vec<MenuItem> {
     items(LOOP_BAR)
 }
 
+/// Where the MIDI Note Editor's menu was opened.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NoteMenu {
+    /// On empty grid rather than on a note: the menu adds Set 1.1.1 Here
+    /// and the grid's settings.
+    pub grid: bool,
+    /// In the Clip View's MPE tab, which adds the envelopes' clearing and
+    /// the pitch bend range.
+    pub mpe: bool,
+}
+
 /// The menu a note or the empty grid in the MIDI Note Editor opens
-/// (C-NOTE).
+/// (C-NOTE, C-MPE), as the piano roll spec's R30 says.
 #[must_use]
-pub fn note() -> Vec<MenuItem> {
-    items(NOTE)
+pub fn note(state: NoteMenu) -> Vec<MenuItem> {
+    let mut rows: Vec<Row> = NOTE_SELECT.to_vec();
+    if state.mpe {
+        rows.extend_from_slice(NOTE_MPE_CLEAR);
+    }
+    rows.extend_from_slice(NOTE_EDIT);
+    if state.grid {
+        rows.extend_from_slice(NOTE_ORIGIN);
+    }
+    rows.extend_from_slice(NOTE_MARKERS);
+    if state.grid {
+        rows.extend_from_slice(NOTE_GRID);
+    }
+    rows.extend_from_slice(NOTE_DRAW);
+    if state.mpe {
+        rows.extend_from_slice(NOTE_MPE_RANGE);
+    }
+    rows.extend_from_slice(NOTE_SCALES);
+    items(&rows)
 }
 
 /// The menu a key in the MIDI Note Editor's piano ruler opens (C-KEYS).
@@ -926,15 +1399,15 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
         "C-CLIP-SES-019b" | "C-CLIP-SES-019c" | "C-CLIP-SES-019d" => {
             Some("Phase 9 (audio to MIDI, IMP-06)")
         }
-        "C-CLIP-SES-020" => Some("Phase 9 (stem separation of Session clips, IMP-11)"),
         "C-TRACK-013" | "C-TRACK-014" => Some("a package not planned yet"),
         "C-CLIP-ARR-027a" | "C-CLIP-ARR-027b" | "C-CLIP-ARR-027c" => {
             Some("Phase 9 (audio to MIDI, IMP-06)")
         }
-        // The MIDI Note Editor's own items (piano-roll R30).
-        "C-NOTE-014" | "C-NOTE-014a" | "C-NOTE-014b" | "C-NOTE-014c" | "C-NOTE-014d" => {
-            Some("WP-6.54 (the clip markers from the keys)")
-        }
+        // The MIDI Note Editor's and the take lanes' items that Live has and
+        // Beatlayer doesn't yet.
+        "C-NOTE-011" | "C-MPE-003" | "C-TAKE-004" | "C-CHAIN-005" | "C-MAIN-005"
+        | "C-PARAM-005" | "C-PARAM-010" | "C-PARAM-011" | "C-MACRO-003" | "C-MACRO-006"
+        | "C-MACRO-007" | "C-MACRO-008" => Some("a package not planned yet"),
         _ => None,
     }
 }
@@ -956,6 +1429,9 @@ pub struct SelectionMenu {
     pub automation: bool,
     /// The selection is on a take lane.
     pub take_lane: bool,
+    /// A time selection holds clips on audio tracks, which brings Separate
+    /// Stems to New Audio Tracks after Crop Clip (stem separation R22).
+    pub audio: bool,
 }
 
 /// The row of Beatlayer's own Copy Selection to Main Lane in a take-lane
@@ -966,29 +1442,28 @@ pub const R29_COPY_CLIP: &str = "R29-copy-to-main-lane-clip";
 /// selection's menu on a take lane, after Paste Bounced Audio (R29).
 pub const R29_COPY_TIME: &str = "R29-copy-to-main-lane-time";
 
-/// The menu a take lane's header opens, C-TAKE-001 to C-TAKE-008 of menus.md
-/// in its order (the comping spec, R29). Live's separators weren't recorded.
+/// The menu a take lane's header opens, C-TAKE-001 to C-TAKE-009 of menus.md
+/// in Live's order (the comping spec, R29). Copy Selection to Main Lane and
+/// Paste Bounced Audio are not in Live's menu: their keys still run them.
 const TAKE_LANE: &[Row] = &[
+    ("C-TAKE-001", "Duplicate", Key(&["S-COMP-005"])),
+    ("C-TAKE-002", "Delete", Key(&["S-EDIT-005"])),
+    SEPARATOR,
+    ("C-TAKE-003", "Rename", Key(&["S-EDIT-008"])),
+    ("C-TAKE-004", "Edit Info Text", Pending(None)),
+    SEPARATOR,
+    ("C-TAKE-005", "Insert Take Lane", Key(&["S-COMP-004"])),
+    ("C-TAKE-006", "Show Take Lanes", Cmd(SHOW_TAKE_LANES)),
     (
-        "C-TAKE-001",
-        "Copy Selection to Main Lane",
-        Cmd(COPY_TO_MAIN_LANE),
-    ),
-    ("C-TAKE-002", "Insert Take Lane", Key(&["S-COMP-004"])),
-    ("C-TAKE-003", "Duplicate", Key(&["S-COMP-005"])),
-    ("C-TAKE-004", "Rename", Key(&["S-EDIT-008"])),
-    ("C-TAKE-005", "Delete", Key(&["S-EDIT-005"])),
-    (
-        "C-TAKE-006",
+        "C-TAKE-007",
         "Delete All Take Lanes",
         Cmd("take_lane.delete_all"),
     ),
     (
-        "C-TAKE-007",
-        "Delete All Unused Take Lanes",
+        "C-TAKE-008",
+        "Delete Unused Take Lanes",
         Cmd("take_lane.delete_unused"),
     ),
-    ("C-TAKE-008", "Paste Bounced Audio", Key(&["S-BOUNCE-002"])),
 ];
 
 /// The menu a take lane's header opens (C-TAKE).
@@ -1039,6 +1514,14 @@ const TIME_SELECTION: &[Row] = &[
         Cmd(CONSOLIDATE_TO_SCENE),
     ),
 ];
+
+/// The row a time selection that holds clips on audio tracks adds after Crop
+/// Clip (C-TIME-019c), as C-TIME-028: Beatlayer's own place (stem separation R22).
+const TIME_STEMS: &[Row] = &[(
+    "C-TIME-028",
+    "Separate Stems to New Audio Tracks",
+    Cmd(SEPARATE_STEMS),
+)];
 
 /// The menu a clip in the Arrangement opens (C-CLIP-ARR), without the rows a
 /// selection adds.
@@ -1160,6 +1643,9 @@ pub fn arrangement_time_in(state: SelectionMenu) -> Vec<MenuItem> {
         rows.extend_from_slice(TIME_AUTOMATION);
     }
     let mut time = with_selection(TIME, TIME_SELECTION, "C-TIME-007", state);
+    if state.clips && state.audio {
+        time = insert_after(&time, TIME_STEMS, "C-TIME-019c");
+    }
     if state.time_commands {
         time = insert_after(&time, TIME_COMMANDS, "C-TIME-003");
     }
@@ -1198,6 +1684,18 @@ pub fn arrangement_fragmentary_bar_in() -> Vec<MenuItem> {
 #[must_use]
 pub fn arrangement_signature_in() -> Vec<MenuItem> {
     items(SIGNATURE)
+}
+
+/// The arranger track's menu away from a section (IMP-22).
+#[must_use]
+pub fn arrangement_arranger_in() -> Vec<MenuItem> {
+    items(ARRANGER)
+}
+
+/// A section's menu (IMP-22).
+#[must_use]
+pub fn arrangement_section_in() -> Vec<MenuItem> {
+    items(SECTION)
 }
 
 /// The loop brace's menu (C-TIME-023).
@@ -1275,7 +1773,11 @@ mod tests {
             if line.starts_with("Other states") {
                 break;
             }
-            let cells: Vec<&str> = line.split('|').map(str::trim).collect();
+            let mut cells: Vec<&str> = line.split('|').map(str::trim).collect();
+            // A row another menu's table defines first reads "= ID".
+            if let Some(id) = cells.get(1).and_then(|id| id.strip_prefix("= ")) {
+                cells[1] = id;
+            }
             if cells.len() > 3 && cells[1].starts_with("C-") {
                 rows.push(Some((cells[1].to_owned(), cells[2].to_owned())));
             } else if cells.len() > 3 && cells[1].is_empty() && cells[2] == "—" {
@@ -1291,6 +1793,7 @@ mod tests {
         arrangement: true,
         time_selection: true,
         devices_off: false,
+        midi: true,
     };
 
     #[test]
@@ -1330,28 +1833,22 @@ mod tests {
 
     // Spec: racks R26
     #[test]
-    fn a_chains_menu_holds_rename_info_text_and_the_colours() {
-        let labels: Vec<&str> = chain()
-            .iter()
-            .filter(|i| !i.is_separator())
-            .map(|i| i.label)
-            .collect();
-        assert_eq!(labels, ["Rename", "Edit Info Text", "Colour"]);
-        assert!(chain().iter().all(|i| is_lives(i.row) == i.row.is_empty()));
-        for item in chain() {
-            if matches!(item.action, Pending(_)) {
-                assert!(pending_package(item.row).is_some(), "{}", item.row);
-            }
-        }
+    fn a_chains_menu_rows_are_lives_and_its_palette_row_is_the_last() {
+        assert!(chain().iter().all(|i| is_lives(i.row)));
+        assert_eq!(chain().last().unwrap().row, CHAIN_COLOUR_ROW);
     }
 
     #[test]
     fn the_track_menus_other_states_add_the_items_menus_md_lists() {
         let base = track(TrackMenu::default());
         let all = track(EVERY_STATE);
+        // IMP-33's Follow Chord Lane is Beatlayer's own, so menus.md's Live rows
+        // don't list it by a C-TRACK ID; its own test follows.
         let added: Vec<_> = all
             .iter()
-            .filter(|i| !i.is_separator() && !base.iter().any(|b| b.row == i.row))
+            .filter(|i| {
+                !i.is_separator() && i.row != IMP_33_FOLLOW && !base.iter().any(|b| b.row == i.row)
+            })
             .collect();
         assert_eq!(added.len(), 10);
         let Some(text) = std::fs::read_to_string(
@@ -1368,6 +1865,28 @@ mod tests {
                 .unwrap_or_else(|| panic!("{id} isn't in menus.md"));
             assert!(line.contains(item.label), "{}: {line}", item.label);
         }
+    }
+
+    // Spec: chord-lane R5
+    #[test]
+    fn a_midi_tracks_menu_adds_follow_chord_lane_after_save_as_default_midi_track() {
+        let rows = |state| -> Vec<&'static str> { track(state).iter().map(|i| i.row).collect() };
+        assert!(!rows(TrackMenu::default()).contains(&IMP_33_FOLLOW));
+        let midi = rows(TrackMenu {
+            midi: true,
+            ..TrackMenu::default()
+        });
+        let default = midi.iter().position(|r| *r == "C-TRACK-014").unwrap();
+        assert_eq!(midi[default + 1], "", "in a group of its own");
+        assert_eq!(midi[default + 2], IMP_33_FOLLOW);
+        let item = track(TrackMenu {
+            midi: true,
+            ..TrackMenu::default()
+        })
+        .into_iter()
+        .find(|i| i.row == IMP_33_FOLLOW)
+        .unwrap();
+        assert_eq!(item.command(), Some("track.set_follow_chord_lane"));
     }
 
     #[test]
@@ -1436,8 +1955,43 @@ mod tests {
             (device(), "(C-DEVICE)"),
             (track(TrackMenu::default()), "(C-TRACK)"),
             (take_lane(), "(C-TAKE)"),
-            (note(), "(C-NOTE)"),
+            (note(NoteMenu::default()), "(C-NOTE)"),
+            (
+                note(NoteMenu {
+                    grid: true,
+                    mpe: false,
+                }),
+                "(C-NOTE grid)",
+            ),
+            (
+                note(NoteMenu {
+                    grid: true,
+                    mpe: true,
+                }),
+                "(C-MPE)",
+            ),
             (keys(), "(C-KEYS)"),
+            (
+                param(ParamMenu {
+                    pan: Some(false),
+                    ..ParamMenu::default()
+                }),
+                "(C-PAN)",
+            ),
+            (param(ParamMenu::default()), "(C-PARAM)"),
+            (
+                param(ParamMenu {
+                    device: true,
+                    in_rack: true,
+                    ..ParamMenu::default()
+                }),
+                "(C-PARAM rack)",
+            ),
+            (macro_knob(), "(C-MACRO)"),
+            (chain(), "(C-CHAIN)"),
+            (main_track(), "(C-MAIN)"),
+            (drum_pad(), "(C-PAD)"),
+            (clip_envelope(), "(C-ENV)"),
             (loop_bar(), "(C-LOOPBAR)"),
             (slot(SlotMenu::default()), "(C-SLOT)"),
             (session_clip(SessionClipMenu::default()), "(C-CLIP-SES)"),
@@ -1465,7 +2019,7 @@ mod tests {
                         // reference names the choices after the colon.
                         let choices = ADAPTIVE_GRID_ROWS.contains(&id.as_str())
                             || FIXED_GRID_ROWS.contains(&id.as_str())
-                            || id == "C-KEYS-002";
+                            || SHAPE_ROWS.contains(&id.as_str());
                         let label = if choices {
                             label.split(':').next().unwrap()
                         } else {
@@ -1599,13 +2153,30 @@ mod tests {
         // Only the items whose commands still wait for a package.
         assert_eq!(
             pending,
-            [
-                "C-CLIP-SES-019b",
-                "C-CLIP-SES-019c",
-                "C-CLIP-SES-019d",
-                "C-CLIP-SES-020",
-            ]
+            ["C-CLIP-SES-019b", "C-CLIP-SES-019c", "C-CLIP-SES-019d",]
         );
+    }
+
+    // Spec: stem-separation R22
+    #[test]
+    fn separate_stems_is_in_the_session_clips_and_the_time_selections_menus() {
+        let time = |audio| {
+            arrangement_time_in(SelectionMenu {
+                clips: true,
+                audio,
+                ..SelectionMenu::default()
+            })
+        };
+        let rows: Vec<_> = time(true).iter().map(|i| i.row).collect();
+        let crop = rows.iter().position(|r| *r == "C-TIME-019c").unwrap();
+        assert_eq!(rows[crop + 1], "C-TIME-028");
+        assert!(!time(false).iter().any(|i| i.row == "C-TIME-028"));
+        let session = session_clip(SessionClipMenu {
+            audio: true,
+            ..SessionClipMenu::default()
+        });
+        let stems = session.iter().find(|i| i.row == "C-CLIP-SES-020").unwrap();
+        assert_eq!(stems.command(), Some("stems.open"));
     }
 
     // Spec: session-context-menus R16
@@ -1652,6 +2223,7 @@ mod tests {
             time_commands: false,
             automation: false,
             take_lane: true,
+            audio: false,
         };
         for (menu, bounced, own) in [
             (arrangement_clip_in(on), "C-CLIP-ARR-016", R29_COPY_CLIP),
@@ -1670,22 +2242,263 @@ mod tests {
         );
     }
 
+    /// A menu's rows as a line each, separators as a dash, the way the
+    /// tests below read them.
+    fn shape(menu: &[MenuItem]) -> Vec<&'static str> {
+        menu.iter()
+            .map(|i| if i.is_separator() { "—" } else { i.label })
+            .collect()
+    }
+
     // Spec: piano-roll R30
     #[test]
     fn the_note_editor_menus_name_their_later_packages() {
-        for menu in [note(), keys()] {
+        for menu in [
+            note(NoteMenu {
+                grid: true,
+                mpe: true,
+            }),
+            keys(),
+            take_lane(),
+            chain(),
+            main_track(),
+            drum_pad(),
+            clip_envelope(),
+            macro_knob(),
+            param(ParamMenu {
+                pan: Some(true),
+                device: true,
+                in_rack: true,
+                ..ParamMenu::default()
+            }),
+        ] {
             for item in menu {
                 if matches!(item.action, Pending(_)) {
                     assert!(pending_package(item.row).is_some(), "{}", item.row);
                 }
             }
         }
-        // The Clip Markers submenu's items run the shortcuts' commands
-        // (piano-roll R37).
-        let markers = note().into_iter().find(|i| i.row == "C-NOTE-014").unwrap();
-        assert_eq!(markers.items.len(), 4);
-        for item in markers.items {
-            assert!(matches!(item.action, Key(_)), "{}", item.row);
-        }
+    }
+
+    // Spec: piano-roll R30
+    #[test]
+    fn the_note_editors_menus_list_lives_rows_in_order() {
+        let on_a_note = shape(&note(NoteMenu::default()));
+        assert_eq!(
+            on_a_note,
+            [
+                "Invert Selection",
+                "Duplicate",
+                "—",
+                "Quantize",
+                "Quantize Settings...",
+                "Deactivate Note",
+                "Extract Groove(s)",
+                "—",
+                "Chop Note(s) on Grid",
+                "Join Notes",
+                "Fit to Time Range",
+                "—",
+                "Crop Clip to Time Selection",
+                "—",
+                "Loop Selection",
+                "Set Start Marker",
+                "Set Loop Start",
+                "Set Loop End",
+                "Set End Marker",
+                "—",
+                "Zoom to Clip Selection",
+                "Zoom Out Clip Completely",
+                "Fit Content To View Width",
+                "Fit Content To View Height",
+                "—",
+                "Draw Mode (Pitch Lock Off)",
+                "—",
+                "Highlight Scales",
+            ]
+        );
+        // The empty grid adds Set 1.1.1 Here and the grid's group.
+        let grid = shape(&note(NoteMenu {
+            grid: true,
+            mpe: false,
+        }));
+        let crop = grid.iter().position(|l| l.starts_with("Crop")).unwrap();
+        assert_eq!(&grid[crop + 1..crop + 4], ["—", "Set 1.1.1 Here", "—"]);
+        let fit = grid.iter().position(|l| l.ends_with("Height")).unwrap();
+        assert_eq!(
+            &grid[fit + 1..fit + 14],
+            [
+                "—",
+                "Snap to Grid",
+                "Adaptive Grid:",
+                "Adaptive Grid",
+                "Fixed Grid:",
+                "Fixed Grid",
+                "—",
+                "Narrow Grid",
+                "Widen Grid",
+                "—",
+                "Triplet Grid",
+                "—",
+                "Draw Mode (Pitch Lock Off)",
+            ]
+        );
+        // The MPE tab adds the envelopes' clearing after Duplicate and the
+        // pitch bend range before Highlight Scales.
+        let mpe = shape(&note(NoteMenu {
+            grid: true,
+            mpe: true,
+        }));
+        assert_eq!(
+            &mpe[2..6],
+            [
+                "—",
+                "Clear Envelope (Pitch Bend)",
+                "Clear All MPE Envelopes",
+                "—"
+            ]
+        );
+        assert_eq!(
+            &mpe[mpe.len() - 4..],
+            ["—", "Pitch Bend Range Settings...", "—", "Highlight Scales"]
+        );
+    }
+
+    // Spec: scales R24
+    #[test]
+    fn the_piano_rulers_menu_lists_the_accidentals_choices() {
+        assert_eq!(
+            shape(&keys()),
+            [
+                "Deactivate Note",
+                "—",
+                "Accidentals",
+                "Auto: Sharps (♯)",
+                "Sharps (♯)",
+                "Flats (♭)",
+                "Sharps and Flats (♯/♭)",
+                "—",
+                "MIDI Note Number",
+            ]
+        );
+        assert_eq!(keys()[2].action, Heading);
+    }
+
+    // Spec: session-context-menus R4
+    #[test]
+    fn the_clip_view_title_bars_menu_is_lives() {
+        assert_eq!(
+            shape(&clip_title()),
+            [
+                "Rename",
+                "—",
+                "Colour palette",
+                "—",
+                "Arrange Clip View Panels Automatically",
+                "Fold"
+            ]
+        );
+    }
+
+    // Spec: comping R29
+    #[test]
+    fn a_take_lane_headers_menu_is_lives() {
+        assert_eq!(
+            shape(&take_lane()),
+            [
+                "Duplicate",
+                "Delete",
+                "—",
+                "Rename",
+                "Edit Info Text",
+                "—",
+                "Insert Take Lane",
+                "Show Take Lanes",
+                "Delete All Take Lanes",
+                "Delete Unused Take Lanes"
+            ]
+        );
+    }
+
+    // Spec: racks R26
+    #[test]
+    fn a_chains_menu_is_lives() {
+        assert_eq!(
+            shape(&chain()),
+            [
+                "Duplicate",
+                "—",
+                "Rename",
+                "Edit Info Text",
+                "Create Chain",
+                "—",
+                "Color Automatically",
+                "Colour palette"
+            ]
+        );
+    }
+
+    // Spec: session-context-menus R17
+    #[test]
+    fn the_main_tracks_header_menu_is_lives() {
+        assert_eq!(
+            shape(&main_track()),
+            [
+                "Edit Info Text",
+                "—",
+                "Insert Audio Track",
+                "Insert MIDI Track",
+                "Insert Return Track",
+                "—",
+                "Select Track Content",
+                "—",
+                "Colour palette"
+            ]
+        );
+    }
+
+    // Spec: drum-racks R12
+    #[test]
+    fn a_drum_pads_menu_is_lives() {
+        assert_eq!(
+            shape(&drum_pad()),
+            [
+                "Rename",
+                "Delete",
+                "—",
+                "Save as Default Pad",
+                "—",
+                "Next Similar",
+                "Previous Similar",
+                "Save as Similarity Reference",
+                "Return to Reference"
+            ]
+        );
+    }
+
+    // Spec: clip-envelopes R13
+    #[test]
+    fn the_clip_envelope_editors_menu_is_lives() {
+        assert_eq!(
+            shape(&clip_envelope()),
+            [
+                "Snap to Grid",
+                "Adaptive Grid:",
+                "Adaptive Grid",
+                "Fixed Grid:",
+                "Fixed Grid",
+                "—",
+                "Narrow Grid",
+                "Widen Grid",
+                "—",
+                "Triplet Grid",
+                "—",
+                "Draw Mode",
+                "—",
+                "Insert Shape:",
+                "Waveforms",
+                "Ramps and ADSR"
+            ]
+        );
     }
 }

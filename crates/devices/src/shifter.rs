@@ -628,8 +628,9 @@ impl Head {
     }
 }
 
-/// One channel's state.
-struct Chan {
+/// One channel's state. Pitch Hack's line is one too: it reads its echoes
+/// through [`Chan::pitch`].
+pub(crate) struct Chan {
     /// The input, a ring: the newest sample at `newest`.
     history: Vec<f32>,
     newest: usize,
@@ -653,7 +654,7 @@ struct Chan {
 }
 
 impl Chan {
-    fn new(rate: f64, latency: usize, echo_len: usize) -> Self {
+    pub(crate) fn new(rate: f64, latency: usize, echo_len: usize) -> Self {
         Self {
             history: vec![0.0; (6 * latency).next_power_of_two()],
             newest: 0,
@@ -669,9 +670,14 @@ impl Chan {
         }
     }
 
-    fn push(&mut self, sample: f32) {
+    pub(crate) fn push(&mut self, sample: f32) {
         self.newest = (self.newest + 1) & (self.history.len() - 1);
         self.history[self.newest] = sample;
+    }
+
+    /// The history `delay` frames before the newest, cubically interpolated.
+    pub(crate) fn read(&self, delay: f64) -> f64 {
+        cubic(&self.history, self.newest, delay)
     }
 
     /// The sample `delay` frames before the newest.
@@ -686,7 +692,7 @@ impl Chan {
     /// its pitch through the changes of head. `latency` is where the heads
     /// centre, and `fade` how far Pitch mode moves each frame toward the
     /// plain delayed signal as the shift reaches nothing.
-    fn pitch(&mut self, semitones: f64, window: f64, latency: usize, fade: f64) -> f64 {
+    pub(crate) fn pitch(&mut self, semitones: f64, window: f64, latency: usize, fade: f64) -> f64 {
         let centred = f64::from(self.at(latency));
         let nothing = semitones.abs() < 1e-9;
         // The shifted signal starts from the plain one, so it takes over at

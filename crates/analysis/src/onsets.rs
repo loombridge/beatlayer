@@ -55,8 +55,13 @@ impl OnsetFunction {
 /// The onset function of `mono`, the channels' average at `rate`.
 #[must_use]
 pub fn onset_function(mono: &[f64], rate: u32) -> OnsetFunction {
+    onset_function_at(mono, rate, size_for(0.021, rate) / 4)
+}
+
+/// The onset function of `mono` with a value every `hop` frames of audio.
+#[must_use]
+pub fn onset_function_at(mono: &[f64], rate: u32, hop: usize) -> OnsetFunction {
     let size = size_for(0.021, rate);
-    let hop = size / 4;
     let mut stft = Stft::new(size);
     let norm = 2.0 / stft.window_sum();
     let count = mono.len().div_ceil(hop);

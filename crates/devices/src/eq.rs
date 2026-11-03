@@ -881,6 +881,7 @@ pub fn display(
     };
     let series = curve_series;
     let mut out = DeviceDisplay {
+        spectrograms: Vec::new(),
         device,
         live: data.is_some(),
         view: None,
@@ -930,6 +931,7 @@ pub fn display(
                 marker.push_str(&text(band_param(curve, band, GAIN_SLOT), gain));
             }
             out.markers.push(DisplayMarker {
+                handle: None,
                 name: format!("{label}{n}"),
                 series: (*name).to_owned(),
                 x: freq as f32,

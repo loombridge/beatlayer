@@ -123,7 +123,10 @@ trigger = "press"
 milestone = "M9"
 mac = ["Cmd+Shift+F"]
 win = ["Ctrl+Shift+F"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "browser.show_similar", contexts = ["browser"] },
+]
 
 [[shortcut]]
 id = "S-BRW-011"

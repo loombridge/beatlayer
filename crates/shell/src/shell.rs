@@ -49,6 +49,7 @@ use bl_plugin_host::lv2::Lv2Host;
 use bl_plugin_host::scan::Scanner;
 use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::arrangement as view_ids;
+use bl_shell_spec::arranger as arranger_ids;
 use bl_shell_spec::audio_editing as audio_ids;
 use bl_shell_spec::automation as automation_ids;
 use bl_shell_spec::autosampler as autosampler_ids;
@@ -72,6 +73,7 @@ use bl_shell_spec::midi_tools as tool_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
 use bl_shell_spec::multisampler as multisampler_ids;
 use bl_shell_spec::notes::{self as note_ids};
+use bl_shell_spec::packages as packages_ids;
 use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
 use bl_shell_spec::push as push_ids;
@@ -115,7 +117,9 @@ mod plugin_list;
 mod processed_files;
 mod sample_edits;
 mod sample_keys;
+mod sample_swap;
 mod save_history;
+mod view_options;
 pub use sample_keys::TransientList;
 mod agent_server;
 mod app_settings;
@@ -124,6 +128,7 @@ mod audio_device;
 mod browser_commands;
 mod clip_scale;
 mod control_surface;
+mod convert;
 mod device_commands;
 mod document_edits;
 mod focus;
@@ -135,6 +140,7 @@ mod map_mode;
 mod menus;
 mod midi_input;
 mod mixer;
+mod packages;
 mod packs;
 mod perception_commands;
 mod playback;
@@ -142,11 +148,13 @@ mod plugin_commands;
 mod plugin_scan;
 mod plugin_windows;
 mod push;
+mod push_session;
 mod recording_takes;
 mod recovery;
 mod remote;
 mod remote_targets;
 mod search;
+mod selection_arm;
 mod session_launch;
 mod session_recording;
 mod session_strip;
@@ -156,8 +164,10 @@ mod slice;
 mod stems;
 mod step_input;
 mod tap_tempo;
+mod tempo_follower;
 mod track_commands;
 mod tunings;
+mod video;
 mod view_commands;
 mod warping;
 mod windows;
@@ -423,6 +433,10 @@ pub enum Effect {
     /// person types the new name; Return runs `locator.rename` with it
     /// (WP-6.24; the time editing spec, R8).
     RenameLocator(bl_model::LocatorId),
+    /// Start renaming a section in the arranger track, where the person
+    /// types the new name; Return runs `arranger.rename_section` with it
+    /// (WP-6.45; the arranger track spec, R7).
+    RenameSection(bl_model::SectionId),
     /// Start typing a new signature for the time-signature marker at this
     /// position, in the lane under the beat-time ruler; Return runs
     /// `arrangement.edit_time_signature` with it (WP-6.61; the time editing
@@ -608,6 +622,9 @@ pub struct Shell {
     /// Whether a start waits for the Link session's phase, as the engine last
     /// published it (the Link spec, R22).
     link_waiting_view: bool,
+    /// Whether Follow is on (the Tempo Follower spec, R3): not kept, off
+    /// when the app starts.
+    tempo_follow_on: bool,
     /// When the MIDI ports were last listed, so [`Shell::poll`] lists them
     /// again every few seconds and a replugged device shows.
     midi_listed: std::time::Instant,
@@ -760,11 +777,15 @@ pub struct Shell {
     /// The media the set's clips play, which the browser fills and the
     /// Arrangement's waveforms read.
     media: Arc<MediaStore>,
+    /// The movies the set's video clips name (WP-9.25).
+    movies: video::Movies,
     /// Processed files being written, with the edits that land when each is
     /// whole (WP-4.20).
     processed: Vec<processed_files::Pending>,
     /// Stem separation's download, separation, and dialog (IMP-11).
     stems: stems::StemsState,
+    /// The Packages manager: the installer thread and its queue (WP-9.1).
+    packages: packages::PackagesState,
     /// The Export Audio/Video dialog and the export under way (WP-6.71).
     export: export_dialog::ExportState,
     packs: packs::PackState,
@@ -832,6 +853,9 @@ pub struct Shell {
     /// The engine's insert marker when the shell last looked, so a move of
     /// it reaches the Arrangement View once (WP-1.18).
     seen_insert_marker: Option<Ticks>,
+    /// Whether the engine plays a Play Selection to the selection's end, so
+    /// the Loop switch shows off (the transport spec, R35).
+    loop_suspended: bool,
     /// Whether a person's gesture (a drag on a value) holds a transaction
     /// open, so its document commands are one undo step.
     gesture: bool,
@@ -864,6 +888,7 @@ pub struct Shell {
     /// The parameters under modulation, as the engine last published them
     /// (WP-5.9).
     modulated: Vec<bl_engine::PlayedParam>,
+    matrix_played: Vec<bl_engine::PlayedParam>,
     /// Whether `modulated` came from a running engine, so it clears when
     /// the engine stops while values a host set stay.
     modulating: bool,
@@ -885,6 +910,12 @@ pub struct Shell {
     /// floating devices' windows and the plug-ins' editor windows;
     /// WP-2.5b): view state, never part of the set.
     plug_in_windows: bool,
+    /// The states a preset gave plug-ins the engine hasn't started yet, which
+    /// they take when they run (the plug-in scanning spec, R16).
+    pending_states: BTreeMap<bl_model::DeviceId, Vec<u8>>,
+    /// Plug-ins inserted from the Browser whose windows Auto-Open Plug-In
+    /// Windows opens once they've started (WP-6.75).
+    auto_open: Vec<bl_model::DeviceId>,
     /// The native device types the engine offers, which the plug-ins'
     /// join in the Device View (WP-2.6).
     native_types: Vec<bl_engine::DeviceType>,
@@ -1068,12 +1099,19 @@ fn clip_marker_command(id: &str) -> bool {
 /// Whether `id` is one of the Arrangement's own clip drags, which the
 /// document runs per frame as gestures: stretching a warped clip's edge (the
 /// warping spec, R47), sliding a clip's contents (R54) and dragging a fade's
-/// handles (the audio clips spec, R27), each one undo step however far the drag
+/// handles (the audio clips spec, R27), and drawing or moving a chord lane
+/// region (the chord lane spec, R3), each one undo step however far the drag
 /// goes.
 fn arrangement_clip_command(id: &str) -> bool {
     matches!(
         id,
-        "clip.stretch" | "clip.slide_contents" | "clip.set_fades" | "arrangement.set_crossfade"
+        "clip.stretch"
+            | "clip.slide_contents"
+            | "clip.set_fades"
+            | "arrangement.set_crossfade"
+            // Spec: chord-lane R3. Drawing, moving and resizing a region.
+            | "chord_lane.add_region"
+            | "chord_lane.move_region"
     )
 }
 
@@ -1097,6 +1135,8 @@ fn marker_label(id: &str) -> &'static str {
         "clip.stretch" => "Stretch clip",
         "clip.slide_contents" => "Slide clip contents",
         "clip.set_fades" | "arrangement.set_crossfade" => "Change Fade",
+        "chord_lane.add_region" => "Add Chord Region",
+        "chord_lane.move_region" => "Move Chord Region",
         model::SET_MIDI_REGION | "clip.set_region" => "Change clip region",
         model::SET_MIDI_LOOP | "clip.set_loop" => "Change clip loop",
         "clip.insert_warp_marker" | "clip.move_warp_markers" => "Move warp markers",
@@ -1241,6 +1281,9 @@ impl Shell {
             &prefs.midi,
             Arc::clone(&push_display),
         );
+        // Spec: stem-separation R19. A package removed while its library
+        // was loaded goes now.
+        crate::packages::sweep(&crate::packages::folder(config_dir.as_deref()));
         let mut browser_view = BrowserView::new(&prefs.browser, Waker::default());
         // Spec: browser-tags R1. The browser's database holds the index of
         // the places' files, the tags, and the items that carry them.
@@ -1254,6 +1297,7 @@ impl Shell {
         // The engine's clips stream from the set's media (WP-1.4b).
         let media = Arc::new(MediaStore::new());
         audio.set_media(Arc::clone(&media));
+        browser_view.set_analysis_media(Arc::clone(&media));
         let analysis_slot = crate::analysed_media::AnalysisSlot::default();
         audio.set_analysis(analysis_slot.clone());
         // CLAP plug-ins (WP-2.6): this thread is their main thread.
@@ -1293,8 +1337,10 @@ impl Shell {
         let mut shell = Self {
             browser_view,
             media,
+            movies: video::Movies::default(),
             processed: Vec::new(),
             stems: stems::StemsState::default(),
+            packages: packages::PackagesState::default(),
             export: export_dialog::ExportState::default(),
             packs: packs::PackState::default(),
             mpe_dialog: None,
@@ -1335,6 +1381,7 @@ impl Shell {
             keep_tempo: false,
             tempo_override: false,
             link_waiting_view: false,
+            tempo_follow_on: false,
             midi_listed: std::time::Instant::now(),
             push_display,
             midi_seen: (0, 0),
@@ -1413,6 +1460,7 @@ impl Shell {
             envelope_control_focused: false,
             au,
             seen_insert_marker: None,
+            loop_suspended: false,
             gesture: false,
             mixer: MixerView::new(),
             session: SessionView::new(),
@@ -1424,6 +1472,7 @@ impl Shell {
             last_launched: None,
             session_over: Vec::new(),
             modulated: Vec::new(),
+            matrix_played: Vec::new(),
             processing: Vec::new(),
             modulating: false,
             meters: Vec::new(),
@@ -1443,6 +1492,8 @@ impl Shell {
             session_watch: crate::session_capture::Watch::default(),
             automation_recording: false,
             plug_in_windows: true,
+            pending_states: BTreeMap::new(),
+            auto_open: Vec::new(),
             devices: {
                 // Beatlayer's native devices (WP-2.5; none ship yet).
                 let mut devices = DeviceView::new();
@@ -1725,6 +1776,7 @@ impl Shell {
         let shown_scale = crate::scales::shown_scale(self.editor.document(), shown);
         let revision = self.document_revision;
         let generation = self.editor_generation;
+        let arm_args = matches!(id, "mixer.set_arm" | "mixer.arm_exclusive").then(|| args.clone());
         let result = self.run_command(id, args);
         self.rack_map_mode_ends_map_mode(id);
         self.sync_key_edit();
@@ -1737,6 +1789,9 @@ impl Shell {
             self.refresh_search();
         }
         if result.is_ok() {
+            if let Some(args) = &arm_args {
+                self.arm_taken_by_hand(args);
+            }
             self.follow_clip_selection(id, &arranged, slot, &slots);
             // Spec: scales R10. Selecting a clip makes its scale the
             // current scale, and a change to that clip's scale changes it
@@ -1827,6 +1882,9 @@ impl Shell {
         if edit_ids::handles(id) {
             return self.run_edit(id, args);
         }
+        if bl_shell_spec::linked_clips::handles(id) {
+            return self.run_linked_clips(id, args);
+        }
         if automation_ids::handles(id) {
             // Spec: clip-envelopes R13. Edit ▸ Simplify Envelope acts on the
             // Envelope Editor's time selection while the editor has the
@@ -1848,6 +1906,12 @@ impl Shell {
         }
         if locator_ids::handles(id) {
             return self.run_locator(id, args);
+        }
+        if arranger_ids::handles(id) {
+            return self.run_arranger(id, args);
+        }
+        if bl_shell_spec::chord_lane::handles(id) {
+            return self.run_chord_lane(id, args);
         }
         if note_ids::is_preview_or_mode(id) || id == note_ids::STEP_RECORD {
             // Spec: step-recording. The Preview switch, previews, step
@@ -1906,7 +1970,7 @@ impl Shell {
         if sample_ids::handles(id) {
             // Spec: sample-editor R21. The Sample Editor's selections and
             // view are the shell's, and change nothing in the set.
-            let result = sample_editor::run(
+            let mut result = sample_editor::run(
                 id,
                 args,
                 self.editor.document(),
@@ -1914,6 +1978,10 @@ impl Shell {
                 &self.arrangement,
             )
             .map_err(|failure| edit_error(id, failure));
+            // Spec: video R12. A video clip's cues are its movie's markers.
+            if let Ok(state) = &mut result {
+                self.add_cues(state);
+            }
             self.touch();
             return result;
         }
@@ -1952,6 +2020,9 @@ impl Shell {
         }
         if bl_shell_spec::link::handles(id) {
             return self.run_link(id, args);
+        }
+        if bl_shell_spec::tempo_follower::handles(id) {
+            return self.run_tempo_follower(id, args);
         }
         if id == transport_ids::TAP_TEMPO {
             return self.run_tap_tempo(args);
@@ -2011,10 +2082,12 @@ impl Shell {
         if id == browser_ids::LOAD_SELECTED
             && let Some(plugin) = self.browser_view.selected_plugin().cloned()
         {
-            // Spec: plugin-scanning R11. A plug-in chosen in the browser
-            // loads as `plugin.load` loads it.
+            // Spec: plugin-scanning R11, R17. A plug-in chosen in the
+            // browser loads as `plugin.load` loads it, and a preset of one
+            // loads it with that preset.
             Self::args::<NoArgs>(id, args)?;
-            let loaded = self.load_browser_plugin(id, &plugin)?;
+            let preset = self.browser_view.selected_plugin_preset();
+            let loaded = self.load_browser_plugin(id, &plugin, preset)?;
             self.touch();
             return Ok(loaded);
         }
@@ -2172,6 +2245,9 @@ impl Shell {
             Self::args::<NoArgs>(id, args)?;
             return self.load_into_devices(load);
         }
+        if bl_shell_spec::view_options::handles(id) {
+            return self.run_view_options(id, args);
+        }
         if multisampler_ids::handles(id) {
             return self.run_multisampler(id, args);
         }
@@ -2201,6 +2277,9 @@ impl Shell {
         if bl_shell_spec::warping::handles(id) {
             return self.run_warping(id, args);
         }
+        if bl_shell_spec::video::handles(id) {
+            return self.run_video(id, args);
+        }
         if bl_shell_spec::groove::handles(id) {
             return self.run_grooves(id, args);
         }
@@ -2222,6 +2301,9 @@ impl Shell {
         }
         if stems_ids::handles(id) {
             return self.run_stems(id, args);
+        }
+        if packages_ids::handles(id) {
+            return self.run_packages(id, args);
         }
         if slice_ids::handles(id) {
             return self.run_slice(id, args);

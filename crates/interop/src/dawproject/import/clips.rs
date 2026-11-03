@@ -296,6 +296,7 @@ impl Importer<'_, '_> {
                 }
             }
             Timeline::Audio(file)
+            | Timeline::Video(file)
             | Timeline::Warps(model::Warps {
                 audio: Some(file), ..
             }) => file.duration.map_or(Ticks::ZERO, |seconds| {
@@ -425,6 +426,7 @@ impl Importer<'_, '_> {
                     .max()?
             }
             Timeline::Audio(file)
+            | Timeline::Video(file)
             | Timeline::Warps(model::Warps {
                 audio: Some(file), ..
             }) => self.span(TimeUnit::Seconds, file.duration?, start),
@@ -445,9 +447,13 @@ impl Importer<'_, '_> {
     ) -> Vec<Piece> {
         match content {
             Timeline::Notes(notes) => self.midi_clip(source, notes, frame, lane, place),
-            Timeline::Audio(file) => self.audio_clip(source, file, None, frame, lane, place),
+            Timeline::Audio(file) => self.audio_clip(source, file, None, false, frame, lane, place),
+            // Spec: DAWproject R89. A movie plays as a video clip.
+            Timeline::Video(file) => self.audio_clip(source, file, None, true, frame, lane, place),
             Timeline::Warps(warps) => match &warps.audio {
-                Some(file) => self.audio_clip(source, file, Some(warps), frame, lane, place),
+                Some(file) => {
+                    self.audio_clip(source, file, Some(warps), warps.video, frame, lane, place)
+                }
                 None => {
                     self.report
                         .add("a warped clip with no file", place, "left out");
@@ -463,7 +469,10 @@ impl Importer<'_, '_> {
                 let mut points: Vec<&model::Points> = Vec::new();
                 for child in &lanes.children {
                     match child {
-                        Timeline::Notes(_) | Timeline::Audio(_) | Timeline::Warps(_) => {
+                        Timeline::Notes(_)
+                        | Timeline::Audio(_)
+                        | Timeline::Video(_)
+                        | Timeline::Warps(_) => {
                             if found {
                                 self.report.add(
                                     "a further timeline in a clip's lanes",
@@ -479,19 +488,12 @@ impl Importer<'_, '_> {
                             };
                             made.extend(self.content(source, child, frame, lane, place, depth + 1));
                         }
-                        Timeline::Video(_) => {
-                            self.report.add("a video timeline", place, "left out");
-                        }
                         Timeline::Points(set) => points.push(set),
                         _ => {}
                     }
                 }
                 self.lane_points(&points, &mut made, frame, lane, place);
                 made
-            }
-            Timeline::Video(_) => {
-                self.report.add("a video clip", place, "left out");
-                Vec::new()
             }
             Timeline::Points(_) | Timeline::Markers(_) | Timeline::ClipSlot(_) => {
                 self.report
@@ -639,12 +641,14 @@ impl Importer<'_, '_> {
     }
 
     /// An audio clip, warped when `warps` holds events that rise (R29 to
-    /// R32).
+    /// R32), and a video clip when `video` says the file is a movie (R89).
+    #[expect(clippy::too_many_arguments, reason = "one clip's whole description")]
     fn audio_clip(
         &mut self,
         source: &model::Clip,
         file: &MediaFile,
         warps: Option<&model::Warps>,
+        video: bool,
         frame: Frame,
         lane: &Lane,
         place: &str,
@@ -658,6 +662,7 @@ impl Importer<'_, '_> {
             return Vec::new();
         };
         let mut data = AudioData::new(hash);
+        data.video = video;
         let mut warped = false;
         if let Some(warps) = warps {
             match self.warp_markers(warps, frame) {

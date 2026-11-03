@@ -263,10 +263,15 @@ impl View<'_> {
                 "mute": mixer.mute,
                 "solo": mixer.solo,
                 "arm": mixer.arm,
+                // Spec: push-2-notes R3. Armed by a control surface's
+                // selection rather than by hand.
+                "arm_by_selection": self.shell.armed_by_selection(track.id()),
             },
             "delay": track.delay(),
             "keep_monitoring_latency": track.keep_monitoring_latency(),
             "tuning_bypass": track.tuning_bypass(),
+            // Spec: chord-lane R5, R12.
+            "follow_chord_lane": track.follow_chord_lane(),
             // Spec: tunings R24. Only a MIDI track's layout does anything.
             "tuning_layout": track.tuning_layout(),
             "clips": track.clips().len(),
@@ -388,6 +393,11 @@ impl View<'_> {
         if let Some((scene, _)) = slot {
             value["scene"] = json!(scene);
         }
+        // Spec: linked-clips R14. The clip's link and the other clips in it.
+        value["link"] = clip.link.map_or(
+            Value::Null,
+            |link| json!({ "id": link, "others": self.document.linked_clip_ids(clip.id) }),
+        );
         if self.detail == Detail::Full {
             value["saved"] = self.saved(clip);
         }
@@ -485,6 +495,7 @@ impl View<'_> {
                 value["receive"] = json!(chain.receive);
                 value["play"] = json!(chain.play);
                 value["choke"] = json!(chain.choke);
+                value["push_colour"] = json!(chain.push_colour);
                 value["sends"] = json!(chain.sends);
             }
         }
@@ -510,6 +521,12 @@ impl View<'_> {
             .map(|(param, value)| json!({ "param": param, "value": value }))
             .collect();
         value["params"] = self.page.slice(params);
+        // Spec: plugin-scanning R20. The preset a plug-in device last loaded
+        // or was saved as, and how much state of its own the set holds for it.
+        if let Some(plugin) = &device.plugin {
+            value["preset"] = json!(device.preset_name);
+            value["state_bytes"] = json!(plugin.data.len());
+        }
         // Spec: cv-tools R4, R20. An external device's routing, the CV
         // choosers of a CV device among it, and a CV device's calibration:
         // the fit, each step's error, and whether one is held.
@@ -538,6 +555,12 @@ impl View<'_> {
                 "list": self.page.slice(layers),
             });
         }
+        // Spec: wavetable R8. What each wavetable oscillator plays, which
+        // `device.load_wavetable` changes.
+        let wavetables = self.shell.wavetables_of(device);
+        if !wavetables.is_empty() {
+            value["wavetables"] = json!(wavetables);
+        }
         // Spec: modulation R18. A modulator's mappings, which
         // `modulator.map` and `modulator.unmap` change.
         if bl_model::modulator::is_modulator_kind(&device.kind) {
@@ -554,6 +577,18 @@ impl View<'_> {
         // which `articulation.list` gives too.
         if device.is_articulation_map() {
             value["articulations"] = json!(device.articulations);
+        }
+        // Spec: sound-similarity R28. A Simpler's or Drum Sampler's sample,
+        // its similarity reference and where the sample stands in the
+        // reference's list, which `device.swap_similar` and its kin change.
+        if let Some(state) = self.shell.sampler_similar_state(device.id) {
+            value["similar"] = json!(state);
+        }
+        // Spec: instrument modulation R11. An instrument's modulation matrix:
+        // its sources and destinations, and every slot, which
+        // `device.set_route` and `device.clear_route` change.
+        if let Some(matrix) = self.shell.device_matrix(device) {
+            value["matrix"] = json!(matrix);
         }
         if device.can_compare() {
             // Spec: device-compare R11.
@@ -699,6 +734,14 @@ fn overview(ctx: &Ctx<'_>, view: &View<'_>) -> Value {
         },
         "time_signature_at_start": settings.time_signatures.signature_at(Ticks::ZERO).to_string(),
         "scale": scale_value(settings.scale),
+        // Spec: chord-lane R2, R12.
+        "chord_lane": settings.chord_lane.iter().map(|region| json!({
+            "id": region.id,
+            "start": region.start,
+            "end": region.end,
+            "scale": scale_value(region.scale),
+            "transpose": region.transpose,
+        })).collect::<Vec<_>>(),
         "tuning": settings.tuning.as_ref().map(bl_model::Tuning::readout),
         "counts": {
             "tracks": document.track_count(),

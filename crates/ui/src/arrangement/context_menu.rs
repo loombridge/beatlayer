@@ -45,6 +45,10 @@ pub enum MenuKind {
     Breakpoint,
     /// An envelope's line: Add Value (C-TIME-026).
     Line,
+    /// The arranger track away from a section (IMP-22).
+    Arranger,
+    /// A section's (IMP-22).
+    Section,
 }
 
 /// The two menus and which one is open.
@@ -186,6 +190,16 @@ impl ContextMenus {
         self.scrub_at = Some(at);
     }
 
+    /// A right-click in the arranger track away from a section.
+    pub fn open_arranger(&mut self) {
+        self.kind = MenuKind::Arranger;
+    }
+
+    /// A right-click on a section, which is selected.
+    pub fn open_section(&mut self) {
+        self.kind = MenuKind::Section;
+    }
+
     /// A right-click on the loop brace.
     pub fn open_brace(&mut self) {
         self.kind = MenuKind::Brace;
@@ -235,37 +249,16 @@ impl ContextMenus {
             MenuKind::Brace => context_menus::arrangement_brace_in(),
             MenuKind::FragmentaryBar => context_menus::arrangement_fragmentary_bar_in(),
             MenuKind::Signature => context_menus::arrangement_signature_in(),
+            MenuKind::Arranger => context_menus::arrangement_arranger_in(),
+            MenuKind::Section => context_menus::arrangement_section_in(),
             MenuKind::Breakpoint | MenuKind::Line => return,
         };
         let menu = &menu;
-        let grid = shell.arrangement().grid();
         for item in shown(menu) {
             if item.is_separator() {
-                ui.separator();
-            } else if ADAPTIVE_GRID_ROWS.contains(&item.row) {
-                // Five choices in three columns (C-CLIP-ARR-020).
-                choices(ui, item.row, 3, AdaptiveGrid::ALL.len(), |ui, i| {
-                    let choice = AdaptiveGrid::ALL[i];
-                    let on = !grid.fixed_on && grid.adaptive == choice;
-                    let response = ui.selectable_label(on, choice.label());
-                    crate::menus::register_item(ui.ctx(), &response);
-                    if response.clicked() {
-                        invoke(events, view_ids::SET_GRID, json!({ "adaptive": choice }));
-                        ui.close();
-                    }
-                });
-            } else if FIXED_GRID_ROWS.contains(&item.row) {
-                // Nine choices in five columns (C-CLIP-ARR-021).
-                choices(ui, item.row, 5, FixedGrid::ALL.len(), |ui, i| {
-                    let choice = FixedGrid::ALL[i];
-                    let on = grid.fixed_on && grid.fixed == choice;
-                    let response = ui.selectable_label(on, choice.label());
-                    crate::menus::register_item(ui.ctx(), &response);
-                    if response.clicked() {
-                        invoke(events, view_ids::SET_GRID, json!({ "fixed": choice }));
-                        ui.close();
-                    }
-                });
+                crate::menus::separator(ui);
+            } else if grid_row(ui, shell, item.row, events) {
+                // The grid's choices, laid out in rows.
             } else if item.row == CLIP_COLOUR_ROW {
                 // Spec: themes R16. The palette colours the selected clips.
                 let doc = shell.editor().document();
@@ -274,11 +267,31 @@ impl ContextMenus {
                     .first()
                     .and_then(|clip| doc.clip(*clip))
                     .and_then(|clip| clip.colour);
-                if let Some(colour) = crate::palette::show(ui, theme, "clip-colour", current) {
+                crate::palette::show(
+                    ui,
+                    theme,
+                    shell,
+                    "clip-colour",
+                    current,
+                    crate::palette::Target::new("clip.set_colour", json!({ "clips": selected })),
+                    events,
+                );
+            } else if item.row == context_menus::SECTION_COLOUR_ROW {
+                // Spec: arranger-track R7. The palette colours the section.
+                let doc = shell.editor().document();
+                let current = shell
+                    .arrangement()
+                    .selected_sections()
+                    .first()
+                    .and_then(|section| doc.section(*section))
+                    .map(|section| section.colour);
+                if let Some(colour) =
+                    crate::palette::show_swatches(ui, theme, "section-colour", current)
+                {
                     invoke(
                         events,
-                        "clip.set_colour",
-                        json!({ "clips": selected, "colour": colour }),
+                        bl_shell::arranger_commands::SET_SECTION_COLOUR,
+                        json!({ "colour": colour }),
                     );
                     ui.close();
                 }
@@ -326,6 +339,29 @@ impl ContextMenus {
                             .first()
                             .map(|clip| json!({ "clip": clip }))
                     }
+                    // Spec: linked-clips R1, R8. Both act on the selected
+                    // clips.
+                    (MenuKind::Clip, Action::Command(id))
+                        if id == bl_shell::linked_clip_commands::DUPLICATE_LINKED
+                            || id == bl_shell::linked_clip_commands::UNLINK =>
+                    {
+                        Some(json!({ "clips": shell.arrangement().selected_clips() }))
+                    }
+                    // Spec: stem-separation R22. The time selection's audio
+                    // tracks and range.
+                    (MenuKind::Time, Action::Command(id))
+                        if id == bl_shell::stems_commands::OPEN =>
+                    {
+                        let view = shell.arrangement();
+                        view.time_selection().map(|(start, end)| {
+                            json!({ "source": {
+                                "kind": "time_selection",
+                                "tracks": view.selected_tracks(),
+                                "start": start,
+                                "end": end,
+                            } })
+                        })
+                    }
                     _ => None,
                 };
                 let response = match args {
@@ -372,11 +408,25 @@ fn selection_menu(shell: &Shell) -> SelectionMenu {
             .time_selection_lanes()
             .iter()
             .any(|lane| lane.target().is_some());
+    // Spec: stem-separation R22. A time selection that holds audio on audio
+    // tracks brings Separate Stems to New Audio Tracks.
+    let audio = view.time_selection().is_some_and(|(start, end)| {
+        doc.track_order()
+            .into_iter()
+            .filter_map(|track| doc.track(track))
+            .filter(|track| track.kind() == bl_model::TrackKind::Audio)
+            .any(|track| {
+                track
+                    .clips()
+                    .any(|clip| clip.start < end && clip.end() > start)
+            })
+    });
     SelectionMenu {
         clips,
         automation,
         take_lane: view.take_lane_selected(),
         time_commands: true,
+        audio,
     }
 }
 
@@ -449,6 +499,40 @@ fn audio_selected(shell: &Shell) -> bool {
             doc.clip(*clip)
                 .is_some_and(|c| matches!(c.data, bl_model::ClipData::Audio(_)))
         })
+}
+
+/// Draws `row` if it is one of the grid's two rows of choices: five
+/// Adaptive Grid settings three a row, nine Fixed Grid spacings five a row
+/// (C-CLIP-ARR-020, C-CLIP-ARR-021, and the note editor's and the clip
+/// envelope editor's). Returns whether it was one.
+pub(crate) fn grid_row(ui: &mut Ui, shell: &Shell, row: &str, events: &mut Vec<UiEvent>) -> bool {
+    let grid = shell.arrangement().grid();
+    if ADAPTIVE_GRID_ROWS.contains(&row) {
+        choices(ui, row, 3, AdaptiveGrid::ALL.len(), |ui, i| {
+            let choice = AdaptiveGrid::ALL[i];
+            let on = !grid.fixed_on && grid.adaptive == choice;
+            let response = ui.selectable_label(on, choice.label());
+            crate::menus::register_item(ui.ctx(), &response);
+            if response.clicked() {
+                invoke(events, view_ids::SET_GRID, json!({ "adaptive": choice }));
+                ui.close();
+            }
+        });
+    } else if FIXED_GRID_ROWS.contains(&row) {
+        choices(ui, row, 5, FixedGrid::ALL.len(), |ui, i| {
+            let choice = FixedGrid::ALL[i];
+            let on = grid.fixed_on && grid.fixed == choice;
+            let response = ui.selectable_label(on, choice.label());
+            crate::menus::register_item(ui.ctx(), &response);
+            if response.clicked() {
+                invoke(events, view_ids::SET_GRID, json!({ "fixed": choice }));
+                ui.close();
+            }
+        });
+    } else {
+        return false;
+    }
+    true
 }
 
 /// Lays out `count` choices in `columns` columns.

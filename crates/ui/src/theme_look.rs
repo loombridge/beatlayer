@@ -65,6 +65,7 @@ impl Colours {
             accent,
             accent_text,
             record,
+            arm_selection,
             error_text,
             focus,
             meter,
@@ -86,6 +87,8 @@ impl Colours {
             value_fill,
             clip_text,
             waveform,
+            out_of_scale,
+            pitch_hues: _,
             track_palette: _,
         } = self;
         vec![
@@ -114,6 +117,7 @@ impl Colours {
             ("accent", Chromatic, accent),
             ("accent_text", Chromatic, accent_text),
             ("record", Chromatic, record),
+            ("arm_selection", Chromatic, arm_selection),
             ("error_text", Chromatic, error_text),
             ("focus", Chromatic, focus),
             ("meter", Chromatic, meter),
@@ -135,6 +139,7 @@ impl Colours {
             ("value_fill", Chromatic, value_fill),
             ("clip_text", Fixed, clip_text),
             ("waveform", Fixed, waveform),
+            ("out_of_scale", Fixed, out_of_scale),
         ]
     }
 

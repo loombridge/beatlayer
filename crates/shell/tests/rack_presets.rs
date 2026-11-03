@@ -673,3 +673,64 @@ fn a_chain_saves_to_a_file_and_loads_back_and_an_armed_chain_is_replaced() {
     );
     assert_eq!(steps(&shell), steps_now);
 }
+
+// Spec: push-2-notes R19. The colour a pad shows on Push 2 is saved with the
+// drum rack, in a preset and in the set.
+#[test]
+fn a_pads_push_colour_survives_a_preset_and_a_saved_set() {
+    let scratch = Scratch::new("push-colour");
+    let (mut shell, _, _) = shell_in(&scratch, "a");
+    let rack = add(&mut shell, json!({ "device": rack_of("drum") })).device;
+    shell
+        .run(
+            "pad.drop",
+            json!({ "rack": rack, "note": 37, "device": gain() }),
+        )
+        .unwrap();
+    let before = steps(&shell);
+    shell
+        .run(
+            "pad.set_push_colour",
+            json!({ "rack": rack, "note": 37, "colour": 23 }),
+        )
+        .unwrap();
+    assert_eq!(steps(&shell), before + 1, "one undo step");
+    let colour = |shell: &Shell, rack: DeviceId| {
+        shell
+            .editor()
+            .document()
+            .device(rack)
+            .unwrap()
+            .chains
+            .iter()
+            .map(|c| c.push_colour)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(colour(&shell, rack), [Some(23)]);
+
+    // A preset keeps it.
+    let saved = save_preset(&mut shell, rack);
+    let (mut other, _, _) = shell_in(&scratch, "b");
+    let loaded: DeviceAdded = serde_json::from_value(
+        other
+            .run("device.add_preset", json!({ "path": saved.path }))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(colour(&other, loaded.device), [Some(23)]);
+
+    // So does the set.
+    let set = scratch.path("Pads.blset");
+    let result: bl_shell::commands::SetResult = serde_json::from_value(
+        shell
+            .run("set.save_as", json!({ "path": set.to_string_lossy() }))
+            .unwrap(),
+    )
+    .unwrap();
+    let (mut fresh, midi, _) = shell_in(&scratch, "c");
+    fresh
+        .run("set.open", json!({ "path": result.path.unwrap() }))
+        .unwrap();
+    assert_eq!(colour(&fresh, rack), [Some(23)]);
+    assert_eq!(track_devices(&fresh, midi), vec![rack]);
+}

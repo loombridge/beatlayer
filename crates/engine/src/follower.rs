@@ -68,6 +68,7 @@ pub struct Follow {
     commands: Vec<(u64, TransportCommand)>,
     no_count_in: bool,
     override_tempo: bool,
+    moment: Option<i64>,
 }
 
 impl Follow {
@@ -79,6 +80,7 @@ impl Follow {
             commands: Vec::with_capacity(commands),
             no_count_in: false,
             override_tempo: false,
+            moment: None,
         }
     }
 
@@ -89,6 +91,7 @@ impl Follow {
         self.commands.clear();
         self.no_count_in = false;
         self.override_tempo = false;
+        self.moment = None;
     }
 
     /// Plays this block at `bpm`, limited to 20 to 999 BPM. While a follower
@@ -144,6 +147,18 @@ impl Follow {
     /// pressed (the Link spec, R4).
     pub fn override_tempo(&mut self) {
         self.override_tempo = true;
+    }
+
+    /// Says the block's first frame is heard at `micros` on Link's clock, as
+    /// the output latency has it, before any shift the follower makes of its
+    /// own: where the audio of Link Audio's peers is read and where the
+    /// tracks offered to them are placed (the Link Audio spec, R6).
+    pub fn moment(&mut self, micros: i64) {
+        self.moment = Some(micros);
+    }
+
+    pub(crate) fn heard(&self) -> Option<i64> {
+        self.moment
     }
 
     pub(crate) fn followed(&self) -> Option<f64> {

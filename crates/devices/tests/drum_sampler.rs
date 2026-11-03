@@ -1060,3 +1060,133 @@ fn the_engine_plays_the_sample_the_set_names() {
         out[47_000]
     );
 }
+
+// Spec: sound-similarity R29. A set's change of sample keeps the device's
+// node: the voice that sounds fades out over 5 ms on the old sample, and a
+// note after it plays the new one, with no allocation in a block.
+#[test]
+fn a_change_of_sample_in_the_set_fades_the_sounding_voice_and_plays_the_new_sample() {
+    let (old_hash, new_hash) = (
+        bl_model::ContentHash([9u8; 32]),
+        bl_model::ContentHash([8u8; 32]),
+    );
+    let mut media = MediaMap::new();
+    media.insert(old_hash, sample(96_000, |_| 1.0));
+    media.insert(new_hash, sample(96_000, |_| 0.5));
+    let mut editor = Editor::new();
+    let track: TrackId = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let mut device: Device = drum_sampler_type().device(editor.new_id());
+    device.media = vec![Some(old_hash)];
+    let id = device.id;
+    editor
+        .apply(Command::InsertDevice {
+            track,
+            index: 0,
+            device,
+        })
+        .unwrap();
+    let quarter = Ticks(TICKS_PER_QUARTER);
+    let clip: bl_model::ClipId = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                Ticks(TICKS_PER_QUARTER * 4),
+                ClipData::Midi(MidiData::new([
+                    Note::new(60, Ticks::ZERO, quarter * 4, 100),
+                    Note::new(62, quarter, quarter, 100),
+                ])),
+            ),
+        })
+        .unwrap();
+    let registry = registry().with_media(Arc::new(media));
+    let mut offline = Offline::new(EngineConfig::new(RATE, 256), registry);
+    assert!(offline.sync(editor.document()).is_empty());
+    offline.sender().transport(TransportCommand::Play);
+    let mut played = Vec::new();
+    offline.render(1024, |block| played.extend_from_slice(block.channel(0)));
+    let level = played[1000];
+    assert!(level > 0.5, "the first note sounds: {level}");
+    editor
+        .apply(Command::SetDeviceSample {
+            device: id,
+            media: Some(new_hash),
+            slot: 0,
+        })
+        .unwrap();
+    assert!(offline.sync(editor.document()).is_empty());
+    let mut after = Vec::new();
+    offline.render(2048, |block| after.extend_from_slice(block.channel(0)));
+    assert!(
+        after[0] > 0.9 * level,
+        "the voice carries on at once: {} for {level}",
+        after[0]
+    );
+    assert!(
+        after[270..1500].iter().all(|s| s.abs() < 1e-4),
+        "the old sample faded out within 5 ms and the held note makes no more"
+    );
+    // The second note, a beat in, plays the new sample.
+    let mut late = Vec::new();
+    offline.render(24_000, |block| late.extend_from_slice(block.channel(0)));
+    let wanted = 0.5 * 100.0 / 127.0;
+    assert!(
+        late.iter().any(|s| (s - wanted).abs() < 0.02),
+        "the new sample plays: peak {}",
+        late.iter().fold(0.0f32, |a, s| a.max(s.abs()))
+    );
+    assert_eq!(offline.heap_operations(), 0, "no allocation in a block");
+}
+
+// Spec: sound-similarity R29. A sample that arrives while a voice sounds
+// leaves the voice playing the old sample, faded out over 5 ms, and the next
+// note plays the new one.
+#[test]
+fn a_sample_that_arrives_while_a_voice_sounds_fades_the_voice_out_over_five_milliseconds() {
+    let (old, new) = (sample(48_000, |_| 1.0), sample(48_000, |_| 0.5));
+    let (mut node, collector) = loaded(&[], &old);
+    let before = render(node.as_mut(), 1000, 1000, &[(0, on(0, 60, 1.0))], &[]);
+    let level = before[0][999];
+    assert!(level > 0.1, "the voice sounds: {level}");
+    node.receive_data(
+        collector
+            .handle()
+            .data(SlotSample::new(0, Arc::clone(&new))),
+    );
+    let fade = render(node.as_mut(), 1000, 1000, &[], &[]);
+    assert!(
+        fade[0][0] > 0.9 * level,
+        "the old sample carries on at once: {} for {level}",
+        fade[0][0]
+    );
+    assert!(
+        fade[0][..240].windows(2).all(|w| w[1] <= w[0] + 1e-6),
+        "it only falls"
+    );
+    assert!(
+        (0.3 * level..0.8 * level).contains(&fade[0][120]),
+        "about half way through: {} for {level}",
+        fade[0][120]
+    );
+    assert!(
+        fade[0][260..].iter().all(|s| s.abs() < 1e-4),
+        "silent after 5 ms"
+    );
+    let after = render(node.as_mut(), 1000, 1000, &[(0, on(0, 60, 1.0))], &[]);
+    assert!(
+        (after[0][999] - 0.5 * level).abs() < 0.05 * level,
+        "{} for half of {level}",
+        after[0][999]
+    );
+}

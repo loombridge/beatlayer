@@ -216,7 +216,7 @@ fn layout() -> DeviceLayout {
             ],
         )),
         LayoutNode::Cell(
-            DisplayCell::new("Gain Reduction", 170.0, BODY_HEIGHT, 1.0)
+            DisplayCell::new("Gain Reduction", 180.0, BODY_HEIGHT, 1.0)
                 .with_top(ControlBand::stacked(
                     60.0,
                     &[(THRESHOLD, Widget::Knob), (OUT, Widget::Knob)],
@@ -525,6 +525,7 @@ pub fn display(
         text: format!("{level:.1} dB"),
     };
     let mut out = DeviceDisplay {
+        spectrograms: Vec::new(),
         device,
         live: data.is_some(),
         view: None,
@@ -541,6 +542,7 @@ pub fn display(
                 .collect(),
         }],
         markers: vec![DisplayMarker {
+            handle: None,
             name: "Threshold".to_owned(),
             series: "Transfer Curve".to_owned(),
             x: threshold as f32,
@@ -564,6 +566,7 @@ pub fn display(
         ];
         if input > CURVE_FROM_DB {
             out.markers.push(DisplayMarker {
+                handle: None,
                 name: "Level".to_owned(),
                 series: "Transfer Curve".to_owned(),
                 x: input,

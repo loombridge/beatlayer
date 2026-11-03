@@ -25,6 +25,12 @@ impl Shell {
     /// the one that starts it.
     pub(super) fn run_tap_tempo(&mut self, args: Value) -> Result<Value, ShellError> {
         let TapTempoArgs { at } = Self::args(ids::TAP_TEMPO, args)?;
+        // Spec: tempo-follower R21. Tempo Follower sets the tempo.
+        if self.tempo_follow_on {
+            return Err(Self::tap_refused(
+                "Tempo Follower is on and sets the tempo; switch it off to tap one",
+            ));
+        }
         if !transport::editable(self, Group::Tempo) {
             return Err(Self::tap_refused(
                 "the song has tempo changes, or a clip leads its tempo; the taps could not set it",

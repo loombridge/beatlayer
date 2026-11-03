@@ -101,6 +101,53 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             "push.set_setup",
             Exception(Equivalent("Push 2's Setup menu, set with its own encoders")),
         ),
+        // Push 2's recording buttons (WP-7.23): each is the button's own
+        // action, which the app reaches by its own commands.
+        (
+            "push.set_fixed_length",
+            Exception(Equivalent("Push 2's Fixed Length button and its menu")),
+        ),
+        (
+            "push.set_swing",
+            Exception(Equivalent("Push 2's swing encoder and its Quantize menu")),
+        ),
+        ("push.new", Exception(Equivalent("Push 2's New button"))),
+        (
+            "push.duplicate",
+            Exception(Equivalent("Push 2's Duplicate button pressed alone")),
+        ),
+        // Push 2's Convert (WP-7.24): the button acts on what is selected,
+        // and the app's own menus make each of its results.
+        (
+            "push.convert",
+            Exception(Equivalent("Push 2's Convert button")),
+        ),
+        // Push 2's Note Mode (WP-7.21): the pad colour shows only on Push 2,
+        // and Duplicate with two pads is its own gesture.
+        (
+            "pad.copy",
+            Exception(Equivalent("Push 2's Duplicate button with two pads")),
+        ),
+        (
+            "pad.set_push_colour",
+            Exception(Equivalent(
+                "Push 2's Shift button with a pad, which opens its colour picker",
+            )),
+        ),
+        // Push 2's Scale menu (WP-7.22): the options belong to a controller's
+        // pads, and the app has no control for them.
+        (
+            "song.set_pad_layout",
+            Exception(Equivalent(
+                "Push 2's Scale menu, which sets them on its display",
+            )),
+        ),
+        (
+            "chain.set_push_colour",
+            Exception(Equivalent(
+                "`pad.set_push_colour`, which sets the colour of every chain on a pad",
+            )),
+        ),
         // The Automation Arm button's context menu (the automation spec,
         // R18), opened from the focused button as the tempo field's is.
         (
@@ -265,6 +312,22 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             settings("theme-colors", nothing, "Clip Color", Key::ArrowDown),
         ),
         (
+            "settings.set_new_tracks_take_group_colour",
+            settings(
+                "theme-colors",
+                nothing,
+                "New Tracks Take Group Color",
+                Key::Enter,
+            ),
+        ),
+        (
+            "settings.use_custom_colour",
+            Exception(Equivalent(
+                "a palette's custom row and its Custom Color… picker record the colour as they \
+                 colour the selection; the keyboard reaches both (themes R31)",
+            )),
+        ),
+        (
             "settings.set_create_fades_on_clip_edges",
             settings(
                 "record-warp-launch",
@@ -385,8 +448,16 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             ),
         ),
         (
+            "settings.set_multiple_plug_in_windows",
+            settings("plug-ins", nothing, "Multiple Plug-In Windows", Key::Enter),
+        ),
+        (
             "settings.set_auto_hide_plug_in_windows",
             settings("plug-ins", nothing, "Auto-Hide Plug-In Windows", Key::Enter),
+        ),
+        (
+            "settings.set_auto_open_plug_in_windows",
+            settings("plug-ins", nothing, "Auto-Open Plug-In Windows", Key::Enter),
         ),
         (
             "settings.set_outline_view_in_focus",
@@ -406,6 +477,19 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                 Key::Enter,
             ),
         ),
+        // The view options (the view options spec, R10 and R15): the wheel's
+        // switch in Display & Input, and the read of the empty tracks. The
+        // note colours and the mark are View menu items.
+        (
+            "settings.set_wheel_adjusts_values",
+            settings(
+                "display-input",
+                nothing,
+                "Adjust Values with Mouse Wheel",
+                Key::Enter,
+            ),
+        ),
+        ("track.list_empty", Exception(Query)),
         // The Shortcuts page (the custom shortcuts spec, R8 and R10): the
         // Remove and Reset buttons.
         (

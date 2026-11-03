@@ -5,7 +5,7 @@ use crate::common;
 use bl_core::time::Ticks;
 use bl_model::{AudioData, Clip, ClipData, ClipId, Command, TrackId};
 use bl_shell::files::factory_default_set;
-use bl_shell::stems_commands::{DialogStep, JobState};
+use bl_shell::stems_commands::{DialogStep, JobState, StemSource};
 use bl_ui::arrangement::benchmark;
 use common::{Harness, Window};
 use egui::{Event, Modifiers, PointerButton, Pos2, pos2};
@@ -130,7 +130,10 @@ fn an_audio_clips_menu_opens_the_packages_dialog_the_first_time() {
         },
     )]);
     let dialog = h.shell.stems_dialog().expect("the dialog is open");
-    assert_eq!((dialog.step, dialog.clip), (DialogStep::Packages, clip));
+    assert_eq!(
+        (dialog.step, dialog.source),
+        (DialogStep::Packages, StemSource::Clip { clip })
+    );
     let output = h.settle();
     let shown = labels(&output);
     for text in [
@@ -184,4 +187,107 @@ fn an_audio_clips_menu_opens_the_packages_dialog_the_first_time() {
     let status = h.shell.stems_status();
     // The stand-ins can't separate anything, but the separation started.
     assert_ne!(status.separation.state, JobState::Idle, "{status:?}");
+}
+
+// Spec: stem-separation R22. A time selection's menu offers Separate Stems
+// to New Audio Tracks after Crop Clip when the selection holds audio, and
+// opens the dialog on the selection's tracks and range.
+#[test]
+fn a_time_selections_menu_opens_the_dialog_on_its_range() {
+    let (mut h, clip) = set();
+    if bl_shell::stems::packages().is_empty() {
+        return;
+    }
+    let track = h.shell.editor().document().clip_track(clip).unwrap();
+    // Bars 4 to 8 over a clip on bars 2 to 6; the right-click is on the
+    // empty part of the selection, so it opens the time selection's menu.
+    h.shell
+        .run(
+            "arrangement.select_time",
+            serde_json::json!({ "start": 4 * BAR, "end": 8 * BAR, "tracks": [track] }),
+        )
+        .unwrap();
+    h.settle();
+    let output = right_click(&mut h, pos2(x(7.0), AUDIO_3));
+    let item = Harness::nodes(&output)
+        .into_iter()
+        .rfind(|n| n.label.starts_with("Separate Stems to New Audio Tracks"))
+        .expect("the time selection's menu has Separate Stems");
+    assert!(!item.disabled);
+    h.frame(vec![Event::AccessKitActionRequest(
+        egui::accesskit::ActionRequest {
+            action: egui::accesskit::Action::Click,
+            target_tree: egui::accesskit::TreeId::ROOT,
+            target_node: item.id,
+            data: None,
+        },
+    )]);
+    let dialog = h.shell.stems_dialog().expect("the dialog is open");
+    assert_eq!(
+        dialog.source,
+        StemSource::TimeSelection {
+            tracks: vec![track],
+            start: Ticks(4 * BAR),
+            end: Ticks(8 * BAR),
+        }
+    );
+}
+
+/// The Create menu's Separate Stems item (M-CREATE-015) as it stands now.
+fn create_item(h: &Harness) -> bl_ui::menus::ItemState {
+    let menus = bl_shell::menus::menu_bar(bl_shell::menus::MenuPlatform::current());
+    let item = menus
+        .iter()
+        .flat_map(bl_shell::menus::Menu::walk)
+        .find(|item| item.row == "M-CREATE-015")
+        .unwrap();
+    bl_ui::menus::item_state(
+        item,
+        &h.shell,
+        &h.keymap,
+        bl_ui::keymap::Platform::current(),
+    )
+}
+
+// Spec: stem-separation R22. The Create menu's item acts on what is
+// selected: one audio clip, a time selection holding audio, or one audio
+// file in the browser; with none of them it is disabled.
+#[test]
+fn the_create_menus_item_acts_on_the_selection() {
+    let (mut h, clip) = set();
+    if bl_shell::stems::packages().is_empty() {
+        return;
+    }
+    let track = h.shell.editor().document().clip_track(clip).unwrap();
+    let open = |h: &mut Harness| {
+        let item = create_item(h);
+        assert!(item.enabled);
+        let invocation = item.invocation.unwrap();
+        h.shell.run(&invocation.id, invocation.args).unwrap();
+        let source = h.shell.stems_dialog().unwrap().source;
+        h.shell.run("stems.close", serde_json::Value::Null).unwrap();
+        source
+    };
+    assert!(!create_item(&h).enabled, "nothing is selected");
+    h.shell
+        .run(
+            "arrangement.select_clips",
+            serde_json::json!({ "clips": [clip] }),
+        )
+        .unwrap();
+    assert_eq!(open(&mut h), StemSource::Clip { clip });
+    h.shell
+        .run(
+            "arrangement.select_time",
+            serde_json::json!({ "start": 3 * BAR, "end": 4 * BAR, "tracks": [track] }),
+        )
+        .unwrap();
+    assert_eq!(
+        open(&mut h),
+        StemSource::TimeSelection {
+            tracks: vec![track],
+            start: Ticks(3 * BAR),
+            end: Ticks(4 * BAR),
+        }
+    );
 }

@@ -89,8 +89,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Left", "Right"]
 win = ["Left", "Right"]
-status = "pending"
-package = "WP-6.73"
+status = "widget"
+handler = "the Arrangement View, with the loop brace selected: Left and Right move it to the previous or next grid line (`arrangement.nudge_loop_brace`)"
 
 [[shortcut]]
 id = "S-LOOP-008"
@@ -101,8 +101,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Down", "Up"]
 win = ["Down", "Up"]
-status = "pending"
-package = "WP-6.73"
+status = "widget"
+handler = "the Arrangement View, with the loop brace selected: Down and Up move it earlier or later by its own length (`arrangement.nudge_loop_brace`)"
 
 [[shortcut]]
 id = "S-LOOP-009"
@@ -113,8 +113,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Down", "Cmd+Up"]
 win = ["Ctrl+Down", "Ctrl+Up"]
-status = "pending"
-package = "WP-6.73"
+status = "widget"
+handler = "the Arrangement View, with the loop brace selected: Cmd-Down and Cmd-Up (Ctrl) halve and double its length (`arrangement.nudge_loop_brace`)"
 
 [[shortcut]]
 id = "S-LOOP-010"
@@ -125,8 +125,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Left", "Cmd+Right"]
 win = ["Ctrl+Left", "Ctrl+Right"]
-status = "pending"
-package = "WP-6.73"
+status = "widget"
+handler = "the Arrangement View, with the loop brace selected: Cmd-Left and Cmd-Right (Ctrl) shorten and lengthen it by a grid step (`arrangement.nudge_loop_brace`)"
 
 [[shortcut]]
 id = "S-LOOP-011"

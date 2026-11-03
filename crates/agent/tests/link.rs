@@ -106,3 +106,94 @@ fn link_set_show_toggle_is_set_by_id_and_read_back() {
     let state = run(&mut client, "link.state", json!({})).unwrap();
     assert_eq!(state["show_toggle"], true);
 }
+
+// Spec: link-audio R1, R3, R7, R8, R12. `link.set_audio` sends audio over the
+// network, so a headless agent is refused it unless it is autonomous; the
+// name, latency and Sync to Incoming Audio are kept preferences. Each is run
+// by ID and `link.state` reads it back, and a track's Link Audio input is set
+// with `routing.set_input` and read back from the track's routing.
+#[test]
+fn link_audio_settings_and_a_tracks_input_are_set_by_id_and_read_back() {
+    let mut client = client(false);
+    let state = run(&mut client, "link.state", json!({})).unwrap();
+    assert_eq!(state["audio"]["enabled"], false);
+    assert_eq!(state["audio"]["latency_ms"], 20.0);
+    assert_eq!(state["audio"]["sync_to_incoming_audio"], false);
+    assert_eq!(state["audio"]["peers"], json!([]));
+
+    let refused = run(&mut client, "link.set_audio", json!({ "on": true }))
+        .expect_err("an external command, refused");
+    assert!(refused.contains("autonomous"), "{refused}");
+    assert_eq!(
+        run(&mut client, "link.state", json!({})).unwrap()["audio"]["enabled"],
+        false,
+        "nothing changed"
+    );
+
+    run(
+        &mut client,
+        "link.set_audio_name",
+        json!({ "name": "Booth" }),
+    )
+    .unwrap();
+    let latency = run(&mut client, "link.set_audio_latency", json!({ "ms": 64.0 })).unwrap();
+    assert_eq!(latency["ms"], 64.0);
+    run(
+        &mut client,
+        "link.set_sync_to_incoming_audio",
+        json!({ "on": true }),
+    )
+    .unwrap();
+    let audio = run(&mut client, "link.state", json!({})).unwrap()["audio"].clone();
+    assert_eq!(audio["name"], "Booth");
+    assert_eq!(audio["latency_ms"], 64.0);
+    assert_eq!(audio["sync_to_incoming_audio"], true);
+
+    let mut client = self::client(true);
+    let on = run(&mut client, "link.set_audio", json!({ "on": true })).unwrap();
+    assert_eq!(on["on"], true);
+    assert_eq!(
+        run(&mut client, "link.state", json!({})).unwrap()["audio"]["enabled"],
+        true
+    );
+    let off = run(&mut client, "link.set_audio", json!({})).unwrap();
+    assert_eq!(off["on"], false, "left out, it switches to the other state");
+
+    // A track takes a peer's channel by name, and its routing reads it back.
+    let made = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "track.create",
+                "args": { "id": {"$new": "take"}, "kind": "audio", "name": "Take", "index": 0 } }] }),
+        )
+        .unwrap()
+        .ok()
+        .unwrap();
+    let track = made["ids"]["take"].as_u64().unwrap();
+    run(
+        &mut client,
+        "routing.set_input",
+        json!({ "track": track, "input": {
+            "type": "link_audio", "peer": "Studio Mac", "channel": "Kick" } }),
+    )
+    .unwrap();
+    let routing = client
+        .call("query", json!({ "id": track, "detail": "full" }))
+        .unwrap()
+        .ok()
+        .unwrap();
+    assert_eq!(
+        routing["saved"]["routing"]["input"],
+        json!({ "type": "link_audio", "peer": "Studio Mac", "channel": "Kick" })
+    );
+    assert!(
+        run(
+            &mut client,
+            "routing.set_input",
+            json!({ "track": track, "input": {
+                "type": "link_audio", "peer": "", "channel": "Kick" } }),
+        )
+        .is_err(),
+        "a peer needs a name"
+    );
+}

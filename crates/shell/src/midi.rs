@@ -144,6 +144,7 @@ impl MidiHost {
             push: Arc::new(bl_push::Shared::new(
                 prefs.push.setup(),
                 f64::from(prefs.push.swing) / 1000.0,
+                prefs.push.fixed(),
             )),
             push_claim,
             push_declined: prefs.push_declined.clone(),
@@ -245,7 +246,11 @@ impl MidiHost {
             show_resync_button: self.show_resync_button,
             external_sync: self.external_sync,
             push_declined: self.push_declined.clone(),
-            push: PushPrefs::of(self.push.setup(), self.push.swing()),
+            push: PushPrefs::of(
+                self.push.setup(),
+                self.push.swing(),
+                self.push.fixed_length(),
+            ),
         }
     }
 

@@ -14,6 +14,7 @@ use crate::EngineConfig;
 use crate::capture::CapturedMidi;
 use crate::follower::{Ask, Follow, Follower};
 use crate::gc::{Owned, Program};
+use crate::link_audio::LinkAudio;
 use crate::message::{
     Action, LoopRegion, Message, NudgeDirection, ParamEvent, Punch, Report, ScheduledCommand,
     TransportCommand, When,
@@ -32,6 +33,7 @@ use crate::session::{
 };
 use crate::state::{EngineCounters, EngineState, TrackMeter};
 use crate::sync_out::{Beats, Part as SyncPart, SyncOut};
+use crate::tempo_follower::Leader;
 
 /// A parameter change waiting for its frame.
 #[derive(Clone, Copy, Debug)]
@@ -379,6 +381,9 @@ pub struct Processor {
     /// Where the song starts, when it has a song start time (the transport
     /// spec, R21).
     song_start: Option<Ticks>,
+    /// Where a run of Play Selection stops, while one plays: the Arrangement
+    /// loop doesn't apply until then (the transport spec, R35).
+    until: Option<Ticks>,
     /// The Global Amount of groove, 1 at 100 %.
     groove_amount: f32,
     /// The set's current scale (the scales spec, R9).
@@ -411,6 +416,16 @@ pub struct Processor {
     /// The outside tempo the song follows, if one is set (the transport
     /// spec, R24).
     follower: Option<Owned<Box<dyn Follower>>>,
+    /// Tempo Follower: the tempo the tracker hears in the device's input
+    /// leads the song, ahead of any Link session (the Tempo Follower spec,
+    /// R6).
+    leader: Option<Owned<Box<dyn Leader>>>,
+    /// The Link Audio the song reads peers' channels from and offers its
+    /// tracks through (the Link Audio spec, R4 to R6).
+    link_audio: Option<Owned<Box<dyn LinkAudio>>>,
+    /// Where Link's clock has this block's first frame heard, in
+    /// microseconds, if a Link session follows (R6).
+    moment: Option<i64>,
     /// What the follower answered for this block.
     follow: Follow,
     /// The tempo this block plays at, if the follower gave one.
@@ -503,6 +518,7 @@ impl Processor {
             held_scrub: None,
             held_frames: None,
             song_start: None,
+            until: None,
             groove_amount: 1.0,
             scale: Scale::default(),
             scales_hidden: false,
@@ -517,6 +533,9 @@ impl Processor {
             last_take: None,
             timed: Vec::with_capacity(config.max_scheduled),
             follower: None,
+            leader: None,
+            link_audio: None,
+            moment: None,
             ext: false,
             follow: Follow::with_capacity(config.max_scheduled),
             followed: None,
@@ -725,7 +744,13 @@ impl Processor {
         let routes = self.program.as_mut().map(|p| &mut p.get_mut().midi);
         self.midi.take(now, self.clock, frames, routes);
         self.resolve_due(frames);
+        // Spec: tempo-follower R10, R11. Tempo Follower hears every block,
+        // stopped or playing, before it is asked.
+        if let Some(leader) = self.leader.as_mut() {
+            leader.get_mut().listen(input, frames);
+        }
         self.ask_follower(frames);
+        self.read_link_audio(frames);
         let mut done = 0;
         while done < frames {
             self.apply_due_transport(done);
@@ -742,8 +767,10 @@ impl Processor {
             self.capture(done, length, part.transport);
             self.log_captured(done, length, part.transport);
             self.render(done, length, part);
+            self.stop_at_end();
             done += length;
         }
+        self.send_link_audio(frames);
         self.clock += frames as u64;
         self.last = frames;
         self.finish(began, frames);
@@ -914,6 +941,15 @@ impl Processor {
                     // for it (the transport spec, R25).
                     self.asked = None;
                     self.ask_follower(frames);
+                }
+                Message::Leader(leader) => {
+                    // Dropping the old one only lets go of it: the drop
+                    // thread frees it.
+                    drop(std::mem::replace(&mut self.leader, leader));
+                }
+                Message::LinkAudio(link_audio) => {
+                    // As the follower: dropping the old one only lets go of it.
+                    drop(std::mem::replace(&mut self.link_audio, link_audio));
                 }
                 Message::Schedule(command) => self.schedule(command),
                 Message::Session(command) => self.session_command(command),
@@ -1202,7 +1238,9 @@ impl Processor {
     /// for the follower's frame when the follower decides starts (R25).
     fn starts_song(&self, command: TransportCommand) -> bool {
         match command {
-            TransportCommand::Play | TransportCommand::PlayFromInsertMarker => true,
+            TransportCommand::Play
+            | TransportCommand::PlayFromInsertMarker
+            | TransportCommand::PlaySelection { .. } => true,
             TransportCommand::Continue
             | TransportCommand::PlayStop
             | TransportCommand::Scrub { .. } => !self.playing,
@@ -1284,6 +1322,8 @@ impl Processor {
             TransportCommand::Play => self.play(),
             // Spec: transport R10, R21
             TransportCommand::PlayFromInsertMarker => self.play_from_marker(),
+            // Spec: transport R35, R36
+            TransportCommand::PlaySelection { start, end } => self.play_selection(start, end),
             // Spec: transport R3, R4
             TransportCommand::Stop => {
                 // Spec: transport R25. A stop of the follower's own cancels
@@ -1293,6 +1333,7 @@ impl Processor {
                 // Spec: transport R22. A jump waiting for a line is
                 // abandoned when the transport stops.
                 self.pending_locate = None;
+                self.end_run();
                 self.metronome.stop();
                 // Spec: routing R11; WP-2.13. Stop ends the take, as Live's
                 // Stop ends a recording.
@@ -1317,6 +1358,7 @@ impl Processor {
                     self.held.clear();
                     self.release = None;
                     self.playing = false;
+                    self.end_run();
                     self.release_midi();
                     self.metronome.stop();
                     self.end_recordings();
@@ -1485,10 +1527,50 @@ impl Processor {
         self.start_playing_at(start);
     }
 
+    /// Starts playback from `start` and leaves the insert marker where it
+    /// is (the transport spec, R35, R36). With an `end` after `start`, the
+    /// song stops there and the Arrangement loop doesn't apply until it
+    /// does. Without one it plays on as Play does, from the song start time
+    /// instead if the set has one (R21).
+    fn play_selection(&mut self, start: Ticks, end: Option<Ticks>) {
+        let start = clamp_position(match end {
+            Some(_) => start,
+            None => self.song_start.unwrap_or(start),
+        });
+        self.start_playing_at(start);
+        self.until = end.filter(|end| *end > start);
+        self.update_loop_frames();
+    }
+
+    /// Ends a run of Play Selection: the Arrangement loop applies again
+    /// (the transport spec, R35).
+    fn end_run(&mut self) {
+        if self.until.take().is_some() {
+            self.update_loop_frames();
+        }
+    }
+
+    /// Stops the song on the end of a run of Play Selection, once the
+    /// playhead reaches it (the transport spec, R35). The block's parts
+    /// end on that frame, so the song stops there at any block size.
+    fn stop_at_end(&mut self) {
+        let Some(end) = self.until.map(|ticks| self.frames_at(ticks)) else {
+            return;
+        };
+        if !self.playing {
+            // Something else stopped the song, such as a real-time render's
+            // end, so the loop applies again.
+            self.end_run();
+        } else if self.position >= end {
+            self.transport(TransportCommand::Stop);
+        }
+    }
+
     fn start_playing_at(&mut self, start: Ticks) {
         // Spec: transport R22. A jump waiting for a line is abandoned when
         // the song starts again somewhere else.
         self.pending_locate = None;
+        self.end_run();
         let (tempo, sigs) = match &self.program {
             Some(p) => (&p.get().tempo, &p.get().time_signatures),
             None => (&self.fallback_tempo, &self.fallback_time_signatures),
@@ -1619,7 +1701,9 @@ impl Processor {
             })
         };
         let (loop_frames, held_frames) = (
-            self.loop_region.and_then(frames),
+            self.loop_region
+                .filter(|_| self.until.is_none())
+                .and_then(frames),
             self.held_scrub.and_then(frames),
         );
         self.loop_frames = loop_frames;
@@ -1669,7 +1753,10 @@ impl Processor {
         }
         match command {
             SessionCommand::Launch { track, scene } => {
-                self.launch_button(track, scene, Played::PLAIN);
+                self.launch_button(track, scene, Played::PLAIN, false);
+            }
+            SessionCommand::LaunchLegato { track, scene } => {
+                self.launch_button(track, scene, Played::PLAIN, true);
             }
             SessionCommand::LaunchAt {
                 track,
@@ -1683,6 +1770,7 @@ impl Processor {
                     velocity,
                     transpose,
                 },
+                false,
             ),
             SessionCommand::Release { track, scene } => self.release_slot(track, scene),
             SessionCommand::Nudge {
@@ -1710,7 +1798,11 @@ impl Processor {
                 self.session.back_to_arrangement(Some(track), self.position);
             }
             SessionCommand::SetQuantization(settings) => self.session.set_settings(settings),
-            SessionCommand::Record => self.record_session(),
+            SessionCommand::Record => self.record_session(None),
+            SessionCommand::RecordFixed {
+                length,
+                phrase_sync,
+            } => self.record_session((length.0 > 0).then_some((length, phrase_sync))),
             SessionCommand::StopRecording => self.stop_session_take(true),
             SessionCommand::MoveToScene(scene) => {
                 let slots = self
@@ -1727,7 +1819,9 @@ impl Processor {
     /// clip, or a Session recording (the launch quantisation spec, R5).
     fn session_starts_song(&self, command: SessionCommand) -> bool {
         match command {
-            SessionCommand::Launch { .. } | SessionCommand::Record => true,
+            SessionCommand::Launch { .. }
+            | SessionCommand::LaunchLegato { .. }
+            | SessionCommand::Record => true,
             SessionCommand::LaunchScene(scene) => self
                 .program
                 .as_ref()
@@ -1741,7 +1835,7 @@ impl Processor {
     /// it's stopped, when the transport starts too, after any count-in. A
     /// clip playing on a track that records a new clip stops where the
     /// recording starts.
-    fn record_session(&mut self) {
+    fn record_session(&mut self, fixed: Option<(Ticks, bool)>) {
         let targets = self
             .plan
             .as_mut()
@@ -1762,7 +1856,15 @@ impl Processor {
             self.position,
             self.config.sample_rate,
         );
-        let start = self.session.frame_for(playhead);
+        let (start, stop) = match fixed {
+            // Spec: push-2-notes R51. A fixed-length take ends on its own,
+            // and its clip plays on.
+            Some((length, phrase_sync)) => {
+                let (start, stop) = self.session.fixed_take(playhead, length, phrase_sync);
+                (start, Some(stop))
+            }
+            None => (self.session.frame_for(playhead), None),
+        };
         if let Some(plan) = self.plan.as_mut() {
             for target in plan.get_mut().session.iter().filter(|t| !t.overdub) {
                 self.session.stop(Some(target.track), &[], playhead);
@@ -1770,8 +1872,8 @@ impl Processor {
         }
         self.session_take = Some(SessionTake {
             start,
-            stop: None,
-            launch: false,
+            stop,
+            launch: stop.is_some(),
             last: None,
         });
     }
@@ -1815,13 +1917,13 @@ impl Processor {
     }
 
     /// Presses a slot's launch button as `played` says.
-    fn launch_button(&mut self, track: TrackId, scene: SceneId, played: Played) {
+    fn launch_button(&mut self, track: TrackId, scene: SceneId, played: Played, legato: bool) {
         if self.is_recording_slot(track, scene) {
             // Spec: session-recording R4. The launch button of a recording
             // slot ends the recording and loops the clip.
             self.stop_session_take(true);
         } else {
-            self.launch_slot(track, scene, played);
+            self.launch_slot(track, scene, played, legato);
         }
     }
 
@@ -1829,7 +1931,7 @@ impl Processor {
     /// R16, R35): on the next grid line while the song plays, and at once from
     /// the Arrangement position while it's stopped, which also starts the
     /// transport (the launch quantisation spec, R5).
-    fn launch_slot(&mut self, track: TrackId, scene: SceneId, played: Played) {
+    fn launch_slot(&mut self, track: TrackId, scene: SceneId, played: Played, legato: bool) {
         let was_playing = self.playing;
         if !was_playing {
             // Spec: launch-quantisation R5. A launch with the transport
@@ -1845,7 +1947,12 @@ impl Processor {
             self.position,
             self.config.sample_rate,
         );
-        let button = self.slot_button(track, scene);
+        let mut button = self.slot_button(track, scene);
+        if legato {
+            // Spec: push-2-notes R46. Legato at once, whatever the clip says.
+            button.legato = true;
+            button.quantization = Some(bl_model::LaunchQuantization::None);
+        }
         self.session
             .press_with(track, scene, button, played, playhead);
     }
@@ -2210,6 +2317,7 @@ impl Processor {
         // with (link R10).
         let looped = self
             .loop_region
+            .filter(|_| self.until.is_none())
             .map(|region| (region.start.get() as f64, region.end.get() as f64));
         let tempo = self
             .program
@@ -2237,10 +2345,17 @@ impl Processor {
                 .follow_cv_clocks(&ask, looped, others, &mut self.follow)
         });
         ask.leader = self.follow.followed();
+        // Spec: tempo-follower R5, R20. Tempo Follower leads ahead of a Link
+        // session, which then shares the tempo it leads with (link R26).
+        if let Some(leader) = self.leader.as_mut() {
+            leader.get_mut().block(&ask, &mut self.follow);
+            ask.leader = self.follow.followed();
+        }
         if let Some(follower) = self.follower.as_mut() {
             follower.get_mut().block(&ask, &mut self.follow);
         }
         self.no_count_in = self.follow.counts_in_off();
+        self.moment = self.follow.heard();
         if self.follow.overrides_tempo() && !self.tempo_overridden {
             self.tempo_overridden = true;
         }
@@ -2256,6 +2371,36 @@ impl Processor {
         // A follower that stops deciding, or goes, lets what waited start.
         if !self.deciding && !self.held.is_empty() {
             self.release_held();
+        }
+    }
+
+    /// Fills the block's Link Audio inputs with what the peers' channels
+    /// hold for the frames it plays on (the Link Audio spec, R5, R6): silence
+    /// while Link Audio is off or no channel is there. Real-time safe.
+    fn read_link_audio(&mut self, frames: usize) {
+        let Some(program) = self.program.as_mut() else {
+            return;
+        };
+        let link = match (self.link_audio.as_mut(), self.moment) {
+            (Some(link), Some(moment)) => {
+                let link: &dyn LinkAudio = &**link.get_mut();
+                link.active().then_some((link, moment))
+            }
+            _ => None,
+        };
+        program
+            .get_mut()
+            .read_link_audio(link, frames, self.config.sample_rate.hz());
+    }
+
+    /// Sends the block's offered tracks to the peers (the Link Audio spec,
+    /// R4). Real-time safe.
+    fn send_link_audio(&mut self, frames: usize) {
+        if let (Some(link), Some(moment)) = (self.link_audio.as_mut(), self.moment)
+            && link.get_mut().active()
+        {
+            link.get_mut()
+                .send(moment, frames, self.config.sample_rate.hz());
         }
     }
 
@@ -2465,6 +2610,10 @@ impl Processor {
         if let Some(region) = self.active_loop() {
             each(region.end);
         }
+        // Spec: transport R35. The song stops on the end of a Play Selection.
+        if let Some(end) = self.until {
+            each(self.frames_at(end));
+        }
         // Spec: transport R22. A jump waiting for the next line of the
         // global launch quantisation lands on that line's frame.
         if let Some(pending) = self.pending_locate {
@@ -2579,6 +2728,14 @@ impl Processor {
                         scale: ScaleRuns::of(self.scale),
                     },
                 );
+                // Spec: link-audio R4. The tracks offered to the peers, as
+                // they leave their mixers.
+                if self.moment.is_some()
+                    && let Some(link) = self.link_audio.as_mut()
+                    && link.get_mut().active()
+                {
+                    program.stage_link_audio(&mut **link.get_mut(), offset, length);
+                }
                 // Spec: external-devices R4, R5
                 self.midi.emit(&mut program.midi, self.output_latency);
                 for c in 0..self.config.channels {
@@ -2990,7 +3147,8 @@ impl Processor {
         state.position = self.position;
         state.position_ticks = position_ticks;
         state.insert_marker = self.insert_marker;
-        state.loop_region = self.loop_region;
+        state.loop_region = self.loop_region.filter(|_| self.until.is_none());
+        state.loop_suspended = self.until.is_some();
         state.recording = self.recording;
         state.take_running = self.take.is_some();
         state.take_so_far = self.take.map(|take| TakeBounds {
@@ -3058,6 +3216,10 @@ impl Processor {
         state.modulated.clear();
         if let Some(program) = &self.program {
             program.get().modulated(&mut state.modulated);
+        }
+        state.matrix_played.clear();
+        if let Some(program) = &self.program {
+            program.get().matrix_played(&mut state.matrix_played);
         }
         state.latency_changes.clear();
         if let Some(program) = &self.program {

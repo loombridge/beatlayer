@@ -15,6 +15,9 @@ pub const UI_FONT: &[u8] = include_bytes!("../fonts/inter/Inter-Regular.ttf");
 /// The colours in a theme's track palette (themes R9).
 const TRACK_COLOURS: usize = 14;
 
+/// The hues of the note colours: one for each pitch class.
+const PITCH_HUES: usize = 12;
+
 const DARK: &str = include_str!("../themes/dark.toml");
 const LIGHT: &str = include_str!("../themes/light.toml");
 
@@ -57,6 +60,9 @@ pub struct Colours {
     pub accent: Colour,
     pub accent_text: Colour,
     pub record: Colour,
+    /// The Arm switch of a track a control surface armed by selection
+    /// (L-MIX-012); an arm by hand is `record`.
+    pub arm_selection: Colour,
     pub error_text: Colour,
     pub text: Colour,
     pub text_dim: Colour,
@@ -109,22 +115,56 @@ pub struct Colours {
     /// The keys of a clip's scale on the piano ruler, and the rows Highlight
     /// Scales shades (WP-6.7b).
     pub scale: Colour,
+    /// The hues of the note colours By Pitch Class and By Scale Degree
+    /// (WP-6.49): C to B, or the root up the scale.
+    pub pitch_hues: Vec<Colour>,
+    /// The grey of a note outside the clip's scale with By Scale Degree.
+    pub out_of_scale: Colour,
     /// Track and clip colours, assigned to new tracks in turn.
     pub track_palette: Vec<Colour>,
 }
 
-/// The size tokens, in points.
+/// The size tokens, in points at 100 % zoom (the UI parity reference,
+/// layout rows L-CTRL, L-BRW, L-INFO and L-ARR). The font sizes are set so
+/// the bundled typeface's capitals stand as high as Live's text does.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Sizes {
-    /// Body text.
+    /// Body text: capitals 7 points high.
     pub text: f32,
-    /// Small text, such as the Status Bar's.
+    /// Small text, such as the Control Bar's and Status Bar's: capitals
+    /// 6.5 points high.
     pub small_text: f32,
-    /// Headings, such as the Settings window's sections.
+    /// Headings, such as the Info View's title: capitals 7.5 points high.
     pub heading: f32,
     /// Controls' corner radius.
     pub corner: f32,
+    /// A Control Bar field's height.
+    pub control_field: f32,
+    /// A chooser's height in an Arrangement View track header's In/Out
+    /// column, and the distance from one to the next.
+    pub header_chooser: f32,
+    pub header_chooser_pitch: f32,
+    /// The distance between the rows of a list: the browser's, the Undo
+    /// History's, the Groove Pool's and the other lists'.
+    pub list_row: f32,
+    /// The distance between the rows of a menu, and the space a separator
+    /// adds between two of them.
+    pub menu_row: f32,
+    pub menu_separator: f32,
+    /// The distance between the lines of the Info View.
+    pub info_line: f32,
+}
+
+impl Sizes {
+    /// The bundled theme's sizes, for layout that has no theme in hand. The
+    /// two bundled themes share them; a theme file's own sizes reach what
+    /// is drawn from a [`Theme`] only.
+    #[must_use]
+    pub fn bundled() -> &'static Self {
+        static BUNDLED: std::sync::OnceLock<Sizes> = std::sync::OnceLock::new();
+        BUNDLED.get_or_init(|| Theme::bundled(true).sizes)
+    }
 }
 
 /// A theme: its name, whether it's dark, and its tokens.
@@ -178,6 +218,17 @@ impl Theme {
         base.lerp_to_gamma(towards, mix.abs())
     }
 
+    /// The colour of a track, clip or scene colour: a swatch as the
+    /// palette gives it, a custom colour as saved (the themes spec, R15,
+    /// R29).
+    #[must_use]
+    pub fn colour(&self, colour: bl_model::Colour) -> Color32 {
+        match colour {
+            bl_model::Colour::Swatch(index) => self.swatch(index),
+            bl_model::Colour::Custom([r, g, b]) => Color32::from_rgb(r, g, b),
+        }
+    }
+
     /// Reads a theme file.
     ///
     /// # Errors
@@ -185,6 +236,12 @@ impl Theme {
     /// A message if the file isn't a valid theme.
     pub fn parse(text: &str) -> Result<Self, String> {
         let theme: Self = toml::from_str(text).map_err(|e| format!("not a valid theme: {e}"))?;
+        let hues = theme.colors.pitch_hues.len();
+        if hues != PITCH_HUES {
+            return Err(format!(
+                "not a valid theme: the pitch hues are {hues} colours, not {PITCH_HUES}"
+            ));
+        }
         match theme.colors.track_palette.len() {
             TRACK_COLOURS => Ok(theme),
             n => Err(format!(
@@ -273,6 +330,9 @@ impl Theme {
         });
         ctx.set_visuals(self.visuals());
         ctx.all_styles_mut(|style| {
+            // A menu's rows are `menu_row` apart: its buttons are as tall as
+            // the pitch less the space between rows.
+            style.spacing.interact_size.y = self.sizes.menu_row - style.spacing.item_spacing.y;
             for (text_style, font) in &mut style.text_styles {
                 font.size = match text_style {
                     egui::TextStyle::Small => self.sizes.small_text,
@@ -296,6 +356,34 @@ const PALEST_MIX: f32 = 0.6;
 pub fn note_colour(colour: Color32, velocity: u8) -> Color32 {
     let t = f32::from(velocity.clamp(1, 127) - 1) / 126.0;
     colour.lerp_to_gamma(Color32::WHITE, PALEST_MIX * (1.0 - t))
+}
+
+impl Theme {
+    /// The colour a note is drawn in before its velocity makes it paler
+    /// (the view options spec, R3): its pitch class's hue with By Pitch
+    /// Class, its degree's in the clip's `scale` with By Scale Degree (the
+    /// out-of-scale grey for a key the scale doesn't hold), and the clip's
+    /// own `face` otherwise, as with Scale Mode off.
+    #[must_use]
+    pub fn note_face(
+        &self,
+        colors: bl_shell::view_option_commands::NoteColors,
+        face: Color32,
+        key: u8,
+        scale: &bl_model::Scale,
+    ) -> Color32 {
+        use bl_shell::view_option_commands::NoteColors::{PitchClass, ScaleDegree};
+        let hues = &self.colors.pitch_hues;
+        match colors {
+            PitchClass => hues[usize::from(key % 12)].0,
+            ScaleDegree if scale.enabled => scale
+                .degree(key)
+                .map_or(self.colors.out_of_scale.0, |degree| {
+                    hues[degree % hues.len()].0
+                }),
+            _ => face,
+        }
+    }
 }
 
 /// Font definitions with only the bundled typeface, for every family.

@@ -89,6 +89,28 @@ fn fixture() -> Project {
         },
     );
 
+    // Spec: chord-lane R2, R5, R10. A region, and a track that follows it.
+    let region: bl_model::ChordRegionId = editor.new_id();
+    apply(
+        &mut editor,
+        Command::AddChordRegion {
+            region: bl_model::ChordRegion {
+                id: region,
+                start: Ticks(BAR),
+                end: Ticks(3 * BAR),
+                scale: bl_model::Scale::new(2, bl_model::ScaleName::Dorian),
+                transpose: 2,
+            },
+        },
+    );
+    apply(
+        &mut editor,
+        Command::SetFollowChordLane {
+            track: keys,
+            follow: true,
+        },
+    );
+
     // The song.
     apply(
         &mut editor,
@@ -152,6 +174,12 @@ fn fixture() -> Project {
             channel: Channel::Pair(3),
         },
         Command::SetCueMode { enabled: true },
+        Command::SetPadLayout {
+            in_key: Some(false),
+            fixed: Some(true),
+            spacing: Some(bl_model::PadSpacing::Thirds),
+            direction: Some(bl_model::PadDirection::Horizontal),
+        },
         Command::SetCueVolume { volume: 0.5 },
         Command::SetReducedLatencyMonitoring { enabled: true },
         // Spec: tunings R2, R14. A tuning inside the set, with a track that
@@ -297,6 +325,24 @@ fn fixture() -> Project {
             .with_role(DeviceRole::Instrument),
         },
     );
+    // An instrument with a modulation matrix, so its slots read back
+    // (instrument modulation R11).
+    let drift: DeviceId = editor.new_id();
+    apply(
+        &mut editor,
+        Command::InsertDevice {
+            track: pad,
+            index: 0,
+            device: Device::new(
+                drift,
+                "Drift",
+                DeviceKind::Native {
+                    device_type: bl_devices::polysynth::POLYSYNTH.to_owned(),
+                },
+            )
+            .with_role(DeviceRole::Instrument),
+        },
+    );
     apply(
         &mut editor,
         Command::SetInput {
@@ -424,6 +470,8 @@ fn fixture() -> Project {
     device.show_preset_name = false;
     device.floating = true;
     device.set_media(0, Some(ContentHash([9; 32])));
+    // The sample similar-sample swapping goes by (sound similarity R23).
+    device.similarity_reference = Some(ContentHash([8; 32]));
     // The edits made to that sample (WP-5.15).
     device.sample_edits = vec![bl_model::SampleEdit {
         kind: bl_model::SampleEditKind::FadeIn,
@@ -440,6 +488,17 @@ fn fixture() -> Project {
         bpm: Some(90.0),
     };
     device.slices = vec![1_000, 2_000];
+    // What each wavetable oscillator plays (WP-8.8, wavetable R7).
+    device.wavetables = vec![
+        Some(bl_model::WavetableChoice::User {
+            raw: true,
+            frames: 3,
+        }),
+        Some(bl_model::WavetableChoice::Factory {
+            category: "Additive".to_owned(),
+            name: "Odd Rise".to_owned(),
+        }),
+    ];
     // The flags that bound what a Simpler plays (sampler R22).
     device.region = Some(bl_model::SampleRegion::Frames {
         start: 500,
@@ -493,7 +552,10 @@ fn fixture() -> Project {
         mix: 0.25,
         listen: true,
     });
-    device.midi_sidechain = Some(bl_model::MidiSidechain { source: Some(keys) });
+    device.midi_sidechain = Some(bl_model::MidiSidechain {
+        source: Some(keys),
+        tap: None,
+    });
     apply(
         &mut editor,
         Command::InsertDevice {
@@ -562,7 +624,7 @@ fn fixture() -> Project {
     for command in [
         Command::SetChainColour {
             chain: loud,
-            colour: Some(12),
+            colour: Some(bl_model::Colour::Swatch(12)),
         },
         Command::SetChainInfo {
             chain: loud,
@@ -644,6 +706,7 @@ fn fixture() -> Project {
             ram: true,
             high_quality: false,
             tempo_leader: true,
+            video: true,
             transpose: 7,
             detune: -12.5,
             transient_edits: TransientEdits {
@@ -871,7 +934,7 @@ fn fixture() -> Project {
         &mut editor,
         Command::SetSceneColour {
             scenes: vec![scenes[0]],
-            colour: Some(47),
+            colour: Some(bl_model::Colour::Swatch(47)),
         },
     );
     apply(
@@ -903,6 +966,22 @@ fn fixture() -> Project {
             start: Some(bl_model::SongStart::Locator(locator)),
         },
     );
+    // WP-6.45: a section and the arranger track, so the format writes
+    // `sections` and `arranger_track`.
+    let section: bl_model::SectionId = editor.new_id();
+    apply(
+        &mut editor,
+        Command::AddSection {
+            section: bl_model::SongSection {
+                id: section,
+                start: Ticks::WHOLE,
+                length: Ticks::WHOLE,
+                name: "Verse".to_owned(),
+                colour: 3,
+            },
+        },
+    );
+    apply(&mut editor, Command::SetArrangerTrack { shown: true });
     // WP-4.14: a frozen track, so the format writes `frozen`.
     apply(
         &mut editor,
@@ -1073,6 +1152,8 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "punch_out",
                 "midi_overdub",
                 "locators",
+                "sections.0.name",
+                "arranger_track",
                 "song_start",
                 "grooves.pool.0.name",
                 "grooves.global_amount",
@@ -1154,6 +1235,8 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "midi_sidechain",
                 "floating",
                 "media",
+                "similarity_reference",
+                "wavetables",
                 "layers",
                 "layers.ram_mode",
                 "layers.snap",
@@ -1401,6 +1484,34 @@ fn saved_forms_come_a_page_at_a_time() {
     );
 }
 
+/// The fixture with a copy of its first MIDI clip, linked with it (the
+/// linked clips spec, R14): the set saves a link's contents once, so the
+/// tests that compare a clip's notes with the set's keep the plain fixture.
+fn with_linked_clips(mut project: Project) -> Project {
+    let mut editor = Editor::from_document(project.document.clone(), project.ids);
+    let (track, clip) = editor
+        .document()
+        .tracks()
+        .find_map(|track| {
+            let clip = track.clips().find(|clip| !clip.data.is_audio())?;
+            Some((track.id(), clip.clone()))
+        })
+        .expect("the fixture has a MIDI clip");
+    let twin = Clip {
+        id: editor.new_id(),
+        start: clip.end(),
+        ..clip.clone()
+    };
+    let linked = vec![clip.id, twin.id];
+    editor
+        .apply(Command::CreateClip { track, clip: twin })
+        .unwrap();
+    editor.apply(Command::LinkClips { clips: linked }).unwrap();
+    project.document = editor.document().clone();
+    project.ids = editor.ids();
+    project
+}
+
 /// Whether `field` (dotted names, `[]` after a list) is in `value`, looking
 /// through a page's `items`.
 fn present(value: &Value, field: &str) -> bool {
@@ -1431,7 +1542,7 @@ fn present(value: &Value, field: &str) -> bool {
 fn every_query_readback_the_command_table_names_is_in_a_real_full_result() {
     use bl_commands::readback::{Object, READBACK, Readback};
 
-    let project = fixture();
+    let project = with_linked_clips(fixture());
     let document = serde_json::to_value(&project.document).unwrap();
     let mut client = open(&project, "declared");
     let (tracks, clips, devices) = saved_parts(&document);
@@ -1661,6 +1772,81 @@ fn the_colour_commands_run_by_id_and_read_back() {
         )
         .unwrap();
     assert!(refused.ok().is_err());
+}
+
+// Spec: themes R25, R29. The colour commands take a `#RRGGBB` colour as well
+// as a swatch, by ID through the agent API, and the query tool reads back
+// whichever the object has.
+#[test]
+fn the_colour_commands_take_a_rrggbb_colour_by_id_and_read_it_back() {
+    let mut client = open(&fixture(), "custom-colours");
+    let keys = query(
+        &mut client,
+        json!({ "path": "track \"Keys\"", "detail": "full" }),
+    );
+    let track = keys["id"].clone();
+    let clip = keys["saved"]["clips"]["items"][0]["id"].clone();
+    let call = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        client
+            .call(
+                "run",
+                json!({ "commands": [{ "command": command, "args": args }] }),
+            )
+            .unwrap()
+    };
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        call(client, command, args)
+            .ok()
+            .unwrap_or_else(|error| panic!("{command}: {error}"))
+    };
+    let colour = |client: &mut Client<InProcess>, what: &Value| -> Value {
+        query(client, json!({ "id": what }))["colour"].clone()
+    };
+
+    run(
+        &mut client,
+        "track.set_colour",
+        json!({ "tracks": [track], "colour": "#12ABEF" }),
+    );
+    assert_eq!(colour(&mut client, &track), "#12ABEF");
+    // Either case goes in, a capital comes back.
+    run(
+        &mut client,
+        "clip.set_colour",
+        json!({ "clips": [clip], "colour": "#ff8000" }),
+    );
+    assert_eq!(colour(&mut client, &clip), "#FF8000");
+    // Assign Track Color to Clips carries a custom colour to the clips.
+    run(
+        &mut client,
+        "track.assign_colour_to_clips",
+        json!({ "tracks": [track] }),
+    );
+    assert_eq!(colour(&mut client, &clip), "#12ABEF");
+    let scene = query(&mut client, json!({ "path": "scene 1" }))["id"].clone();
+    run(
+        &mut client,
+        "scene.set_colour",
+        json!({ "scenes": [scene], "colour": "#000001" }),
+    );
+    assert_eq!(colour(&mut client, &scene), "#000001");
+    // A swatch still reads back as its number.
+    run(
+        &mut client,
+        "track.set_colour",
+        json!({ "tracks": [track], "colour": 7 }),
+    );
+    assert_eq!(colour(&mut client, &track), 7);
+    // What is neither is refused.
+    for bad in [json!("#12345"), json!("teal"), json!(70)] {
+        let refused = call(
+            &mut client,
+            "track.set_colour",
+            json!({ "tracks": [track], "colour": bad }),
+        );
+        assert!(refused.ok().is_err(), "{bad}");
+    }
+    assert_eq!(colour(&mut client, &track), 7);
 }
 
 // Spec: note-editing R32. Group Notes and Ungroup Notes run by ID through the
@@ -1900,4 +2086,54 @@ fn the_trim_and_loop_switch_readbacks_change_with_their_commands() {
         json!({ "clip": midi, "enabled": !looping.as_bool().unwrap() }),
     );
     assert_ne!(read(&mut client, &midi, field), before, "{field}");
+}
+
+// Spec: plugin-scanning R20. The query tool reads back the preset a plug-in
+// device holds and how much state of its own the set keeps for it.
+#[test]
+fn a_plug_in_devices_preset_and_state_read_back() {
+    let mut shell = Shell::headless();
+    let track = shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|t| t.kind() == TrackKind::Audio)
+        .map(bl_model::Track::id)
+        .unwrap();
+    let device = shell.edit(|editor| {
+        let id: DeviceId = editor.new_id();
+        let plugin = Device::new(
+            id,
+            "Test",
+            DeviceKind::Plugin {
+                format: bl_model::PluginFormat::Clap,
+                plugin_id: "com.example.test".to_owned(),
+            },
+        );
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device: plugin,
+            })
+            .unwrap();
+        editor
+            .amend_plugin_state(
+                id,
+                Some(bl_model::PluginState {
+                    path: String::new(),
+                    data: vec![1, 2, 3],
+                }),
+            )
+            .unwrap();
+        editor
+            .amend_device_preset_name(id, Some("Warm".to_owned()))
+            .unwrap();
+        id
+    });
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("test-agent").unwrap();
+    let got = query(&mut client, json!({ "id": device }));
+    assert_eq!(got["preset"], "Warm");
+    assert_eq!(got["state_bytes"], 3);
 }

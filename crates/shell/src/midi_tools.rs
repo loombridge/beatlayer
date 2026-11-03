@@ -502,7 +502,7 @@ impl MidiTools {
 
     /// The next seed: one a new application takes when it is given none
     /// (R20).
-    fn draw_seed(&mut self) -> u32 {
+    pub(crate) fn draw_seed(&mut self) -> u32 {
         self.draws += 1;
         let mut rng = Rng::new(u32::try_from(self.draws % (1 << 32)).unwrap_or(0));
         (rng.next_u64() >> 32) as u32
@@ -788,7 +788,7 @@ struct Target {
 
 /// The range a tool acts on when the editor has no time selection (R10): the
 /// loop brace while the loop is on, else the Start marker to the End marker.
-fn default_range(midi: &MidiData, length: Ticks) -> (Ticks, Ticks) {
+pub(crate) fn default_range(midi: &MidiData, length: Ticks) -> (Ticks, Ticks) {
     let end = midi.start + length;
     if midi.looping {
         (midi.loop_start, midi.loop_end.unwrap_or(end))
@@ -808,8 +808,13 @@ fn target(
 ) -> Result<Target, EditFailure> {
     let ordered = notes_in_order(midi);
     let shown = view.shown_clip(doc, arrangement) == Some(clip.id);
+    // A selection can outlive the notes it named, after an undo or a replaced set.
     let selected = if shown {
-        view.selected_notes(doc, arrangement).to_vec()
+        view.selected_notes(doc, arrangement)
+            .iter()
+            .copied()
+            .filter(|place| (*place as usize) < ordered.len())
+            .collect()
     } else {
         Vec::new()
     };
@@ -985,7 +990,7 @@ pub fn stepped_keys(doc: &Document, clip: ClipId, keys: &[u8], degrees: i32) -> 
 
 /// A tool's input with no notes: the clip's scale and Drum Rack keys, which
 /// is all a generator's pitch controls need.
-fn plain_input(doc: &Document, clip: ClipId) -> ToolInput {
+pub(crate) fn plain_input(doc: &Document, clip: ClipId) -> ToolInput {
     let value = doc.clip(clip);
     ToolInput {
         notes: Vec::new(),

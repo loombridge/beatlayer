@@ -25,7 +25,7 @@ use bl_ui::menus::item_state;
 use bl_ui::mixer::{Place, column_id, fader_id, volume_field_id};
 use common::{Harness, Node, Window, command};
 use egui::accesskit::{Action, Role};
-use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, Vec2, pos2, vec2};
+use egui::{Color32, Event, Key, Modifiers, PointerButton, Pos2, Rect, Vec2, pos2, vec2};
 use serde_json::json;
 
 /// A main window that draws Live's title bar, so every position is in
@@ -3683,8 +3683,17 @@ fn a_click_on_the_peak_readout_sets_it_back_to_the_current_peak() {
 #[test]
 fn an_engine_fed_peak_line_holds_two_seconds_of_the_test_clock_at_every_height() {
     use std::time::Duration;
-    let mut h = session();
+    // The engine paced by hand, and running the set: until its first block
+    // it publishes no meters, and a frame would take the test's away.
+    let mut h = Harness::manual_with_title_bar(Window::Main);
+    h.shell
+        .run("view.toggle_session_arrangement", json!({}))
+        .unwrap();
+    h.settle();
     let t = tracks(&h.shell);
+    h.wait("the engine's meters", |h| {
+        h.shell.meters().iter().any(|m| m.track == t[2])
+    });
     let clock = bl_core::clock::TestClock::new();
     h.shell.use_test_clock(clock.clone());
     let meter = |amplitude: f32| TrackMeter {
@@ -3822,9 +3831,10 @@ fn option_drags_every_tracks_edge_and_the_limits_hold() {
     assert_eq!(doc_widths(&h)[0], 400.0);
 }
 
-// Spec: mixer-view R36 (I-DRAG-005), session-view R26.
+// Spec: mixer-view R36 (I-DRAG-005). The edge widens Main like any track's
+// and reveals nothing.
 #[test]
-fn dragging_main_s_left_edge_widens_it_and_shows_the_scene_fields() {
+fn dragging_main_s_left_edge_widens_it_and_shows_no_scene_fields() {
     let mut h = session();
     let main = h.shell.editor().document().main_id();
     assert!(!h.shell.mixer_view().scene_tempo());
@@ -3841,7 +3851,7 @@ fn dragging_main_s_left_edge_widens_it_and_shows_the_scene_fields() {
             .column_width(h.shell.editor().document(), main),
         164.0
     );
-    assert!(h.shell.mixer_view().scene_tempo());
+    assert!(!h.shell.mixer_view().scene_tempo());
     let nodes = tree(&mut h);
     assert_eq!(rect_of(Harness::node(&nodes, "Main")).width(), 164.0);
 }
@@ -3954,5 +3964,117 @@ fn heights_and_widths_scale_with_the_zoom() {
                 && (meter.max - expected.meter.max).length() < 0.1,
             "{percent}%"
         );
+    }
+}
+
+// Spec: push-2-notes R3, UI parity L-MIX-012. An Arm switch armed by a control
+// surface's selection is drawn in the theme's pink; an arm by hand stays red.
+#[test]
+fn an_arm_by_selection_is_drawn_in_the_themes_pink() {
+    let mut h = session();
+    let t = tracks(&h.shell);
+    let arm = control(&mut h, "1 MIDI", "Arm Recording");
+    click(&mut h, arm.center(), Modifiers::NONE);
+    assert!(mixer(&h.shell, t[0]).arm);
+    let colours = h.theme.colors.clone();
+    let faces = |h: &mut Harness, colour: Color32| {
+        let output = h.settle();
+        output
+            .shapes
+            .iter()
+            .filter(|clipped| match &clipped.shape {
+                egui::Shape::Rect(rect) => rect.fill == colour && arm.contains(rect.rect.center()),
+                _ => false,
+            })
+            .count()
+    };
+    assert_eq!(faces(&mut h, colours.record.0), 1, "red by hand");
+    assert_eq!(faces(&mut h, colours.arm_selection.0), 0);
+    bl_shell::testing::arm_by_selection(&mut h.shell, t[0]);
+    assert_eq!(faces(&mut h, colours.record.0), 0);
+    assert_eq!(
+        faces(&mut h, colours.arm_selection.0),
+        1,
+        "pink by selection"
+    );
+}
+
+// The mouse wheel on controls (WP-6.49; the view options spec, R10 to R13).
+
+/// One notch of a mouse wheel, up (positive) or down.
+fn notch(h: &mut Harness, delta: f32, modifiers: Modifiers) {
+    h.frame(vec![Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Line,
+        delta: vec2(0.0, delta),
+        modifiers,
+        phase: egui::TouchPhase::Move,
+    }]);
+}
+
+// Spec: view-options R11, R13.
+#[test]
+fn the_wheel_moves_a_fader_a_decibel_a_notch_and_shift_a_tenth() {
+    let mut h = session();
+    h.shell
+        .run("settings.set_wheel_adjusts_values", json!({ "on": true }))
+        .unwrap();
+    let t = tracks(&h.shell);
+    let fader = control(&mut h, "3 Audio", "Track Volume");
+    h.frame(vec![Event::PointerMoved(fader.center())]);
+    h.frame(vec![]);
+    let steps = h.shell.editor().undo_history().len();
+    notch(&mut h, 1.0, Modifiers::NONE);
+    h.frame(vec![]);
+    assert!((controls::gain_db(mixer(&h.shell, t[2]).volume) - 1.0).abs() < 1e-9);
+    notch(&mut h, 1.0, Modifiers::SHIFT);
+    h.frame(vec![]);
+    assert!((controls::gain_db(mixer(&h.shell, t[2]).volume) - 1.1).abs() < 1e-9);
+    notch(&mut h, -1.0, Modifiers::NONE);
+    for _ in 0..40 {
+        h.frame(vec![]);
+    }
+    assert!((controls::gain_db(mixer(&h.shell, t[2]).volume) - 0.1).abs() < 1e-9);
+    assert_eq!(
+        h.shell.editor().undo_history().len(),
+        steps + 1,
+        "the run is one undo step"
+    );
+    assert_eq!(
+        h.shell.editor().undo_history().next(),
+        Some(controls::VOLUME_GESTURE)
+    );
+}
+
+// Spec: view-options R10, R11.
+#[test]
+fn the_wheel_scrolls_the_mixer_over_a_fader_unless_the_switch_is_on() {
+    for on in [false, true] {
+        let mut h = session();
+        many_tracks(&mut h, 20);
+        h.shell
+            .run("settings.set_wheel_adjusts_values", json!({ "on": on }))
+            .unwrap();
+        let t = tracks(&h.shell);
+        let fader = control(&mut h, "3 Audio", "Track Volume");
+        h.frame(vec![Event::PointerMoved(fader.center())]);
+        h.frame(vec![]);
+        for _ in 0..10 {
+            h.frame(vec![Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: vec2(0.0, -40.0),
+                modifiers: Modifiers::NONE,
+                phase: egui::TouchPhase::Move,
+            }]);
+        }
+        h.settle();
+        let scroll = state(&mut h.shell).session.scroll;
+        let volume = controls::gain_db(mixer(&h.shell, t[2]).volume);
+        if on {
+            assert_eq!(scroll, 0.0, "the wheel is the fader's");
+            assert!(volume < -1.0, "400 points turned it down: {volume}");
+        } else {
+            assert!(scroll > 100.0, "the wheel scrolls the mixer as before");
+            assert_eq!(volume, 0.0);
+        }
     }
 }

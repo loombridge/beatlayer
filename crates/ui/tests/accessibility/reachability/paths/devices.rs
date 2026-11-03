@@ -260,7 +260,10 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ),
         (
             "rack.set_macro_style",
-            Exception(Equivalent("Macro Style on a macro's context menu")),
+            Exception(AgentOnly(
+                "a macro's style; Live's macro menu has no Macro Style item, so a person reaches \
+                 it through the agent API",
+            )),
         ),
         (
             "rack.set_mapped_value",
@@ -392,6 +395,17 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             "device.set_sample",
             Exception(Equivalent("loading a sample (`device.load_sample`)")),
         ),
+        (
+            "device.load_wavetable",
+            Exception(LaterView(
+                "the Wavetable device's oscillator choosers and display, which take a table \
+                 (WP-8.9, WP-8.11)",
+            )),
+        ),
+        (
+            "device.set_wavetable",
+            Exception(Equivalent("loading a wavetable (`device.load_wavetable`)")),
+        ),
         // WP-5.10: a modulator's Map and Unmap buttons, the controls it
         // maps while Map is lit (Enter on one), and the Shaper's preset
         // buttons, which draw its shape.
@@ -416,6 +430,12 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         (
             "device.select_slot",
             main(a_drum_sampler, device_view, "Slot 2", Key::Enter),
+        ),
+        // A Drum Synth's display (drum synths R6): Tab to its upper half,
+        // then Enter plays a hit.
+        (
+            "device.preview_hit",
+            main(a_drum_synth, device_view, "Preview Hit", Key::Enter),
         ),
         // A device's sidechain strip and section (routing R29): Enter on
         // its buttons, Up and Down on its chooser and number boxes.
@@ -654,6 +674,42 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                  (sampler R22)",
             )),
         ),
+        // An instrument's modulation matrix (WP-8.4): the route commands are
+        // the Matrix tabs' grids, which come with Wavetable and Meld; the
+        // model's commands write a slot as given.
+        (
+            "device.write_route",
+            Exception(Equivalent(
+                "`device.set_route`, which checks the names against the device's matrix",
+            )),
+        ),
+        (
+            "device.erase_route",
+            Exception(Equivalent(
+                "`device.clear_route`, which puts the slot's amount back to 0 %",
+            )),
+        ),
+        // Collision's resonator tabs' Copy buttons: the device layout has no
+        // button control yet.
+        (
+            "collision.copy_resonator",
+            Exception(LaterView(
+                "the Copy buttons of Collision's resonator tabs, once the device layout has a \
+                 button control (WP-8.21)",
+            )),
+        ),
+        (
+            "device.set_route",
+            Exception(LaterView(
+                "the Matrix tabs of Wavetable and Meld (WP-8.10, WP-8.20)",
+            )),
+        ),
+        (
+            "device.clear_route",
+            Exception(LaterView(
+                "the Matrix tabs of Wavetable and Meld (WP-8.10, WP-8.20)",
+            )),
+        ),
         // Manual slicing in the sample display, and the Warp controls
         // (WP-5.15b): the slicing gestures have no keyboard form yet, and
         // the Warp controls are in the Device View's Tab order.
@@ -757,6 +813,7 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ),
         ("device.parameters", Exception(Query)),
         ("device.display", Exception(Query)),
+        ("device.similar", Exception(Query)),
         // A display's view buttons (device framework R38): Enter on one.
         (
             "device.set_display_view",
@@ -884,6 +941,7 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                  save the list",
             )),
         ),
+        ("plugin.hide", Exception(HIDE_PLUG_IN)),
         (
             "plugin.settings",
             settings(

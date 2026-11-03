@@ -133,6 +133,30 @@ pub fn new_clip(
     sized(audio, seconds, doc, at)
 }
 
+/// The video clip a movie of `seconds` becomes when it is added to the
+/// Arrangement at `at` (the video spec, R5, R9): warped with one marker at
+/// the set's tempo there, and leading, so its sound plays at its own speed.
+/// A movie's sound isn't analysed, and a file's saved settings (R42) don't
+/// apply to a clip that leads.
+#[must_use]
+pub fn new_video_clip(
+    file: &MediaFile,
+    seconds: f64,
+    doc: &Document,
+    at: Ticks,
+    warping: Warping<'_>,
+) -> NewClip {
+    let tempo = doc.settings().tempo.bpm_at(at).get();
+    let audio = AudioData::new_video(file.hash, tempo).map_or_else(
+        |_| AudioData::new(file.hash),
+        |audio| AudioData {
+            warp_mode: warp_mode(warping.prefs.default_warp_mode),
+            ..audio
+        },
+    );
+    sized(audio, seconds, doc, at)
+}
+
 /// A short sample's data under `setting` (R32, R34): warped as a loop of
 /// whole bars with the loop on or off, or `None` to leave it unwarped.
 fn warp_short(

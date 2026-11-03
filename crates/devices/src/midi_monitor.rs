@@ -281,6 +281,7 @@ pub fn display(
 ) -> DeviceDisplay {
     let frozen = values.get(&FREEZE).is_some_and(|on| *on >= 0.5);
     let mut display = DeviceDisplay {
+        spectrograms: Vec::new(),
         device,
         live: data.is_some(),
         view: None,

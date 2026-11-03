@@ -32,14 +32,17 @@ The commands, by the part of their ID before its first dot:
 - [`app`](app.md)
 - [`ara`](ara.md)
 - [`arrangement`](arrangement.md)
+- [`arranger`](arranger.md)
 - [`articulation`](articulation.md)
 - [`assistant`](assistant.md)
 - [`audio`](audio.md)
 - [`automation`](automation.md)
 - [`browser`](browser.md)
 - [`chain`](chain.md)
+- [`chord_lane`](chord_lane.md)
 - [`clip`](clip.md)
 - [`clip_view`](clip_view.md)
+- [`collision`](collision.md)
 - [`control_surface`](control_surface.md)
 - [`cv`](cv.md)
 - [`device`](device.md)
@@ -60,6 +63,7 @@ The commands, by the part of their ID before its first dot:
 - [`modulation`](modulation.md)
 - [`modulator`](modulator.md)
 - [`note`](note.md)
+- [`packages`](packages.md)
 - [`pad`](pad.md)
 - [`perception`](perception.md)
 - [`plugin`](plugin.md)
@@ -77,9 +81,11 @@ The commands, by the part of their ID before its first dot:
 - [`stems`](stems.md)
 - [`sync`](sync.md)
 - [`take_lane`](take_lane.md)
+- [`tempo_follower`](tempo_follower.md)
 - [`track`](track.md)
 - [`transport`](transport.md)
 - [`tuning`](tuning.md)
+- [`video`](video.md)
 - [`view`](view.md)
 - [`window`](window.md)
 
@@ -316,6 +322,123 @@ An allowed agent as the agent server's commands report it: without its token.
   "required": [
     "name",
     "autonomous"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Alternate`
+
+Two parameters that share one control, which a switch turns between: while `switch` is on the control is `on`'s, and otherwise `off`'s. The layout places `off`'s control only (Limiter's Maximize turns Ceiling into Threshold).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `switch` | [`ParamId`](#paramid) | yes | The switch. |
+| `off` | [`ParamId`](#paramid) | yes | The parameter the control is while the switch is off. |
+| `on` | [`ParamId`](#paramid) | yes | The parameter the control is while the switch is on. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Two parameters that share one control, which a switch turns between: while `switch` is on the control is `on`'s, and otherwise `off`'s. The layout places `off`'s control only (Limiter's Maximize turns Ceiling into Threshold).",
+  "properties": {
+    "off": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The parameter the control is while the switch is off."
+    },
+    "on": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The parameter the control is while the switch is on."
+    },
+    "switch": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The switch."
+    }
+  },
+  "required": [
+    "switch",
+    "off",
+    "on"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `AnalysisState`
+
+How far sound analysis has got (spec: sound-similarity R6, R7).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `analysed` | integer, at least 0 | yes | The audio files and presets that have a descriptor. |
+| `waiting` | integer, at least 0 | yes | The audio files and presets waiting to be analysed, the one under way included. |
+| `skipped` | integer, at least 0 | yes | The files that couldn't be analysed, and aren't tried again until they change. |
+| `paused` | boolean | yes | Whether analysis is paused: the file under way is finished, and no other is begun until it resumes. |
+| `computed` | integer, at least 0 | yes | The descriptors computed since Beatlayer started: a file whose content already had one, such as a moved copy, doesn't add to it. |
+| `current` | string or null | no | The path of the file under way. |
+| `share` | number or null | no | The share of the files that were waiting when this run began that are done, from 0 to 1; left out when nothing waits. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How far sound analysis has got (spec: sound-similarity R6, R7).",
+  "properties": {
+    "analysed": {
+      "description": "The audio files and presets that have a descriptor.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "computed": {
+      "description": "The descriptors computed since Beatlayer started: a file whose content already had one, such as a moved copy, doesn't add to it.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "current": {
+      "description": "The path of the file under way.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "paused": {
+      "description": "Whether analysis is paused: the file under way is finished, and no other is begun until it resumes.",
+      "type": "boolean"
+    },
+    "share": {
+      "description": "The share of the files that were waiting when this run began that are done, from 0 to 1; left out when nothing waits.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "skipped": {
+      "description": "The files that couldn't be analysed, and aren't tried again until they change.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "waiting": {
+      "description": "The audio files and presets waiting to be analysed, the one under way included.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "analysed",
+    "waiting",
+    "skipped",
+    "paused",
+    "computed"
   ],
   "type": "object"
 }
@@ -945,6 +1068,7 @@ What the Arrangement View shows: every view command returns it.
 | `selected_tracks` | array of [`TrackId`](#trackid) | yes | The selected tracks, top to bottom. |
 | `selected_clips` | array of [`ClipId`](#clipid) | yes | The selected clips (WP-1.8b), in the order they were selected. The editing commands act on these when there are any, and on the time selection otherwise. |
 | `selected_locators` | array of [`LocatorId`](#locatorid) | yes | The selected locators (WP-6.24), in the order they were selected. The locator commands act on these. |
+| `chord_lane` | boolean | yes | Whether the chord lane shows (WP-6.48; the chord lane spec, R1). |
 | `time_selection` | [`TimeRange`](#timerange) or null | yes | The selected span of time on the selected tracks, if any. |
 | `folded_tracks` | array of [`TrackId`](#trackid) | yes | The folded tracks. |
 | `zoom_back_steps` | integer, at least 0 | yes | How many views `arrangement.zoom_back` can go back to. |
@@ -953,10 +1077,14 @@ What the Arrangement View shows: every view command returns it.
 | `show_in_out` | boolean | yes | Whether the track headers show their In/Out column. |
 | `show_volume` | boolean | yes | Whether the track headers show their volume, pan, and sends. |
 | `show_return_tracks` | boolean | yes | Whether the return tracks' rows show in the lanes. |
+| `arranger_track` | boolean | no | Whether the arranger track shows above the track lanes (WP-6.45). |
 | `automation_lanes` | array of [`AutomationLane`](#automationlane) | no | Each track's automation lanes, for the tracks whose lanes aren't as a new track's (the main lane showing its volume, and no lanes of its own): the choosers' choices, the lanes of their own and whether they show (the automation spec, R32). |
+| `loop_brace_selected` | boolean | no | Whether the loop brace is selected (WP-6.73): its keys then move and resize it. It is while the time selection is the brace's span, after a click on the brace's bar. |
 | `selected_breakpoint` | [`SelectedBreakpoint`](#selectedbreakpoint) or null | no | The breakpoint selected in that lane (WP-6.26), if any: `automation.select_breakpoint` sets it. |
+| `selected_chord_region` | [`ChordRegionId`](#chordregionid) or null | no | The selected chord region (WP-6.48), if any: Delete deletes it. |
 | `selected_fade` | [`FadeHandleState`](#fadehandlestate) or null | no | The selected fade handle (WP-6.51), if any: Delete deletes its fade. |
 | `selected_lane` | [`Lane`](#lane) or null | no | The automation lane that has the keyboard (WP-6.26): the one the last click, or Up and Down, selected, while Automation Mode is on. The keys of the automation editing spec's R20 to R26 act on its envelope. |
+| `selected_sections` | array of [`SectionId`](#sectionid) | no | The selected sections of the arranger track (WP-6.45), in the order they were selected. The arranger commands act on these. |
 | `selected_take_lanes` | array of [`TakeLaneId`](#takelaneid) | no | The take lanes whose headers are selected (the comping spec, R26), in the order they were selected. Their tracks are selected tracks too. |
 | `selected_time_signature` | [`Ticks`](#ticks) or null | no | The position of the selected time-signature marker (WP-6.61), if any: Delete deletes it and Cmd-R types its signature. |
 | `shown_take_lanes` | array of [`TrackId`](#trackid) | no | The tracks whose take lanes show (the comping spec, R24). |
@@ -968,6 +1096,10 @@ What the Arrangement View shows: every view command returns it.
 {
   "description": "What the Arrangement View shows: every view command returns it.",
   "properties": {
+    "arranger_track": {
+      "description": "Whether the arranger track shows above the track lanes (WP-6.45).",
+      "type": "boolean"
+    },
     "automation_arm": {
       "description": "Whether Automation Arm is on: while Arrangement Record runs, moving a control writes its values into the parameter's envelope.",
       "type": "boolean"
@@ -981,6 +1113,11 @@ What the Arrangement View shows: every view command returns it.
     },
     "automation_mode": {
       "description": "Whether Automation Mode is on: each track shows its automation lane under its lane, with the device and parameter choosers.",
+      "type": "boolean"
+    },
+    "chord_lane": {
+      "default": false,
+      "description": "Whether the chord lane shows (WP-6.48; the chord lane spec, R1).",
       "type": "boolean"
     },
     "folded_tracks": {
@@ -1005,6 +1142,10 @@ What the Arrangement View shows: every view command returns it.
     "insert_marker": {
       "$ref": "#/$defs/Ticks",
       "description": "Where the insert marker is."
+    },
+    "loop_brace_selected": {
+      "description": "Whether the loop brace is selected (WP-6.73): its keys then move and resize it. It is while the time selection is the brace's span, after a click on the brace's bar.",
+      "type": "boolean"
     },
     "optimize_height": {
       "description": "Whether Optimize Height is on: every track fits in the lanes.",
@@ -1033,6 +1174,17 @@ What the Arrangement View shows: every view command returns it.
         }
       ],
       "description": "The breakpoint selected in that lane (WP-6.26), if any: `automation.select_breakpoint` sets it."
+    },
+    "selected_chord_region": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ChordRegionId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The selected chord region (WP-6.48), if any: Delete deletes it."
     },
     "selected_clips": {
       "default": [],
@@ -1069,6 +1221,13 @@ What the Arrangement View shows: every view command returns it.
       "description": "The selected locators (WP-6.24), in the order they were selected. The locator commands act on these.",
       "items": {
         "$ref": "#/$defs/LocatorId"
+      },
+      "type": "array"
+    },
+    "selected_sections": {
+      "description": "The selected sections of the arranger track (WP-6.45), in the order they were selected. The arranger commands act on these.",
+      "items": {
+        "$ref": "#/$defs/SectionId"
       },
       "type": "array"
     },
@@ -1172,6 +1331,7 @@ What the Arrangement View shows: every view command returns it.
     "selected_tracks",
     "selected_clips",
     "selected_locators",
+    "chord_lane",
     "time_selection",
     "folded_tracks",
     "zoom_back_steps",
@@ -1180,6 +1340,43 @@ What the Arrangement View shows: every view command returns it.
     "show_in_out",
     "show_volume",
     "show_return_tracks"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ArrangerResult`
+
+What an arranger command did: the sections selected afterwards, and whether it was recorded as an undo step.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `selected_sections` | array of [`SectionId`](#sectionid) | yes | The sections selected afterwards. |
+| `undo_step` | boolean | yes | Whether the edit was recorded as an undo step: false when it changed nothing. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What an arranger command did: the sections selected afterwards, and whether it was recorded as an undo step.",
+  "properties": {
+    "selected_sections": {
+      "description": "The sections selected afterwards.",
+      "items": {
+        "$ref": "#/$defs/SectionId"
+      },
+      "type": "array"
+    },
+    "undo_step": {
+      "description": "Whether the edit was recorded as an undo step: false when it changed nothing.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "selected_sections",
+    "undo_step"
   ],
   "type": "object"
 }
@@ -1695,6 +1892,7 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
 | `tempo_leader` | boolean | no | The Lead/Follow switch (the warping spec, R43): whether this Arrangement clip leads the set's tempo instead of following it. Off unless given, a follower. Only a warped Arrangement clip can lead. |
 | `transient_edits` | [`TransientEdits`](#transientedits) | no | The clip's edits to its file's detected transients (the warping spec, R23): none unless given. They belong to the file, so replacing the file drops them (R27). |
 | `transpose` | integer from -48 to 48 | no | The clip's Transpose, in whole semitones, from −48 to 48 (R2): 0 unless given. It shifts the clip's pitch in every mode but Re-Pitch (R10, R26). |
+| `video` | boolean | no | Whether the clip is a video clip (the video spec, R5): its media is a QuickTime movie, whose sound the clip plays and whose picture follows the sound's time. Off unless given; only an Arrangement clip is one. |
 | `warp` | boolean | no | The Warp switch (the warping spec, R1): off unless given. On, the clip follows the set's tempo through its warp map, and `start`, `end`, `loop_start` and `loop_end` are whole ticks of its contents, counted from the clip's 1.1.1, instead of seconds in the file. |
 | `warp_markers` | array of [`WarpMarker`](#warpmarker) | no | The warp markers, in increasing order of both fields: a warped clip has at least one. Switching Warp off keeps them (R3). |
 | `warp_mode` | [`WarpMode`](#warpmode) | no | The warp mode (the warp modes spec, R1): Beats unless given. An unwarped clip keeps it for when Warp goes back on. |
@@ -1837,6 +2035,10 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
       "minimum": -48,
       "type": "integer"
     },
+    "video": {
+      "description": "Whether the clip is a video clip (the video spec, R5): its media is a QuickTime movie, whose sound the clip plays and whose picture follows the sound's time. Off unless given; only an Arrangement clip is one.",
+      "type": "boolean"
+    },
     "warp": {
       "description": "The Warp switch (the warping spec, R1): off unless given. On, the clip follows the set's tempo through its warp map, and `start`, `end`, `loop_start` and `loop_end` are whole ticks of its contents, counted from the clip's 1.1.1, instead of seconds in the file.",
       "type": "boolean"
@@ -1914,6 +2116,63 @@ What `audio.devices` returns.
     "driver",
     "devices",
     "error"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `AudioLatency`
+
+What `link.set_audio_latency` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `ms` | number | yes | The latency in effect now, in milliseconds. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `link.set_audio_latency` returns.",
+  "properties": {
+    "ms": {
+      "description": "The latency in effect now, in milliseconds.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "ms"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `AudioName`
+
+What `link.set_audio_name` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The name in effect now. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `link.set_audio_name` returns.",
+  "properties": {
+    "name": {
+      "description": "The name in effect now.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name"
   ],
   "type": "object"
 }
@@ -3799,6 +4058,7 @@ What the browser shows: most browser commands return it.
 | `note` | string or null | no | What the content pane says when it has no rows, such as which package fills an empty Library label. |
 | `renaming` | string or null | no | The file whose name is open for editing, after `clip.save_file` saved it: `browser.rename_file` gives it its new name. |
 | `renaming_label` | [`Label`](#label) or null | no | The label whose name is open for editing, after `browser.add_label` or `browser.rename_label` without a name. |
+| `similar` | string or null | no | The file the content pane lists the neighbours of, shown in the search field as a token (spec: sound-similarity R12). |
 
 <details><summary>JSON Schema</summary>
 
@@ -3901,6 +4161,13 @@ What the browser shows: most browser commands return it.
         "type": "string"
       },
       "type": "array"
+    },
+    "similar": {
+      "description": "The file the content pane lists the neighbours of, shown in the search field as a token (spec: sound-similarity R12).",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "tag_editor": {
       "description": "Whether the Tag Editor is open beside the content pane.",
@@ -4214,12 +4481,13 @@ One chain of a rack: its own name, colour, info text and mixer, and its devices 
 | `name` | string | yes | The chain's name. |
 | `audio_to` | [`TrackId`](#trackid) or null | no | Where a return chain's output goes: one of the set's return tracks, or the rack's own output while there is none (drum racks spec, R8). |
 | `choke` | integer or null | no | The choke group a drum rack's chain is in, from 1 to 16, or none. |
-| `colour` | integer or null | no | The chain's colour: an index into the palette of 5 rows of 14 swatches, from 0 to 69, or none. |
+| `colour` | [`Colour`](#colour) or null | no | The chain's colour: an index into the palette of 5 rows of 14 swatches, from 0 to 69, or none. |
 | `devices` | array of [`Device`](#device) | no | The chain's devices, in signal order. |
 | `info` | string | no | The info text the user gave the chain (Edit Info Text). |
 | `is_return` | boolean | no | Whether this is one of a drum rack's return chains, which sit after its drum chains (drum racks spec, R7). |
 | `mixer` | [`ChainMixer`](#chainmixer) | no | The chain's mixer. |
 | `play` | integer from 0 to 255 | no | The note a drum rack's chain passes on to its devices, from 0 to 127: C3 (60) in a new chain. |
+| `push_colour` | integer or null | no | The swatch a drum rack's chain shows on Push 2 in place of its track's colour (the notes on Push 2 spec, R19), from 0 to 69, or none. Only a drum rack's chains have one. |
 | `receive` | [`Receive`](#receive) | no | The note a drum rack's chain answers (drum racks spec, R1). Only a drum rack's chains have one; any other chain keeps the default. |
 | `sends` | array of [`ChainSend`](#chainsend) | no | A drum rack's drum chain's sends to its return chains, post-fader; a return chain without an entry gets none (−∞ dB). |
 | `zones` | [`ChainZones`](#chainzones) | no | The chain's zones. Left out of the saved set while they pass everything. |
@@ -4252,14 +4520,15 @@ One chain of a rack: its own name, colour, info text and mixer, and its devices 
       ]
     },
     "colour": {
-      "description": "The chain's colour: an index into the palette of 5 rows of 14 swatches, from 0 to 69, or none.",
-      "format": "uint8",
-      "maximum": 255,
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Colour"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The chain's colour: an index into the palette of 5 rows of 14 swatches, from 0 to 69, or none."
     },
     "devices": {
       "default": [],
@@ -4296,6 +4565,16 @@ One chain of a rack: its own name, colour, info text and mixer, and its devices 
       "maximum": 255,
       "minimum": 0,
       "type": "integer"
+    },
+    "push_colour": {
+      "description": "The swatch a drum rack's chain shows on Push 2 in place of its track's colour (the notes on Push 2 spec, R19), from 0 to 69, or none. Only a drum rack's chains have one.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "receive": {
       "$ref": "#/$defs/Receive",
@@ -4592,7 +4871,7 @@ One row of a rack's chain list (racks spec, R21).
 |---|---|---|---|
 | `id` | [`ChainId`](#chainid) | yes | The chain. |
 | `name` | string | yes | Its name. |
-| `colour` | integer or null | yes | Its colour, a swatch of the palette of 5 rows of 14, if it has one. |
+| `colour` | [`Colour`](#colour) or null | yes | Its colour, a swatch of the palette of 5 rows of 14 or a `#RRGGBB` colour, if it has one. |
 | `enabled` | boolean | yes | Its Chain Activator. |
 | `solo` | boolean | yes | Whether it's soloed. |
 | `hot_swap` | boolean | yes | Whether it's armed for hot-swap by its Hot-Swap button. |
@@ -4611,14 +4890,15 @@ One row of a rack's chain list (racks spec, R21).
   "description": "One row of a rack's chain list (racks spec, R21).",
   "properties": {
     "colour": {
-      "description": "Its colour, a swatch of the palette of 5 rows of 14, if it has one.",
-      "format": "uint8",
-      "maximum": 255,
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Colour"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its colour, a swatch of the palette of 5 rows of 14 or a `#RRGGBB` colour, if it has one."
     },
     "drum": {
       "anyOf": [
@@ -4804,7 +5084,7 @@ A chain folded out as a strip in the mixers (racks spec, R27): the chain, the ra
 | `has_mixer` | boolean | yes | Whether the chain has Volume and Pan: all but a MIDI effect rack's chains do. |
 | `enabled` | boolean | yes | Whether the chain's activator is on. |
 | `solo` | boolean | yes | Whether the chain is soloed. |
-| `colour` | integer or null | no | The chain's colour, a swatch of the palette of 5 rows of 14, if it has one. |
+| `colour` | [`Colour`](#colour) or null | no | The chain's colour, a swatch of the palette of 5 rows of 14, if it has one. |
 | `nested` | [`RackFold`](#rackfold) or null | no | The rack inside this chain, if it has one whose chains fold out too (racks spec, R27): a fold button on this strip shows its chains. |
 
 <details><summary>JSON Schema</summary>
@@ -4818,14 +5098,15 @@ A chain folded out as a strip in the mixers (racks spec, R27): the chain, the ra
       "description": "The chain."
     },
     "colour": {
-      "description": "The chain's colour, a swatch of the palette of 5 rows of 14, if it has one.",
-      "format": "uint8",
-      "maximum": 255,
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Colour"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The chain's colour, a swatch of the palette of 5 rows of 14, if it has one."
     },
     "enabled": {
       "description": "Whether the chain's activator is on.",
@@ -5333,6 +5614,79 @@ One of:
 
 </details>
 
+### `ChordRegion`
+
+One stretch of the song and what it does to the tracks that follow the lane.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | [`ChordRegionId`](#chordregionid) | yes | The region's ID. |
+| `start` | [`Ticks`](#ticks) | yes | Where it starts, on the song's beats: 1.1.1 or later. |
+| `end` | [`Ticks`](#ticks) | yes | Where it ends, which it doesn't include: after its start. |
+| `scale` | [`Scale`](#scale) | no | Its scale: the current scale of the following tracks' devices while the song plays through it. A scale with `enabled` false is no scale, and leaves the clips' own. |
+| `transpose` | integer from -128 to 127 | no | How far it moves the notes of the following tracks: degrees of each clip's scale where the clip has Scale Mode on, semitones where it is off. From -24 to 24. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "One stretch of the song and what it does to the tracks that follow the lane.",
+  "properties": {
+    "end": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it ends, which it doesn't include: after its start."
+    },
+    "id": {
+      "$ref": "#/$defs/ChordRegionId",
+      "description": "The region's ID."
+    },
+    "scale": {
+      "$ref": "#/$defs/Scale",
+      "description": "Its scale: the current scale of the following tracks' devices while the song plays through it. A scale with `enabled` false is no scale, and leaves the clips' own."
+    },
+    "start": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it starts, on the song's beats: 1.1.1 or later."
+    },
+    "transpose": {
+      "description": "How far it moves the notes of the following tracks: degrees of each clip's scale where the clip has Scale Mode on, semitones where it is off. From -24 to 24.",
+      "format": "int8",
+      "maximum": 127,
+      "minimum": -128,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "id",
+    "start",
+    "end"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ChordRegionId`
+
+The ID of a chord region: a positive integer, unique within the project and never reused.
+
+Type: integer, at least 1.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The ID of a chord region: a positive integer, unique within the project and never reused.",
+  "format": "uint64",
+  "minimum": 1,
+  "type": "integer"
+}
+```
+
+</details>
+
 ### `ChordState`
 
 One chord of Stacks' progression.
@@ -5405,11 +5759,12 @@ A clip on a track's arrangement lane.
 | `length` | [`Ticks`](#ticks) | yes | How long the clip is. Always positive. |
 | `mute` | boolean | yes | Whether the clip is switched off, so it stays in place but doesn't play. |
 | `data` | [`ClipData`](#clipdata) | yes | What the clip plays. |
-| `colour` | integer or null | no | The clip's colour, a swatch from 0 to 69 (the themes spec, R14). A clip handed to a command without one takes its track's colour as it goes in, and a set saved before colours gives each clip its track's on loading, so a clip in a document always has one. |
+| `colour` | [`Colour`](#colour) or null | no | The clip's colour, a swatch from 0 to 69 or a `#RRGGBB` colour (the themes spec, R14, R29). A clip handed to a command without one takes its track's colour as it goes in, and a set saved before colours gives each clip its track's on loading, so a clip in a document always has one. |
 | `envelopes` | array of [`ClipEnvelope`](#clipenvelope) | no | The clip's envelopes (WP-3.15): one per parameter of its track it modulates, in target order. Empty for a clip with none, which is what a set saved before this package holds. |
 | `groove` | [`GrooveId`](#grooveid) or null | no | The clip's groove (WP-6.19): one of the set's Groove Pool, or none. It changes when the clip's notes play, or where its audio plays, and nothing in the clip itself until it is committed. |
 | `info_text` | string | no | The user's own info text (Edit Info Text), which the Info View shows while the pointer is over the clip; empty for none, and left out of the saved set then (the Info View spec, R9). |
 | `launch` | [`ClipLaunch`](#cliplaunch) | no | The clip's launch settings (WP-3.4), which only a Session clip's launching reads. The defaults for a clip saved without them. |
+| `link` | [`LinkId`](#linkid) or null | no | The link the clip belongs to (WP-6.44, the linked clips spec, R2): the clips of one link hold the same contents (R3), whatever edit reaches one of them (R4). `None` for an independent clip, which is what a set saved before linked clips holds. |
 | `offset` | [`Ticks`](#ticks) | no | How far into its contents a MIDI clip starts: its notes are placed from `start - offset`, and the part before the clip's start doesn't play. 0 (or left out) plays the contents from their beginning. Never negative. Splitting a MIDI clip or trimming its left edge changes it, so each part plays what it played before. An audio clip's is always 0: its Start marker moves instead, as Live's does. |
 | `scale` | [`Scale`](#scale) | no | The clip's scale (WP-6.7): its Scale Mode switch, its root and its scale name. It never changes what the clip plays; it tells the rest of the set which keys belong. A clip off at C, in Major, writes nothing, so a set saved before the scales loads unchanged. |
 
@@ -5420,14 +5775,15 @@ A clip on a track's arrangement lane.
   "description": "A clip on a track's arrangement lane.",
   "properties": {
     "colour": {
-      "description": "The clip's colour, a swatch from 0 to 69 (the themes spec, R14). A clip handed to a command without one takes its track's colour as it goes in, and a set saved before colours gives each clip its track's on loading, so a clip in a document always has one.",
-      "format": "uint8",
-      "maximum": 255,
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Colour"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip's colour, a swatch from 0 to 69 or a `#RRGGBB` colour (the themes spec, R14, R29). A clip handed to a command without one takes its track's colour as it goes in, and a set saved before colours gives each clip its track's on loading, so a clip in a document always has one."
     },
     "data": {
       "$ref": "#/$defs/ClipData",
@@ -5466,6 +5822,17 @@ A clip on a track's arrangement lane.
     "length": {
       "$ref": "#/$defs/Ticks",
       "description": "How long the clip is. Always positive."
+    },
+    "link": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LinkId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The link the clip belongs to (WP-6.44, the linked clips spec, R2): the clips of one link hold the same contents (R3), whatever edit reaches one of them (R4). `None` for an independent clip, which is what a set saved before linked clips holds."
     },
     "mute": {
       "description": "Whether the clip is switched off, so it stays in place but doesn't play.",
@@ -6851,6 +7218,36 @@ One of:
 
 </details>
 
+### `Colour`
+
+A swatch of the palette of 5 rows of 14 (0 to 69, numbered from the top row's left, row by row), or a colour of one's own as `#RRGGBB`.
+
+One of:
+
+- integer from 0 to 69
+- string matching `^#[0-9A-Fa-f]{6}$`
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A swatch of the palette of 5 rows of 14 (0 to 69, numbered from the top row's left, row by row), or a colour of one's own as `#RRGGBB`.",
+  "oneOf": [
+    {
+      "maximum": 69,
+      "minimum": 0,
+      "type": "integer"
+    },
+    {
+      "pattern": "^#[0-9A-Fa-f]{6}$",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `Column`
 
 A column of the content pane (spec: browser-tags R27). Name always shows, first.
@@ -7543,6 +7940,10 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
 | `widget` | [`Widget`](#widget) | yes | How it's drawn. |
 | `x` | number | yes | Its left edge, from the band's. |
 | `y` | number | yes | Its top edge, from the band's. |
+| `glyph` | [`Glyph`](#glyph) or null | no | The icon of an icon button or a round button. |
+| `grey` | [`GreyWhen`](#greywhen) or null | no | The condition that greys the control. |
+| `size` | [`Size`](#size) or null | no | Its size where the device sets it, in place of the widget's: the width of a box, a row of buttons or a unit pair's control. |
+| `unit` | [`UnitPair`](#unitpair) or null | no | The unit pair beside a knob, which makes the knob show one of two parameters. |
 
 <details><summary>JSON Schema</summary>
 
@@ -7550,9 +7951,53 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
 {
   "description": "One control in a band: a parameter, drawn by a widget, at a place in the band.",
   "properties": {
+    "glyph": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Glyph"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The icon of an icon button or a round button."
+    },
+    "grey": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/GreyWhen"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The condition that greys the control."
+    },
     "param": {
       "$ref": "#/$defs/ParamId",
       "description": "The parameter."
+    },
+    "size": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Size"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its size where the device sets it, in place of the widget's: the width of a box, a row of buttons or a unit pair's control."
+    },
+    "unit": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UnitPair"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The unit pair beside a knob, which makes the knob show one of two parameters."
     },
     "widget": {
       "$ref": "#/$defs/Widget",
@@ -8269,6 +8714,108 @@ One of:
 
 </details>
 
+### `Cue`
+
+A cue the Sample Editor shows (the video spec, R12): a marker embedded in a video clip's movie.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `time` | number | yes | Where it is in the movie, in seconds. |
+| `name` | string | yes | The name the movie gives it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A cue the Sample Editor shows (the video spec, R12): a marker embedded in a video clip's movie.",
+  "properties": {
+    "name": {
+      "description": "The name the movie gives it.",
+      "type": "string"
+    },
+    "time": {
+      "description": "Where it is in the movie, in seconds.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "time",
+    "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `CustomColours`
+
+The row of custom colours under every palette (themes R28): 14 places, each empty or a colour of the person's own, and the order the places were last used in, which says what a full row gives up.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `places` | array of [`Colour`](#colour) or null | yes | The places, from the first: a `#RRGGBB` colour or null. |
+| `used` | array of integer from 0 to 255 | yes | The places that hold a colour, from the one used longest ago to the one used last. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The row of custom colours under every palette (themes R28): 14 places, each empty or a colour of the person's own, and the order the places were last used in, which says what a full row gives up.",
+  "properties": {
+    "places": {
+      "default": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "description": "The places, from the first: a `#RRGGBB` colour or null.",
+      "items": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Colour"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "type": "array"
+    },
+    "used": {
+      "default": [],
+      "description": "The places that hold a colour, from the one used longest ago to the one used last.",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "places",
+    "used"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `CvCalibration`
 
 A calibration: `octaves_per_volt` and `hz_at_zero_volts` of the fitted line and the `steps` it was fitted to, each with the pitch it gave and its error in cents.
@@ -8677,12 +9224,15 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `preset_name` | string or null | no | The name of the preset the device holds (the plug-in list spec, R5): the Beatlayer device preset last loaded into it or saved from it, or else the program name the plug-in's format reported. Left out of the saved set while there is none, so a device saved before this package loads with none. |
 | `region` | [`SampleRegion`](#sampleregion) or null | no | The part of slot 0's sample a Simpler plays, between its Start and End flags (the sampler spec, R22): `None` for the whole sample. Loading another sample clears it; an edit that changes the sample's length moves it. Left out of the saved set while it is the whole sample. |
 | `role` | [`DeviceRole`](#devicerole) | no | Where it goes in a chain: MIDI effects, then the instrument, then audio effects. Audio effects aren't marked in the saved set. |
+| `routes` | array of [`ModRoute`](#modroute) | no | The routes an instrument's modulation matrix holds in its free slots (the instrument modulation spec, R8 to R10), by slot number. A route's amount is the slot's parameter. Empty for a device without free slots or with none set, and left out of the saved set then. |
 | `sample_edits` | array of [`SampleEdit`](#sampleedit) | no | The edits made to the sample in slot 0 (WP-5.15, IMP-28; the multisampler spec, R55): applied in order to the media, which the file is never written for. A multisampler's layers hold their own. Loading another sample clears them. Left out of the saved set while there are none. |
 | `shape` | array or null | no | The breakpoints of a Shaper's shape (R23); `None` plays the default shape. Left out of the saved set while it is the default. |
 | `show_preset_name` | boolean | no | Whether the title bar shows the preset's or the given name (on, as a new device is) or the device's own name: the context menu's Show Preset Name. Left out of the saved set while on. |
 | `sidechain` | [`Sidechain`](#sidechain) or null | no | The device's sidechain input, if its type declares one (WP-2.19b): where its detector can listen other than its own input. Left out of the saved set for a device without one. |
+| `similarity_reference` | [`ContentHash`](#contenthash) or null | no | The sample similar-sample swapping goes by (sound similarity R23): the one Save as Similarity Reference kept, or the one a swap started from. `None` while it is the sample the device was loaded with, slot 0's own; loading another sample clears it. Left out of the saved set while it is `None`. |
 | `slices` | array of integer, at least 0 | no | Manual slice markers in frames into the sample, for devices that support manual slicing (WP-5.15b, Simpler). Kept in increasing order of frame. Left out of the saved set when empty. |
 | `warp` | [`DeviceWarp`](#devicewarp) | no | Warp settings for devices that play warped media (WP-5.15b, Simpler). Left out of the saved set when default. |
+| `wavetables` | array of [`WavetableChoice`](#wavetablechoice) or null | no | What each wavetable oscillator plays (WP-8.8; the wavetable spec, R7, R8): oscillator 1's choice first. A user table's file is the media in the oscillator's own sample slot, so the set's media table, missing files and Collect All and Save treat it as a sample. An oscillator with no choice plays the device's default table, and the list never ends in one. Left out of the saved set for a device that has none. |
 
 <details><summary>JSON Schema</summary>
 
@@ -8873,6 +9423,13 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
       "$ref": "#/$defs/DeviceRole",
       "description": "Where it goes in a chain: MIDI effects, then the instrument, then audio effects. Audio effects aren't marked in the saved set."
     },
+    "routes": {
+      "description": "The routes an instrument's modulation matrix holds in its free slots (the instrument modulation spec, R8 to R10), by slot number. A route's amount is the slot's parameter. Empty for a device without free slots or with none set, and left out of the saved set then.",
+      "items": {
+        "$ref": "#/$defs/ModRoute"
+      },
+      "type": "array"
+    },
     "sample_edits": {
       "description": "The edits made to the sample in slot 0 (WP-5.15, IMP-28; the multisampler spec, R55): applied in order to the media, which the file is never written for. A multisampler's layers hold their own. Loading another sample clears them. Left out of the saved set while there are none.",
       "items": {
@@ -8905,6 +9462,17 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
       ],
       "description": "The device's sidechain input, if its type declares one (WP-2.19b): where its detector can listen other than its own input. Left out of the saved set for a device without one."
     },
+    "similarity_reference": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ContentHash"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The sample similar-sample swapping goes by (sound similarity R23): the one Save as Similarity Reference kept, or the one a swap started from. `None` while it is the sample the device was loaded with, slot 0's own; loading another sample clears it. Left out of the saved set while it is `None`."
+    },
     "slices": {
       "description": "Manual slice markers in frames into the sample, for devices that support manual slicing (WP-5.15b, Simpler). Kept in increasing order of frame. Left out of the saved set when empty.",
       "items": {
@@ -8917,6 +9485,20 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
     "warp": {
       "$ref": "#/$defs/DeviceWarp",
       "description": "Warp settings for devices that play warped media (WP-5.15b, Simpler). Left out of the saved set when default."
+    },
+    "wavetables": {
+      "description": "What each wavetable oscillator plays (WP-8.8; the wavetable spec, R7, R8): oscillator 1's choice first. A user table's file is the media in the oscillator's own sample slot, so the set's media table, missing files and Collect All and Save treat it as a sample. An oscillator with no choice plays the device's default table, and the list never ends in one. Left out of the saved set for a device that has none.",
+      "items": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/WavetableChoice"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "type": "array"
     }
   },
   "required": [
@@ -8989,8 +9571,12 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
 |---|---|---|---|
 | `params` | array of [`ParamDescriptor`](#paramdescriptor) | yes | Its parameters. |
 | `layout` | [`DeviceLayout`](#devicelayout) | yes | Where its controls and display cells sit (IMP-14). |
+| `alternates` | array of [`Alternate`](#alternate) | no | The controls that show one of two parameters, as a switch says. Both parameters keep their values and their lanes whichever is shown. |
 | `banks` | array of [`Bank`](#bank) | no | The banks the type declares for control surfaces, its main controls first; empty for a type that leaves them to [`DeviceDescription::banks`]' generic ones. They hold neither the menu options nor the title switch. |
+| `display_drag` | array of [`ParamId`](#paramid) | no | The parameter a vertical drag on the display changes, one for each of `views`, in their order (Roar's shaper display drags the shown stage's Shaper Amount); empty for a display that isn't dragged. |
 | `menu_options` | array of [`ParamId`](#paramid) | no | The switches the device lists as its own items in its Show Options menu, after Save as Default Preset (C-DEVICE-015), in this order. They are parameters like any other, but the layout places no control for them. |
+| `relabels` | array of [`Relabel`](#relabel) | no | The parameters whose names follow another parameter's value. |
+| `spectrogram` | [`SpectrogramGrid`](#spectrogramgrid) or null | no | The grid of the spectrogram its display holds, if it holds one (the device framework spec, R46). |
 | `title_switch` | [`ParamId`](#paramid) or null | no | The switch the device draws in its title bar instead of its panel (L-DEV-004): Use Current Scale, on the five scale-aware devices. It is a parameter like any other, which the layout places no control for. |
 | `views` | array of string | no | The views its display offers, such as `Transfer Curve`, the first being the one it starts in; empty for a display with one view. Which is shown is view state (`device.set_display_view`). |
 
@@ -9000,10 +9586,24 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
 {
   "description": "What a kind of device is to the framework: its parameters' descriptors, in the order its generic UI and agents list them, and its layout.",
   "properties": {
+    "alternates": {
+      "description": "The controls that show one of two parameters, as a switch says. Both parameters keep their values and their lanes whichever is shown.",
+      "items": {
+        "$ref": "#/$defs/Alternate"
+      },
+      "type": "array"
+    },
     "banks": {
       "description": "The banks the type declares for control surfaces, its main controls first; empty for a type that leaves them to [`DeviceDescription::banks`]' generic ones. They hold neither the menu options nor the title switch.",
       "items": {
         "$ref": "#/$defs/Bank"
+      },
+      "type": "array"
+    },
+    "display_drag": {
+      "description": "The parameter a vertical drag on the display changes, one for each of `views`, in their order (Roar's shaper display drags the shown stage's Shaper Amount); empty for a display that isn't dragged.",
+      "items": {
+        "$ref": "#/$defs/ParamId"
       },
       "type": "array"
     },
@@ -9024,6 +9624,24 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
         "$ref": "#/$defs/ParamDescriptor"
       },
       "type": "array"
+    },
+    "relabels": {
+      "description": "The parameters whose names follow another parameter's value.",
+      "items": {
+        "$ref": "#/$defs/Relabel"
+      },
+      "type": "array"
+    },
+    "spectrogram": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SpectrogramGrid"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The grid of the spectrogram its display holds, if it holds one (the device framework spec, R46)."
     },
     "title_switch": {
       "anyOf": [
@@ -9065,6 +9683,7 @@ A device's display now, as `device.display` reports it.
 | `series` | array of [`DisplaySeries`](#displayseries) | yes | Its curves and spectra. |
 | `markers` | array of [`DisplayMarker`](#displaymarker) | yes | Its markers. |
 | `readings` | array of [`DisplayReading`](#displayreading) | yes | Its single readings. |
+| `spectrograms` | array of [`DisplaySpectrogram`](#displayspectrogram) | no | Its spectrograms. |
 | `view` | string or null | no | The view the display is showing, for a device whose display has views. |
 
 <details><summary>JSON Schema</summary>
@@ -9099,6 +9718,13 @@ A device's display now, as `device.display` reports it.
       "description": "Its curves and spectra.",
       "items": {
         "$ref": "#/$defs/DisplaySeries"
+      },
+      "type": "array"
+    },
+    "spectrograms": {
+      "description": "Its spectrograms.",
+      "items": {
+        "$ref": "#/$defs/DisplaySpectrogram"
       },
       "type": "array"
     },
@@ -9557,6 +10183,7 @@ A device's layout (IMP-14): bands of controls and display cells in rows and colu
 |---|---|---|---|
 | `root` | [`LayoutNode`](#layoutnode) | yes | The whole body. |
 | `expanded` | [`LayoutNode`](#layoutnode) or null | no | The part the device adds to its body while it is expanded (L-DEV-004, L-DEV-007), if it has one: placed to the right of [`root`](Self::root). It places its parameters' controls like the rest of the layout. |
+| `title` | array of [`TitlePart`](#titlepart) | no | What the device adds to its title bar. |
 
 <details><summary>JSON Schema</summary>
 
@@ -9578,6 +10205,13 @@ A device's layout (IMP-14): bands of controls and display cells in rows and colu
     "root": {
       "$ref": "#/$defs/LayoutNode",
       "description": "The whole body."
+    },
+    "title": {
+      "description": "What the device adds to its title bar.",
+      "items": {
+        "$ref": "#/$defs/TitlePart"
+      },
+      "type": "array"
     }
   },
   "required": [
@@ -9860,6 +10494,7 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
 | `learning` | integer or null | no | The articulation whose Learn button is lit, counted from 0: the panel's state, not the set's. |
 | `loaded_slots` | array of boolean | no | For a device with sample slots: whether each slot holds a sample. |
 | `locked` | array of [`ParamId`](#paramid) | no | The parameters drawn disabled because the device takes them from its current scale: Scale's Base and Scale Name and Arpeggiator's Root and Scale, while Use Current Scale is on (the scales spec, R16). |
+| `matrix_routes` | array of [`MatrixRoutes`](#matrixroutes) | no | For each parameter an instrument's modulation matrix moves, the sources routed into it, in slot order (the instrument modulation spec, R12): what assistive technology reads beside the control's value. Empty for a device without a matrix or with no route. |
 | `pages` | array of [`PagesFrame`](#pagesframe) | no | Each pages node of the device's layout with its pages and the one shown (device framework R43): view state, saved with the set but no undo step. Empty for a device with none. |
 | `slot_keys` | array of string | no | For a device with sample slots: the key each slot plays, as Live names notes (`C3`). |
 
@@ -9917,6 +10552,13 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
       "description": "The parameters drawn disabled because the device takes them from its current scale: Scale's Base and Scale Name and Arpeggiator's Root and Scale, while Use Current Scale is on (the scales spec, R16).",
       "items": {
         "$ref": "#/$defs/ParamId"
+      },
+      "type": "array"
+    },
+    "matrix_routes": {
+      "description": "For each parameter an instrument's modulation matrix moves, the sources routed into it, in slot order (the instrument modulation spec, R12): what assistive technology reads beside the control's value. Empty for a device without a matrix or with no route.",
+      "items": {
+        "$ref": "#/$defs/MatrixRoutes"
       },
       "type": "array"
     },
@@ -10092,7 +10734,8 @@ What `device_view.state` returns.
 | `track` | [`TrackId`](#trackid) or null | yes | The track whose chain shows: the selected track, or `null` with no track selected. |
 | `track_kind` | [`TrackKind`](#trackkind) or null | yes | That track's kind. |
 | `devices` | array of [`DeviceFrame`](#deviceframe) | yes | Its devices, in signal order. |
-| `selected` | [`DeviceId`](#deviceid) or null | yes | The selected device, if it's in this chain. |
+| `selected` | [`DeviceId`](#deviceid) or null | yes | The first selected device, if it's in this chain. |
+| `selection` | array of [`DeviceId`](#deviceid) | yes | Every selected device in this chain, in order: one run of neighbouring devices (device chains R47). |
 | `hot_swap` | [`HotSwap`](#hotswap) or null | yes | The device being hot-swapped, on any track, and what the browser's bar says ("Swapping Audio Effect"). |
 | `can_paste` | boolean | yes | Whether the clipboard holds a device to paste. |
 | `can_paste_chain` | boolean | yes | Whether the chain clipboard holds chains to paste. |
@@ -10188,7 +10831,15 @@ What `device_view.state` returns.
           "type": "null"
         }
       ],
-      "description": "The selected device, if it's in this chain."
+      "description": "The first selected device, if it's in this chain."
+    },
+    "selection": {
+      "default": [],
+      "description": "Every selected device in this chain, in order: one run of neighbouring devices (device chains R47).",
+      "items": {
+        "$ref": "#/$defs/DeviceId"
+      },
+      "type": "array"
     },
     "track": {
       "anyOf": [
@@ -10218,6 +10869,7 @@ What `device_view.state` returns.
     "track_kind",
     "devices",
     "selected",
+    "selection",
     "hot_swap",
     "can_paste",
     "can_paste_chain",
@@ -10321,7 +10973,7 @@ The open dialog.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `step` | [`DialogStep`](#dialogstep) | yes | What it shows. |
-| `clip` | [`ClipId`](#clipid) | yes | The clip it separates. |
+| `source` | [`StemSource`](#stemsource) | yes | What it separates. |
 
 <details><summary>JSON Schema</summary>
 
@@ -10329,9 +10981,9 @@ The open dialog.
 {
   "description": "The open dialog.",
   "properties": {
-    "clip": {
-      "$ref": "#/$defs/ClipId",
-      "description": "The clip it separates."
+    "source": {
+      "$ref": "#/$defs/StemSource",
+      "description": "What it separates."
     },
     "step": {
       "$ref": "#/$defs/DialogStep",
@@ -10340,7 +10992,7 @@ The open dialog.
   },
   "required": [
     "step",
-    "clip"
+    "source"
   ],
   "type": "object"
 }
@@ -10573,6 +11225,46 @@ A display cell: a graph, a spectrum, a waveform, or an envelope editor, which gr
 
 </details>
 
+### `DisplayHandle`
+
+What dragging a marker sets: where the marker sits across the cell is the horizontal parameter's travel, and up the cell is the marker's place on its series (with a vertical parameter, a drag moves that too), so a drag is the parameters' own control at another place.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `x` | [`ParamId`](#paramid) | yes | The parameter its horizontal place is. |
+| `y` | [`ParamId`](#paramid) or null | no | The parameter its vertical place is, if it has one. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What dragging a marker sets: where the marker sits across the cell is the horizontal parameter's travel, and up the cell is the marker's place on its series (with a vertical parameter, a drag moves that too), so a drag is the parameters' own control at another place.",
+  "properties": {
+    "x": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The parameter its horizontal place is."
+    },
+    "y": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ParamId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The parameter its vertical place is, if it has one."
+    }
+  },
+  "required": [
+    "x"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `DisplayInputSettings`
 
 The Display & Input page's settings.
@@ -10584,6 +11276,7 @@ The Display & Input page's settings.
 | `permanent_scrub_areas` | boolean | yes | Permanent Scrub Areas, as `settings.set_permanent_scrub_areas` sets it (the time editing spec, R26). |
 | `use_tab_key_to_move_focus` | boolean | yes | Use Tab Key to Move Focus, as `focus.toggle_tab_navigation` toggles it. |
 | `wrap_tab_navigation` | boolean | yes | Wrap Tab Navigation, as `focus.toggle_wrap_navigation` toggles it. |
+| `wheel_adjusts_values` | boolean | yes | Adjust Values with Mouse Wheel, as `settings.set_wheel_adjusts_values` sets it (the view options spec, R10). |
 | `second_window_zoom_percent` | integer or null | no | The second window's zoom in percent, as `view.set_zoom` takes it with `window` set to `second`: only while the second window is open, when the page shows Second Window Zoom (interface-zoom R12). |
 
 <details><summary>JSON Schema</summary>
@@ -10614,6 +11307,10 @@ The Display & Input page's settings.
       "description": "Use Tab Key to Move Focus, as `focus.toggle_tab_navigation` toggles it.",
       "type": "boolean"
     },
+    "wheel_adjusts_values": {
+      "description": "Adjust Values with Mouse Wheel, as `settings.set_wheel_adjusts_values` sets it (the view options spec, R10).",
+      "type": "boolean"
+    },
     "wrap_tab_navigation": {
       "description": "Wrap Tab Navigation, as `focus.toggle_wrap_navigation` toggles it.",
       "type": "boolean"
@@ -10631,7 +11328,8 @@ The Display & Input page's settings.
     "outline_view_in_focus",
     "permanent_scrub_areas",
     "use_tab_key_to_move_focus",
-    "wrap_tab_navigation"
+    "wrap_tab_navigation",
+    "wheel_adjusts_values"
   ],
   "type": "object"
 }
@@ -10650,6 +11348,7 @@ A point on the display: a band's dot on an EQ's curve, or the level now on a com
 | `x` | number | yes | Its place along the axis, in the series' `x_unit`. |
 | `y` | number | yes | Its value, in the series' `unit`. |
 | `text` | string | yes | How it reads, such as `A1 Peak 1.00 kHz 3.0 dB`. |
+| `handle` | [`DisplayHandle`](#displayhandle) or null | no | The parameters dragging it sets, for a marker that is a handle. |
 
 <details><summary>JSON Schema</summary>
 
@@ -10657,6 +11356,17 @@ A point on the display: a band's dot on an EQ's curve, or the level now on a com
 {
   "description": "A point on the display: a band's dot on an EQ's curve, or the level now on a compressor's transfer curve.",
   "properties": {
+    "handle": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DisplayHandle"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The parameters dragging it sets, for a marker that is a handle."
+    },
     "name": {
       "description": "What it is, such as `A1`.",
       "type": "string"
@@ -10819,6 +11529,90 @@ A curve or a spectrum: values at evenly spaced places along an axis.
     "log_x",
     "y_range",
     "detail",
+    "values"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `DisplaySpectrogram`
+
+A spectrogram: magnitudes in dB over time and frequency.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | What it is, such as `Spectrogram`. |
+| `columns` | integer, at least 0 | yes | The columns over time, the newest on the right. |
+| `rows` | integer, at least 0 | yes | The rows over frequency, the lowest at the bottom. |
+| `frequencies` | array of number, at least 2 | yes | The lowest and highest frequency, in Hz, at the middle of the first and last row. |
+| `log_frequency` | boolean | yes | Whether the rows are spaced logarithmically in frequency (linearly if not). |
+| `levels` | array of number, at least 2 | yes | The levels in dB that the colour ramp runs between: the floor, drawn as its first colour, and the ceiling, as its last. |
+| `values` | array of number | yes | The magnitudes in dB, a column after another from the oldest to the newest, each from its lowest row to its highest. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A spectrogram: magnitudes in dB over time and frequency.",
+  "properties": {
+    "columns": {
+      "description": "The columns over time, the newest on the right.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "frequencies": {
+      "description": "The lowest and highest frequency, in Hz, at the middle of the first and last row.",
+      "items": {
+        "format": "float",
+        "type": "number"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": "array"
+    },
+    "levels": {
+      "description": "The levels in dB that the colour ramp runs between: the floor, drawn as its first colour, and the ceiling, as its last.",
+      "items": {
+        "format": "float",
+        "type": "number"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": "array"
+    },
+    "log_frequency": {
+      "description": "Whether the rows are spaced logarithmically in frequency (linearly if not).",
+      "type": "boolean"
+    },
+    "name": {
+      "description": "What it is, such as `Spectrogram`.",
+      "type": "string"
+    },
+    "rows": {
+      "description": "The rows over frequency, the lowest at the bottom.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "values": {
+      "description": "The magnitudes in dB, a column after another from the oldest to the newest, each from its lowest row to its highest.",
+      "items": {
+        "format": "float",
+        "type": "number"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "columns",
+    "rows",
+    "frequencies",
+    "log_frequency",
+    "levels",
     "values"
   ],
   "type": "object"
@@ -11507,6 +12301,37 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `EmptyTracks`
+
+What `track.list_empty` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array of [`TrackId`](#trackid) | yes | The empty tracks, in display order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `track.list_empty` returns.",
+  "properties": {
+    "tracks": {
+      "description": "The empty tracks, in display order.",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "tracks"
+  ],
+  "type": "object"
 }
 ```
 
@@ -13267,6 +14092,8 @@ The Filter View (spec: browser-tags R18 to R22).
 | `groups` | array of [`FilterGroup`](#filtergroup) | yes | The groups it shows under the chosen label that have tags to show. |
 | `menu` | array of [`FilterGroupChoice`](#filtergroupchoice) | yes | Every group the chosen label can show, with whether it shows. |
 | `selected` | array of string | yes | The selected tags' full names. |
+| `include_auto_tags` | boolean | yes | Whether the Filter View Menu's Include Auto Tags is on: automatic tags show in the Filter View, filter and answer `#` search (spec: browser-tags R55). |
+| `customized` | boolean | yes | Whether the chosen label's groups differ from its default ones, which Reset Filter Groups to Default would undo. |
 
 <details><summary>JSON Schema</summary>
 
@@ -13274,12 +14101,20 @@ The Filter View (spec: browser-tags R18 to R22).
 {
   "description": "The Filter View (spec: browser-tags R18 to R22).",
   "properties": {
+    "customized": {
+      "description": "Whether the chosen label's groups differ from its default ones, which Reset Filter Groups to Default would undo.",
+      "type": "boolean"
+    },
     "groups": {
       "description": "The groups it shows under the chosen label that have tags to show.",
       "items": {
         "$ref": "#/$defs/FilterGroup"
       },
       "type": "array"
+    },
+    "include_auto_tags": {
+      "description": "Whether the Filter View Menu's Include Auto Tags is on: automatic tags show in the Filter View, filter and answer `#` search (spec: browser-tags R55).",
+      "type": "boolean"
     },
     "menu": {
       "description": "Every group the chosen label can show, with whether it shows.",
@@ -13304,7 +14139,9 @@ The Filter View (spec: browser-tags R18 to R22).
     "shown",
     "groups",
     "menu",
-    "selected"
+    "selected",
+    "include_auto_tags",
+    "customized"
   ],
   "type": "object"
 }
@@ -13670,6 +14507,100 @@ On a scene, `linked` is the Longest button: the time is the multiplier times the
 
 </details>
 
+### `FollowSwitched`
+
+What `tempo_follower.set_enabled` and `settings.set_show_tempo_follower_toggle` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether it's on now. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `tempo_follower.set_enabled` and `settings.set_show_tempo_follower_toggle` return.",
+  "properties": {
+    "on": {
+      "description": "Whether it's on now.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FrameAt`
+
+What `video.frame_at` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | yes | The video clip, or `null` where none plays: the picture is black. |
+| `movie_time` | number or null | yes | The time in the movie, in seconds, the clip plays at `at`, through its warp map, or the `movie_time` asked for; `null` outside the clip or before the movie. |
+| `frame` | integer or null | yes | The index of the movie's frame shown then, counting from 0 in the order they show; `null` where the movie has no picture: black. |
+| `frame_time` | number or null | yes | When that frame starts to show on the movie's timeline, in seconds. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `video.frame_at` returns.",
+  "properties": {
+    "clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The video clip, or `null` where none plays: the picture is black."
+    },
+    "frame": {
+      "description": "The index of the movie's frame shown then, counting from 0 in the order they show; `null` where the movie has no picture: black.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "frame_time": {
+      "description": "When that frame starts to show on the movie's timeline, in seconds.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "movie_time": {
+      "description": "The time in the movie, in seconds, the clip plays at `at`, through its warp map, or the `movie_time` asked for; `null` outside the clip or before the movie.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "clip",
+    "movie_time",
+    "frame",
+    "frame_time"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `FreezeResult`
 
 What a freeze did.
@@ -13970,6 +14901,138 @@ A frozen track: the freeze file stretch of each clip, its tail regions, and the 
       "type": "array"
     }
   },
+  "type": "object"
+}
+```
+
+</details>
+
+### `Glyph`
+
+An icon on an icon button, a round button or a unit pair: drawn by the UI in the button's colour.
+
+One of:
+
+- `"low_pass"`: A low-pass filter's response.
+- `"high_pass"`: A high-pass filter's response.
+- `"band_pass"`: A band-pass filter's response.
+- `"notch"`: A notch filter's response.
+- `"metronome"`: A metronome: the tempo-synced unit.
+- `"play"`: A play triangle.
+- `"down"`: A down triangle.
+- `"info"`: A lower-case i, for a device's information.
+- `"left"`: A left arrow.
+- `"right"`: A right arrow.
+- `"plus"`: A plus sign.
+- `"minus"`: A minus sign.
+- `"flat_sharp"`: A flat and a sharp: Use Current Scale.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An icon on an icon button, a round button or a unit pair: drawn by the UI in the button's colour.",
+  "oneOf": [
+    {
+      "const": "low_pass",
+      "description": "A low-pass filter's response.",
+      "type": "string"
+    },
+    {
+      "const": "high_pass",
+      "description": "A high-pass filter's response.",
+      "type": "string"
+    },
+    {
+      "const": "band_pass",
+      "description": "A band-pass filter's response.",
+      "type": "string"
+    },
+    {
+      "const": "notch",
+      "description": "A notch filter's response.",
+      "type": "string"
+    },
+    {
+      "const": "metronome",
+      "description": "A metronome: the tempo-synced unit.",
+      "type": "string"
+    },
+    {
+      "const": "play",
+      "description": "A play triangle.",
+      "type": "string"
+    },
+    {
+      "const": "down",
+      "description": "A down triangle.",
+      "type": "string"
+    },
+    {
+      "const": "info",
+      "description": "A lower-case i, for a device's information.",
+      "type": "string"
+    },
+    {
+      "const": "left",
+      "description": "A left arrow.",
+      "type": "string"
+    },
+    {
+      "const": "right",
+      "description": "A right arrow.",
+      "type": "string"
+    },
+    {
+      "const": "plus",
+      "description": "A plus sign.",
+      "type": "string"
+    },
+    {
+      "const": "minus",
+      "description": "A minus sign.",
+      "type": "string"
+    },
+    {
+      "const": "flat_sharp",
+      "description": "A flat and a sharp: Use Current Scale.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `GreyWhen`
+
+A condition that greys a control: while parameter `param`'s value, rounded, is `value`. The control stays visible and usable, as one of a device that is off does (L-DEV-011).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `param` | [`ParamId`](#paramid) | yes | The parameter that decides. |
+| `value` | integer | yes | The value, rounded, at which the control is greyed. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A condition that greys a control: while parameter `param`'s value, rounded, is `value`. The control stays visible and usable, as one of a device that is off does (L-DEV-011).",
+  "properties": {
+    "param": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The parameter that decides."
+    },
+    "value": {
+      "description": "The value, rounded, at which the control is greyed.",
+      "format": "int32",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "param",
+    "value"
+  ],
   "type": "object"
 }
 ```
@@ -14804,6 +15867,41 @@ One of:
 
 </details>
 
+### `Heading`
+
+A section heading: a line of text over a group of controls (Electric's Hammer and Fork).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `text` | string | yes | The text. |
+| `width` | number | yes | The width its text needs, in points: the least it takes. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A section heading: a line of text over a group of controls (Electric's Hammer and Fork).",
+  "properties": {
+    "text": {
+      "description": "The text.",
+      "type": "string"
+    },
+    "width": {
+      "description": "The width its text needs, in points: the least it takes.",
+      "format": "float",
+      "type": "number"
+    }
+  },
+  "required": [
+    "text",
+    "width"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `HeldKey`
 
 A key held on the track's MIDI input, with the velocity it was played at.
@@ -14920,6 +16018,34 @@ A row, as `set.save_history` reports it.
     "kind",
     "time",
     "label"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `HitPreviewed`
+
+What `device.preview_hit` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `sent` | boolean | yes | Whether the audio engine took it: it is off, or has no such device, when this is `false`, and nothing plays. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.preview_hit` returns.",
+  "properties": {
+    "sent": {
+      "description": "Whether the audio engine took it: it is off, or has no such device, when this is `false`, and nothing plays.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "sent"
   ],
   "type": "object"
 }
@@ -15233,7 +16359,7 @@ The index of the places' files, built in the background.
 
 ### `Input`
 
-Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a MIDI track with an instrument, a return, or Main, tapped at `tap`; with a `chain` of an instrument or audio effect rack on that track, that chain's signal at `tap`; or with an `output`, one of an instrument's extra outputs on that track), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.
+Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a MIDI track with an instrument, a return, or Main, tapped at `tap`; with a `chain` of an instrument or audio effect rack on that track, that chain's signal at `tap`; or with an `output`, one of an instrument's extra outputs on that track), `link_audio` (a Link Audio peer's channel, by the names `peer` and `channel`), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.
 
 One of:
 
@@ -15242,6 +16368,7 @@ One of:
 - an object with `type` = `"all_ins"`: All Ins: every MIDI input port whose Track switch is on, and the computer MIDI keyboard. MIDI tracks only.
 - an object with `type` = `"computer_keyboard"`: The computer MIDI keyboard. MIDI tracks only.
 - an object with `type` = `"port"`, `name` (string): One MIDI input port, by the name the MIDI system gives it. MIDI tracks only. The track keeps the name while the port is away and receives again when a port of that name returns.
+- an object with `type` = `"link_audio"`, `peer` (string), `channel` (string): A channel another app in the Link session offers (Link Audio), by the names of the peer and the channel. Audio tracks only. The track keeps the names while the peer is away, silent, and hears them again when a peer and channel of those names return (the Link Audio spec, R10).
 - an object with `type` = `"resampling"`: Resampling: the Main output. Audio tracks only.
 - an object with `type` = `"track"`, `track` ([`TrackId`](#trackid)), `chain` ([`ChainId`](#chainid) or null), `output` ([`DeviceOutput`](#deviceoutput) or null), `tap` ([`Tap`](#tap)): Another track's signal.
 
@@ -15249,7 +16376,7 @@ One of:
 
 ```json
 {
-  "description": "Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a MIDI track with an instrument, a return, or Main, tapped at `tap`; with a `chain` of an instrument or audio effect rack on that track, that chain's signal at `tap`; or with an `output`, one of an instrument's extra outputs on that track), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.",
+  "description": "Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a MIDI track with an instrument, a return, or Main, tapped at `tap`; with a `chain` of an instrument or audio effect rack on that track, that chain's signal at `tap`; or with an `output`, one of an instrument's extra outputs on that track), `link_audio` (a Link Audio peer's channel, by the names `peer` and `channel`), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.",
   "oneOf": [
     {
       "description": "No Input.",
@@ -15322,6 +16449,29 @@ One of:
       "required": [
         "type",
         "name"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A channel another app in the Link session offers (Link Audio), by the names of the peer and the channel. Audio tracks only. The track keeps the names while the peer is away, silent, and hears them again when a peer and channel of those names return (the Link Audio spec, R10).",
+      "properties": {
+        "channel": {
+          "description": "The channel's name, as the peer shows it.",
+          "type": "string"
+        },
+        "peer": {
+          "description": "The peer's name, as the Link page lists it.",
+          "type": "string"
+        },
+        "type": {
+          "const": "link_audio",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "peer",
+        "channel"
       ],
       "type": "object"
     },
@@ -15416,6 +16566,40 @@ What `remote.input` returns.
 
 </details>
 
+### `InputSet`
+
+What `settings.set_tempo_follower_input` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `label` | string | yes | The input channel now, as the Input Channel chooser shows it. |
+| `channel` | [`Channel`](#channel) | yes | The input channel now. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `settings.set_tempo_follower_input` returns.",
+  "properties": {
+    "channel": {
+      "$ref": "#/$defs/Channel",
+      "description": "The input channel now."
+    },
+    "label": {
+      "description": "The input channel now, as the Input Channel chooser shows it.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "label",
+    "channel"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `InstalledPack`
 
 What `set.install_pack` returns.
@@ -15485,6 +16669,9 @@ One row of the content pane.
 | `details` | [`ItemDetails`](#itemdetails) or null | no | What the optional columns show for it, left out while none shows (spec: browser-tags R27). |
 | `folder` | string or null | no | In search results, the folder it's in, relative to its place. |
 | `format` | [`PluginFormat`](#pluginformat) or null | no | For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11). |
+| `hidden` | boolean | no | For a plug-in, whether it is hidden, which the row draws dimmed while Show Hidden Plug-Ins is on (spec: browser-tags R43); left out otherwise. |
+| `nested` | array of integer, at least 0 | no | The collections of the person's own it is in, by their numbers (8 and up); left out while it is in none (spec: browser-tags R46, R48). |
+| `presets` | boolean | no | For a plug-in, whether it has presets listed under its row, which its fold triangle opens (the plug-in scanning spec, R15); `open` says whether they are listed. Left out otherwise. |
 
 <details><summary>JSON Schema</summary>
 
@@ -15549,6 +16736,10 @@ One row of the content pane.
       ],
       "description": "For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11)."
     },
+    "hidden": {
+      "description": "For a plug-in, whether it is hidden, which the row draws dimmed while Show Hidden Plug-Ins is on (spec: browser-tags R43); left out otherwise.",
+      "type": "boolean"
+    },
     "kind": {
       "$ref": "#/$defs/ItemKind",
       "description": "What it is."
@@ -15556,6 +16747,15 @@ One row of the content pane.
     "name": {
       "description": "Its name, as the Name column shows it.",
       "type": "string"
+    },
+    "nested": {
+      "description": "The collections of the person's own it is in, by their numbers (8 and up); left out while it is in none (spec: browser-tags R46, R48).",
+      "items": {
+        "format": "uint32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
     },
     "open": {
       "default": false,
@@ -15565,6 +16765,10 @@ One row of the content pane.
     "path": {
       "description": "Its path on disk; in the Plug-Ins label, the row's key instead: a vendor folder's is `plug-ins:/` and the vendor, a plug-in's is its file, `#`, and its identifier (the plug-in scanning spec, R11).",
       "type": "string"
+    },
+    "presets": {
+      "description": "For a plug-in, whether it has presets listed under its row, which its fold triangle opens (the plug-in scanning spec, R15); `open` says whether they are listed. Left out otherwise.",
+      "type": "boolean"
     }
   },
   "required": [
@@ -15798,6 +17002,7 @@ A tag on an item, and where it comes from.
 |---|---|---|---|
 | `tag` | string | yes | The tag's full name. |
 | `source` | [`TagSource`](#tagsource) | yes | Where it comes from. |
+| `origin` | string or null | no | For an automatic tag, what it was found from: `plugin` (its categories) or `sound` (the sample's sound). |
 
 <details><summary>JSON Schema</summary>
 
@@ -15805,6 +17010,13 @@ A tag on an item, and where it comes from.
 {
   "description": "A tag on an item, and where it comes from.",
   "properties": {
+    "origin": {
+      "description": "For an automatic tag, what it was found from: `plugin` (its categories) or `sound` (the sample's sound).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "source": {
       "$ref": "#/$defs/TagSource",
       "description": "Where it comes from."
@@ -16198,7 +17410,7 @@ One of:
 
 ### `Label`
 
-A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{"folder": "/its/path"}`, or a saved label, as `{"saved": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{"collection": 3}`.
+A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{"folder": "/its/path"}`, or a saved label, as `{"saved": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{"collection": 3}`, or a collection of the person's own inside one, numbered from 8.
 
 One of:
 
@@ -16219,13 +17431,13 @@ One of:
 - `"current_project"`: The open set's project folder.
 - an object with `folder` (string): A folder the person added to Places, by its path.
 - an object with `saved` (integer): A saved label, by its ID (spec: browser-tags R24).
-- an object with `collection` (integer from 0 to 255): A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34).
+- an object with `collection` (integer, at least 0): A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34); a collection inside another is numbered from 8 (R45).
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{\"folder\": \"/its/path\"}`, or a saved label, as `{\"saved\": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{\"collection\": 3}`.",
+  "description": "A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{\"folder\": \"/its/path\"}`, or a saved label, as `{\"saved\": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{\"collection\": 3}`, or a collection of the person's own inside one, numbered from 8.",
   "oneOf": [
     {
       "const": "all",
@@ -16331,11 +17543,10 @@ One of:
     },
     {
       "additionalProperties": false,
-      "description": "A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34).",
+      "description": "A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34); a collection inside another is numbered from 8 (R45).",
       "properties": {
         "collection": {
-          "format": "uint8",
-          "maximum": 255,
+          "format": "uint32",
           "minimum": 0,
           "type": "integer"
         }
@@ -16363,6 +17574,8 @@ A label as the sidebar lists it.
 | `available` | boolean | yes | Whether its folder can be read now (a place) or it has content (a Library label). A missing folder is listed greyed, as in Live. |
 | `shown` | boolean | yes | Whether the sidebar shows it: the person can hide Library labels and saved labels (spec: browser-tags R26). |
 | `icon` | string or null | no | The icon the person gave it, from [`LABEL_ICONS`] (spec: browser-tags R25). |
+| `open` | boolean | no | For a collection that holds others, whether its list is open in the sidebar. |
+| `parent` | [`Label`](#label) or null | no | For a collection inside another, the one it is in (spec: browser-tags R45, R48). |
 | `path` | string or null | no | For a place, its folder; `null` for Current Project while the set has never been saved. |
 
 <details><summary>JSON Schema</summary>
@@ -16389,6 +17602,21 @@ A label as the sidebar lists it.
     "name": {
       "description": "Its name.",
       "type": "string"
+    },
+    "open": {
+      "description": "For a collection that holds others, whether its list is open in the sidebar.",
+      "type": "boolean"
+    },
+    "parent": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Label"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "For a collection inside another, the one it is in (spec: browser-tags R45, R48)."
     },
     "path": {
       "description": "For a place, its folder; `null` for Current Project while the set has never been saved.",
@@ -17746,6 +18974,7 @@ One of:
 - an object with `row` (array of [`LayoutNode`](#layoutnode)): Parts left to right.
 - an object with `column` (array of [`LayoutNode`](#layoutnode)): Parts top to bottom.
 - an object with `pages` ([`PagesNode`](#pagesnode)): Named pages, one of which shows at a time (WP-8.1).
+- an object with `heading` ([`Heading`](#heading)): A heading over a group of controls: it takes the width of the group it sits over.
 
 <details><summary>JSON Schema</summary>
 
@@ -17821,6 +19050,19 @@ One of:
       },
       "required": [
         "pages"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A heading over a group of controls: it takes the width of the group it sits over.",
+      "properties": {
+        "heading": {
+          "$ref": "#/$defs/Heading"
+        }
+      },
+      "required": [
+        "heading"
       ],
       "type": "object"
     }
@@ -17925,6 +19167,112 @@ The Library page's settings (L-SET-016).
 
 </details>
 
+### `LinkAudioPeer`
+
+A peer in the session that has Link Audio on (`link.state`).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The peer's name. |
+| `state` | [`PeerState`](#peerstate) | yes | Whether audio is arriving from it. |
+| `buffered_ms` | number | yes | The audio buffered from it, in milliseconds. |
+| `channels` | array of string | yes | The channels it offers, in its order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A peer in the session that has Link Audio on (`link.state`).",
+  "properties": {
+    "buffered_ms": {
+      "description": "The audio buffered from it, in milliseconds.",
+      "format": "double",
+      "type": "number"
+    },
+    "channels": {
+      "description": "The channels it offers, in its order.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "name": {
+      "description": "The peer's name.",
+      "type": "string"
+    },
+    "state": {
+      "$ref": "#/$defs/PeerState",
+      "description": "Whether audio is arriving from it."
+    }
+  },
+  "required": [
+    "name",
+    "state",
+    "buffered_ms",
+    "channels"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `LinkAudioState`
+
+Link Audio's part of `link.state`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean | yes | Whether Link Audio is switched on (it streams only while Link is on too). |
+| `name` | string | yes | The name other peers see this app by. |
+| `latency_ms` | number | yes | The input latency of incoming audio, in milliseconds. |
+| `sync_to_incoming_audio` | boolean | yes | Whether Beatlayer delays its own playback by the latency. |
+| `peers` | array of [`LinkAudioPeer`](#linkaudiopeer) | yes | The peers with Link Audio on, as the Link page lists them. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Link Audio's part of `link.state`.",
+  "properties": {
+    "enabled": {
+      "description": "Whether Link Audio is switched on (it streams only while Link is on too).",
+      "type": "boolean"
+    },
+    "latency_ms": {
+      "description": "The input latency of incoming audio, in milliseconds.",
+      "format": "double",
+      "type": "number"
+    },
+    "name": {
+      "description": "The name other peers see this app by.",
+      "type": "string"
+    },
+    "peers": {
+      "description": "The peers with Link Audio on, as the Link page lists them.",
+      "items": {
+        "$ref": "#/$defs/LinkAudioPeer"
+      },
+      "type": "array"
+    },
+    "sync_to_incoming_audio": {
+      "description": "Whether Beatlayer delays its own playback by the latency.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "enabled",
+    "name",
+    "latency_ms",
+    "sync_to_incoming_audio",
+    "peers"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `LinkGroupId`
 
 The ID of a link group: a positive integer, unique within the project and never reused.
@@ -17936,6 +19284,25 @@ Type: integer, at least 1.
 ```json
 {
   "description": "The ID of a link group: a positive integer, unique within the project and never reused.",
+  "format": "uint64",
+  "minimum": 1,
+  "type": "integer"
+}
+```
+
+</details>
+
+### `LinkId`
+
+The ID of a link: a positive integer, unique within the project and never reused.
+
+Type: integer, at least 1.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The ID of a link: a positive integer, unique within the project and never reused.",
   "format": "uint64",
   "minimum": 1,
   "type": "integer"
@@ -17960,6 +19327,7 @@ What `link.state` returns.
 | `show_toggle` | boolean | yes | Whether the Control Bar shows the Link toggle and its menu. |
 | `waiting_for_link` | boolean | yes | Whether a start waits for the session's phase. |
 | `starts_in` | number or null | yes | How many seconds until a waiting start begins, once it has been worked out; null otherwise. |
+| `audio` | [`LinkAudioState`](#linkaudiostate) | yes | Link Audio: its switch, name, latency, Sync to Incoming Audio and the peers. |
 
 <details><summary>JSON Schema</summary>
 
@@ -17967,6 +19335,10 @@ What `link.state` returns.
 {
   "description": "What `link.state` returns.",
   "properties": {
+    "audio": {
+      "$ref": "#/$defs/LinkAudioState",
+      "description": "Link Audio: its switch, name, latency, Sync to Incoming Audio and the peers."
+    },
     "enabled": {
       "description": "Whether Link is on: the app is in a Link session on its networks.",
       "type": "boolean"
@@ -18033,7 +19405,8 @@ What `link.state` returns.
     "start_stop_sync",
     "show_toggle",
     "waiting_for_link",
-    "starts_in"
+    "starts_in",
+    "audio"
   ],
   "type": "object"
 }
@@ -18115,6 +19488,58 @@ What `device.load_sample` returns.
     "media",
     "slot",
     "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `LoadWavetableResult`
+
+What `device.load_wavetable` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device that took the table. |
+| `oscillator` | integer from 0 to 255 | yes | The oscillator that took it. |
+| `choice` | [`WavetableChoice`](#wavetablechoice) | yes | What the oscillator plays now. |
+| `frames` | integer from 0 to 65535 | yes | How many frames the table has. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.load_wavetable` returns.",
+  "properties": {
+    "choice": {
+      "$ref": "#/$defs/WavetableChoice",
+      "description": "What the oscillator plays now."
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device that took the table."
+    },
+    "frames": {
+      "description": "How many frames the table has.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "oscillator": {
+      "description": "The oscillator that took it.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "oscillator",
+    "choice",
+    "frames"
   ],
   "type": "object"
 }
@@ -18297,6 +19722,104 @@ One of:
 
 </details>
 
+### `LoopBraceEnd`
+
+The end of the loop brace the insert marker goes to.
+
+One of:
+
+- `"start"`: The brace's start.
+- `"end"`: The brace's end.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The end of the loop brace the insert marker goes to.",
+  "oneOf": [
+    {
+      "const": "start",
+      "description": "The brace's start.",
+      "type": "string"
+    },
+    {
+      "const": "end",
+      "description": "The brace's end.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `LoopBraceMove`
+
+`left` or `right`: to the previous or next grid line. `earlier` or `later`: by the brace's own length. `halve` or `double`: its length, from its start. `shorten` or `lengthen`: its length by a grid step.
+
+One of:
+
+- `"left"`: To the previous grid line.
+- `"right"`: To the next grid line.
+- `"earlier"`: Earlier by its length, stopping at 1.1.1.
+- `"later"`: Later by its length.
+- `"halve"`: Half as long, from its start.
+- `"double"`: Twice as long, from its start.
+- `"shorten"`: Shorter by a grid step.
+- `"lengthen"`: Longer by a grid step.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "`left` or `right`: to the previous or next grid line. `earlier` or `later`: by the brace's own length. `halve` or `double`: its length, from its start. `shorten` or `lengthen`: its length by a grid step.",
+  "oneOf": [
+    {
+      "const": "left",
+      "description": "To the previous grid line.",
+      "type": "string"
+    },
+    {
+      "const": "right",
+      "description": "To the next grid line.",
+      "type": "string"
+    },
+    {
+      "const": "earlier",
+      "description": "Earlier by its length, stopping at 1.1.1.",
+      "type": "string"
+    },
+    {
+      "const": "later",
+      "description": "Later by its length.",
+      "type": "string"
+    },
+    {
+      "const": "halve",
+      "description": "Half as long, from its start.",
+      "type": "string"
+    },
+    {
+      "const": "double",
+      "description": "Twice as long, from its start.",
+      "type": "string"
+    },
+    {
+      "const": "shorten",
+      "description": "Shorter by a grid step.",
+      "type": "string"
+    },
+    {
+      "const": "lengthen",
+      "description": "Longer by a grid step.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `LoopKind`
 
 Which of a layer's loops `device.snap_layer_markers` snaps.
@@ -18458,7 +19981,7 @@ One macro's saved settings beside its value (macros spec, R10, R14, R16, R21 and
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `colour` | integer or null | no | A swatch of the palette of 5 rows of 14, from 0 to 69, or none. |
+| `colour` | [`Colour`](#colour) or null | no | A swatch of the palette of 5 rows of 14, from 0 to 69, or none. |
 | `info` | string | no | The info text the user gave it (Edit Info Text). |
 | `name` | string | no | The name Rename gave it; empty for its default name (R10). |
 | `randomize_excluded` | boolean | no | Whether Randomize leaves it alone (R16). |
@@ -18473,14 +19996,15 @@ One macro's saved settings beside its value (macros spec, R10, R14, R16, R21 and
   "description": "One macro's saved settings beside its value (macros spec, R10, R14, R16, R21 and R30). A macro's value is a parameter of its rack, in `Device::params`.",
   "properties": {
     "colour": {
-      "description": "A swatch of the palette of 5 rows of 14, from 0 to 69, or none.",
-      "format": "uint8",
-      "maximum": 255,
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Colour"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A swatch of the palette of 5 rows of 14, from 0 to 69, or none."
     },
     "info": {
       "description": "The info text the user gave it (Edit Info Text).",
@@ -18524,7 +20048,7 @@ One macro as `rack.macros` reports it.
 |---|---|---|---|
 | `number` | integer from 0 to 255 | yes | Its number, from 1. |
 | `name` | string | yes | Its name: Rename's, its one parameter's, or "Macro N" (macros spec, R10). |
-| `colour` | integer or null | yes | Its colour: a swatch of the palette of 5 rows of 14, or null. |
+| `colour` | [`Colour`](#colour) or null | yes | Its colour: a swatch of the palette of 5 rows of 14, a `#RRGGBB` colour, or null. |
 | `value` | number | yes | Its value, from 0 to 1. |
 | `text` | string | yes | How it reads: its parameter's value and unit, 0 to 127, or a shared unit (R10). |
 | `style` | [`MacroStyle`](#macrostyle) | yes | How it is drawn and which positions it takes (R21). |
@@ -18540,14 +20064,15 @@ One macro as `rack.macros` reports it.
   "description": "One macro as `rack.macros` reports it.",
   "properties": {
     "colour": {
-      "description": "Its colour: a swatch of the palette of 5 rows of 14, or null.",
-      "format": "uint8",
-      "maximum": 255,
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Colour"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its colour: a swatch of the palette of 5 rows of 14, a `#RRGGBB` colour, or null."
     },
     "mappings": {
       "description": "What it drives, in the order the mappings were made (R9).",
@@ -18887,6 +20412,37 @@ One of:
         "param"
       ],
       "type": "object"
+    }
+  ]
+}
+```
+
+</details>
+
+### `Maker`
+
+A maker's mark in a device's title bar.
+
+One of:
+
+- `"softube"`: Softube, who made Amp.
+- `"cytomic"`: Cytomic, who made Glue Compressor.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A maker's mark in a device's title bar.",
+  "oneOf": [
+    {
+      "const": "softube",
+      "description": "Softube, who made Amp.",
+      "type": "string"
+    },
+    {
+      "const": "cytomic",
+      "description": "Cytomic, who made Glue Compressor.",
+      "type": "string"
     }
   ]
 }
@@ -19250,6 +20806,43 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `MatrixRoutes`
+
+The sources routed into one parameter of an instrument's matrix.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `param` | [`ParamId`](#paramid) | yes | The parameter. |
+| `sources` | array of string | yes | The names of the sources routed into it, in slot order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The sources routed into one parameter of an instrument's matrix.",
+  "properties": {
+    "param": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The parameter."
+    },
+    "sources": {
+      "description": "The names of the sources routed into it, in slot order.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "param",
+    "sources"
+  ],
+  "type": "object"
 }
 ```
 
@@ -19722,17 +21315,18 @@ What `midi.ports` returns.
 
 ### `MidiSidechain`
 
-A device's MIDI sidechain input: `source`, the MIDI track whose notes and channel messages the device hears, or absent for No Input.
+A device's MIDI sidechain input: `source`, the MIDI track whose notes and channel messages the device hears, or absent for No Input; and, on a device whose type gives its MIDI sidechain a tapping point, `tap`: `pre_fx` for what the track's clips and input played, `post_fx` (a new device's) for what leaves its MIDI effects, or `post_mixer`, the same as `post_fx`.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `source` | [`TrackId`](#trackid) or null | no | The MIDI track it listens to, or `None` (No Input), as on a new device. |
+| `tap` | [`Tap`](#tap) or null | no | Where the device takes the source's notes, for a device type that gives its MIDI sidechain a tapping point; `None` for one that doesn't, which hears them [`Tap::PreFx`]. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A device's MIDI sidechain input: `source`, the MIDI track whose notes and channel messages the device hears, or absent for No Input.",
+  "description": "A device's MIDI sidechain input: `source`, the MIDI track whose notes and channel messages the device hears, or absent for No Input; and, on a device whose type gives its MIDI sidechain a tapping point, `tap`: `pre_fx` for what the track's clips and input played, `post_fx` (a new device's) for what leaves its MIDI effects, or `post_mixer`, the same as `post_fx`.",
   "properties": {
     "source": {
       "anyOf": [
@@ -19744,6 +21338,17 @@ A device's MIDI sidechain input: `source`, the MIDI track whose notes and channe
         }
       ],
       "description": "The MIDI track it listens to, or `None` (No Input), as on a new device."
+    },
+    "tap": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Tap"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Where the device takes the source's notes, for a device type that gives its MIDI sidechain a tapping point; `None` for one that doesn't, which hears them [`Tap::PreFx`]."
     }
   },
   "type": "object"
@@ -19754,18 +21359,19 @@ A device's MIDI sidechain input: `source`, the MIDI track whose notes and channe
 
 ### `MidiSidechainSection`
 
-A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5.27; the routing spec, R34): the toggle shows the section, which holds the MIDI source chooser.
+A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5.27; the routing spec, R34): the toggle shows the section, which holds the MIDI source chooser and, where the device has one, the tapping point chooser (R39). A device with both sidechains reports both sections (R38).
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `shown` | boolean | yes | Whether the section is shown, by the toggle at the top of the device's left strip. It changes only the view. |
 | `source` | string | yes | What the MIDI source chooser shows: a MIDI track's label (`1-MIDI`) or `No Input`. |
+| `tap` | string or null | no | What the tapping point chooser under it shows (`Pre FX`, `Post FX` or `Post Mixer`), for a device whose MIDI sidechain has one (the routing spec, R39). |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5.27; the routing spec, R34): the toggle shows the section, which holds the MIDI source chooser.",
+  "description": "A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5.27; the routing spec, R34): the toggle shows the section, which holds the MIDI source chooser and, where the device has one, the tapping point chooser (R39). A device with both sidechains reports both sections (R38).",
   "properties": {
     "shown": {
       "description": "Whether the section is shown, by the toggle at the top of the device's left strip. It changes only the view.",
@@ -19774,6 +21380,13 @@ A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5
     "source": {
       "description": "What the MIDI source chooser shows: a MIDI track's label (`1-MIDI`) or `No Input`.",
       "type": "string"
+    },
+    "tap": {
+      "description": "What the tapping point chooser under it shows (`Pre FX`, `Post FX` or `Post Mixer`), for a device whose MIDI sidechain has one (the routing spec, R39).",
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [
@@ -20224,6 +21837,49 @@ What `mixer_view.state` and the other view commands return.
     "meters",
     "peaks",
     "column_widths"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ModRoute`
+
+A route a device holds in a free slot: saved with the set and with the device's presets (R10). Its amount is the slot's parameter.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `slot` | integer from 0 to 255 | yes | The slot's number. |
+| `source` | string | yes | The source's name. |
+| `destination` | string | yes | The destination's name. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A route a device holds in a free slot: saved with the set and with the device's presets (R10). Its amount is the slot's parameter.",
+  "properties": {
+    "destination": {
+      "description": "The destination's name.",
+      "type": "string"
+    },
+    "slot": {
+      "description": "The slot's number.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "source": {
+      "description": "The source's name.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "slot",
+    "source",
+    "destination"
   ],
   "type": "object"
 }
@@ -21044,6 +22700,37 @@ A multisampler's views and selection, as `device_view.state` reports them (R30).
 
 </details>
 
+### `Neighbour`
+
+The section a Move Earlier or Move Later swaps with.
+
+One of:
+
+- `"earlier"`: The section before it.
+- `"later"`: The section after it.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The section a Move Earlier or Move Later swaps with.",
+  "oneOf": [
+    {
+      "const": "earlier",
+      "description": "The section before it.",
+      "type": "string"
+    },
+    {
+      "const": "later",
+      "description": "The section after it.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `NewDevice`
 
 The device `device.add` adds.
@@ -21362,6 +23049,71 @@ What the note clipboard holds, as `note.copy` reports it.
   "required": [
     "notes",
     "length"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `NoteColors`
+
+How the MIDI Note Editor colours notes (R2, R3).
+
+One of:
+
+- `"velocity"`: The clip's colour, paler the softer the note: Live's.
+- `"pitch_class"`: One hue for each pitch class, the same in every octave.
+- `"scale_degree"`: One hue for each degree of the clip's scale, grey outside it.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How the MIDI Note Editor colours notes (R2, R3).",
+  "oneOf": [
+    {
+      "const": "velocity",
+      "description": "The clip's colour, paler the softer the note: Live's.",
+      "type": "string"
+    },
+    {
+      "const": "pitch_class",
+      "description": "One hue for each pitch class, the same in every octave.",
+      "type": "string"
+    },
+    {
+      "const": "scale_degree",
+      "description": "One hue for each degree of the clip's scale, grey outside it.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `NoteColorsResult`
+
+What `view.set_note_colors` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `colors` | [`NoteColors`](#notecolors) | yes | The colouring in use afterwards. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `view.set_note_colors` returns.",
+  "properties": {
+    "colors": {
+      "$ref": "#/$defs/NoteColors",
+      "description": "The colouring in use afterwards."
+    }
+  },
+  "required": [
+    "colors"
   ],
   "type": "object"
 }
@@ -22194,25 +23946,95 @@ What `set.pack_status` returns.
 
 </details>
 
+### `PackageState`
+
+Where a package is.
+
+One of:
+
+- `"not_installed"`: Not on this computer.
+- `"queued"`: Waiting for the download before it.
+- `"downloading"`: Downloading: see `progress`.
+- `"installed"`: Installed.
+- `"removed_at_next_launch"`: Removed, but its library is loaded: its files go the next time Beatlayer starts.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Where a package is.",
+  "oneOf": [
+    {
+      "const": "not_installed",
+      "description": "Not on this computer.",
+      "type": "string"
+    },
+    {
+      "const": "queued",
+      "description": "Waiting for the download before it.",
+      "type": "string"
+    },
+    {
+      "const": "downloading",
+      "description": "Downloading: see `progress`.",
+      "type": "string"
+    },
+    {
+      "const": "installed",
+      "description": "Installed.",
+      "type": "string"
+    },
+    {
+      "const": "removed_at_next_launch",
+      "description": "Removed, but its library is loaded: its files go the next time Beatlayer starts.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `PackageStatus`
 
-A package the separation needs.
+A package of the manifest, as `packages.list` and `stems.status` give it.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `id` | string | yes | Its ID, which `packages.install` and `packages.remove` take. |
 | `name` | string | yes | Its name. |
 | `purpose` | string | yes | What it does. |
 | `version` | string | yes | Its version. |
 | `url` | string | yes | Its project's page. |
 | `size` | integer, at least 0 | yes | The download's size in bytes. |
 | `installed` | boolean | yes | Whether it's installed. |
+| `role` | string | yes | The role it fills: features share a package by role. |
+| `state` | [`PackageState`](#packagestate) | yes | Where it is. |
+| `features` | array of string | yes | The features that need it, by ID. |
+| `at_next_launch` | boolean | no | Installed, but a library in its role is already loaded, so it takes effect the next time Beatlayer starts. |
+| `progress` | number | no | While it downloads, how far it is, from 0 to 1. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A package the separation needs.",
+  "description": "A package of the manifest, as `packages.list` and `stems.status` give it.",
   "properties": {
+    "at_next_launch": {
+      "description": "Installed, but a library in its role is already loaded, so it takes effect the next time Beatlayer starts.",
+      "type": "boolean"
+    },
+    "features": {
+      "description": "The features that need it, by ID.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "id": {
+      "description": "Its ID, which `packages.install` and `packages.remove` take.",
+      "type": "string"
+    },
     "installed": {
       "description": "Whether it's installed.",
       "type": "boolean"
@@ -22221,8 +24043,17 @@ A package the separation needs.
       "description": "Its name.",
       "type": "string"
     },
+    "progress": {
+      "description": "While it downloads, how far it is, from 0 to 1.",
+      "format": "float",
+      "type": "number"
+    },
     "purpose": {
       "description": "What it does.",
+      "type": "string"
+    },
+    "role": {
+      "description": "The role it fills: features share a package by role.",
       "type": "string"
     },
     "size": {
@@ -22230,6 +24061,10 @@ A package the separation needs.
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
+    },
+    "state": {
+      "$ref": "#/$defs/PackageState",
+      "description": "Where it is."
     },
     "url": {
       "description": "Its project's page.",
@@ -22241,14 +24076,86 @@ A package the separation needs.
     }
   },
   "required": [
+    "id",
     "name",
     "purpose",
     "version",
     "url",
     "size",
-    "installed"
+    "installed",
+    "role",
+    "state",
+    "features"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `PackagesStatus`
+
+What `packages.list` and the other commands return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `folder` | string | yes | Where the packages are installed. |
+| `packages` | array of [`PackageStatus`](#packagestatus) | yes | The packages of the manifest for this platform. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `packages.list` and the other commands return.",
+  "properties": {
+    "folder": {
+      "description": "Where the packages are installed.",
+      "type": "string"
+    },
+    "packages": {
+      "description": "The packages of the manifest for this platform.",
+      "items": {
+        "$ref": "#/$defs/PackageStatus"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "folder",
+    "packages"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PadDirection`
+
+A pad layout's direction: `vertical` or `horizontal`.
+
+One of:
+
+- `"vertical"`: Moving right is one step, moving up a row is the interval.
+- `"horizontal"`: Rows and columns swap.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A pad layout's direction: `vertical` or `horizontal`.",
+  "oneOf": [
+    {
+      "const": "vertical",
+      "description": "Moving right is one step, moving up a row is the interval.",
+      "type": "string"
+    },
+    {
+      "const": "horizontal",
+      "description": "Rows and columns swap.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -22402,6 +24309,43 @@ One of:
     {
       "const": "multi",
       "description": "Several chains on its note: it reads `Multi`.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PadSpacing`
+
+A pad layout's row interval: `fourths`, `thirds` or `sequent`.
+
+One of:
+
+- `"fourths"`: 3 scale degrees (In Key) or 5 semitones (Chromatic).
+- `"thirds"`: 2 scale degrees or 4 semitones.
+- `"sequent"`: 8 steps: each row starts where the one below ends.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A pad layout's row interval: `fourths`, `thirds` or `sequent`.",
+  "oneOf": [
+    {
+      "const": "fourths",
+      "description": "3 scale degrees (In Key) or 5 semitones (Chromatic).",
+      "type": "string"
+    },
+    {
+      "const": "thirds",
+      "description": "2 scale degrees or 4 semitones.",
+      "type": "string"
+    },
+    {
+      "const": "sequent",
+      "description": "8 steps: each row starts where the one below ends.",
       "type": "string"
     }
   ]
@@ -22636,6 +24580,7 @@ One of:
 - `"tabs"`: A row of tabs along the top of the node's area.
 - `"title_bar"`: Tabs in the device's title bar, after its name, that the device's title bar draws: the node's area is the shown page's alone.
 - `"shell"`: A strip of sections, each its page's main controls under a section button, beside a display area the shown page fills.
+- `"strip"`: A strip down the node's left edge ([`STRIP_WIDTH`] wide) with a ▼ toggle at its top and the node's name written up it; the node's area right of it holds the second page while it is shown and the first, which is empty, while it isn't ([`PagesNode::side_strip`]).
 
 <details><summary>JSON Schema</summary>
 
@@ -22656,6 +24601,11 @@ One of:
     {
       "const": "shell",
       "description": "A strip of sections, each its page's main controls under a section button, beside a display area the shown page fills.",
+      "type": "string"
+    },
+    {
+      "const": "strip",
+      "description": "A strip down the node's left edge ([`STRIP_WIDTH`] wide) with a ▼ toggle at its top and the node's name written up it; the node's area right of it holds the second page while it is shown and the first, which is empty, while it isn't ([`PagesNode::side_strip`]).",
       "type": "string"
     }
   ]
@@ -23224,6 +25174,42 @@ One of:
 
 </details>
 
+### `ParamLabel`
+
+What a [`Relabel`] gives a parameter.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Its name. |
+| `unit` | string or null | no | The unit its number reads in instead of its own, as text. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a [`Relabel`] gives a parameter.",
+  "properties": {
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "unit": {
+      "description": "The unit its number reads in instead of its own, as text.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ParamUnit`
 
 What a parameter's value measures, which says how it reads.
@@ -23313,6 +25299,7 @@ One of a device's parameters as `device.parameters` reports it.
 | `menu_option` | boolean | yes | Whether it's one of the device's own items in its Show Options menu rather than a control in its body (C-DEVICE-015). |
 | `title_switch` | boolean | yes | Whether it's the switch the device draws in its title bar rather than in its body (L-DEV-004), such as Use Current Scale. |
 | `configured` | boolean | yes | Whether it's one of the parameters the device's panel is configured to show (clap-hosting R5, configure mode). True for every parameter of a device that isn't a plug-in, since its panel shows them all. |
+| `shown` | boolean | yes | Whether its control is shown: false for the parameter a switch has put away, such as Limiter's Ceiling while Maximize is on (the control then is Threshold's). A parameter that isn't shown keeps its value, its lane and its place in its banks, and still plays. |
 | `description` | string | no | What it does, for the Info View (WP-2.24) and agents. |
 | `other` | number or null | no | Its value in the A and B state that isn't active (device compare R11); left out for a device without two states. |
 
@@ -23365,6 +25352,11 @@ One of a device's parameters as `device.parameters` reports it.
         "null"
       ]
     },
+    "shown": {
+      "default": true,
+      "description": "Whether its control is shown: false for the parameter a switch has put away, such as Limiter's Ceiling while Maximize is on (the control then is Threshold's). A parameter that isn't shown keeps its value, its lane and its place in its banks, and still plays.",
+      "type": "boolean"
+    },
     "text": {
       "description": "How the value reads, as its control shows it, such as `-6.0 dB`.",
       "type": "string"
@@ -23390,7 +25382,8 @@ One of a device's parameters as `device.parameters` reports it.
     "text",
     "menu_option",
     "title_switch",
-    "configured"
+    "configured",
+    "shown"
   ],
   "type": "object"
 }
@@ -23433,6 +25426,37 @@ One of:
     {
       "const": "groove_pool",
       "description": "The Groove Pool under the list (the grooves spec R24): its keys are its own, so no browser key applies.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PeerState`
+
+Whether audio is arriving from a Link Audio peer (`link.state`).
+
+One of:
+
+- `"receiving"`: A track takes one of the peer's channels and audio is arriving.
+- `"connected"`: The peer is in the session with Link Audio on, and nothing arrives.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Whether audio is arriving from a Link Audio peer (`link.state`).",
+  "oneOf": [
+    {
+      "const": "receiving",
+      "description": "A track takes one of the peer's channels and audio is arriving.",
+      "type": "string"
+    },
+    {
+      "const": "connected",
+      "description": "The peer is in the session with Link Audio on, and nothing arrives.",
       "type": "string"
     }
   ]
@@ -23562,6 +25586,37 @@ The Pitch filter: pitch classes C to B.
     "classes"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `PitchUnit`
+
+What a step of a pitch utility is (Spec: pitch-and-time-utilities R2).
+
+One of:
+
+- `"steps"`: A step of the clip's scale in Scale Mode, a semitone otherwise, and a Drum Rack's key on a Drum Rack track.
+- `"semitones"`: A semitone.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a step of a pitch utility is (Spec: pitch-and-time-utilities R2).",
+  "oneOf": [
+    {
+      "const": "steps",
+      "description": "A step of the clip's scale in Scale Mode, a semitone otherwise, and a Drum Rack's key on a Drum Rack track.",
+      "type": "string"
+    },
+    {
+      "const": "semitones",
+      "description": "A semitone.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -24797,6 +26852,548 @@ One column of Browse Mode (push-2-tracks R14).
 
 </details>
 
+### `PushChain`
+
+A chain on one of the lower buttons while a rack's button is held.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The chain. |
+| `name` | string | yes | Its name. |
+| `selected` | boolean | yes | Whether it is the selected chain. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A chain on one of the lower buttons while a rack's button is held.",
+  "properties": {
+    "chain": {
+      "$ref": "#/$defs/ChainId",
+      "description": "The chain."
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "selected": {
+      "description": "Whether it is the selected chain.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "chain",
+    "name",
+    "selected"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushClipArea`
+
+The sequenceable area the pads edit in a step sequencing layout (push-2-tracks R51).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `fit` | string | yes | How the display fits the clip: `folded`, `sequencer`, `sequencer_notes` or `pad`. |
+| `from` | [`Ticks`](#ticks) | yes | Where the page of steps starts, in ticks. |
+| `to` | [`Ticks`](#ticks) | yes | Where it ends. |
+| `low` | integer from 0 to 255 | yes | The lowest pitch the pads edit. |
+| `high` | integer from 0 to 255 | yes | The highest. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The sequenceable area the pads edit in a step sequencing layout (push-2-tracks R51).",
+  "properties": {
+    "fit": {
+      "description": "How the display fits the clip: `folded`, `sequencer`, `sequencer_notes` or `pad`.",
+      "type": "string"
+    },
+    "from": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where the page of steps starts, in ticks."
+    },
+    "high": {
+      "description": "The highest.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "low": {
+      "description": "The lowest pitch the pads edit.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "to": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it ends."
+    }
+  },
+  "required": [
+    "fit",
+    "from",
+    "to",
+    "low",
+    "high"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushClipControl`
+
+One control on an encoder in Clip Mode (push-2-tracks R58).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `encoder` | integer from 0 to 255 | yes | The encoder, from 1. |
+| `name` | string | yes | The control's name. |
+| `value` | string | yes | Its value as the display shows it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One control on an encoder in Clip Mode (push-2-tracks R58).",
+  "properties": {
+    "encoder": {
+      "description": "The encoder, from 1.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "name": {
+      "description": "The control's name.",
+      "type": "string"
+    },
+    "value": {
+      "description": "Its value as the display shows it.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "encoder",
+    "name",
+    "value"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushClipMode`
+
+What Clip Mode shows (push-2-tracks R58).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | yes | The clip shown. |
+| `shows` | string | yes | What the mode shows: `midi`, `audio`, `empty_midi`, `empty_audio` or `nothing`. |
+| `name` | string | yes | The clip's name. |
+| `looping` | boolean or null | yes | Whether the clip's Loop is on. |
+| `controls` | array of [`PushClipControl`](#pushclipcontrol) | yes | The controls on the encoders, left to right. |
+| `zoom` | number | yes | The zoom: 1 shows the whole clip. |
+| `view` | array of number, at least 2 | yes | The span of beats of the clip's contents the display shows. |
+| `folded` | boolean | yes | Whether the display is folded to the pitches that hold notes. |
+| `area` | [`PushClipArea`](#pushcliparea) or null | yes | The sequenceable area the pads edit. |
+| `held_steps` | array of [`PushHeldStep`](#pushheldstep) | yes | The steps held, whose notes the encoders set. |
+| `select_pad` | integer or null | yes | The drum pad whose every note the encoders set while Select holds it, as a MIDI note. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What Clip Mode shows (push-2-tracks R58).",
+  "properties": {
+    "area": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushClipArea"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The sequenceable area the pads edit."
+    },
+    "clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip shown."
+    },
+    "controls": {
+      "description": "The controls on the encoders, left to right.",
+      "items": {
+        "$ref": "#/$defs/PushClipControl"
+      },
+      "type": "array"
+    },
+    "folded": {
+      "description": "Whether the display is folded to the pitches that hold notes.",
+      "type": "boolean"
+    },
+    "held_steps": {
+      "description": "The steps held, whose notes the encoders set.",
+      "items": {
+        "$ref": "#/$defs/PushHeldStep"
+      },
+      "type": "array"
+    },
+    "looping": {
+      "description": "Whether the clip's Loop is on.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "The clip's name.",
+      "type": "string"
+    },
+    "select_pad": {
+      "description": "The drum pad whose every note the encoders set while Select holds it, as a MIDI note.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "shows": {
+      "description": "What the mode shows: `midi`, `audio`, `empty_midi`, `empty_audio` or `nothing`.",
+      "type": "string"
+    },
+    "view": {
+      "description": "The span of beats of the clip's contents the display shows.",
+      "items": {
+        "format": "double",
+        "type": "number"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": "array"
+    },
+    "zoom": {
+      "description": "The zoom: 1 shows the whole clip.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "clip",
+    "shows",
+    "name",
+    "looping",
+    "controls",
+    "zoom",
+    "view",
+    "folded",
+    "area",
+    "held_steps",
+    "select_pad"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushConvertTo`
+
+What `push.convert` makes a new MIDI track or drum rack of.
+
+One of:
+
+- `"simpler"`: A new MIDI track with a Simpler holding the audio clip's sample.
+- `"drum_rack"`: A new MIDI track with a drum rack holding the sample in a Simpler on its first pad.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `push.convert` makes a new MIDI track or drum rack of.",
+  "oneOf": [
+    {
+      "const": "simpler",
+      "description": "A new MIDI track with a Simpler holding the audio clip's sample.",
+      "type": "string"
+    },
+    {
+      "const": "drum_rack",
+      "description": "A new MIDI track with a drum rack holding the sample in a Simpler on its first pad.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PushConverted`
+
+What `push.convert` made.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `from` | string | yes | What was converted: `simpler` (a Classic or One-Shot Simpler made a new track with a drum rack), `slices` (a slicing Simpler became a drum rack), `pad` (a drum rack's pad made a new track) or `clip` (an audio clip made a new track). |
+| `track` | [`TrackId`](#trackid) or null | yes | The new track, unless the Simpler became a drum rack in its place. |
+| `device` | [`DeviceId`](#deviceid) | yes | The device made: the drum rack, or the Simpler the track holds. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `push.convert` made.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device made: the drum rack, or the Simpler the track holds."
+    },
+    "from": {
+      "description": "What was converted: `simpler` (a Classic or One-Shot Simpler made a new track with a drum rack), `slices` (a slicing Simpler became a drum rack), `pad` (a drum rack's pad made a new track) or `clip` (an audio clip made a new track).",
+      "type": "string"
+    },
+    "track": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrackId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The new track, unless the Simpler became a drum rack in its place."
+    }
+  },
+  "required": [
+    "from",
+    "track",
+    "device"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushDevice`
+
+A device on one of the upper buttons in Device Mode (push-2-tracks R27).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `button` | integer, at least 0 | yes | The upper display button, from 1. |
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `name` | string | yes | Its name. |
+| `depth` | integer, at least 0 | yes | How deep it is inside racks: 0 on the track's own chain. |
+| `kind` | string | yes | What it is: `instrument`, `audio_effect`, `midi_effect`, `instrument_rack`, `audio_effect_rack`, `midi_effect_rack` or `drum_rack`. |
+| `enabled` | boolean | yes | Whether it is switched on. |
+| `selected` | boolean | yes | Whether it is the device in focus, which is the window's selected one. |
+| `unfolded` | boolean | yes | For a rack, whether its devices follow it on the buttons. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A device on one of the upper buttons in Device Mode (push-2-tracks R27).",
+  "properties": {
+    "button": {
+      "description": "The upper display button, from 1.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "depth": {
+      "description": "How deep it is inside racks: 0 on the track's own chain.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "enabled": {
+      "description": "Whether it is switched on.",
+      "type": "boolean"
+    },
+    "kind": {
+      "description": "What it is: `instrument`, `audio_effect`, `midi_effect`, `instrument_rack`, `audio_effect_rack`, `midi_effect_rack` or `drum_rack`.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "selected": {
+      "description": "Whether it is the device in focus, which is the window's selected one.",
+      "type": "boolean"
+    },
+    "unfolded": {
+      "description": "For a rack, whether its devices follow it on the buttons.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "button",
+    "device",
+    "name",
+    "depth",
+    "kind",
+    "enabled",
+    "selected",
+    "unfolded"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushDeviceMode`
+
+What Device Mode shows (push-2-tracks R27).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `devices` | array of [`PushDevice`](#pushdevice) | yes | The devices on the upper buttons, in order. |
+| `left_arrow` | boolean | yes | Whether the first upper button is an arrow that moves the devices shown back. |
+| `right_arrow` | boolean | yes | Whether the last upper button is an arrow that moves them on. |
+| `empty` | boolean | yes | Whether the track has no devices. |
+| `edit` | boolean | yes | Whether Edit Mode is on. |
+| `bank` | integer, at least 0 | yes | The bank on the encoders, from 0. |
+| `banks` | array of string | yes | Every bank's name. |
+| `bank_page` | integer, at least 0 | yes | The page of banks the lower buttons show in Edit Mode, from 0. |
+| `bank_pages` | integer, at least 0 | yes | How many pages the banks make. |
+| `params` | array of [`PushParam`](#pushparam) | yes | The parameters on the eight encoders. |
+| `chains` | array of [`PushChain`](#pushchain) | yes | The chains the lower buttons show while a rack's button is held. |
+| `mute_locked` | boolean | yes | Whether Mute is locked, so each device button switches its device. |
+| `simpler` | [`PushSimpler`](#pushsimpler) or null | yes | Simpler's main bank and Edit Mode, while a Simpler is in focus (push-2-notes R67 to R76). |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What Device Mode shows (push-2-tracks R27).",
+  "properties": {
+    "bank": {
+      "description": "The bank on the encoders, from 0.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "bank_page": {
+      "description": "The page of banks the lower buttons show in Edit Mode, from 0.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "bank_pages": {
+      "description": "How many pages the banks make.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "banks": {
+      "description": "Every bank's name.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "chains": {
+      "description": "The chains the lower buttons show while a rack's button is held.",
+      "items": {
+        "$ref": "#/$defs/PushChain"
+      },
+      "type": "array"
+    },
+    "devices": {
+      "description": "The devices on the upper buttons, in order.",
+      "items": {
+        "$ref": "#/$defs/PushDevice"
+      },
+      "type": "array"
+    },
+    "edit": {
+      "description": "Whether Edit Mode is on.",
+      "type": "boolean"
+    },
+    "empty": {
+      "description": "Whether the track has no devices.",
+      "type": "boolean"
+    },
+    "left_arrow": {
+      "description": "Whether the first upper button is an arrow that moves the devices shown back.",
+      "type": "boolean"
+    },
+    "mute_locked": {
+      "description": "Whether Mute is locked, so each device button switches its device.",
+      "type": "boolean"
+    },
+    "params": {
+      "description": "The parameters on the eight encoders.",
+      "items": {
+        "$ref": "#/$defs/PushParam"
+      },
+      "type": "array"
+    },
+    "right_arrow": {
+      "description": "Whether the last upper button is an arrow that moves them on.",
+      "type": "boolean"
+    },
+    "simpler": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushSimpler"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Simpler's main bank and Edit Mode, while a Simpler is in focus (push-2-notes R67 to R76)."
+    }
+  },
+  "required": [
+    "devices",
+    "left_arrow",
+    "right_arrow",
+    "empty",
+    "edit",
+    "bank",
+    "banks",
+    "bank_page",
+    "bank_pages",
+    "params",
+    "chains",
+    "mute_locked",
+    "simpler"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `PushDisplay`
 
 What the display shows (R17 to R20).
@@ -24947,6 +27544,169 @@ One of:
 
 </details>
 
+### `PushFixedLength`
+
+Fixed Length's settings (the notes on Push 2 spec, R50).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether it is on. |
+| `length` | [`PushFixedLengthValue`](#pushfixedlengthvalue) | yes | The length of the clip a recording makes. |
+| `phrase_sync` | boolean | yes | Whether Phrase Sync is on. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Fixed Length's settings (the notes on Push 2 spec, R50).",
+  "properties": {
+    "length": {
+      "$ref": "#/$defs/PushFixedLengthValue",
+      "description": "The length of the clip a recording makes."
+    },
+    "on": {
+      "description": "Whether it is on.",
+      "type": "boolean"
+    },
+    "phrase_sync": {
+      "description": "Whether Phrase Sync is on.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on",
+    "length",
+    "phrase_sync"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushFixedLengthValue`
+
+The lengths Fixed Length offers (the notes on Push 2 spec, R50).
+
+One of:
+
+- `"1 beat"`: 1 beat.
+- `"2 beats"`: 2 beats.
+- `"1 bar"`: 1 bar.
+- `"2 bars"`: 2 bars.
+- `"4 bars"`: 4 bars.
+- `"8 bars"`: 8 bars.
+- `"16 bars"`: 16 bars.
+- `"32 bars"`: 32 bars.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The lengths Fixed Length offers (the notes on Push 2 spec, R50).",
+  "oneOf": [
+    {
+      "const": "1 beat",
+      "description": "1 beat.",
+      "type": "string"
+    },
+    {
+      "const": "2 beats",
+      "description": "2 beats.",
+      "type": "string"
+    },
+    {
+      "const": "1 bar",
+      "description": "1 bar.",
+      "type": "string"
+    },
+    {
+      "const": "2 bars",
+      "description": "2 bars.",
+      "type": "string"
+    },
+    {
+      "const": "4 bars",
+      "description": "4 bars.",
+      "type": "string"
+    },
+    {
+      "const": "8 bars",
+      "description": "8 bars.",
+      "type": "string"
+    },
+    {
+      "const": "16 bars",
+      "description": "16 bars.",
+      "type": "string"
+    },
+    {
+      "const": "32 bars",
+      "description": "32 bars.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PushHeldStep`
+
+A step held down in Note Mode.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | yes | The clip the step belongs to, if the slot holds one. |
+| `pad` | integer from 0 to 255 | yes | The step's drum pad, as a MIDI note. |
+| `start` | [`Ticks`](#ticks) | yes | Where the step starts in the clip's contents. |
+| `length` | [`Ticks`](#ticks) | yes | How long the step is. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A step held down in Note Mode.",
+  "properties": {
+    "clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip the step belongs to, if the slot holds one."
+    },
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "How long the step is."
+    },
+    "pad": {
+      "description": "The step's drum pad, as a MIDI note.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "start": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where the step starts in the clip's contents."
+    }
+  },
+  "required": [
+    "clip",
+    "pad",
+    "start",
+    "length"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `PushInfo`
 
 One connected Push 2.
@@ -24972,8 +27732,12 @@ One connected Push 2.
 | `setup` | [`PushSetup`](#pushsetup) | yes | The Setup menu's values. |
 | `display` | [`PushDisplay`](#pushdisplay) | yes | The display. |
 | `browse` | [`PushBrowse`](#pushbrowse) or null | yes | What Browse Mode shows, while it is the display mode. |
+| `device` | [`PushDeviceMode`](#pushdevicemode) or null | yes | What Device Mode shows, while it is the display mode. |
+| `clip` | [`PushClipMode`](#pushclipmode) or null | yes | What Clip Mode shows, while it is the display mode. |
 | `session` | [`PushSession`](#pushsession) or null | yes | What Session Mode shows, while it is the pad mode. |
 | `mix_mode` | [`PushMix`](#pushmix) or null | yes | What Mix Mode shows, while it is the display mode. |
+| `note` | [`PushNote`](#pushnote) or null | yes | What Note Mode shows, while it is the pad mode. |
+| `recording` | [`PushRecording`](#pushrecording) | yes | Recording, Fixed Length and the swing amount (the notes on Push 2 spec, R48 to R63). |
 
 <details><summary>JSON Schema</summary>
 
@@ -24992,9 +27756,31 @@ One connected Push 2.
       ],
       "description": "What Browse Mode shows, while it is the display mode."
     },
+    "clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushClipMode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What Clip Mode shows, while it is the display mode."
+    },
     "colour_picker": {
       "description": "Whether the colour picker is open.",
       "type": "boolean"
+    },
+    "device": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushDeviceMode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What Device Mode shows, while it is the display mode."
     },
     "display": {
       "$ref": "#/$defs/PushDisplay",
@@ -25087,6 +27873,17 @@ One connected Push 2.
       ],
       "description": "What Mix Mode shows, while it is the display mode."
     },
+    "note": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushNote"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What Note Mode shows, while it is the pad mode."
+    },
     "output": {
       "description": "The output it is sent to.",
       "type": "string"
@@ -25094,6 +27891,10 @@ One connected Push 2.
     "pad_mode": {
       "$ref": "#/$defs/PushPadMode",
       "description": "The pad mode."
+    },
+    "recording": {
+      "$ref": "#/$defs/PushRecording",
+      "description": "Recording, Fixed Length and the swing amount (the notes on Push 2 spec, R48 to R63)."
     },
     "row": {
       "description": "The Control Surfaces table's row it runs in, from 1.",
@@ -25142,8 +27943,12 @@ One connected Push 2.
     "setup",
     "display",
     "browse",
+    "device",
+    "clip",
     "session",
-    "mix_mode"
+    "mix_mode",
+    "note",
+    "recording"
   ],
   "type": "object"
 }
@@ -25241,6 +28046,101 @@ What an LED does besides showing its colour (R13).
 
 </details>
 
+### `PushMelody`
+
+What a melodic track's layouts show (the notes on Push 2 spec, R32 to R44).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `in_key` | boolean | yes | In Key (true) or Chromatic. |
+| `fixed` | boolean | yes | Whether the bottom-left pad stays on C. |
+| `layout` | string | yes | The interval between rows: `4ths`, `3rds` or `Sequent`. |
+| `direction` | string | yes | `Vertical` or `Horizontal`. |
+| `octave` | integer | yes | 64 Notes' shift in octaves from where the pads start. |
+| `low` | integer from 0 to 255 | yes | The lowest note the pads, rows or 32 notes hold, as a MIDI note. |
+| `high` | integer from 0 to 255 | yes | The highest. |
+| `range` | string | yes | The range as the display notifies it, such as `C1 to C3`. |
+| `selected_notes` | array of integer from 0 to 255 | yes | The notes selected in the Melodic Sequencer + 32 Notes. |
+| `strip_modulation` | boolean | yes | Whether the touch strip is the modulation wheel rather than pitch bend, in 64 Notes. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a melodic track's layouts show (the notes on Push 2 spec, R32 to R44).",
+  "properties": {
+    "direction": {
+      "description": "`Vertical` or `Horizontal`.",
+      "type": "string"
+    },
+    "fixed": {
+      "description": "Whether the bottom-left pad stays on C.",
+      "type": "boolean"
+    },
+    "high": {
+      "description": "The highest.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "in_key": {
+      "description": "In Key (true) or Chromatic.",
+      "type": "boolean"
+    },
+    "layout": {
+      "description": "The interval between rows: `4ths`, `3rds` or `Sequent`.",
+      "type": "string"
+    },
+    "low": {
+      "description": "The lowest note the pads, rows or 32 notes hold, as a MIDI note.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "octave": {
+      "description": "64 Notes' shift in octaves from where the pads start.",
+      "format": "int32",
+      "type": "integer"
+    },
+    "range": {
+      "description": "The range as the display notifies it, such as `C1 to C3`.",
+      "type": "string"
+    },
+    "selected_notes": {
+      "description": "The notes selected in the Melodic Sequencer + 32 Notes.",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "strip_modulation": {
+      "description": "Whether the touch strip is the modulation wheel rather than pitch bend, in 64 Notes.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "in_key",
+    "fixed",
+    "layout",
+    "direction",
+    "octave",
+    "low",
+    "high",
+    "range",
+    "selected_notes",
+    "strip_modulation"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `PushMenu`
 
 A menu over the display mode (R23).
@@ -25249,6 +28149,9 @@ One of:
 
 - `"setup"`: Setup.
 - `"scale"`: Scale.
+- `"quantize"`: Quantize (the notes on Push 2 spec, R58).
+- `"fixed_length"`: Fixed Length (the notes on Push 2 spec, R50).
+- `"convert"`: The choices Convert offers for an audio clip.
 
 <details><summary>JSON Schema</summary>
 
@@ -25264,6 +28167,21 @@ One of:
     {
       "const": "scale",
       "description": "Scale.",
+      "type": "string"
+    },
+    {
+      "const": "quantize",
+      "description": "Quantize (the notes on Push 2 spec, R58).",
+      "type": "string"
+    },
+    {
+      "const": "fixed_length",
+      "description": "Fixed Length (the notes on Push 2 spec, R50).",
+      "type": "string"
+    },
+    {
+      "const": "convert",
+      "description": "The choices Convert offers for an audio clip.",
       "type": "string"
     }
   ]
@@ -25522,6 +28440,179 @@ One of the eight places Mix Mode shows: a track, or a chain of an unfolded rack 
 
 </details>
 
+### `PushNote`
+
+What Note Mode shows (the notes on Push 2 spec, R1 to R47).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) or null | yes | The track the pads play: the first selected one. |
+| `layout` | string | yes | The layout: `Loop Selector`, `16 Velocities` or `64 Pads` on a drum track, `64 Notes`, `Melodic Sequencer` or `Melodic Sequencer + 32 Notes` on another MIDI track, `None` on any other track. |
+| `overlay` | string or null | yes | What holding Layout, or Shift and Layout, shows in the lower-right pads, if anything: `16 Velocities` or `Loop Length Pads`. |
+| `overlay_locked` | boolean | yes | Whether that stays in view after Layout is released. |
+| `bank` | integer or null | yes | The first note of the drum rack's pad view, which the pads show. |
+| `selected_pad` | integer or null | yes | The drum pad the steps edit, as a MIDI note. |
+| `step_size` | string | yes | The step size, such as `1/16` or `1/8T`. |
+| `edited_clip` | [`ClipId`](#clipid) or null | yes | The clip the steps edit, if the slot holds one. |
+| `edited_scene` | [`SceneId`](#sceneid) or null | yes | The scene whose slot holds it. |
+| `page` | integer from 0 to 255 | yes | The first of the two pages the step area shows, counting from 1. |
+| `following` | boolean | yes | Whether the step area follows the page that plays. |
+| `velocity` | integer or null | yes | The velocity new steps take, once a velocity pad chose one. |
+| `held_steps` | array of [`PushHeldStep`](#pushheldstep) | yes | The steps held down now. |
+| `accent` | boolean | yes | Whether Accent is on, tapped or held (the notes on Push 2 spec, R54). |
+| `repeat` | boolean | yes | Whether Repeat is on for the track, tapped or held (R55). |
+| `melody` | [`PushMelody`](#pushmelody) or null | yes | What a melodic layout shows, on a melodic track. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What Note Mode shows (the notes on Push 2 spec, R1 to R47).",
+  "properties": {
+    "accent": {
+      "description": "Whether Accent is on, tapped or held (the notes on Push 2 spec, R54).",
+      "type": "boolean"
+    },
+    "bank": {
+      "description": "The first note of the drum rack's pad view, which the pads show.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "edited_clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip the steps edit, if the slot holds one."
+    },
+    "edited_scene": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SceneId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The scene whose slot holds it."
+    },
+    "following": {
+      "description": "Whether the step area follows the page that plays.",
+      "type": "boolean"
+    },
+    "held_steps": {
+      "description": "The steps held down now.",
+      "items": {
+        "$ref": "#/$defs/PushHeldStep"
+      },
+      "type": "array"
+    },
+    "layout": {
+      "description": "The layout: `Loop Selector`, `16 Velocities` or `64 Pads` on a drum track, `64 Notes`, `Melodic Sequencer` or `Melodic Sequencer + 32 Notes` on another MIDI track, `None` on any other track.",
+      "type": "string"
+    },
+    "melody": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushMelody"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What a melodic layout shows, on a melodic track."
+    },
+    "overlay": {
+      "description": "What holding Layout, or Shift and Layout, shows in the lower-right pads, if anything: `16 Velocities` or `Loop Length Pads`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "overlay_locked": {
+      "description": "Whether that stays in view after Layout is released.",
+      "type": "boolean"
+    },
+    "page": {
+      "description": "The first of the two pages the step area shows, counting from 1.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "repeat": {
+      "description": "Whether Repeat is on for the track, tapped or held (R55).",
+      "type": "boolean"
+    },
+    "selected_pad": {
+      "description": "The drum pad the steps edit, as a MIDI note.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "step_size": {
+      "description": "The step size, such as `1/16` or `1/8T`.",
+      "type": "string"
+    },
+    "track": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrackId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The track the pads play: the first selected one."
+    },
+    "velocity": {
+      "description": "The velocity new steps take, once a velocity pad chose one.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "track",
+    "layout",
+    "overlay",
+    "overlay_locked",
+    "bank",
+    "selected_pad",
+    "step_size",
+    "edited_clip",
+    "edited_scene",
+    "page",
+    "following",
+    "velocity",
+    "held_steps",
+    "accent",
+    "repeat",
+    "melody"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `PushPadMode`
 
 The pad mode (R21).
@@ -25548,6 +28639,166 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `PushParam`
+
+A parameter on one of the encoders in Device Mode.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Its name. |
+| `value` | string | yes | Its value as the device shows it. |
+| `held` | boolean | yes | Whether a macro holds it, so the encoder doesn't move it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A parameter on one of the encoders in Device Mode.",
+  "properties": {
+    "held": {
+      "description": "Whether a macro holds it, so the encoder doesn't move it.",
+      "type": "boolean"
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "value": {
+      "description": "Its value as the device shows it.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "value",
+    "held"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushQuantizeMenu`
+
+The Quantize menu (the notes on Push 2 spec, R58).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `swing` | integer from 0 to 255 | yes | Swing Amount, 0 to 100 %. |
+| `quantize_to` | string | yes | Quantize To, as the grid's note value, such as `1/16`. |
+| `amount` | integer from 0 to 255 | yes | Quantize Amount, 0 to 100 %. |
+| `record_quantize` | string | yes | Record Quantize's value, as `transport.set_record_quantization` names it. |
+| `stays` | boolean | yes | Whether the menu stays after Quantize is released. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Quantize menu (the notes on Push 2 spec, R58).",
+  "properties": {
+    "amount": {
+      "description": "Quantize Amount, 0 to 100 %.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "quantize_to": {
+      "description": "Quantize To, as the grid's note value, such as `1/16`.",
+      "type": "string"
+    },
+    "record_quantize": {
+      "description": "Record Quantize's value, as `transport.set_record_quantization` names it.",
+      "type": "string"
+    },
+    "stays": {
+      "description": "Whether the menu stays after Quantize is released.",
+      "type": "boolean"
+    },
+    "swing": {
+      "description": "Swing Amount, 0 to 100 %.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "swing",
+    "quantize_to",
+    "amount",
+    "record_quantize",
+    "stays"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushRecording`
+
+What `push.state` reports of recording on Push 2.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `record` | string | yes | What Record shows: `off`, `session` (a Session recording or an overdub) or `arrangement`. |
+| `fixed_length` | [`PushFixedLength`](#pushfixedlength) | yes | Fixed Length's settings. |
+| `swing` | integer from 0 to 255 | yes | The swing amount, 0 to 100 %. |
+| `automation_arm` | boolean | yes | Whether Automation Arm is on (Automate). |
+| `quantize_menu` | [`PushQuantizeMenu`](#pushquantizemenu) or null | yes | What the Quantize menu shows while it is open. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `push.state` reports of recording on Push 2.",
+  "properties": {
+    "automation_arm": {
+      "description": "Whether Automation Arm is on (Automate).",
+      "type": "boolean"
+    },
+    "fixed_length": {
+      "$ref": "#/$defs/PushFixedLength",
+      "description": "Fixed Length's settings."
+    },
+    "quantize_menu": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushQuantizeMenu"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What the Quantize menu shows while it is open."
+    },
+    "record": {
+      "description": "What Record shows: `off`, `session` (a Session recording or an overdub) or `arrangement`.",
+      "type": "string"
+    },
+    "swing": {
+      "description": "The swing amount, 0 to 100 %.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "record",
+    "fixed_length",
+    "swing",
+    "automation_arm",
+    "quantize_menu"
+  ],
+  "type": "object"
 }
 ```
 
@@ -25669,7 +28920,7 @@ What a pad or a Scene/Grid button shows in Session Mode (push-2-tracks R73).
 |---|---|---|---|
 | `shows` | string | yes | Of a pad in the slots: `none` (no track or scene), `empty`, `stopped`, `queued`, `playing`, `stopping` or `recording`. Of a pad in Session Overview: `none`, `ring`, `playing` or `block`. Of a Scene/Grid button: `none`, `empty` or `clip`; in the overview, `none`, `part` or `shown`. |
 | `clip` | [`ClipId`](#clipid) or null | yes | The clip in the pad's slot. |
-| `colour` | integer or null | yes | The swatch of the clip's colour, or of the scene's. |
+| `colour` | [`Colour`](#colour) or null | yes | The clip's colour, or the scene's: a swatch or `#RRGGBB`. |
 
 <details><summary>JSON Schema</summary>
 
@@ -25689,14 +28940,15 @@ What a pad or a Scene/Grid button shows in Session Mode (push-2-tracks R73).
       "description": "The clip in the pad's slot."
     },
     "colour": {
-      "description": "The swatch of the clip's colour, or of the scene's.",
-      "format": "uint8",
-      "maximum": 255,
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Colour"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip's colour, or the scene's: a swatch or `#RRGGBB`."
     },
     "shows": {
       "description": "Of a pad in the slots: `none` (no track or scene), `empty`, `stopped`, `queued`, `playing`, `stopping` or `recording`. Of a pad in Session Overview: `none`, `ring`, `playing` or `block`. Of a Scene/Grid button: `none`, `empty` or `clip`; in the overview, `none`, `part` or `shown`.",
@@ -25814,6 +29066,157 @@ The Setup menu's values (R31).
     "display_light",
     "led_brightness",
     "workflow"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushSimpler`
+
+What Device Mode shows of a Simpler (push-2-notes R67 to R76).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `empty` | boolean | yes | Whether it has no sample, which the display says. |
+| `mode` | string | yes | Its mode: `classic`, `one_shot` or `slice`. |
+| `main_bank` | boolean | yes | Whether the main bank is on the encoders. |
+| `zoom` | string | yes | How far the waveform is zoomed in, as `×1.0` for the whole sample. |
+| `zoom_around` | string | yes | What Zoom zooms around: `start`, `end`, `s_start`, `s_length` or `slice`. |
+| `region` | pair of integer, at least 0 and integer, at least 0 | yes | The Start and End flags, in frames of the sample. |
+| `slices` | integer, at least 0 | yes | How many slices Slice mode has. |
+| `selected_slice` | integer, at least 0 | yes | The selected slice, from 0. |
+| `pad_slicing` | boolean | yes | Whether Pad Slicing is on. |
+| `edit_buttons` | array of [`PushSimplerButton`](#pushsimplerbutton) | yes | Edit Mode's buttons after Back, with the upper button each is on. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What Device Mode shows of a Simpler (push-2-notes R67 to R76).",
+  "properties": {
+    "edit_buttons": {
+      "description": "Edit Mode's buttons after Back, with the upper button each is on.",
+      "items": {
+        "$ref": "#/$defs/PushSimplerButton"
+      },
+      "type": "array"
+    },
+    "empty": {
+      "description": "Whether it has no sample, which the display says.",
+      "type": "boolean"
+    },
+    "main_bank": {
+      "description": "Whether the main bank is on the encoders.",
+      "type": "boolean"
+    },
+    "mode": {
+      "description": "Its mode: `classic`, `one_shot` or `slice`.",
+      "type": "string"
+    },
+    "pad_slicing": {
+      "description": "Whether Pad Slicing is on.",
+      "type": "boolean"
+    },
+    "region": {
+      "description": "The Start and End flags, in frames of the sample.",
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      ],
+      "type": "array"
+    },
+    "selected_slice": {
+      "description": "The selected slice, from 0.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "slices": {
+      "description": "How many slices Slice mode has.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "zoom": {
+      "description": "How far the waveform is zoomed in, as `×1.0` for the whole sample.",
+      "type": "string"
+    },
+    "zoom_around": {
+      "description": "What Zoom zooms around: `start`, `end`, `s_start`, `s_length` or `slice`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "empty",
+    "mode",
+    "main_bank",
+    "zoom",
+    "zoom_around",
+    "region",
+    "slices",
+    "selected_slice",
+    "pad_slicing",
+    "edit_buttons"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushSimplerButton`
+
+One of Simpler's Edit Mode buttons.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `button` | integer, at least 0 | yes | The upper button, from 1. |
+| `name` | string | yes | What it does: `loop`, `trigger_gate`, `pad_slicing`, `split_slice`, `warp_as`, `half`, `double`, `crop` or `reverse`. |
+| `text` | string | yes | Its text. |
+| `on` | boolean | yes | Whether the setting it stands for is on. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One of Simpler's Edit Mode buttons.",
+  "properties": {
+    "button": {
+      "description": "The upper button, from 1.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "name": {
+      "description": "What it does: `loop`, `trigger_gate`, `pad_slicing`, `split_slice`, `warp_as`, `half`, `double`, `crop` or `reverse`.",
+      "type": "string"
+    },
+    "on": {
+      "description": "Whether the setting it stands for is on.",
+      "type": "boolean"
+    },
+    "text": {
+      "description": "Its text.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "button",
+    "name",
+    "text",
+    "on"
   ],
   "type": "object"
 }
@@ -27215,6 +30618,49 @@ A tuning's reference pitch (the tunings spec, R7): a note, and the frequency in 
 
 </details>
 
+### `Relabel`
+
+A parameter whose name, and the unit its value reads in, follow a choice or switch of the same device: Meld's macros are named by their oscillator's type, and its Semitones read in scale degrees while Use Current Scale is on. The parameter keeps its ID, value, lane and place.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `param` | [`ParamId`](#paramid) | yes | The parameter relabelled. |
+| `by` | [`ParamId`](#paramid) | yes | The choice or switch whose value picks the label. |
+| `labels` | array of [`ParamLabel`](#paramlabel) | yes | The labels, by that value; a value past the last takes the last. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A parameter whose name, and the unit its value reads in, follow a choice or switch of the same device: Meld's macros are named by their oscillator's type, and its Semitones read in scale degrees while Use Current Scale is on. The parameter keeps its ID, value, lane and place.",
+  "properties": {
+    "by": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The choice or switch whose value picks the label."
+    },
+    "labels": {
+      "description": "The labels, by that value; a value past the last takes the last.",
+      "items": {
+        "$ref": "#/$defs/ParamLabel"
+      },
+      "type": "array"
+    },
+    "param": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The parameter relabelled."
+    }
+  },
+  "required": [
+    "param",
+    "by",
+    "labels"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `RelativeEncoding`
 
 The four relative encodings an encoder sends (R2).
@@ -28382,6 +31828,52 @@ What `set.close_dawproject_report` returns.
 
 </details>
 
+### `ResonatorCopied`
+
+What `collision.copy_resonator` returns: the Collision and the resonators it copied between.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `from` | integer from 0 to 255 | yes | The resonator copied from, 1 or 2. |
+| `to` | integer from 0 to 255 | yes | The resonator copied to, 1 or 2. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `collision.copy_resonator` returns: the Collision and the resonators it copied between.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "from": {
+      "description": "The resonator copied from, 1 or 2.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "to": {
+      "description": "The resonator copied to, 1 or 2.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "from",
+    "to"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Restored`
 
 What `set.restore` returns.
@@ -28886,6 +32378,43 @@ One of:
 
 </details>
 
+### `RouteChanged`
+
+What `device.set_route` and `device.clear_route` return: the slot they changed.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `slot` | integer from 0 to 255 | yes | The slot's number. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.set_route` and `device.clear_route` return: the slot they changed.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "slot": {
+      "description": "The slot's number.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "slot"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `RowInfo`
 
 One row of the table.
@@ -29314,6 +32843,7 @@ What the Sample Editor shows and has selected, for the clip it shows.
 | `time_selection` | array or null | yes | The time selection's start and end, if there is one. |
 | `view` | array or null | yes | The span shown, in seconds in the file, or in ticks of the clip's contents when it is warped (`warped`); `null` shows the whole file. |
 | `fit_height` | boolean | yes | Whether the waveform is fitted to the editor's height. |
+| `cues` | array of [`Cue`](#cue) | yes | The markers embedded in a video clip's movie, shown as cues that can't be moved (the video spec, R12); none for any other clip. |
 
 <details><summary>JSON Schema</summary>
 
@@ -29331,6 +32861,14 @@ What the Sample Editor shows and has selected, for the clip it shows.
         }
       ],
       "description": "The audio clip the editor shows; `null` when it shows none."
+    },
+    "cues": {
+      "default": [],
+      "description": "The markers embedded in a video clip's movie, shown as cues that can't be moved (the video spec, R12); none for any other clip.",
+      "items": {
+        "$ref": "#/$defs/Cue"
+      },
+      "type": "array"
     },
     "fit_height": {
       "description": "Whether the waveform is fitted to the editor's height.",
@@ -29418,7 +32956,8 @@ What the Sample Editor shows and has selected, for the clip it shows.
     "insert_marker",
     "time_selection",
     "view",
-    "fit_height"
+    "fit_height",
+    "cues"
   ],
   "type": "object"
 }
@@ -30008,6 +33547,7 @@ A saved label (spec: browser-tags R24).
 | `search` | string | yes | The search words it keeps. |
 | `tags` | array of string | yes | The tags it keeps, by their full names. |
 | `icon` | string or null | no | The icon it was given. |
+| `reference` | string or null | no | The file it lists the neighbours of, first (spec: sound-similarity R15). |
 
 <details><summary>JSON Schema</summary>
 
@@ -30033,6 +33573,13 @@ A saved label (spec: browser-tags R24).
     "name": {
       "description": "Its name.",
       "type": "string"
+    },
+    "reference": {
+      "description": "The file it lists the neighbours of, first (spec: sound-similarity R15).",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "search": {
       "description": "The search words it keeps.",
@@ -30802,6 +34349,25 @@ One of:
 
 </details>
 
+### `SectionId`
+
+The ID of a section: a positive integer, unique within the project and never reused.
+
+Type: integer, at least 1.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The ID of a section: a positive integer, unique within the project and never reused.",
+  "format": "uint64",
+  "minimum": 1,
+  "type": "integer"
+}
+```
+
+</details>
+
 ### `SelectEdge`
 
 Which edge of the current scene to select (S-SES-020 to S-SES-022).
@@ -31066,6 +34632,7 @@ What `session.state` and its commands return: what the grid has selected.
 | `scroll_y` | number | yes | How far the scenes are scrolled down, in points at 100%. |
 | `launches` | array of [`SlotLaunch`](#slotlaunch) | no | The slots the engine has queued, playing or recording, with what each is doing. Empty in the grid's own state; `session.state` fills it in. |
 | `rings` | array of [`RingBox`](#ringbox) | no | The control surfaces' session rings, by track and scene ID, in the Control Surfaces table's row order (control surfaces R28, session view R38). Empty in the grid's own state; `session.state` fills it in. |
+| `scene_view` | [`SceneId`](#sceneid) or null | no | The scene whose Scene View is open in the detail area. |
 
 <details><summary>JSON Schema</summary>
 
@@ -31086,6 +34653,17 @@ What `session.state` and its commands return: what the grid has selected.
         "$ref": "#/$defs/RingBox"
       },
       "type": "array"
+    },
+    "scene_view": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SceneId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The scene whose Scene View is open in the detail area."
     },
     "scenes": {
       "description": "The selected scenes (their launch buttons or names).",
@@ -31445,7 +35023,9 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
 | `automation_record_mode` | [`AutomationRecordMode`](#automationrecordmode) | yes | The mode an Arrangement recording writes control moves in, as `settings.set_automation_record_mode` sets it (the automation spec, R18). |
 | `file_folder` | [`FileFolderSettings`](#filefoldersettings) | yes | File & Folder: the Temporary Folder, as `settings.set_temporary_folder` sets it. |
 | `library` | [`LibrarySettings`](#librarysettings) | yes | Library: Collect Files on Export and the User Library's folder. |
+| `multiple_plug_in_windows` | boolean | yes | Plug-Ins: Multiple Plug-In Windows, as `settings.set_multiple_plug_in_windows` sets it. |
 | `auto_hide_plug_in_windows` | boolean | yes | Plug-Ins: Auto-Hide Plug-In Windows, as `settings.set_auto_hide_plug_in_windows` sets it. |
+| `auto_open_plug_in_windows` | boolean | yes | Plug-Ins: Auto-Open Plug-In Windows, as `settings.set_auto_open_plug_in_windows` sets it. |
 | `plug_ins` | [`PluginSettings`](#pluginsettings) | yes | Plug-Ins: how the Browser shows plug-ins, as `plugin.settings` sets it. |
 | `agents` | [`AgentsPageSettings`](#agentspagesettings) | yes | Agents. |
 | `assistant` | [`AssistantState`](#assistantstate) | yes | Agents, the assistant: provider, base URL, model, and whether an API key is stored for the provider (the key itself is never reported). |
@@ -31472,6 +35052,10 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
       "description": "Plug-Ins: Auto-Hide Plug-In Windows, as `settings.set_auto_hide_plug_in_windows` sets it.",
       "type": "boolean"
     },
+    "auto_open_plug_in_windows": {
+      "description": "Plug-Ins: Auto-Open Plug-In Windows, as `settings.set_auto_open_plug_in_windows` sets it.",
+      "type": "boolean"
+    },
     "automation_record_mode": {
       "$ref": "#/$defs/AutomationRecordMode",
       "description": "The mode an Arrangement recording writes control moves in, as `settings.set_automation_record_mode` sets it (the automation spec, R18)."
@@ -31495,6 +35079,10 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "library": {
       "$ref": "#/$defs/LibrarySettings",
       "description": "Library: Collect Files on Export and the User Library's folder."
+    },
+    "multiple_plug_in_windows": {
+      "description": "Plug-Ins: Multiple Plug-In Windows, as `settings.set_multiple_plug_in_windows` sets it.",
+      "type": "boolean"
     },
     "page": {
       "$ref": "#/$defs/SettingsPage",
@@ -31559,7 +35147,9 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "automation_record_mode",
     "file_folder",
     "library",
+    "multiple_plug_in_windows",
     "auto_hide_plug_in_windows",
+    "auto_open_plug_in_windows",
     "plug_ins",
     "agents",
     "assistant"
@@ -32111,6 +35701,230 @@ What a time-signature command did: the marker selected afterwards, and whether i
 
 </details>
 
+### `SimilarItem`
+
+One item of `browser.similar`'s list.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | Its path. |
+| `kind` | [`ItemKind`](#itemkind) | yes | What it is. |
+| `distance` | number | yes | Its distance from the reference: 0 for the reference, up to 0.35. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One item of `browser.similar`'s list.",
+  "properties": {
+    "distance": {
+      "description": "Its distance from the reference: 0 for the reference, up to 0.35.",
+      "format": "float",
+      "type": "number"
+    },
+    "kind": {
+      "$ref": "#/$defs/ItemKind",
+      "description": "What it is."
+    },
+    "path": {
+      "description": "Its path.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path",
+    "kind",
+    "distance"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SimilarList`
+
+What `browser.similar` gives (spec: sound-similarity R16).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `reference` | [`SimilarItem`](#similaritem) | yes | The reference. |
+| `items` | array of [`SimilarItem`](#similaritem) | yes | The reference first, then the nearest items of its own kind, most similar first. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `browser.similar` gives (spec: sound-similarity R16).",
+  "properties": {
+    "items": {
+      "description": "The reference first, then the nearest items of its own kind, most similar first.",
+      "items": {
+        "$ref": "#/$defs/SimilarItem"
+      },
+      "type": "array"
+    },
+    "reference": {
+      "$ref": "#/$defs/SimilarItem",
+      "description": "The reference."
+    }
+  },
+  "required": [
+    "reference",
+    "items"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SimilarState`
+
+What `device.similar` returns: where a sampler's sample stands in the similar list of its reference (sound similarity R27, R28).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The sampler. |
+| `sample` | [`ContentHash`](#contenthash) or null | yes | The sample it holds, by content hash. |
+| `reference` | [`ContentHash`](#contenthash) or null | yes | Its similarity reference, by content hash: the sample it was loaded with unless one was saved or a swap began from another. |
+| `position` | integer or null | yes | The sample's place in the reference's list, counted from 0 (the reference is 0); `null` if the list can't be made or doesn't hold it. |
+| `count` | integer or null | yes | How many samples the list holds, the reference first; `null` if the list can't be made. |
+| `can_previous` | boolean | yes | Whether the previous similar sample can be loaded. |
+| `can_next` | boolean | yes | Whether the next similar sample can be loaded. |
+| `can_return` | boolean | yes | Whether Return to Reference can load the reference: the device holds another sample. |
+| `reason` | string or null | no | Why the list can't be made or the swap controls are disabled, if so (R27); `null` when the list exists. |
+| `reference_path` | string or null | no | The file of the reference in the browser's places, which Show Similar Files lists the neighbours of; `null` if the list can't be made. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.similar` returns: where a sampler's sample stands in the similar list of its reference (sound similarity R27, R28).",
+  "properties": {
+    "can_next": {
+      "description": "Whether the next similar sample can be loaded.",
+      "type": "boolean"
+    },
+    "can_previous": {
+      "description": "Whether the previous similar sample can be loaded.",
+      "type": "boolean"
+    },
+    "can_return": {
+      "description": "Whether Return to Reference can load the reference: the device holds another sample.",
+      "type": "boolean"
+    },
+    "count": {
+      "description": "How many samples the list holds, the reference first; `null` if the list can't be made.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The sampler."
+    },
+    "position": {
+      "description": "The sample's place in the reference's list, counted from 0 (the reference is 0); `null` if the list can't be made or doesn't hold it.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "reason": {
+      "description": "Why the list can't be made or the swap controls are disabled, if so (R27); `null` when the list exists.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reference": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ContentHash"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its similarity reference, by content hash: the sample it was loaded with unless one was saved or a swap began from another."
+    },
+    "reference_path": {
+      "description": "The file of the reference in the browser's places, which Show Similar Files lists the neighbours of; `null` if the list can't be made.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sample": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ContentHash"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The sample it holds, by content hash."
+    }
+  },
+  "required": [
+    "device",
+    "sample",
+    "reference",
+    "position",
+    "count",
+    "can_previous",
+    "can_next",
+    "can_return"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Size`
+
+A size in points.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `width` | number | yes | The width. |
+| `height` | number | yes | The height. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A size in points.",
+  "properties": {
+    "height": {
+      "description": "The height.",
+      "format": "float",
+      "type": "number"
+    },
+    "width": {
+      "description": "The width.",
+      "format": "float",
+      "type": "number"
+    }
+  },
+  "required": [
+    "width",
+    "height"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `SkewEdge`
 
 Which edge of the box `automation.skew` tilts.
@@ -32487,6 +36301,61 @@ One slot: a track's column and a scene's row.
 
 </details>
 
+### `SongSection`
+
+A section of the song.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | [`SectionId`](#sectionid) | yes | The section's ID. |
+| `start` | [`Ticks`](#ticks) | yes | Where it starts: 0 (1.1.1) or later. |
+| `length` | [`Ticks`](#ticks) | yes | How long it is: more than 0. |
+| `name` | string | yes | Its name, which may be empty. |
+| `colour` | integer from 0 to 255 | yes | Its colour, a swatch from 0 to 69 (the themes spec, R14). |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A section of the song.",
+  "properties": {
+    "colour": {
+      "description": "Its colour, a swatch from 0 to 69 (the themes spec, R14).",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "id": {
+      "$ref": "#/$defs/SectionId",
+      "description": "The section's ID."
+    },
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "How long it is: more than 0."
+    },
+    "name": {
+      "description": "Its name, which may be empty.",
+      "type": "string"
+    },
+    "start": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it starts: 0 (1.1.1) or later."
+    }
+  },
+  "required": [
+    "id",
+    "start",
+    "length",
+    "name",
+    "colour"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `SongStart`
 
 Where the song starts: a locator, or the loop brace's start. It follows the locator or the brace as they move.
@@ -32521,6 +36390,74 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `SpectrogramGrid`
+
+The grid of a device's spectrogram, as its type's description gives it (R46): fixed for the type, never by the size of the cell or window it is drawn in.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `columns` | integer, at least 0 | yes | The columns over time, the newest on the right. |
+| `rows` | integer, at least 0 | yes | The rows over frequency, the lowest at the bottom. |
+| `frequencies` | array of number, at least 2 | yes | The lowest and highest frequency, in Hz, at the middle of the first and last row. |
+| `log_frequency` | boolean | yes | Whether the rows are spaced logarithmically in frequency (linearly if not). |
+| `levels` | array of number, at least 2 | yes | The levels in dB that the colour ramp runs between: the floor, drawn as its first colour, and the ceiling, as its last. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The grid of a device's spectrogram, as its type's description gives it (R46): fixed for the type, never by the size of the cell or window it is drawn in.",
+  "properties": {
+    "columns": {
+      "description": "The columns over time, the newest on the right.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "frequencies": {
+      "description": "The lowest and highest frequency, in Hz, at the middle of the first and last row.",
+      "items": {
+        "format": "float",
+        "type": "number"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": "array"
+    },
+    "levels": {
+      "description": "The levels in dB that the colour ramp runs between: the floor, drawn as its first colour, and the ceiling, as its last.",
+      "items": {
+        "format": "float",
+        "type": "number"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": "array"
+    },
+    "log_frequency": {
+      "description": "Whether the rows are spaced logarithmically in frequency (linearly if not).",
+      "type": "boolean"
+    },
+    "rows": {
+      "description": "The rows over frequency, the lowest at the bottom.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "columns",
+    "rows",
+    "frequencies",
+    "log_frequency",
+    "levels"
+  ],
+  "type": "object"
 }
 ```
 
@@ -32766,6 +36703,95 @@ One of:
 
 </details>
 
+### `StemSource`
+
+What a separation works on (the stem separation spec, R22).
+
+One of:
+
+- an object with `kind` = `"clip"`, `clip` ([`ClipId`](#clipid)): An audio clip in the Arrangement or in a Session slot.
+- an object with `kind` = `"file"`, `path` (string): An audio file, separated whole: what the browser's menu runs.
+- an object with `kind` = `"time_selection"`, `tracks` (array of [`TrackId`](#trackid)), `start` ([`Ticks`](#ticks)), `end` ([`Ticks`](#ticks)): The audio the clips of audio tracks play inside the Arrangement's time selection, each track on its own.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a separation works on (the stem separation spec, R22).",
+  "oneOf": [
+    {
+      "description": "An audio clip in the Arrangement or in a Session slot.",
+      "properties": {
+        "clip": {
+          "$ref": "#/$defs/ClipId",
+          "description": "The clip."
+        },
+        "kind": {
+          "const": "clip",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "clip"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "An audio file, separated whole: what the browser's menu runs.",
+      "properties": {
+        "kind": {
+          "const": "file",
+          "type": "string"
+        },
+        "path": {
+          "description": "Its path.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "path"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The audio the clips of audio tracks play inside the Arrangement's time selection, each track on its own.",
+      "properties": {
+        "end": {
+          "$ref": "#/$defs/Ticks",
+          "description": "The range's end."
+        },
+        "kind": {
+          "const": "time_selection",
+          "type": "string"
+        },
+        "start": {
+          "$ref": "#/$defs/Ticks",
+          "description": "The range's start."
+        },
+        "tracks": {
+          "description": "The tracks; those with no audio in the range are skipped.",
+          "items": {
+            "$ref": "#/$defs/TrackId"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "tracks",
+        "start",
+        "end"
+      ],
+      "type": "object"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `StemsStatus`
 
 What `stems.status` returns.
@@ -32777,8 +36803,10 @@ What `stems.status` returns.
 | `packages` | array of [`PackageStatus`](#packagestatus) | yes | The packages. |
 | `install` | [`JobStatus`](#jobstatus) | yes | The download. |
 | `separation` | [`JobStatus`](#jobstatus) | yes | The separation. |
+| `created_clips` | array of [`ClipId`](#clipid) | no | The clips the last separation made, in the order of their tracks. |
 | `created_tracks` | array of [`TrackId`](#trackid) | no | The tracks the last separation made, the group first if it made one. |
 | `dialog` | [`DialogStatus`](#dialogstatus) or null | no | The dialog, if it's open. |
+| `provider` | string | no | What the current or last separation ran on, such as `Core ML`, or `CPU (not the GPU: ...)` with the reason a GPU wasn't used. |
 
 <details><summary>JSON Schema</summary>
 
@@ -32786,6 +36814,13 @@ What `stems.status` returns.
 {
   "description": "What `stems.status` returns.",
   "properties": {
+    "created_clips": {
+      "description": "The clips the last separation made, in the order of their tracks.",
+      "items": {
+        "$ref": "#/$defs/ClipId"
+      },
+      "type": "array"
+    },
     "created_tracks": {
       "description": "The tracks the last separation made, the group first if it made one.",
       "items": {
@@ -32822,6 +36857,10 @@ What `stems.status` returns.
         "$ref": "#/$defs/PackageStatus"
       },
       "type": "array"
+    },
+    "provider": {
+      "description": "What the current or last separation ran on, such as `Core ML`, or `CPU (not the GPU: ...)` with the reason a GPU wasn't used.",
+      "type": "string"
     },
     "separation": {
       "$ref": "#/$defs/JobStatus",
@@ -33260,6 +37299,93 @@ One of:
 
 </details>
 
+### `SwapDirection`
+
+Which way `device.swap_similar` goes in the similar list.
+
+One of:
+
+- `"next"`: The next sample after the one the device holds.
+- `"previous"`: The sample before the one the device holds.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which way `device.swap_similar` goes in the similar list.",
+  "oneOf": [
+    {
+      "const": "next",
+      "description": "The next sample after the one the device holds.",
+      "type": "string"
+    },
+    {
+      "const": "previous",
+      "description": "The sample before the one the device holds.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `Swapped`
+
+What `device.swap_similar` and `device.return_to_reference` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device that took the sample. |
+| `media` | [`ContentHash`](#contenthash) | yes | The sample it holds now, by content hash. |
+| `name` | string | yes | The sample's file name, without its extension. |
+| `position` | integer, at least 0 | yes | The sample's place in the reference's similar list, counted from 0. |
+| `count` | integer, at least 0 | yes | How many samples the list holds, the reference first. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.swap_similar` and `device.return_to_reference` return.",
+  "properties": {
+    "count": {
+      "description": "How many samples the list holds, the reference first.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device that took the sample."
+    },
+    "media": {
+      "$ref": "#/$defs/ContentHash",
+      "description": "The sample it holds now, by content hash."
+    },
+    "name": {
+      "description": "The sample's file name, without its extension.",
+      "type": "string"
+    },
+    "position": {
+      "description": "The sample's place in the reference's similar list, counted from 0.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "media",
+    "name",
+    "position",
+    "count"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `SwitchResult`
 
 What a command that switches something returns: its new state.
@@ -33290,7 +37416,7 @@ What a command that switches something returns: its new state.
 
 ### `Switched`
 
-What `link.set_enabled`, `link.set_start_stop_sync` and `link.set_show_toggle` return.
+What `link.set_enabled`, `link.set_start_stop_sync`, `link.set_show_toggle`, `link.set_audio` and `link.set_sync_to_incoming_audio` return.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -33300,7 +37426,7 @@ What `link.set_enabled`, `link.set_start_stop_sync` and `link.set_show_toggle` r
 
 ```json
 {
-  "description": "What `link.set_enabled`, `link.set_start_stop_sync` and `link.set_show_toggle` return.",
+  "description": "What `link.set_enabled`, `link.set_start_stop_sync`, `link.set_show_toggle`, `link.set_audio` and `link.set_sync_to_incoming_audio` return.",
   "properties": {
     "on": {
       "description": "Whether it's on now.",
@@ -33618,6 +37744,7 @@ One of:
 - `"own"`: The item carries it in its own right.
 - `"folder"`: A folder it lies in carries it.
 - `"beatlayer"`: Beatlayer gave it, from what it knows of the item.
+- `"auto"`: Beatlayer gave it automatically, from a plug-in's categories or a sample's sound (spec: browser-tags R49); a person can take it off or make it their own.
 
 <details><summary>JSON Schema</summary>
 
@@ -33638,6 +37765,11 @@ One of:
     {
       "const": "beatlayer",
       "description": "Beatlayer gave it, from what it knows of the item.",
+      "type": "string"
+    },
+    {
+      "const": "auto",
+      "description": "Beatlayer gave it automatically, from a plug-in's categories or a sample's sound (spec: browser-tags R49); a person can take it off or make it their own.",
       "type": "string"
     }
   ]
@@ -34423,6 +38555,99 @@ What `control_surface.templates` returns.
 
 </details>
 
+### `TempoFollowerState`
+
+What `tempo_follower.state` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether Follow is on: the tracker listens and the song's tempo follows it. |
+| `show_toggle` | boolean | yes | Whether the Control Bar shows the Follow toggle (Show Tempo Follower Toggle). |
+| `input` | [`Channel`](#channel) | yes | The audio input it listens to (Input Channel). |
+| `input_label` | string | yes | The input channel as the Input Channel chooser shows it. |
+| `can_run` | boolean | yes | Whether Follow can run: the audio device's input can be reached. |
+| `unavailable` | string or null | yes | Why it can't, when it can't. |
+| `tempo` | number or null | yes | The tempo the song follows now, in BPM; null while Follow is off or the tracker hasn't been confident yet. |
+| `confidence` | number | yes | The tracker's confidence, from 0 to 1; 0 while Follow is off. |
+| `phase` | number | yes | The beat's phase the tracker hears, from 0 to 1; 0 while Follow is off. |
+| `blocks_dropped` | integer, at least 0 | yes | How many blocks of input the copy dropped because the tracker fell behind, since Follow went on. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `tempo_follower.state` returns.",
+  "properties": {
+    "blocks_dropped": {
+      "description": "How many blocks of input the copy dropped because the tracker fell behind, since Follow went on.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "can_run": {
+      "description": "Whether Follow can run: the audio device's input can be reached.",
+      "type": "boolean"
+    },
+    "confidence": {
+      "description": "The tracker's confidence, from 0 to 1; 0 while Follow is off.",
+      "format": "double",
+      "type": "number"
+    },
+    "input": {
+      "$ref": "#/$defs/Channel",
+      "description": "The audio input it listens to (Input Channel)."
+    },
+    "input_label": {
+      "description": "The input channel as the Input Channel chooser shows it.",
+      "type": "string"
+    },
+    "on": {
+      "description": "Whether Follow is on: the tracker listens and the song's tempo follows it.",
+      "type": "boolean"
+    },
+    "phase": {
+      "description": "The beat's phase the tracker hears, from 0 to 1; 0 while Follow is off.",
+      "format": "double",
+      "type": "number"
+    },
+    "show_toggle": {
+      "description": "Whether the Control Bar shows the Follow toggle (Show Tempo Follower Toggle).",
+      "type": "boolean"
+    },
+    "tempo": {
+      "description": "The tempo the song follows now, in BPM; null while Follow is off or the tracker hasn't been confident yet.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "unavailable": {
+      "description": "Why it can't, when it can't.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "on",
+    "show_toggle",
+    "input",
+    "input_label",
+    "can_run",
+    "unavailable",
+    "tempo",
+    "confidence",
+    "phase",
+    "blocks_dropped"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `TempoMap`
 
 The song's tempo over time, as segments in order of position. The first starts at tick 0, each starts after the one before it, and the last is constant. A song at one tempo is a single constant segment.
@@ -34720,6 +38945,8 @@ Theme & Colors in `settings.state` (themes R12).
 | `default_track_colour` | integer from 0 to 255 | yes | Default Track Color, a swatch from 0 to 69, which new tracks take while Auto-Assign Track Colors is off. |
 | `reduced_automatic_colours` | boolean | yes | Reduced Automatic Colors. |
 | `clip_colour` | [`ClipColour`](#clipcolour) | yes | Clip Color. |
+| `new_tracks_take_group_colour` | boolean | yes | New Tracks Take Group Color (themes R30). |
+| `custom_colours` | [`CustomColours`](#customcolours) | yes | The row of custom colours under every palette (themes R28). |
 | `appearance` | [`Appearance`](#appearance) | yes | The Appearance chosen. |
 | `drawn_appearance` | [`Appearance`](#appearance) | yes | The appearance drawn now, `light` or `dark`: Follow System resolved. |
 | `themes` | array of string | yes | The themes the Theme chooser offers, in its order. |
@@ -34768,6 +38995,29 @@ Theme & Colors in `settings.state` (themes R12).
       "minimum": -32768,
       "type": "integer"
     },
+    "custom_colours": {
+      "$ref": "#/$defs/CustomColours",
+      "default": {
+        "places": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "used": []
+      },
+      "description": "The row of custom colours under every palette (themes R28)."
+    },
     "default_track_colour": {
       "default": 12,
       "description": "Default Track Color, a swatch from 0 to 69, which new tracks take while Auto-Assign Track Colors is off.",
@@ -34791,6 +39041,11 @@ Theme & Colors in `settings.state` (themes R12).
     "high_contrast": {
       "default": false,
       "description": "High Contrast.",
+      "type": "boolean"
+    },
+    "new_tracks_take_group_colour": {
+      "default": false,
+      "description": "New Tracks Take Group Color (themes R30).",
       "type": "boolean"
     },
     "reduced_automatic_colours": {
@@ -34828,6 +39083,8 @@ Theme & Colors in `settings.state` (themes R12).
     "default_track_colour",
     "reduced_automatic_colours",
     "clip_colour",
+    "new_tracks_take_group_colour",
+    "custom_colours",
     "appearance",
     "drawn_appearance",
     "themes"
@@ -35303,6 +39560,123 @@ A timecode input's last whole time.
     "position_ticks"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `TitlePart`
+
+A part a device adds to its title bar, besides the activator, the name, its title-bar tabs ([`PageStyle::TitleBar`]), Use Current Scale (the description's title switch) and the three round buttons at the right (L-DEV-004, L-DEV-045). Those on the right are drawn right to left, the last of the list outermost.
+
+One of:
+
+- an object with `heading` (string): A heading across the title bar over its tabs and parts, as Drift's and Meld's.
+- `"mpe"`: The MPE label, for a device that takes MPE.
+- an object with `maker` ([`Maker`](#maker)): A maker's mark.
+- an object with `letter` (pair of string of 1 characters and [`ParamId`](#paramid)): A lettered toggle for the parameter (the A A S buttons).
+- an object with `round` (pair of [`Glyph`](#glyph) and [`ParamId`](#paramid)): A round button with an icon after the activator (▶, ▼, i), lit while the parameter is on.
+- an object with `button` ([`ParamId`](#paramid)): A text button reading the parameter's name (Learn, Send).
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A part a device adds to its title bar, besides the activator, the name, its title-bar tabs ([`PageStyle::TitleBar`]), Use Current Scale (the description's title switch) and the three round buttons at the right (L-DEV-004, L-DEV-045). Those on the right are drawn right to left, the last of the list outermost.",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "description": "A heading across the title bar over its tabs and parts, as Drift's and Meld's.",
+      "properties": {
+        "heading": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "heading"
+      ],
+      "type": "object"
+    },
+    {
+      "const": "mpe",
+      "description": "The MPE label, for a device that takes MPE.",
+      "type": "string"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A maker's mark.",
+      "properties": {
+        "maker": {
+          "$ref": "#/$defs/Maker"
+        }
+      },
+      "required": [
+        "maker"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A lettered toggle for the parameter (the A A S buttons).",
+      "properties": {
+        "letter": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "maxLength": 1,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/ParamId"
+            }
+          ],
+          "type": "array"
+        }
+      },
+      "required": [
+        "letter"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A round button with an icon after the activator (▶, ▼, i), lit while the parameter is on.",
+      "properties": {
+        "round": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/Glyph"
+            },
+            {
+              "$ref": "#/$defs/ParamId"
+            }
+          ],
+          "type": "array"
+        }
+      },
+      "required": [
+        "round"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A text button reading the parameter's name (Learn, Send).",
+      "properties": {
+        "button": {
+          "$ref": "#/$defs/ParamId"
+        }
+      },
+      "required": [
+        "button"
+      ],
+      "type": "object"
+    }
+  ]
 }
 ```
 
@@ -36513,7 +40887,7 @@ What `transport.state` returns: the transport and the Control Bar's transport se
 | `arrangement_position` | string | yes | What the Control Bar's Arrangement Position fields show, as bar.beat.sixteenth by the song's time signatures: the play position while the song plays, and the insert marker while it's stopped. |
 | `loop_start` | [`Ticks`](#ticks) | yes | Where the Arrangement loop brace starts, in ticks. |
 | `loop_length` | [`Ticks`](#ticks) | yes | How long the loop brace is, in ticks. |
-| `loop_on` | boolean | yes | Whether the Arrangement Loop switch is on. |
+| `loop_on` | boolean | yes | Whether the Arrangement Loop switch is on. While a Play Selection that stops at the selection's end plays, it reads off (the transport spec, R35). |
 | `loop_start_position` | string | yes | The loop brace's start as the Loop Start fields show it, as bar.beat.sixteenth. |
 | `loop_length_bars` | string | yes | The brace's length as the Loop Length fields show it: bars, beats, and sixteenths counted from 0, such as `4.0.0` for four bars. |
 | `tempo` | number | yes | The tempo where the Arrangement Position fields are, in quarter notes per minute, as the Tempo field shows it. |
@@ -36618,7 +40992,7 @@ What `transport.state` returns: the transport and the Control Bar's transport se
       "type": "string"
     },
     "loop_on": {
-      "description": "Whether the Arrangement Loop switch is on.",
+      "description": "Whether the Arrangement Loop switch is on. While a Play Selection that stops at the selection's end plays, it reads off (the transport spec, R35).",
       "type": "boolean"
     },
     "loop_start": {
@@ -37215,6 +41589,88 @@ What `device.ungroup` returns.
 
 </details>
 
+### `Unit`
+
+A unit a knob's two parameters read in.
+
+One of:
+
+- `"ms"`: Milliseconds.
+- `"hz"`: Hertz.
+- `"sync"`: Synced to the tempo: drawn as a metronome.
+- `"note"`: A musical note.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A unit a knob's two parameters read in.",
+  "oneOf": [
+    {
+      "const": "ms",
+      "description": "Milliseconds.",
+      "type": "string"
+    },
+    {
+      "const": "hz",
+      "description": "Hertz.",
+      "type": "string"
+    },
+    {
+      "const": "sync",
+      "description": "Synced to the tempo: drawn as a metronome.",
+      "type": "string"
+    },
+    {
+      "const": "note",
+      "description": "A musical note.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `UnitPair`
+
+A pair of unit buttons beside a knob that switch which of two parameters the knob shows: Arpeggiator's Rate (ms or sync), Envelope Follower's Delay, LFO's Rate. The knob shows one parameter, never both: the device's description says which two, as an [`Alternate`](crate::param::Alternate) whose switch is `mode`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `mode` | [`ParamId`](#paramid) | yes | The switch that picks the unit: off, the first unit's parameter (the control's own) shows and the first button is lit. |
+| `units` | array of [`Unit`](#unit), at least 2 | yes | The two units, in the order of `mode`'s values. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A pair of unit buttons beside a knob that switch which of two parameters the knob shows: Arpeggiator's Rate (ms or sync), Envelope Follower's Delay, LFO's Rate. The knob shows one parameter, never both: the device's description says which two, as an [`Alternate`](crate::param::Alternate) whose switch is `mode`.",
+  "properties": {
+    "mode": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The switch that picks the unit: off, the first unit's parameter (the control's own) shows and the first button is lit."
+    },
+    "units": {
+      "description": "The two units, in the order of `mode`'s values.",
+      "items": {
+        "$ref": "#/$defs/Unit"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": "array"
+    }
+  },
+  "required": [
+    "mode",
+    "units"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `UnmapResult`
 
 What `remote.unmap` returns.
@@ -37464,6 +41920,127 @@ What `settings.set_user_library` returns: the User Library in use afterwards.
   },
   "required": [
     "path"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `UtilitiesState`
+
+The Pitch and Time Utilities panel's values and what it shows.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `interval` | integer | yes | Interval Size. |
+| `interval_range` | pair of integer and integer | yes | The least and the most Interval Size can be set to with the notes it would copy now: those that keep every copy on the keyboard. |
+| `stretch` | number | yes | The Stretch knob's position. |
+| `stretch_factor` | number | yes | The factor that position is, from 0.1 to 10. |
+| `duration` | string | yes | Duration. |
+| `humanize_amount` | integer from 0 to 255 | yes | Humanize Amount, in percent. |
+| `scale` | string or null | yes | The root and name of the clip's scale; `null` while Scale Mode is off. |
+| `fit_to_scale` | boolean | yes | Whether Fit to Scale is available: Scale Mode is on. |
+| `time_range` | boolean | yes | Whether Duration's Time Range is available: there is a time selection. |
+| `lowest` | integer or null | yes | The lowest key of the notes the utilities act on now. |
+| `highest` | integer or null | yes | The highest key of the notes the utilities act on now. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Pitch and Time Utilities panel's values and what it shows.",
+  "properties": {
+    "duration": {
+      "description": "Duration.",
+      "type": "string"
+    },
+    "fit_to_scale": {
+      "description": "Whether Fit to Scale is available: Scale Mode is on.",
+      "type": "boolean"
+    },
+    "highest": {
+      "description": "The highest key of the notes the utilities act on now.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "humanize_amount": {
+      "description": "Humanize Amount, in percent.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "interval": {
+      "description": "Interval Size.",
+      "format": "int32",
+      "type": "integer"
+    },
+    "interval_range": {
+      "description": "The least and the most Interval Size can be set to with the notes it would copy now: those that keep every copy on the keyboard.",
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "format": "int32",
+          "type": "integer"
+        },
+        {
+          "format": "int32",
+          "type": "integer"
+        }
+      ],
+      "type": "array"
+    },
+    "lowest": {
+      "description": "The lowest key of the notes the utilities act on now.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "scale": {
+      "description": "The root and name of the clip's scale; `null` while Scale Mode is off.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "stretch": {
+      "description": "The Stretch knob's position.",
+      "format": "double",
+      "type": "number"
+    },
+    "stretch_factor": {
+      "description": "The factor that position is, from 0.1 to 10.",
+      "format": "double",
+      "type": "number"
+    },
+    "time_range": {
+      "description": "Whether Duration's Time Range is available: there is a time selection.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "interval",
+    "interval_range",
+    "stretch",
+    "stretch_factor",
+    "duration",
+    "humanize_amount",
+    "scale",
+    "fit_to_scale",
+    "time_range",
+    "lowest",
+    "highest"
   ],
   "type": "object"
 }
@@ -37923,6 +42500,8 @@ What `view.state` returns: what the view commands switch, without switching any 
 | `undo_history` | boolean | yes | Whether the Undo History panel shows. |
 | `save_history` | boolean | yes | Whether the Save History panel shows. |
 | `plug_in_windows` | boolean | yes | Whether floating devices' and plug-ins' windows are shown, as `view.toggle_plug_in_windows` sets it. |
+| `note_colors` | [`NoteColors`](#notecolors) | yes | How the MIDI Note Editor colours notes, as `view.set_note_colors` sets it (the view options spec, R2). |
+| `mark_empty_tracks` | boolean | yes | Whether empty tracks show a mark, as `view.set_mark_empty_tracks` sets it (the view options spec, R6). |
 
 <details><summary>JSON Schema</summary>
 
@@ -37945,6 +42524,14 @@ What `view.state` returns: what the view commands switch, without switching any 
     "focused_window": {
       "$ref": "#/$defs/WindowName",
       "description": "The window the commands that act on one window act on when they aren't told which: the one with the focus."
+    },
+    "mark_empty_tracks": {
+      "description": "Whether empty tracks show a mark, as `view.set_mark_empty_tracks` sets it (the view options spec, R6).",
+      "type": "boolean"
+    },
+    "note_colors": {
+      "$ref": "#/$defs/NoteColors",
+      "description": "How the MIDI Note Editor colours notes, as `view.set_note_colors` sets it (the view options spec, R2)."
     },
     "plug_in_windows": {
       "description": "Whether floating devices' and plug-ins' windows are shown, as `view.toggle_plug_in_windows` sets it.",
@@ -37981,7 +42568,9 @@ What `view.state` returns: what the view commands switch, without switching any 
     "assistant",
     "undo_history",
     "save_history",
-    "plug_in_windows"
+    "plug_in_windows",
+    "note_colors",
+    "mark_empty_tracks"
   ],
   "type": "object"
 }
@@ -38206,31 +42795,126 @@ Every mode's controls (R2). Re-Pitch and Complex have none.
 
 </details>
 
-### `Widget`
+### `WavetableChoice`
 
-How a control draws its parameter.
+What a wavetable oscillator plays (WP-8.8; the wavetable spec, R6 to R8).
 
 One of:
 
-- `"knob"`: A round knob with its name above and its value below: continuous values and gains.
-- `"toggle"`: A switch button with its name above: toggles.
-- `"chooser"`: A field that opens a menu of choices, with its name above.
-- `"number"`: A number field, dragged or typed, with its name above.
+- an object with `kind` = `"factory"`, `category` (string), `name` (string): One of Beatlayer's factory tables, by category and name.
+- an object with `kind` = `"user"`, `raw` (boolean), `frames` (integer from 0 to 65535): A table made from the file in the oscillator's sample slot.
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "How a control draws its parameter.",
+  "description": "What a wavetable oscillator plays (WP-8.8; the wavetable spec, R6 to R8).",
+  "oneOf": [
+    {
+      "description": "One of Beatlayer's factory tables, by category and name.",
+      "properties": {
+        "category": {
+          "description": "The table's category.",
+          "type": "string"
+        },
+        "kind": {
+          "const": "factory",
+          "type": "string"
+        },
+        "name": {
+          "description": "The table's name in it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "category",
+        "name"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A table made from the file in the oscillator's sample slot.",
+      "properties": {
+        "frames": {
+          "description": "How many frames the file made.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "const": "user",
+          "type": "string"
+        },
+        "raw": {
+          "description": "Whether the file's frames are used as they are, with no clean-up.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "raw",
+        "frames"
+      ],
+      "type": "object"
+    }
+  ]
+}
+```
+
+</details>
+
+### `Widget`
+
+How a control draws its parameter. Every size is as Live draws it (observed in Live 12.4.16, 2 November 2026; layout L-DEV-042 to L-DEV-046).
+
+One of:
+
+- `"knob"`: A large round knob with its name above and its value below: the arc runs in the accent from the parameter's default, so a bipolar knob's from the centre, with a small notch at its top.
+- `"small_knob"`: The same knob in Live's second, smaller size.
+- `"number"`: A plain number box, dragged or typed, with its name above.
+- `"slider"`: A number box whose blue fill shows the value's place in its range (a "lit" box), with its name above.
+- `"marked"`: A plain number box with a ◀ marker at its right (the amounts of Chord and Sampler), with its name above.
+- `"chooser"`: A field that opens a menu of choices, with its name above.
+- `"toggle"`: A text button holding its parameter's name, orange with dark text while on, dark grey with light text while off.
+- `"outlined"`: A text button like [`Toggle`](Self::Toggle) whose off state is outlined in orange.
+- `"icon_toggle"`: A small rectangular button with an icon ([`Control::glyph`]) in place of text, lit while on.
+- `"round"`: A round button with an icon ([`Control::glyph`]), lit while on.
+- an object with `segments` (integer from 0 to 255): A row of that many text buttons, one for each choice of a choice parameter, the chosen one lit (Peak, RMS and Expand).
+- an object with `stack` (integer from 0 to 255): The same as a column of that many buttons.
+- an object with `grid` (object with `columns` (integer from 0 to 255), `rows` (integer from 0 to 255)): The choices of a choice parameter as a grid of small buttons, filled by rows (Note Echo's 1 2 3 4 over 5 6 8 16).
+- an object with `icon_segments` (integer from 0 to 255): A row of that many icon buttons, one for each choice of a choice parameter (the filter types), the chosen one lit.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How a control draws its parameter. Every size is as Live draws it (observed in Live 12.4.16, 2 November 2026; layout L-DEV-042 to L-DEV-046).",
   "oneOf": [
     {
       "const": "knob",
-      "description": "A round knob with its name above and its value below: continuous values and gains.",
+      "description": "A large round knob with its name above and its value below: the arc runs in the accent from the parameter's default, so a bipolar knob's from the centre, with a small notch at its top.",
       "type": "string"
     },
     {
-      "const": "toggle",
-      "description": "A switch button with its name above: toggles.",
+      "const": "small_knob",
+      "description": "The same knob in Live's second, smaller size.",
+      "type": "string"
+    },
+    {
+      "const": "number",
+      "description": "A plain number box, dragged or typed, with its name above.",
+      "type": "string"
+    },
+    {
+      "const": "slider",
+      "description": "A number box whose blue fill shows the value's place in its range (a \"lit\" box), with its name above.",
+      "type": "string"
+    },
+    {
+      "const": "marked",
+      "description": "A plain number box with a ◀ marker at its right (the amounts of Chord and Sampler), with its name above.",
       "type": "string"
     },
     {
@@ -38239,9 +42923,105 @@ One of:
       "type": "string"
     },
     {
-      "const": "number",
-      "description": "A number field, dragged or typed, with its name above.",
+      "const": "toggle",
+      "description": "A text button holding its parameter's name, orange with dark text while on, dark grey with light text while off.",
       "type": "string"
+    },
+    {
+      "const": "outlined",
+      "description": "A text button like [`Toggle`](Self::Toggle) whose off state is outlined in orange.",
+      "type": "string"
+    },
+    {
+      "const": "icon_toggle",
+      "description": "A small rectangular button with an icon ([`Control::glyph`]) in place of text, lit while on.",
+      "type": "string"
+    },
+    {
+      "const": "round",
+      "description": "A round button with an icon ([`Control::glyph`]), lit while on.",
+      "type": "string"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A row of that many text buttons, one for each choice of a choice parameter, the chosen one lit (Peak, RMS and Expand).",
+      "properties": {
+        "segments": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "segments"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "The same as a column of that many buttons.",
+      "properties": {
+        "stack": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "stack"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "The choices of a choice parameter as a grid of small buttons, filled by rows (Note Echo's 1 2 3 4 over 5 6 8 16).",
+      "properties": {
+        "grid": {
+          "properties": {
+            "columns": {
+              "description": "How many buttons across.",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "rows": {
+              "description": "How many rows.",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "columns",
+            "rows"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "grid"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A row of that many icon buttons, one for each choice of a choice parameter (the filter types), the chosen one lit.",
+      "properties": {
+        "icon_segments": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "icon_segments"
+      ],
+      "type": "object"
     }
   ]
 }
@@ -38420,6 +43200,23 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `uint8`
+
+Type: integer from 0 to 255.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "format": "uint8",
+  "maximum": 255,
+  "minimum": 0,
+  "type": "integer"
 }
 ```
 

@@ -10,7 +10,7 @@
 //! which Live doesn't have. It follows Plug-Ins, the page whose plug-ins
 //! are the other way another program drives the app.
 
-use bl_model::{LaunchMode, LaunchQuantization, TakeoverMode};
+use bl_model::{LaunchMode, LaunchQuantization, PluginFormat, TakeoverMode};
 use bl_project::registry as recovery_ids;
 use bl_shell::assistant::AssistantProvider;
 use bl_shell::audio::{
@@ -26,6 +26,7 @@ use bl_shell::settings::{
     GRID_LINE_INTENSITY, LoopWarpShortSamples, SessionAutomationTracks, SettingsPage, Tone,
     ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, zoom_step,
 };
+use bl_shell::tempo_follower_commands as tempo_follower_ids;
 use bl_shell::{Invocation, Shell, agent, assistant, commands as ids};
 use egui::accesskit::Role;
 use egui::{
@@ -1064,6 +1065,21 @@ fn display_page(
     for row in &NAVIGATION {
         rows.pending(ui, row);
     }
+    // Spec: view-options R10. The last row of Navigation and Keyboard.
+    let rect = rows.row(ui, "Adjust Values with Mouse Wheel", SettingsLayout::SWITCH);
+    if let Some(on) = switch(
+        ui,
+        theme,
+        "adjust-values-with-mouse-wheel",
+        "Adjust Values with Mouse Wheel",
+        rect,
+        shell.wheel_adjusts_values(),
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            bl_shell::view_option_commands::SET_WHEEL_ADJUSTS_VALUES,
+            json!({ "on": on }),
+        )));
+    }
     // Spec: time-editing R26 (L-SET-010): Permanent Scrub Areas, the one
     // Mouse and Pen Input setting built so far.
     rows.heading(ui, "Mouse and Pen Input");
@@ -1486,29 +1502,66 @@ fn plug_ins_page(
             )));
         }
     }
-    rows.heading(ui, "Plug-In Windows");
-    rows.pending(
-        ui,
-        &switch_row("Multiple Plug-In Windows", "WP-2.6").showing("On"),
-    );
-    let rect = rows.row(ui, "Auto-Hide Plug-In Windows", SettingsLayout::SWITCH);
-    if let Some(on) = switch(
+    // Spec: browser-tags R44. None, then the formats this platform lists.
+    let rect = rows.row(ui, "Preferred Plug-In Format", SettingsLayout::CHOOSER);
+    let mut formats = vec![("None", None), ("CLAP", Some(PluginFormat::Clap))];
+    formats.push(("VST3", Some(PluginFormat::Vst3)));
+    if cfg!(target_os = "macos") {
+        formats.push(("Audio Units", Some(PluginFormat::AudioUnit)));
+    }
+    let formats: Vec<Choice<Option<PluginFormat>>> = formats
+        .into_iter()
+        .map(|(label, value)| Choice {
+            label: label.to_owned(),
+            value,
+            leds: NO_LEDS,
+        })
+        .collect();
+    if let Some(format) = chooser(
         ui,
         theme,
-        "auto-hide-plug-in-windows",
-        "Auto-Hide Plug-In Windows",
+        "preferred-plug-in-format",
+        "Preferred Plug-In Format",
         rect,
-        shell.auto_hide_plug_in_windows(),
+        &formats,
+        Some(&sources.format_preference),
+        true,
     ) {
         events.push(UiEvent::Invoke(Invocation::new(
-            ids::SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
-            json!({ "on": on }),
+            bl_shell::plugin_commands::SETTINGS,
+            json!({ "format_preference": format }),
         )));
     }
-    rows.pending(
-        ui,
-        &switch_row("Auto-Open Plug-In Windows", "WP-2.6").showing("On"),
-    );
+    rows.heading(ui, "Plug-In Windows");
+    let windows = [
+        (
+            "Multiple Plug-In Windows",
+            "multiple-plug-in-windows",
+            shell.multiple_plug_in_windows(),
+            ids::SETTINGS_SET_MULTIPLE_PLUG_IN_WINDOWS,
+        ),
+        (
+            "Auto-Hide Plug-In Windows",
+            "auto-hide-plug-in-windows",
+            shell.auto_hide_plug_in_windows(),
+            ids::SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
+        ),
+        (
+            "Auto-Open Plug-In Windows",
+            "auto-open-plug-in-windows",
+            shell.auto_open_plug_in_windows(),
+            ids::SETTINGS_SET_AUTO_OPEN_PLUG_IN_WINDOWS,
+        ),
+    ];
+    for (label, id_salt, value, command) in windows {
+        let rect = rows.row(ui, label, SettingsLayout::SWITCH);
+        if let Some(on) = switch(ui, theme, id_salt, label, rect, value) {
+            events.push(UiEvent::Invoke(Invocation::new(
+                command,
+                json!({ "on": on }),
+            )));
+        }
+    }
 }
 
 /// A push button in the Settings window, as Live's Rescan is: a rounded
@@ -1741,6 +1794,21 @@ fn theme_page(
             json!({ "on": on }),
         )));
     }
+    // Spec: themes R30. After Reduced Automatic Colors.
+    let rect = rows.row(ui, "New Tracks Take Group Color", SettingsLayout::SWITCH);
+    if let Some(on) = switch(
+        ui,
+        theme,
+        "new-tracks-take-group-colour",
+        "New Tracks Take Group Color",
+        rect,
+        look.new_tracks_take_group_colour,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_NEW_TRACKS_TAKE_GROUP_COLOUR,
+            json!({ "on": on }),
+        )));
+    }
     let rect = rows.row(ui, "Clip Color", SettingsLayout::CHOOSER);
     let clip_colours = choices(ClipColour::ALL.map(|c| (c.label().to_owned(), c)));
     if let Some(clip_colour) = chooser(
@@ -1828,7 +1896,7 @@ fn swatch_chooser(
         ));
     });
     egui::Popup::menu(&response).show(|ui| {
-        if let Some(swatch) = crate::palette::show(ui, theme, id_salt, Some(current)) {
+        if let Some(swatch) = crate::palette::show_swatches(ui, theme, id_salt, Some(current)) {
             chosen = Some(swatch);
             ui.close();
         }
@@ -1948,8 +2016,9 @@ fn library_page(
 }
 
 /// Link (L-SET-013; the Link spec, R20): the Link section's Show Link Toggle
-/// and Start Stop Sync. While no audio engine runs it holds only a message,
-/// and Link stays as it is set. Link Audio's section comes with its package.
+/// and Start Stop Sync, then Link Audio's section (the Link Audio spec, R2):
+/// Audio, Name, Latency, Sync to Incoming Audio and the peers list. While no
+/// audio engine runs it holds only a message, and Link stays as it is set.
 fn link_page(
     ui: &mut Ui,
     shell: &Shell,
@@ -2000,6 +2069,198 @@ fn link_page(
             json!({ "on": on }),
         )));
     }
+    link_audio_section(ui, shell, theme, rows, events);
+}
+
+/// The width of the Latency slider and the Name field.
+const LINK_AUDIO_FIELD: f32 = 160.0;
+
+/// Link Audio (the Link Audio spec, R2, R3, R7, R8, R9, R13): Audio, Name,
+/// Latency and Sync to Incoming Audio, and the peers list, a table of each
+/// peer's name, state and buffered audio.
+fn link_audio_section(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rows: &mut Rows<'_>,
+    events: &mut Vec<UiEvent>,
+) {
+    rows.heading(ui, "Link Audio");
+    let rect = rows.row(ui, "Audio", SettingsLayout::SWITCH);
+    if let Some(on) = switch(
+        ui,
+        theme,
+        "link-audio",
+        // The page list has an Audio of its own, so the switch's name says
+        // what it switches.
+        "Link Audio",
+        rect,
+        shell.link_audio_enabled(),
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            link_ids::SET_AUDIO,
+            json!({ "on": on }),
+        )));
+    }
+    let rect = rows.row(ui, "Name", LINK_AUDIO_FIELD);
+    if let Some(name) = committed_field(
+        ui,
+        rect,
+        "link-audio-name",
+        "Name",
+        &shell.link_audio_name(),
+        |edit| edit,
+        Some("The name other apps in the Link session see this app by."),
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            link_ids::SET_AUDIO_NAME,
+            json!({ "name": name }),
+        )));
+    }
+    let rect = rows.row(ui, "Latency", LINK_AUDIO_FIELD);
+    let mut ms = shell.link_audio_latency_ms();
+    let slider = ui.put(
+        rect,
+        egui::Slider::new(&mut ms, 0.0..=link_ids::MAX_LATENCY_MS)
+            .integer()
+            .suffix(" ms"),
+    );
+    ui.ctx().accesskit_node_builder(slider.id, |node| {
+        node.set_label("Latency".to_owned());
+    });
+    if slider.changed() {
+        events.push(UiEvent::Invoke(Invocation::new(
+            link_ids::SET_AUDIO_LATENCY,
+            json!({ "ms": ms }),
+        )));
+    }
+    let rect = rows.row(ui, "Sync to Incoming Audio", SettingsLayout::SWITCH);
+    if let Some(on) = switch(
+        ui,
+        theme,
+        "link-sync-to-incoming-audio",
+        "Sync to Incoming Audio",
+        rect,
+        shell.link_sync_to_incoming_audio(),
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            link_ids::SET_SYNC_TO_INCOMING_AUDIO,
+            json!({ "on": on }),
+        )));
+    }
+    link_audio_peers(ui, shell, theme, rows);
+}
+
+/// The peers list: a table whose rows are the peers with Link Audio on, each
+/// by name, with its state and the audio buffered from it in milliseconds
+/// (the Link Audio spec, R9, R13).
+fn link_audio_peers(ui: &mut Ui, shell: &Shell, theme: &Theme, rows: &mut Rows<'_>) {
+    let widths = [140.0, 90.0, 70.0];
+    let table = |ui: &mut Ui, role: Role, label: &str, text: &str, rect: Rect| {
+        let response = ui.interact(rect, Id::new(("link-peers", label, text)), Sense::hover());
+        ui.painter().text(
+            pos2(rect.left() + 2.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            text,
+            theme.font(),
+            if role == Role::ColumnHeader {
+                theme.colors.text_dim.0
+            } else {
+                theme.colors.text.0
+            },
+        );
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_role(role);
+            node.set_label(text.to_owned());
+        });
+    };
+    let cells = rows.table_row(ui, "Peers", &widths);
+    for (rect, heading) in cells.iter().zip(["Name", "State", "Buffered"]) {
+        table(ui, Role::ColumnHeader, "head", heading, *rect);
+    }
+    let peers = shell.link_audio_peers();
+    if peers.is_empty() {
+        rows.read_note(ui, "No other app in the session has Link Audio on.");
+    }
+    for peer in peers {
+        let cells = rows.table_row(ui, "", &widths);
+        let buffered = format!("{:.0} ms", peer.buffered_ms);
+        for (rect, text) in
+            cells
+                .iter()
+                .zip([peer.name.as_str(), peer.state.label(), buffered.as_str()])
+        {
+            table(ui, Role::Cell, &peer.name, text, *rect);
+        }
+    }
+}
+
+/// The Tempo Follower section (L-SET-014; the Tempo Follower spec, R1): Show
+/// Tempo Follower Toggle, and Input Channel, the audio input's single
+/// channels then its stereo pairs, as the Routing choosers list them. A
+/// channel the device hasn't, which the preferences keep, is listed too.
+fn tempo_follower_rows(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rows: &mut Rows<'_>,
+    events: &mut Vec<UiEvent>,
+) {
+    rows.heading(ui, "Tempo Follower");
+    let choices = [("Show", true), ("Hide", false)].map(|(label, value)| Choice {
+        label: label.to_owned(),
+        value,
+        leds: NO_LEDS,
+    });
+    let rect = rows.row(ui, "Show Tempo Follower Toggle", SettingsLayout::CHOOSER);
+    if let Some(on) = chooser(
+        ui,
+        theme,
+        "show-tempo-follower-toggle",
+        "Show Tempo Follower Toggle",
+        rect,
+        &choices,
+        Some(&shell.tempo_follower_toggle_shown()),
+        true,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            tempo_follower_ids::SET_SHOW_TOGGLE,
+            json!({ "on": on }),
+        )));
+    }
+    let inputs = shell.audio().channels().0;
+    let current = shell.tempo_follower_input();
+    let mut channels: Vec<bl_model::Channel> = (1..=inputs)
+        .map(bl_model::Channel::Mono)
+        .chain((1..inputs).step_by(2).map(bl_model::Channel::Pair))
+        .collect();
+    if !channels.contains(&current) {
+        channels.push(current);
+    }
+    let channels: Vec<Choice<bl_model::Channel>> = channels
+        .into_iter()
+        .map(|value| Choice {
+            label: value.label(),
+            value,
+            leds: NO_LEDS,
+        })
+        .collect();
+    let rect = rows.row(ui, "Input Channel", SettingsLayout::CHOOSER);
+    if let Some(channel) = chooser(
+        ui,
+        theme,
+        "tempo-follower-input-channel",
+        "Input Channel",
+        rect,
+        &channels,
+        Some(&current),
+        true,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            tempo_follower_ids::SET_INPUT,
+            json!({ "channel": channel }),
+        )));
+    }
 }
 
 /// Tempo & MIDI (L-SET-014): the second section's Show Resync Button, and the
@@ -2008,9 +2269,10 @@ fn link_page(
 /// spec R2 and R27 give it. An output with Sync on has a disclosure triangle
 /// after its switches that opens its MIDI Clock Sync Delay, MIDI Clock Type
 /// and Hardware Resync (the MIDI clock spec, R1). Takeover Mode comes before
-/// the ports (the remote mapping spec, R28). The Tempo Follower and control
-/// surfaces come with later packages. Remote is kept and acts when MIDI
-/// mapping is built (R5).
+/// the ports (the remote mapping spec, R28). The page starts with the Tempo
+/// Follower section: Show Tempo Follower Toggle and Input Channel (the Tempo
+/// Follower spec, R1). Remote is kept and acts when MIDI mapping is built
+/// (R5).
 fn tempo_midi_page(
     ui: &mut Ui,
     shell: &Shell,
@@ -2018,6 +2280,7 @@ fn tempo_midi_page(
     rows: &mut Rows<'_>,
     events: &mut Vec<UiEvent>,
 ) {
+    tempo_follower_rows(ui, shell, theme, rows, events);
     // Spec: midi-clock R10
     let rect = rows.row(ui, "Show Resync Button", SettingsLayout::SWITCH);
     if let Some(on) = switch(
@@ -2035,7 +2298,6 @@ fn tempo_midi_page(
     }
     rows.heading(ui, "MIDI");
     control_surfaces_table(ui, shell, theme, rows, events);
-    rows.note(ui, "The Tempo Follower settings come with a later package.");
     // Spec: remote-mapping R28. Takeover Mode sits where Live has it: after
     // the Control Surfaces table's place and before the MIDI ports table.
     let modes: Vec<Choice<TakeoverMode>> = TakeoverMode::ALL

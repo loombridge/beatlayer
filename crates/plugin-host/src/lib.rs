@@ -41,6 +41,7 @@ pub(crate) fn count_value_reads(n: usize) {
 
 pub mod ara;
 pub mod au;
+pub mod categories;
 pub mod clap;
 mod drive;
 mod lend;

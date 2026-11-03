@@ -21,9 +21,29 @@ pub const SET_MODE: &str = "push.set_mode";
 pub const SET_SETUP: &str = "push.set_setup";
 /// `push.display_frame`: the latest display frame as a PNG.
 pub const DISPLAY_FRAME: &str = "push.display_frame";
+/// `push.set_fixed_length`: Fixed Length's switch, length and Phrase Sync.
+pub const SET_FIXED_LENGTH: &str = "push.set_fixed_length";
+/// `push.set_swing`: the swing amount.
+pub const SET_SWING: &str = "push.set_swing";
+/// `push.new`: Push 2's New button.
+pub const NEW: &str = "push.new";
+/// `push.duplicate`: Push 2's Duplicate button pressed alone.
+pub const DUPLICATE: &str = "push.duplicate";
+/// `push.convert`: what Convert makes of what is selected.
+pub const CONVERT: &str = "push.convert";
 
 /// Every command [`register`] adds.
-pub const IDS: &[&str] = &[STATE, SET_MODE, SET_SETUP, DISPLAY_FRAME];
+pub const IDS: &[&str] = &[
+    STATE,
+    SET_MODE,
+    SET_SETUP,
+    DISPLAY_FRAME,
+    CONVERT,
+    SET_FIXED_LENGTH,
+    SET_SWING,
+    NEW,
+    DUPLICATE,
+];
 
 /// Whether `id` is one of the commands [`register`] adds.
 #[must_use]
@@ -73,6 +93,12 @@ pub enum PushMenu {
     Setup,
     /// Scale.
     Scale,
+    /// Quantize (the notes on Push 2 spec, R58).
+    Quantize,
+    /// Fixed Length (the notes on Push 2 spec, R50).
+    FixedLength,
+    /// The choices Convert offers for an audio clip.
+    Convert,
 }
 
 /// Workflow (R31).
@@ -183,6 +209,215 @@ pub struct PushBrowse {
     pub in_use: usize,
 }
 
+/// A device on one of the upper buttons in Device Mode (push-2-tracks R27).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushDevice {
+    /// The upper display button, from 1.
+    pub button: usize,
+    /// The device.
+    pub device: bl_model::DeviceId,
+    /// Its name.
+    pub name: String,
+    /// How deep it is inside racks: 0 on the track's own chain.
+    pub depth: usize,
+    /// What it is: `instrument`, `audio_effect`, `midi_effect`,
+    /// `instrument_rack`, `audio_effect_rack`, `midi_effect_rack` or
+    /// `drum_rack`.
+    pub kind: String,
+    /// Whether it is switched on.
+    pub enabled: bool,
+    /// Whether it is the device in focus, which is the window's selected one.
+    pub selected: bool,
+    /// For a rack, whether its devices follow it on the buttons.
+    pub unfolded: bool,
+}
+
+/// A parameter on one of the encoders in Device Mode.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushParam {
+    /// Its name.
+    pub name: String,
+    /// Its value as the device shows it.
+    pub value: String,
+    /// Whether a macro holds it, so the encoder doesn't move it.
+    pub held: bool,
+}
+
+/// A chain on one of the lower buttons while a rack's button is held.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushChain {
+    /// The chain.
+    pub chain: bl_model::ChainId,
+    /// Its name.
+    pub name: String,
+    /// Whether it is the selected chain.
+    pub selected: bool,
+}
+
+/// What Device Mode shows (push-2-tracks R27).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushDeviceMode {
+    /// The devices on the upper buttons, in order.
+    pub devices: Vec<PushDevice>,
+    /// Whether the first upper button is an arrow that moves the devices
+    /// shown back.
+    pub left_arrow: bool,
+    /// Whether the last upper button is an arrow that moves them on.
+    pub right_arrow: bool,
+    /// Whether the track has no devices.
+    pub empty: bool,
+    /// Whether Edit Mode is on.
+    pub edit: bool,
+    /// The bank on the encoders, from 0.
+    pub bank: usize,
+    /// Every bank's name.
+    pub banks: Vec<String>,
+    /// The page of banks the lower buttons show in Edit Mode, from 0.
+    pub bank_page: usize,
+    /// How many pages the banks make.
+    pub bank_pages: usize,
+    /// The parameters on the eight encoders.
+    pub params: Vec<PushParam>,
+    /// The chains the lower buttons show while a rack's button is held.
+    pub chains: Vec<PushChain>,
+    /// Whether Mute is locked, so each device button switches its device.
+    pub mute_locked: bool,
+    /// Simpler's main bank and Edit Mode, while a Simpler is in focus
+    /// (push-2-notes R67 to R76).
+    pub simpler: Option<PushSimpler>,
+}
+
+/// What Device Mode shows of a Simpler (push-2-notes R67 to R76).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushSimpler {
+    /// Whether it has no sample, which the display says.
+    pub empty: bool,
+    /// Its mode: `classic`, `one_shot` or `slice`.
+    pub mode: String,
+    /// Whether the main bank is on the encoders.
+    pub main_bank: bool,
+    /// How far the waveform is zoomed in, as `×1.0` for the whole sample.
+    pub zoom: String,
+    /// What Zoom zooms around: `start`, `end`, `s_start`, `s_length` or
+    /// `slice`.
+    pub zoom_around: String,
+    /// The Start and End flags, in frames of the sample.
+    pub region: (u64, u64),
+    /// How many slices Slice mode has.
+    pub slices: usize,
+    /// The selected slice, from 0.
+    pub selected_slice: usize,
+    /// Whether Pad Slicing is on.
+    pub pad_slicing: bool,
+    /// Edit Mode's buttons after Back, with the upper button each is on.
+    pub edit_buttons: Vec<PushSimplerButton>,
+}
+
+/// One of Simpler's Edit Mode buttons.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushSimplerButton {
+    /// The upper button, from 1.
+    pub button: usize,
+    /// What it does: `loop`, `trigger_gate`, `pad_slicing`, `split_slice`,
+    /// `warp_as`, `half`, `double`, `crop` or `reverse`.
+    pub name: String,
+    /// Its text.
+    pub text: String,
+    /// Whether the setting it stands for is on.
+    pub on: bool,
+}
+
+/// What `push.convert` makes a new MIDI track or drum rack of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PushConvertTo {
+    /// A new MIDI track with a Simpler holding the audio clip's sample.
+    Simpler,
+    /// A new MIDI track with a drum rack holding the sample in a Simpler on
+    /// its first pad.
+    DrumRack,
+}
+
+/// Arguments of `push.convert`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PushConvertArgs {
+    /// For an audio clip: what to make of it. Left out, a Simpler.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<PushConvertTo>,
+}
+
+/// What `push.convert` made.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushConverted {
+    /// What was converted: `simpler` (a Classic or One-Shot Simpler made a
+    /// new track with a drum rack), `slices` (a slicing Simpler became a drum
+    /// rack), `pad` (a drum rack's pad made a new track) or `clip` (an audio
+    /// clip made a new track).
+    pub from: String,
+    /// The new track, unless the Simpler became a drum rack in its place.
+    pub track: Option<TrackId>,
+    /// The device made: the drum rack, or the Simpler the track holds.
+    pub device: DeviceId,
+}
+
+/// One control on an encoder in Clip Mode (push-2-tracks R58).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushClipControl {
+    /// The encoder, from 1.
+    pub encoder: u8,
+    /// The control's name.
+    pub name: String,
+    /// Its value as the display shows it.
+    pub value: String,
+}
+
+/// The sequenceable area the pads edit in a step sequencing layout
+/// (push-2-tracks R51).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushClipArea {
+    /// How the display fits the clip: `folded`, `sequencer`,
+    /// `sequencer_notes` or `pad`.
+    pub fit: String,
+    /// Where the page of steps starts, in ticks.
+    pub from: bl_core::time::Ticks,
+    /// Where it ends.
+    pub to: bl_core::time::Ticks,
+    /// The lowest pitch the pads edit.
+    pub low: u8,
+    /// The highest.
+    pub high: u8,
+}
+
+/// What Clip Mode shows (push-2-tracks R58).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PushClipMode {
+    /// The clip shown.
+    pub clip: Option<bl_model::ClipId>,
+    /// What the mode shows: `midi`, `audio`, `empty_midi`, `empty_audio` or
+    /// `nothing`.
+    pub shows: String,
+    /// The clip's name.
+    pub name: String,
+    /// Whether the clip's Loop is on.
+    pub looping: Option<bool>,
+    /// The controls on the encoders, left to right.
+    pub controls: Vec<PushClipControl>,
+    /// The zoom: 1 shows the whole clip.
+    pub zoom: f64,
+    /// The span of beats of the clip's contents the display shows.
+    pub view: [f64; 2],
+    /// Whether the display is folded to the pitches that hold notes.
+    pub folded: bool,
+    /// The sequenceable area the pads edit.
+    pub area: Option<PushClipArea>,
+    /// The steps held, whose notes the encoders set.
+    pub held_steps: Vec<PushHeldStep>,
+    /// The drum pad whose every note the encoders set while Select holds it,
+    /// as a MIDI note.
+    pub select_pad: Option<u8>,
+}
+
 /// What a pad or a Scene/Grid button shows in Session Mode (push-2-tracks
 /// R73).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -195,8 +430,8 @@ pub struct PushSessionLook {
     pub shows: String,
     /// The clip in the pad's slot.
     pub clip: Option<bl_model::ClipId>,
-    /// The swatch of the clip's colour, or of the scene's.
-    pub colour: Option<u8>,
+    /// The clip's colour, or the scene's: a swatch or `#RRGGBB`.
+    pub colour: Option<bl_model::Colour>,
 }
 
 /// What Session Mode shows (push-2-tracks R73).
@@ -316,10 +551,185 @@ pub struct PushInfo {
     pub display: PushDisplay,
     /// What Browse Mode shows, while it is the display mode.
     pub browse: Option<PushBrowse>,
+    /// What Device Mode shows, while it is the display mode.
+    pub device: Option<PushDeviceMode>,
+    /// What Clip Mode shows, while it is the display mode.
+    pub clip: Option<PushClipMode>,
     /// What Session Mode shows, while it is the pad mode.
     pub session: Option<PushSession>,
     /// What Mix Mode shows, while it is the display mode.
     pub mix_mode: Option<PushMix>,
+    /// What Note Mode shows, while it is the pad mode.
+    pub note: Option<PushNote>,
+    /// Recording, Fixed Length and the swing amount (the notes on Push 2
+    /// spec, R48 to R63).
+    pub recording: PushRecording,
+}
+
+/// What `push.state` reports of recording on Push 2.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushRecording {
+    /// What Record shows: `off`, `session` (a Session recording or an
+    /// overdub) or `arrangement`.
+    pub record: String,
+    /// Fixed Length's settings.
+    pub fixed_length: PushFixedLength,
+    /// The swing amount, 0 to 100 %.
+    pub swing: u8,
+    /// Whether Automation Arm is on (Automate).
+    pub automation_arm: bool,
+    /// What the Quantize menu shows while it is open.
+    pub quantize_menu: Option<PushQuantizeMenu>,
+}
+
+/// Fixed Length's settings (the notes on Push 2 spec, R50).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushFixedLength {
+    /// Whether it is on.
+    pub on: bool,
+    /// The length of the clip a recording makes.
+    pub length: PushFixedLengthValue,
+    /// Whether Phrase Sync is on.
+    pub phrase_sync: bool,
+}
+
+/// The lengths Fixed Length offers (the notes on Push 2 spec, R50).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub enum PushFixedLengthValue {
+    /// 1 beat.
+    #[serde(rename = "1 beat")]
+    Beat1,
+    /// 2 beats.
+    #[serde(rename = "2 beats")]
+    Beats2,
+    /// 1 bar.
+    #[serde(rename = "1 bar")]
+    Bar1,
+    /// 2 bars.
+    #[serde(rename = "2 bars")]
+    Bars2,
+    /// 4 bars.
+    #[serde(rename = "4 bars")]
+    Bars4,
+    /// 8 bars.
+    #[serde(rename = "8 bars")]
+    Bars8,
+    /// 16 bars.
+    #[serde(rename = "16 bars")]
+    Bars16,
+    /// 32 bars.
+    #[serde(rename = "32 bars")]
+    Bars32,
+}
+
+impl PushFixedLengthValue {
+    /// Every length, shortest first.
+    pub const ALL: [Self; 8] = [
+        Self::Beat1,
+        Self::Beats2,
+        Self::Bar1,
+        Self::Bars2,
+        Self::Bars4,
+        Self::Bars8,
+        Self::Bars16,
+        Self::Bars32,
+    ];
+}
+
+/// The Quantize menu (the notes on Push 2 spec, R58).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushQuantizeMenu {
+    /// Swing Amount, 0 to 100 %.
+    pub swing: u8,
+    /// Quantize To, as the grid's note value, such as `1/16`.
+    pub quantize_to: String,
+    /// Quantize Amount, 0 to 100 %.
+    pub amount: u8,
+    /// Record Quantize's value, as `transport.set_record_quantization`
+    /// names it.
+    pub record_quantize: String,
+    /// Whether the menu stays after Quantize is released.
+    pub stays: bool,
+}
+
+/// A step held down in Note Mode.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushHeldStep {
+    /// The clip the step belongs to, if the slot holds one.
+    pub clip: Option<bl_model::ClipId>,
+    /// The step's drum pad, as a MIDI note.
+    pub pad: u8,
+    /// Where the step starts in the clip's contents.
+    pub start: bl_core::time::Ticks,
+    /// How long the step is.
+    pub length: bl_core::time::Ticks,
+}
+
+/// What a melodic track's layouts show (the notes on Push 2 spec, R32 to
+/// R44).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushMelody {
+    /// In Key (true) or Chromatic.
+    pub in_key: bool,
+    /// Whether the bottom-left pad stays on C.
+    pub fixed: bool,
+    /// The interval between rows: `4ths`, `3rds` or `Sequent`.
+    pub layout: String,
+    /// `Vertical` or `Horizontal`.
+    pub direction: String,
+    /// 64 Notes' shift in octaves from where the pads start.
+    pub octave: i32,
+    /// The lowest note the pads, rows or 32 notes hold, as a MIDI note.
+    pub low: u8,
+    /// The highest.
+    pub high: u8,
+    /// The range as the display notifies it, such as `C1 to C3`.
+    pub range: String,
+    /// The notes selected in the Melodic Sequencer + 32 Notes.
+    pub selected_notes: Vec<u8>,
+    /// Whether the touch strip is the modulation wheel rather than pitch
+    /// bend, in 64 Notes.
+    pub strip_modulation: bool,
+}
+
+/// What Note Mode shows (the notes on Push 2 spec, R1 to R47).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushNote {
+    /// The track the pads play: the first selected one.
+    pub track: Option<bl_model::TrackId>,
+    /// The layout: `Loop Selector`, `16 Velocities` or `64 Pads` on a drum
+    /// track, `64 Notes`, `Melodic Sequencer` or `Melodic Sequencer + 32
+    /// Notes` on another MIDI track, `None` on any other track.
+    pub layout: String,
+    /// What holding Layout, or Shift and Layout, shows in the lower-right
+    /// pads, if anything: `16 Velocities` or `Loop Length Pads`.
+    pub overlay: Option<String>,
+    /// Whether that stays in view after Layout is released.
+    pub overlay_locked: bool,
+    /// The first note of the drum rack's pad view, which the pads show.
+    pub bank: Option<u8>,
+    /// The drum pad the steps edit, as a MIDI note.
+    pub selected_pad: Option<u8>,
+    /// The step size, such as `1/16` or `1/8T`.
+    pub step_size: String,
+    /// The clip the steps edit, if the slot holds one.
+    pub edited_clip: Option<bl_model::ClipId>,
+    /// The scene whose slot holds it.
+    pub edited_scene: Option<bl_model::SceneId>,
+    /// The first of the two pages the step area shows, counting from 1.
+    pub page: u8,
+    /// Whether the step area follows the page that plays.
+    pub following: bool,
+    /// The velocity new steps take, once a velocity pad chose one.
+    pub velocity: Option<u8>,
+    /// The steps held down now.
+    pub held_steps: Vec<PushHeldStep>,
+    /// Whether Accent is on, tapped or held (the notes on Push 2 spec, R54).
+    pub accent: bool,
+    /// Whether Repeat is on for the track, tapped or held (R55).
+    pub repeat: bool,
+    /// What a melodic layout shows, on a melodic track.
+    pub melody: Option<PushMelody>,
 }
 
 /// What `push.state` returns.
@@ -384,6 +794,43 @@ pub struct PushSetSetupArgs {
     pub workflow: Option<PushWorkflow>,
 }
 
+/// Arguments of `push.set_fixed_length`. Fields left out stay.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PushSetFixedLengthArgs {
+    /// Whether Fixed Length is on.
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    /// The length of the clip a recording makes.
+    #[serde(default)]
+    pub length: Option<PushFixedLengthValue>,
+    /// Whether Phrase Sync is on.
+    #[serde(default)]
+    pub phrase_sync: Option<bool>,
+}
+
+/// Arguments of `push.set_swing`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PushSetSwingArgs {
+    /// The swing amount, 0 to 100 %.
+    #[schemars(range(min = 0, max = 100))]
+    pub amount: u8,
+}
+
+/// Arguments of `push.new` and `push.duplicate`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PushSessionArgs {
+    /// The Workflow to act as. Left out, the Setup menu's.
+    #[serde(default)]
+    pub workflow: Option<PushWorkflow>,
+    /// For `push.duplicate`: capture a scene, as Shift with Duplicate does,
+    /// whatever the Workflow.
+    #[serde(default)]
+    pub scene: bool,
+}
+
 /// Arguments of `push.display_frame`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -422,12 +869,15 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  strip's configuration and LEDs; the Setup menu's values; and the display's \
                  content as text, by band and column: labels, parameter names and values, \
                  dots, notifications; and, in Browse Mode, what Load does, its columns with their \
-                 entries and selection and the column in use; in Mix Mode, Track Mix's \
-                 view, what Global Mix sets, the sends' shift, the eight tracks or chains shown \
-                 with what each encoder sets and its value, and the groups and racks that are \
-                 unfolded; and, in Session Mode, the ring, what each pad and Scene/Grid button \
-                 shows, whether Session Overview is shown or locked and the Stop Clip lock. \
-                 Changes nothing.",
+                 entries and selection and the column in use; in Device Mode, the devices on \
+                 the upper buttons with their depth and which is selected, whether Edit Mode is \
+                 on, the bank and its page of banks, the parameters on the encoders, the chains \
+                 shown while a rack's button is held, and whether Mute is locked; in Mix Mode, \
+                 Track Mix's view, what Global Mix sets, the sends' shift, the eight tracks or \
+                 chains shown with what each encoder sets and its value, and the groups and \
+                 racks that are unfolded; and, in Session Mode, the ring, what each pad and \
+                 Scene/Grid button shows, whether Session Overview is shown or locked and the \
+                 Stop Clip lock. Changes nothing.",
             )
             .permission(Permission::Read)
             .context(Global)
@@ -461,6 +911,84 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .context(Global)
             .args::<PushSetSetupArgs>()
             .result::<PushSetup>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SET_FIXED_LENGTH, "Set Push 2 Fixed Length")
+            .description(
+                "Sets Fixed Length on Push 2: whether it is on, the length of the clip a Session \
+                 recording makes (1 beat, 2 beats, 1 bar, 2 bars, 4 bars, 8 bars, 16 bars or \
+                 32 bars) and Phrase Sync. They are preferences, kept between launches and the \
+                 same for every set. With Fixed Length on, `session.record` makes an empty clip \
+                 of the length and ends by itself at its end. Read back by `push.state` \
+                 (`recording.fixed_length`).",
+            )
+            .permission(Permission::Edit)
+            .context(Global)
+            .args::<PushSetFixedLengthArgs>()
+            .result::<PushFixedLength>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SET_SWING, "Set Push 2 Swing Amount")
+            .description(
+                "Sets the swing amount, 0 to 100 %: the share of half a step by which Repeat and \
+                 Quantize delay every second note. A preference, the same as Push 2's swing \
+                 encoder and its Quantize menu set. Read back by `push.state` \
+                 (`recording.swing`).",
+            )
+            .permission(Permission::Edit)
+            .context(Global)
+            .args::<PushSetSwingArgs>()
+            .result::<u8>(),
+    )?;
+    registry.register(
+        CommandSpec::new(NEW, "Push 2 New")
+            .description(
+                "Push 2's New button: stops the selected track's clip and selects an empty slot \
+                 on it to record into. With Workflow Scene it inserts a scene after the selected \
+                 one holding copies of the clips playing on the other tracks, which carry on \
+                 from it, and selects the track's empty slot there; with Workflow Clip it \
+                 selects the next empty slot below on the track, inserting a scene if there is \
+                 none. One undo step.",
+            )
+            .permission(Permission::Edit)
+            .context(Global)
+            .args::<PushSessionArgs>()
+            .result::<()>(),
+    )?;
+    registry.register(
+        CommandSpec::new(DUPLICATE, "Push 2 Duplicate")
+            .description(
+                "Push 2's Duplicate button pressed alone. With Workflow Scene (or `scene`) it \
+                 runs Capture and Insert Scene, so the new scene plays without a break. With \
+                 Workflow Clip it copies the selected clip into the slot below, inserting a \
+                 scene if that slot holds a clip, and launches the copy as a Legato launch, \
+                 leaving the other tracks playing. One undo step.",
+            )
+            .permission(Permission::Edit)
+            .context(Global)
+            .args::<PushSessionArgs>()
+            .result::<()>(),
+    )?;
+    registry.register(
+        CommandSpec::new(CONVERT, "Push 2 Convert")
+            .description(
+                "What Push 2's Convert button makes of what is selected, as one undo step: \
+                 with a Simpler in Classic or One-Shot mode, a new MIDI track after the \
+                 selected one with a drum rack holding a copy of the Simpler on the pad for \
+                 note 36 and copies of the track's other devices in their places; with a \
+                 Simpler in Slice mode, the Simpler replaced by a drum rack of its slices (the \
+                 same as `device.slice_to_drum_rack`); with a drum rack pad selected, a new \
+                 MIDI track holding copies of the pad's devices; with an audio clip selected, \
+                 a new MIDI track with a Simpler holding its sample (`to` `simpler`, the \
+                 default) or with a drum rack holding it in a Simpler on its first pad \
+                 (`drum_rack`), either way with the clip's warp settings and copies of the \
+                 track's devices. Refused when none of these is selected. Read back by \
+                 `song.query` of `tracks`.",
+            )
+            .permission(Permission::Edit)
+            .context(Global)
+            .args::<PushConvertArgs>()
+            .result::<PushConverted>(),
     )?;
     registry.register(
         CommandSpec::new(DISPLAY_FRAME, "Push 2 Display Frame")

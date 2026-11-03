@@ -62,6 +62,10 @@ impl AnalysedMedia {
 }
 
 impl MediaLibrary for AnalysedMedia {
+    fn file(&self, media: ContentHash) -> Option<std::path::PathBuf> {
+        self.inner.file(media)
+    }
+
     fn open(&self, media: ContentHash, rate: SampleRate, start: u64) -> Option<OpenedSource> {
         self.inner.open(media, rate, start)
     }

@@ -346,12 +346,13 @@ fn a_midi_clips_menu_lists_lives_items_and_runs_the_working_ones() {
     );
     assert!(!item(&output, "Export MIDI Clip...").disabled);
     assert!(!item(&output, "Deactivate Clip").disabled);
-    // The palette is one grid of 70 swatches.
+    // The palette is one grid of 70 swatches, the custom row's 14 places and
+    // Custom Color….
     let grid = Harness::nodes(&output)
         .into_iter()
         .find(|n| n.role == Role::Grid && n.label == "Colour palette")
         .expect("the palette");
-    assert_eq!(grid.children.len(), 70);
+    assert_eq!(grid.children.len(), 70 + 14 + 1);
 
     // Deactivate Clip runs session.deactivate on the selection.
     choose(&mut h, "Deactivate Clip");
@@ -401,12 +402,28 @@ fn an_audio_clips_menu_adds_the_audio_rows_after_crop_clip() {
         assert!(has(&output, row), "{row}");
     }
     assert!(!item(&output, "Slice to New MIDI Track").disabled);
+    // Spec: stem-separation R22. Built: enabled wherever stem separation is.
     let stems = item(&output, "Separate Stems to New Audio Tracks");
-    assert!(stems.disabled);
-    assert!(
-        stems.description.contains("Phase 9"),
-        "{}",
-        stems.description
+    assert_eq!(stems.disabled, bl_shell::stems::packages().is_empty());
+}
+
+// Spec: stem-separation R22, R23. Separate Stems to New Audio Tracks in a
+// Session audio clip's menu opens the dialog on that clip.
+#[test]
+fn separate_stems_in_a_session_clips_menu_opens_the_dialog_on_the_clip() {
+    if bl_shell::stems::packages().is_empty() {
+        return;
+    }
+    let mut h = harness();
+    let g = Grid::new(&h);
+    let track = track_of(&h, TrackKind::Audio);
+    let clip = audio_clip(&mut h, track, g.scenes[0]);
+    right_click(&mut h, g.slot(track, 0));
+    choose(&mut h, "Separate Stems to New Audio Tracks");
+    let dialog = h.shell.stems_dialog().expect("the dialog is open");
+    assert_eq!(
+        dialog.source,
+        bl_shell::stems_commands::StemSource::Clip { clip }
     );
 }
 
@@ -449,8 +466,14 @@ fn an_item_acts_on_every_selected_clip_and_a_click_outside_the_selection_selects
     h.take_events();
     click_node(&mut h, &swatch(3, 4));
     let doc = h.shell.editor().document();
-    assert_eq!(doc.clip(a).unwrap().colour, Some(2 * 14 + 3));
-    assert_eq!(doc.clip(b).unwrap().colour, Some(2 * 14 + 3));
+    assert_eq!(
+        doc.clip(a).unwrap().colour,
+        Some(bl_model::Colour::Swatch(2 * 14 + 3))
+    );
+    assert_eq!(
+        doc.clip(b).unwrap().colour,
+        Some(bl_model::Colour::Swatch(2 * 14 + 3))
+    );
     assert!(
         !egui::Popup::is_any_open(&h.ctx),
         "choosing closes the menu"
@@ -571,8 +594,14 @@ fn the_scene_palette_colours_the_selected_scenes_and_no_color_clears_them() {
         .unwrap();
     click_node(&mut h, &swatch);
     let doc = h.shell.editor().document();
-    assert_eq!(doc.scene(g.scenes[0]).unwrap().colour, Some(14 + 4));
-    assert_eq!(doc.scene(g.scenes[2]).unwrap().colour, Some(14 + 4));
+    assert_eq!(
+        doc.scene(g.scenes[0]).unwrap().colour,
+        Some(bl_model::Colour::Swatch(14 + 4))
+    );
+    assert_eq!(
+        doc.scene(g.scenes[2]).unwrap().colour,
+        Some(bl_model::Colour::Swatch(14 + 4))
+    );
     assert_eq!(doc.scene(g.scenes[1]).unwrap().colour, None);
 
     choose_from(&mut h, g.scene_row(0).name.center(), "No Color");
@@ -694,7 +723,10 @@ fn the_scene_views_title_bar_opens_the_scene_menu() {
     let mut h = harness();
     let g = Grid::new(&h);
     h.shell
-        .run("session.select", json!({ "scene": g.scenes[0] }))
+        .run(
+            "session.select",
+            json!({ "scene": g.scenes[0], "scene_view": true }),
+        )
         .unwrap();
     h.shell
         .run(
@@ -755,8 +787,8 @@ fn the_keys_open_the_selected_clips_menu_and_the_selected_scenes() {
 }
 
 // Spec: session-context-menus R4, R9, R13, R14. The Clip View's title bar
-// opens its menu: Rename, Edit Info Text, the palette, Fold and the three
-// Arrange Clip View Panels items, the ones that wait naming their package.
+// opens its menu: Rename, the palette, Arrange Clip View Panels
+// Automatically and Fold.
 #[test]
 fn the_clip_views_title_bar_opens_its_menu_and_rename_types_in_it() {
     let mut h = harness();
@@ -779,23 +811,20 @@ fn the_clip_views_title_bar_opens_its_menu_and_rename_types_in_it() {
         .expect("the Clip View shows");
     let title = pos2(detail.left() + 60.0, detail.top() + 7.0);
     let output = right_click(&mut h, title);
-    for row in [
-        "Rename",
-        "Edit Info Text",
-        "Fold",
-        "Arrange Clip View Panels Automatically",
-        "Arrange Clip View Panels Horizontally",
-        "Arrange Clip View Panels Vertically",
-    ] {
+    // C-CLIPTITLE: Rename, the palette, the automatic arrangement ticked and
+    // Fold; the other two arrangements are in the View menu only.
+    for row in ["Rename", "Fold", "Arrange Clip View Panels Automatically"] {
         assert!(has(&output, row), "{row}");
     }
-    // Spec: detail-views R20, R23. The panels' items are live since WP-6.72.
     for row in [
-        "Fold",
-        "Arrange Clip View Panels Automatically",
+        "Edit Info Text",
         "Arrange Clip View Panels Horizontally",
         "Arrange Clip View Panels Vertically",
     ] {
+        assert!(!has(&output, row), "{row} isn't in Live's menu");
+    }
+    // Spec: detail-views R20, R23. The panels' items are live since WP-6.72.
+    for row in ["Fold", "Arrange Clip View Panels Automatically"] {
         assert!(!item(&output, row).disabled, "{row}");
     }
     assert!(
@@ -813,7 +842,7 @@ fn the_clip_views_title_bar_opens_its_menu_and_rename_types_in_it() {
     click_node(&mut h, &swatch);
     assert_eq!(
         h.shell.editor().document().clip(clip).unwrap().colour,
-        Some(2)
+        Some(bl_model::Colour::Swatch(2))
     );
 
     // Rename types the name in the title bar; Return renames the clip.

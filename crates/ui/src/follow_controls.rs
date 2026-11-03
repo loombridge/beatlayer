@@ -14,7 +14,7 @@ use bl_model::{
     SceneId,
 };
 use bl_shell::{Area, Invocation};
-use egui::{Align2, Id, Pos2, Rect, Ui, Vec2, pos2, vec2};
+use egui::{Align2, Id, Pos2, Rect, Stroke, Ui, Vec2, pos2, vec2};
 use serde_json::{Value, json};
 
 use crate::main_window::UiEvent;
@@ -37,15 +37,22 @@ struct Metrics {
     jump_row: bool,
 }
 
-/// The Scene View's.
+/// The Scene View's, whose controls fill a column 184 points wide: the
+/// Follow Action switch beside its heading, actions A and B side by side
+/// with their chances and Jump targets under them, then Longest and its
+/// length (L-SES-011).
 const WIDE: Metrics = Metrics {
-    chooser: vec2(120.0, 17.0),
+    chooser: vec2(90.0, 17.0),
     small: vec2(54.0, 17.0),
-    jump: vec2(34.0, 17.0),
+    jump: vec2(54.0, 17.0),
     time: vec2(70.0, 17.0),
-    controls_at: 92.0,
+    controls_at: 0.0,
     jump_row: false,
 };
+/// The Scene View's column: where its second column of controls and its
+/// Follow Action switch start.
+const SCENE_RIGHT: f32 = 94.0;
+const SCENE_SWITCH: f32 = 130.0;
 
 /// The Clip View's left group, which is 166 points wide (L-CLIP-004).
 const NARROW: Metrics = Metrics {
@@ -94,10 +101,8 @@ pub fn show(
     events: &mut Vec<UiEvent>,
 ) -> f32 {
     let c = &theme.colors;
-    let m = match owner {
-        Owner::Clip(..) => NARROW,
-        Owner::Scene(_) => WIDE,
-    };
+    let scene = matches!(owner, Owner::Scene(_));
+    let m = if scene { WIDE } else { NARROW };
     let painter = ui.painter().clone();
     let mut y = at.y;
     let mut row = |label: &str| {
@@ -129,8 +134,13 @@ pub fn show(
         );
     };
 
-    // The Follow Action switch.
-    let start = row("");
+    // The Follow Action switch, at the right of its heading on a scene.
+    let start = row(if scene { "Follow Action" } else { "" });
+    let start = if scene {
+        start + vec2(SCENE_SWITCH, 0.0)
+    } else {
+        start
+    };
     let salt = name("follow-enabled");
     focus(ui, "switch", &salt);
     if let Some(on) = widgets::switch(
@@ -153,6 +163,12 @@ pub fn show(
             leds: NO_LEDS,
         })
         .collect();
+    // A scene's actions sit side by side, their chances on the row under
+    // them and their Jump targets, if either has one, under that.
+    let jumping = [follow.action_a, follow.action_b].contains(&FollowAction::Jump);
+    let pair = scene.then(|| row(""));
+    let chances = scene.then(|| row(""));
+    let jumps = (scene && jumping).then(|| row(""));
     for (side, action, jump, chance, field, jump_field) in [
         (
             "A",
@@ -171,7 +187,11 @@ pub fn show(
             "jump_b",
         ),
     ] {
-        let start = row(&format!("Action {side}"));
+        let across = if side == "A" { 0.0 } else { SCENE_RIGHT };
+        let start = match pair {
+            Some(pair) => pair + vec2(across, 0.0),
+            None => row(&format!("Action {side}")),
+        };
         let salt = name(&format!("follow-action-{side}"));
         focus(ui, "chooser", &salt);
         if let Some(chosen) = widgets::chooser(
@@ -191,10 +211,10 @@ pub fn show(
             let salt = name(&format!("follow-jump-{side}"));
             focus(ui, "number-box", &salt);
             // Beside the chooser, or on a row of its own under it.
-            let at = if m.jump_row {
-                row(&format!("Jump {side}"))
-            } else {
-                pos2(next, start.y)
+            let at = match jumps {
+                Some(jumps) => pos2(start.x, jumps.y),
+                None if m.jump_row => row(&format!("Jump {side}")),
+                None => pos2(next, start.y),
             };
             if let Some(target) = widgets::number_box(
                 ui,
@@ -213,7 +233,7 @@ pub fn show(
             ) {
                 events.push(change(jump_field, json!(target.round() as u32)));
             }
-            if !m.jump_row {
+            if !m.jump_row && !scene {
                 next += m.jump.x + 6.0;
             }
         }
@@ -224,7 +244,17 @@ pub fn show(
             theme,
             &salt,
             &name(&format!("Chance {side}")),
-            Rect::from_min_size(pos2(next, start.y), m.small),
+            Rect::from_min_size(
+                chances.map_or(pos2(next, start.y), |chances| {
+                    let right = if side == "A" {
+                        0.0
+                    } else {
+                        m.chooser.x - m.small.x
+                    };
+                    pos2(start.x + right, chances.y)
+                }),
+                m.small,
+            ),
             f64::from(chance),
             (0.0, 100.0),
             &|value, steps| value + f64::from(steps),
@@ -240,6 +270,29 @@ pub fn show(
         }
     }
 
+    // The chances' slider: the triangle sits further right the less A has.
+    if let Some(chances) = chances {
+        let (from, to) = (
+            chances.x + m.small.x + 4.0,
+            chances.x + SCENE_RIGHT + m.chooser.x - m.small.x - 4.0,
+        );
+        let mid = chances.y + m.small.y / 2.0;
+        painter.line_segment(
+            [pos2(from, mid), pos2(to, mid)],
+            Stroke::new(1.0, c.text_dim.0),
+        );
+        let x = from + (to - from) * (100.0 - f32::from(follow.chance_a)) / 100.0;
+        painter.add(egui::Shape::convex_polygon(
+            vec![
+                pos2(x, mid),
+                pos2(x - 4.0, mid + 6.0),
+                pos2(x + 4.0, mid + 6.0),
+            ],
+            c.text_dim.0,
+            Stroke::NONE,
+        ));
+    }
+
     // The follow time: Linked (Longest on a scene), then the multiplier, or
     // Clip End, or the Unlinked time.
     let (switch_name, switch_label) = match owner {
@@ -247,6 +300,12 @@ pub fn show(
         Owner::Clip(..) => ("Follow Time Linked", "Linked"),
     };
     let start = row(switch_label);
+    // A scene's label is a short one, so the controls start after it.
+    let start = if scene {
+        start + vec2(48.0, 0.0)
+    } else {
+        start
+    };
     let salt = name("follow-linked");
     focus(ui, "switch", &salt);
     if let Some(linked) = widgets::switch(

@@ -305,7 +305,10 @@ fn chains_are_added_moved_copied_renamed_and_coloured_in_one_step_each() {
         assert_eq!(steps(&shell), before + 1, "{command} {args}");
     }
     let chain = shell.editor().document().chain(named).unwrap();
-    assert_eq!((chain.name.as_str(), chain.colour), ("Delay", Some(5)));
+    assert_eq!(
+        (chain.name.as_str(), chain.colour),
+        ("Delay", Some(bl_model::Colour::Swatch(5)))
+    );
     assert_eq!(chain.info, "echoes");
 
     // Copy and paste, duplicate, and cut: new IDs, the devices copied.
@@ -376,7 +379,7 @@ fn group_wraps_the_selection_in_the_kind_that_holds_it() {
     )
     .unwrap();
     assert_eq!(steps(&shell), before + 1);
-    assert_eq!(last_step(&shell), "Group");
+    assert_eq!(last_step(&shell), "Group Devices");
     let doc = shell.editor().document();
     let rack = doc.device(grouped.rack).unwrap();
     assert_eq!(rack.rack_kind(), Some(RackKind::AudioEffect));
@@ -609,7 +612,7 @@ fn a_chain_and_its_devices_survive_save_and_load() {
         "the rack, its chains and everything in them"
     );
     let chain: &Chain = doc.chain(chains[1]).unwrap();
-    assert_eq!(chain.colour, Some(9));
+    assert_eq!(chain.colour, Some(bl_model::Colour::Swatch(9)));
     assert_eq!(chain.mixer.volume, 0.5);
     assert!(doc.chain(chains[0]).unwrap().mixer.solo);
     assert_eq!(chain.devices[0].id, device);

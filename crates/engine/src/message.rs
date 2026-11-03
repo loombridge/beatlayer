@@ -5,10 +5,12 @@ use bl_model::ParamId;
 
 use crate::follower::Follower;
 use crate::gc::{Owned, Program};
+use crate::link_audio::LinkAudio;
 use crate::node::{NodeData, NodeKey, ParamValue};
 use crate::recording::RecordingPlan;
 use crate::render::RenderPlan;
 use crate::session::SessionCommand;
+use crate::tempo_follower::Leader;
 
 /// When a parameter change or a transport command takes effect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -75,6 +77,17 @@ pub enum TransportCommand {
     Play,
     /// Plays from the insert marker, whatever the song's start time is.
     PlayFromInsertMarker,
+    /// Plays from `start`, leaving the insert marker where it is (the
+    /// transport spec, R35, R36). With an `end` after `start`, the song
+    /// stops on that frame, the Arrangement loop doesn't apply until it
+    /// does, and a stop or a new start ends the run early. Without one it
+    /// plays on as Play does, from the song start time if the set has one.
+    PlaySelection {
+        /// Where playback starts, in ticks.
+        start: Ticks,
+        /// Where it stops, if it stops.
+        end: Option<Ticks>,
+    },
     /// While playing, stops, keeping the song position for
     /// [`Continue`](Self::Continue). While stopped, returns the insert
     /// marker and the song position to 1.1.1 (tick 0), as a second press of
@@ -283,6 +296,12 @@ pub(crate) enum Message {
     /// The outside tempo the song follows from the next block on, or `None`
     /// for none (the transport spec, R24).
     Follower(Option<Owned<Box<dyn Follower>>>),
+    /// Tempo Follower, which listens to the device's input and leads the
+    /// song's tempo (the Tempo Follower spec, R6), or `None` for none.
+    Leader(Option<Owned<Box<dyn Leader>>>),
+    /// The Link Audio the engine reads peers' channels from and offers its
+    /// tracks through, or `None` for none (the Link Audio spec, R4 to R6).
+    LinkAudio(Option<Owned<Box<dyn LinkAudio>>>),
     /// Output `index` of the `count` output ports with Sync on and their
     /// options (midi-clock R3); a `count` of 0 clears the list.
     SyncOutput {

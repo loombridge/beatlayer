@@ -12,7 +12,7 @@ use egui::{Align2, Id, Key, Rect, Sense, Stroke, StrokeKind, Ui, UiBuilder, pos2
 use serde_json::json;
 
 use super::{BrowserUi, Glyph, bounds, command, glyph, invoke};
-use crate::layout::{BROWSER_ROW, BrowserLayout};
+use crate::layout::{BrowserLayout, list_row};
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
 
@@ -165,10 +165,10 @@ impl BrowserUi {
         let groups = state.groups.clone();
         let width = area.width();
         let lines = self.filter_lines(ui, theme, &groups, width).to_vec();
-        let content = lines.len() as f32 * BROWSER_ROW;
+        let content = lines.len() as f32 * list_row();
         self.filter_scroll = super::scrolled(ui, area, self.filter_scroll, content);
-        let first = (self.filter_scroll / BROWSER_ROW).floor() as usize;
-        let visible = ((area.height() / BROWSER_ROW).ceil() as usize + 1)
+        let first = (self.filter_scroll / list_row()).floor() as usize;
+        let visible = ((area.height() / list_row()).ceil() as usize + 1)
             .min(lines.len().saturating_sub(first));
 
         // The tag buttons in the order the arrow keys walk them.
@@ -186,8 +186,8 @@ impl BrowserUi {
         clip_ui.set_clip_rect(area);
         let mut noted: Vec<usize> = Vec::new();
         for (offset, line) in lines.iter().enumerate().skip(first).take(visible) {
-            let top = area.top() + offset as f32 * BROWSER_ROW - self.filter_scroll;
-            let row = Rect::from_min_size(pos2(area.left(), top), vec2(area.width(), BROWSER_ROW));
+            let top = area.top() + offset as f32 * list_row() - self.filter_scroll;
+            let row = Rect::from_min_size(pos2(area.left(), top), vec2(area.width(), list_row()));
             let group = &groups[line.group];
             let group_id = filter_group_id(&group.name);
             if !noted.contains(&line.group) {
@@ -402,9 +402,10 @@ impl BrowserUi {
         }
     }
 
-    /// The Results bar (L-BRW-008; spec: browser-tags R22): how many filter
-    /// tags are selected, Clear, which clears them and the search words,
-    /// and Add Label, which keeps what the browser shows as a saved label.
+    /// The Results bar (L-BRW-008; spec: browser-tags R22): a yellow bar
+    /// reading "Results", a box with how many filter tags are selected,
+    /// and at its right Clear, which clears them and the search words, and
+    /// Add Label, which keeps what the browser shows as a saved label.
     pub(super) fn results_bar(
         &mut self,
         ui: &mut Ui,
@@ -417,19 +418,33 @@ impl BrowserUi {
         let view = shell.browser_view();
         let count = view.filter_count();
         let painter = ui.painter_at(bar);
-        painter.rect_filled(bar, 0.0, theme.colors.ruler.0);
-        let text = match count {
-            0 => "No filters".to_owned(),
-            1 => "1 filter".to_owned(),
-            n => format!("{n} filters"),
-        };
-        painter.text(
+        let ink = theme.colors.accent_text.0;
+        painter.rect_filled(bar, 0.0, theme.colors.accent.0);
+        let label = painter.text(
             pos2(bar.left() + 6.0, bar.center().y),
             Align2::LEFT_CENTER,
-            &text,
+            "Results",
             theme.small_font(),
-            theme.colors.text_dim.0,
+            ink,
         );
+        // The count box: absent while only words are searched.
+        let text = match count {
+            0 => String::new(),
+            1 => "1 Filter".to_owned(),
+            n => format!("{n} Filters"),
+        };
+        if count > 0 {
+            let galley = painter.layout_no_wrap(text.clone(), theme.small_font(), ink);
+            let boxed = Rect::from_min_size(
+                pos2(
+                    label.right() + 6.0,
+                    bar.center().y - galley.size().y / 2.0 - 1.0,
+                ),
+                galley.size() + vec2(12.0, 2.0),
+            );
+            painter.rect_filled(boxed, theme.sizes.corner, ink.gamma_multiply(0.15));
+            painter.galley(boxed.min + vec2(6.0, 1.0), galley, ink);
+        }
         let _ = ui.interact(bar, results_bar_id(), Sense::hover());
         ui.ctx().accesskit_node_builder(results_bar_id(), |node| {
             node.set_role(Role::Group);
@@ -437,23 +452,44 @@ impl BrowserUi {
             node.set_value(text.clone());
             node.set_bounds(bounds(bar));
         });
-        // Add Label (a bookmark) and Clear (an X), at the bar's right.
-        let size = vec2(BROWSER_ROW, BROWSER_ROW);
-        let clear = Rect::from_min_size(
-            pos2(bar.right() - 4.0 - size.x, bar.center().y - size.y / 2.0),
-            size,
+        // Clear (a text button), then Add Label (≡+) at the bar's right edge.
+        let height = bar.height() - 4.0;
+        let clear_width = painter
+            .layout_no_wrap("Clear".to_owned(), theme.small_font(), ink)
+            .size()
+            .x
+            + 16.0;
+        let add = Rect::from_min_size(
+            pos2(bar.right() - 4.0 - 26.0, bar.center().y - height / 2.0),
+            vec2(26.0, height),
         );
-        let add = clear.translate(vec2(-size.x - 2.0, 0.0));
-        for (rect, id, name, kind) in [
-            (add, add_label_id(), "Add Label", Glyph::Bookmark),
-            (clear, clear_filters_id(), "Clear", Glyph::Cross),
+        let clear = Rect::from_min_size(
+            pos2(add.left() - 4.0 - clear_width, add.top()),
+            vec2(clear_width, height),
+        );
+        for (rect, id, name) in [
+            (clear, clear_filters_id(), "Clear"),
+            (add, add_label_id(), "Add Label"),
         ] {
             let response = ui.interact(rect, id, Sense::click());
             crate::focus::register(ui.ctx(), id, bl_shell::Area::Browser, None);
-            if response.hovered() {
-                painter.rect_filled(rect, theme.sizes.corner, theme.colors.control_hover.0);
+            let fill = if response.hovered() {
+                theme.colors.control_hover.0
+            } else {
+                theme.colors.control.0
+            };
+            painter.rect_filled(rect, rect.height() / 2.0, fill);
+            if id == add_label_id() {
+                glyph(&painter, rect, Glyph::AddLabel, theme.colors.text.0);
+            } else {
+                painter.text(
+                    rect.center(),
+                    Align2::CENTER_CENTER,
+                    name,
+                    theme.small_font(),
+                    theme.colors.text.0,
+                );
             }
-            glyph(&painter, rect, kind, theme.colors.text.0);
             if response.clicked() {
                 if id == add_label_id() {
                     invoke(events, ids::ADD_LABEL, json!({}));
@@ -469,10 +505,11 @@ impl BrowserUi {
         }
     }
 
-    /// The Filter View Menu (C-FILTER; spec: browser-tags R21): the groups
-    /// the chosen label can show, ticked while they show, Show All Filter
-    /// Groups, Reset Filter Groups to Default, Include Auto Tags (disabled
-    /// until automatic tagging), the Tag Editor and Show Quick Tags.
+    /// The Filter View Menu (C-FILTER; spec: browser-tags R21), in Live's
+    /// order: Open Tag Editor, Open Quick Tags and Enable Auto Tags, ticked
+    /// while they are on; Show All, Hide All and Reset Filter Groups to
+    /// Default; then the groups the chosen label can show, ticked while they
+    /// show.
     pub(super) fn filter_view_menu(
         &mut self,
         ui: &mut Ui,
@@ -482,8 +519,9 @@ impl BrowserUi {
         let view = shell.browser_view();
         let state = view.filter_view();
         let mut first = true;
-        let mut item = |ui: &mut Ui, text: String, enabled: bool| -> egui::Response {
-            let response = ui.add_enabled(enabled, egui::Button::new(text));
+        let mut item = |ui: &mut Ui, text: &str, ticked: bool, enabled: bool| -> egui::Response {
+            let mark = if ticked { "\u{2714} " } else { "" };
+            let response = ui.add_enabled(enabled, egui::Button::new(format!("{mark}{text}")));
             crate::menus::register_item(ui.ctx(), &response);
             if first && enabled {
                 crate::menus::take_focus_first(ui, &response);
@@ -491,9 +529,50 @@ impl BrowserUi {
             }
             response
         };
+        let tag_editor = view.tag_editor();
+        if item(ui, "Open Tag Editor", tag_editor, true).clicked() {
+            invoke(events, ids::SHOW_TAG_EDITOR, json!({ "show": !tag_editor }));
+            ui.close();
+        }
+        let quick = view.quick_tags_shown();
+        if item(ui, "Open Quick Tags", quick, true).clicked() {
+            invoke(events, ids::SHOW_QUICK_TAGS, json!({ "show": !quick }));
+            ui.close();
+        }
+        // Spec: browser-tags R55. Ticked while automatic tags show, filter
+        // and answer `#` search.
+        let include = state.include_auto_tags;
+        if item(ui, "Enable Auto Tags", include, true).clicked() {
+            invoke(
+                events,
+                ids::SET_INCLUDE_AUTO_TAGS,
+                json!({ "include": !include }),
+            );
+            ui.close();
+        }
+        crate::menus::separator(ui);
+        if item(ui, "Show All Filter Groups", false, true).clicked() {
+            invoke(events, ids::SET_FILTER_GROUPS, json!({ "show_all": true }));
+            ui.close();
+        }
+        if item(ui, "Hide All Filter Groups", false, true).clicked() {
+            invoke(events, ids::SET_FILTER_GROUPS, json!({ "hide_all": true }));
+            ui.close();
+        }
+        if item(
+            ui,
+            "Reset Filter Groups to Default",
+            false,
+            state.customized,
+        )
+        .clicked()
+        {
+            invoke(events, ids::SET_FILTER_GROUPS, json!({ "reset": true }));
+            ui.close();
+        }
+        crate::menus::separator(ui);
         for group in &state.menu {
-            let mark = if group.shown { "\u{2714} " } else { "" };
-            if item(ui, format!("{mark}{}", group.name), true).clicked() {
+            if item(ui, &group.name, group.shown, true).clicked() {
                 invoke(
                     events,
                     ids::SET_FILTER_GROUPS,
@@ -501,30 +580,6 @@ impl BrowserUi {
                 );
                 ui.close();
             }
-        }
-        ui.separator();
-        if item(ui, "Show All Filter Groups".to_owned(), true).clicked() {
-            invoke(events, ids::SET_FILTER_GROUPS, json!({ "show_all": true }));
-            ui.close();
-        }
-        if item(ui, "Reset Filter Groups to Default".to_owned(), true).clicked() {
-            invoke(events, ids::SET_FILTER_GROUPS, json!({ "reset": true }));
-            ui.close();
-        }
-        ui.separator();
-        // Include Auto Tags waits for automatic tagging (milestone M9).
-        let _ = item(ui, "Include Auto Tags".to_owned(), false);
-        let tag_editor = view.tag_editor();
-        let mark = if tag_editor { "\u{2714} " } else { "" };
-        if item(ui, format!("{mark}Tag Editor"), true).clicked() {
-            invoke(events, ids::SHOW_TAG_EDITOR, json!({ "show": !tag_editor }));
-            ui.close();
-        }
-        let quick = view.quick_tags_shown();
-        let mark = if quick { "\u{2714} " } else { "" };
-        if item(ui, format!("{mark}Show Quick Tags"), true).clicked() {
-            invoke(events, ids::SHOW_QUICK_TAGS, json!({ "show": !quick }));
-            ui.close();
         }
     }
 }

@@ -30,6 +30,10 @@ pub const CHAIN_PREVIEW: &str = "chain.preview";
 pub const PAD_DROP: &str = "pad.drop";
 /// `pad.swap`: drag a pad onto another.
 pub const PAD_SWAP: &str = "pad.swap";
+/// `pad.copy`: copy a pad's chains onto another pad.
+pub const PAD_COPY: &str = "pad.copy";
+/// `pad.set_push_colour`: the colour a pad shows on Push 2.
+pub const PAD_SET_PUSH_COLOUR: &str = "pad.set_push_colour";
 /// `pad.save_default`: Save as Default Pad.
 pub const PAD_SAVE_DEFAULT: &str = "pad.save_default";
 /// `pad.delete`: delete a pad's chains.
@@ -60,6 +64,8 @@ pub const IDS: &[&str] = &[
     CHAIN_PREVIEW,
     PAD_DROP,
     PAD_SWAP,
+    PAD_COPY,
+    PAD_SET_PUSH_COLOUR,
     PAD_SAVE_DEFAULT,
     PAD_DELETE,
     PAD_RENAME,
@@ -254,6 +260,34 @@ pub struct PadSwitchArgs {
     /// pad turning on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on: Option<bool>,
+}
+
+/// Arguments of `pad.copy`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PadCopyArgs {
+    /// The drum rack; the selected device if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rack: Option<DeviceId>,
+    /// The pad copied.
+    pub from: u8,
+    /// The pad that takes the copy, whose chains it replaces.
+    pub to: u8,
+}
+
+/// Arguments of `pad.set_push_colour`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PadPushColourArgs {
+    /// The drum rack; the selected device if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rack: Option<DeviceId>,
+    /// The pad's note, 0 to 127.
+    pub note: u8,
+    /// The swatch of the palette of 5 rows of 14 (0 to 69), or `null` to show
+    /// the track's colour again.
+    #[serde(default)]
+    pub colour: Option<u8>,
 }
 
 /// Arguments of `pad.preview`.
@@ -511,6 +545,29 @@ pub(crate) fn specs() -> Vec<CommandSpec> {
             .permission(Permission::Edit)
             .context(DeviceView)
             .args::<PadSwapArgs>()
+            .result::<DeviceViewState>(),
+        CommandSpec::new(PAD_COPY, "Copy Pad")
+            .description(
+                "Copies a pad onto another, as Duplicate with two pads does on Push 2: the \
+                 chains of `to` are deleted and each chain of `from` is copied there, \
+                 receiving `to`'s note, with its devices, settings, sends and Push colour. \
+                 No clip's notes change. One undo step. Undo restores the replaced chains, \
+                 but because it removes the person's work an agent asks first.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<PadCopyArgs>()
+            .result::<DeviceViewState>(),
+        CommandSpec::new(PAD_SET_PUSH_COLOUR, "Set Pad Colour on Push")
+            .description(
+                "Sets the swatch of the palette of 5 rows of 14 (0 to 69) that Push 2 shows \
+                 for a pad, in place of its track's colour, or clears it with `null`. It is \
+                 saved with the rack, in the set and its presets, and shown only on Push 2. \
+                 A pad with no chain has no colour to set. One undo step.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<PadPushColourArgs>()
             .result::<DeviceViewState>(),
         CommandSpec::new(PAD_SAVE_DEFAULT, "Save as Default Pad")
             .description(

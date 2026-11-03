@@ -73,6 +73,14 @@ pub(super) const FIXTURES: &[Fixture] = &[
         build: cv_modulators,
     },
     Fixture {
+        name: "analog-voices",
+        about: "A phrase of four notes through Analog (WP-8.14): a sub oscillator and a synced \
+                rectangle, noise, a resonant 24 dB low-pass whose cutoff \
+                follows its envelope into a formant filter with Drive, and an amplifier \
+                envelope that loops its attack, decay and release.",
+        build: analog_voices,
+    },
+    Fixture {
         name: "summed-tracks",
         about: "Four tracks summed into Main through their faders, at three volumes, one muted.",
         build: summed_tracks,
@@ -245,6 +253,28 @@ pub(super) const FIXTURES: &[Fixture] = &[
                 half a bar, each repeat quieter and lower than the last, the grid varied by \
                 the device's seeded source.",
         build: beat_repeat,
+    },
+    Fixture {
+        name: "echo",
+        about: "A drum loop of two bars through Echo in Ping Pong: a dotted eighth and a quarter \
+                note, the filters, a synced LFO and the envelope moving the times and the \
+                cutoffs, wobble and Repitch, a gate and ducking, and the reverb in the feedback \
+                loop, the wobble following the device's seed.",
+        build: echo,
+    },
+    Fixture {
+        name: "operator",
+        about: "A phrase through Operator in algorithm 4: a looped modulator whose envelope \
+                restarts on every beat and a pitch envelope that restarts on the song's \
+                sixteenths, Time and Time < Key stretching the envelopes, and velocity and key \
+                moving the levels and the pan.",
+        build: operator,
+    },
+    Fixture {
+        name: "resonators",
+        about: "A drum loop of two bars through Resonators in Mode B with four resonators on, \
+                a band-pass filter, Const, a brighter Color and a shorter Decay.",
+        build: resonators,
     },
     Fixture {
         name: "clip-tempo-change",
@@ -543,6 +573,18 @@ pub(super) const FIXTURES: &[Fixture] = &[
         name: "warp-re-pitch-240",
         about: "The first two beats of the drum loop warped at 120 BPM in Re-Pitch, in a 240 BPM song: it plays at 2 times its speed (warp-modes R34, R37).",
         build: warp_re_pitch_240,
+    },
+    Fixture {
+        name: "electric",
+        about: "A chord and a line played on Electric: the hammer, the tine and tone bar, the \
+                pickup at four times the rate, the damper and the release.",
+        build: electric,
+    },
+    Fixture {
+        name: "tension",
+        about: "A bowed line with vibrato, the body and a filter, and a plucked chord with its \
+                damper, on Tension: the exciters, the string, the pickup and the termination.",
+        build: tension,
     },
 ];
 
@@ -928,6 +970,327 @@ fn beat_repeat() -> Scene {
     song.finish(4.25)
 }
 
+/// Spec: electric R2 to R10, R13. A chord and a line on Electric, with the
+/// hammer's velocity moving its force and stiffness.
+fn electric() -> Scene {
+    use bl_devices::electric::{
+        DISTANCE, ELECTRIC, FORCE_VEL, RELEASE, STIFFNESS_VEL, SYMMETRY, TINE_COLOR,
+    };
+    let mut song = Song::new();
+    let track = song.track(TrackKind::Midi, "Keys", None);
+    let mut device = Device::new(
+        song.editor.new_id(),
+        "Electric",
+        DeviceKind::Native {
+            device_type: ELECTRIC.to_owned(),
+        },
+    );
+    for (param, value) in [
+        (FORCE_VEL, 60.0),
+        (STIFFNESS_VEL, 40.0),
+        (TINE_COLOR, 20.0),
+        (SYMMETRY, 35.0),
+        (DISTANCE, 30.0),
+        (RELEASE, 350.0),
+    ] {
+        device.params.insert(param, value);
+    }
+    song.apply(Command::InsertDevice {
+        track,
+        index: 0,
+        device,
+    });
+    let beat = Ticks::QUARTER.0;
+    let notes = [
+        (48, 0, 8, 100),
+        (55, 0, 8, 80),
+        (64, 0, 8, 60),
+        (72, 8, 2, 120),
+        (67, 10, 2, 40),
+        (60, 12, 4, 90),
+    ]
+    .iter()
+    .map(|&(key, start, length, velocity)| {
+        bl_model::Note::new(
+            key,
+            Ticks(start * beat / 2),
+            Ticks(length * beat / 2),
+            velocity,
+        )
+    })
+    .collect::<Vec<_>>();
+    let clip = song.editor.new_id();
+    song.apply(Command::CreateClip {
+        track,
+        clip: Clip::new(
+            clip,
+            Ticks::ZERO,
+            Ticks::QUARTER * 8,
+            ClipData::Midi(bl_model::MidiData::new(notes)),
+        ),
+    });
+    song.finish(4.5)
+}
+
+/// Spec: tension R1 to R13, R17. A bowed line and a plucked chord on Tension.
+fn tension() -> Scene {
+    use bl_devices::tension::{
+        BODY_ON, BODY_SIZE, BODY_TYPE, C, EXC_TYPE, FILTER_MODE, FILTER_ON, TENSION, VIB_ON,
+    };
+    let mut song = Song::new();
+    let beat = Ticks::QUARTER.0;
+    let mut play =
+        |name: &str, params: &[(bl_model::ParamId, f64)], notes: &[(u8, i64, i64, u8)]| {
+            let track = song.track(TrackKind::Midi, name, None);
+            let mut device = Device::new(
+                song.editor.new_id(),
+                "Tension",
+                DeviceKind::Native {
+                    device_type: TENSION.to_owned(),
+                },
+            );
+            for &(param, value) in params {
+                device.params.insert(param, value);
+            }
+            song.apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device,
+            });
+            let notes = notes
+                .iter()
+                .map(|&(key, start, length, velocity)| {
+                    bl_model::Note::new(
+                        key,
+                        Ticks(start * beat / 2),
+                        Ticks(length * beat / 2),
+                        velocity,
+                    )
+                })
+                .collect::<Vec<_>>();
+            let clip = song.editor.new_id();
+            song.apply(Command::CreateClip {
+                track,
+                clip: Clip::new(
+                    clip,
+                    Ticks::ZERO,
+                    Ticks::QUARTER * 8,
+                    ClipData::Midi(bl_model::MidiData::new(notes)),
+                ),
+            });
+        };
+    play(
+        "Bow",
+        &[
+            (EXC_TYPE, 0.0),
+            (VIB_ON, 1.0),
+            (BODY_ON, 1.0),
+            (BODY_TYPE, 3.0),
+            (BODY_SIZE, 3.0),
+            (FILTER_ON, 1.0),
+            (FILTER_MODE, 1.0),
+            (C::FilterFreq.id(), 2_500.0),
+            (C::VibDelay.id(), 200.0),
+        ],
+        &[(48, 0, 4, 90), (55, 4, 4, 70), (52, 8, 4, 100)],
+    );
+    play(
+        "Plucked",
+        &[(EXC_TYPE, 3.0), (BODY_ON, 1.0), (BODY_TYPE, 1.0)],
+        &[
+            (60, 0, 4, 100),
+            (64, 0, 4, 80),
+            (67, 0, 4, 80),
+            (72, 8, 3, 110),
+        ],
+    );
+    song.finish(3.5)
+}
+
+/// Spec: echo R19. A drum loop through Echo with every stage on.
+fn echo() -> Scene {
+    use bl_devices::echo::{self, ECHO, line_param};
+    let mut song = Song::new();
+    let bar = drum_bar();
+    let two_bars: Vec<f32> = bar.iter().chain(&bar).copied().collect();
+    let drums = song.file("drums.wav", 48_000, &[two_bars.clone(), two_bars]);
+    let track = song.track(TrackKind::Audio, "Drums", None);
+    let at = song.at("1.1.1");
+    song.audio_clip(track, at, Ticks::QUARTER * 8, AudioData::new(drums));
+    let mut device = Device::new(
+        song.editor.new_id(),
+        "Echo",
+        DeviceKind::Native {
+            device_type: ECHO.to_owned(),
+        },
+    );
+    for (param, value) in [
+        (echo::CHANNEL_MODE, 1.0),
+        (line_param(0, echo::SYNC_MODE), 2.0),
+        (line_param(0, echo::DOTTED), 3.0),
+        (line_param(1, echo::NOTES), 4.0),
+        (echo::FEEDBACK, 60.0),
+        (echo::FILTER, 1.0),
+        (echo::HP_FREQ, 250.0),
+        (echo::LP_FREQ, 5_000.0),
+        (echo::LP_RES, 40.0),
+        (echo::LFO_SYNC, 1.0),
+        (echo::LFO_RATE, 4.0),
+        (echo::MOD_DELAY, 40.0),
+        (echo::MOD_FILTER, 30.0),
+        (echo::ENV_MIX, 30.0),
+        (echo::GATE, 1.0),
+        (echo::GATE_THRESHOLD, -45.0),
+        (echo::DUCKING, 1.0),
+        (echo::WOBBLE, 1.0),
+        (echo::REPITCH, 1.0),
+        (echo::REVERB, 30.0),
+        (echo::REVERB_LOCATION, 2.0),
+        (echo::DECAY, 1.5),
+        (echo::STEREO, 130.0),
+        (echo::OUTPUT, 0.125),
+        (echo::DRY_WET, 45.0),
+        (echo::EQUAL_LOUDNESS, 1.0),
+    ] {
+        device.params.insert(param, value);
+    }
+    song.apply(Command::InsertDevice {
+        track,
+        index: 0,
+        device,
+    });
+    song.finish(3.0)
+}
+
+/// Spec: operator R11 to R17. A phrase through Operator with Beat and Sync
+/// envelopes on the song's grid.
+fn operator() -> Scene {
+    use bl_devices::operator::{self as op, OPERATOR, osc, shaped};
+    use bl_devices::operator_envelope::Loop;
+
+    let mut song = Song::new();
+    let beat = Ticks::QUARTER.0;
+    let keys = song.track(TrackKind::Midi, "Operator", None);
+    let mut device = Device::new(
+        song.editor.new_id(),
+        "Operator",
+        DeviceKind::Native {
+            device_type: OPERATOR.to_owned(),
+        },
+    );
+    for (param, value) in [
+        (op::ALGORITHM, 4.0),
+        (op::ANTIALIAS, 0.0),
+        (op::TONE, 80.0),
+        (op::TIME, 15.0),
+        (op::TIME_KEY, 20.0),
+        (op::PAN_KEY, 35.0),
+        (op::PAN_RANDOM, 25.0),
+        (op::VOICES, 4.0),
+        (osc(0, op::OSC_LEVEL_VEL), 50.0),
+        (osc(0, op::OSC_LEVEL_KEY), 20.0),
+        (osc(0, op::ENV_SUSTAIN), 0.5),
+        (osc(0, op::ENV_RELEASE), 400.0),
+        (osc(1, op::OSC_LEVEL), 0.3),
+        (osc(1, op::OSC_COARSE), 2.0),
+        (osc(1, op::OSC_FEEDBACK), 25.0),
+        (osc(1, op::ENV_LOOP), Loop::Beat as usize as f64),
+        (osc(1, op::ENV_REPEAT), 4.0),
+        (osc(1, op::ENV_DECAY), 250.0),
+        (osc(1, op::ENV_SUSTAIN), 0.05),
+        (osc(2, op::OSC_LEVEL), 0.2),
+        (osc(2, op::OSC_COARSE), 3.0),
+        (osc(2, op::OSC_FINE), 20.0),
+        (osc(2, op::ENV_SUSTAIN), 0.1),
+        (osc(2, op::ENV_DECAY), 500.0),
+        (op::PITCH_ON, 1.0),
+        (op::PITCH_AMOUNT, 15.0),
+        (shaped(op::PITCH_ENV, op::SHAPED_INITIAL), 100.0),
+        (shaped(op::PITCH_ENV, op::SHAPED_PEAK), 100.0),
+        (shaped(op::PITCH_ENV, op::SHAPED_SUSTAIN), 0.0),
+        (shaped(op::PITCH_ENV, op::SHAPED_DECAY), 300.0),
+        (shaped(op::PITCH_ENV, op::SHAPED_DECAY_SLOPE), 0.5),
+        (
+            shaped(op::PITCH_ENV, op::SHAPED_LOOP),
+            Loop::Sync as usize as f64,
+        ),
+        (shaped(op::PITCH_ENV, op::SHAPED_REPEAT), 3.0),
+    ] {
+        device.params.insert(param, value);
+    }
+    song.apply(Command::InsertDevice {
+        track: keys,
+        index: 0,
+        device,
+    });
+    let notes: Vec<bl_model::Note> = [
+        (48u8, 0i64, 6i64, 110u8),
+        (55, 5, 5, 60),
+        (60, 10, 6, 90),
+        (64, 14, 4, 127),
+    ]
+    .iter()
+    .map(|&(key, start, length, velocity)| {
+        bl_model::Note::new(
+            key,
+            Ticks(start * beat / 4),
+            Ticks(length * beat / 4),
+            velocity,
+        )
+    })
+    .collect();
+    let clip = song.editor.new_id();
+    song.apply(Command::CreateClip {
+        track: keys,
+        clip: Clip::new(
+            clip,
+            Ticks::ZERO,
+            Ticks::QUARTER * 6,
+            ClipData::Midi(bl_model::MidiData::new(notes)),
+        ),
+    });
+    song.finish(3.0)
+}
+
+/// Spec: resonators R12. A drum loop through Resonators with four resonators on.
+fn resonators() -> Scene {
+    use bl_devices::resonators::{self, RESONATORS, voice_param};
+    let mut song = Song::new();
+    let bar = drum_bar();
+    let two_bars: Vec<f32> = bar.iter().chain(&bar).copied().collect();
+    let drums = song.file("drums.wav", 48_000, &[two_bars.clone(), two_bars]);
+    let track = song.track(TrackKind::Audio, "Drums", None);
+    let at = song.at("1.1.1");
+    song.audio_clip(track, at, Ticks::QUARTER * 8, AudioData::new(drums));
+    let mut device = Device::new(
+        song.editor.new_id(),
+        "Resonators",
+        DeviceKind::Native {
+            device_type: RESONATORS.to_owned(),
+        },
+    );
+    for (param, value) in [
+        (resonators::MODE, 1.0),
+        (resonators::DECAY, 0.8),
+        (resonators::CONST, 1.0),
+        (resonators::COLOR, 30.0),
+        (resonators::FILTER_FREQ, 2_000.0),
+        (voice_param(0, resonators::PITCH), 48.0),
+        (voice_param(0, resonators::FINE), 10.0),
+        (voice_param(3, resonators::ON), 1.0),
+        (resonators::GAIN, 0.5),
+        (resonators::DRY_WET, 60.0),
+    ] {
+        device.params.insert(param, value);
+    }
+    song.apply(Command::InsertDevice {
+        track,
+        index: 0,
+        device,
+    });
+    song.finish(1.5)
+}
+
 /// A phrase through CV Instrument and CV Triggers, captured on the device
 /// channels after Main's two (WP-7.17; the CV tools spec, R12, R17).
 fn cv_instrument_and_triggers() -> Scene {
@@ -1014,6 +1377,100 @@ fn cv_instrument_and_triggers() -> Scene {
     });
     song.device_channels = 6;
     song.finish(3.5)
+}
+
+/// A phrase through Analog's oscillators, filters, Drive and looping
+/// envelope (WP-8.14; the Analog spec, R2 to R15).
+fn analog_voices() -> Scene {
+    use bl_devices::analog::{
+        DRIVES, LOOPS, MODES, SHAPES, SUB_SYNC, amp, analog_type, env, filter, noise, osc,
+    };
+
+    let mut song = Song::new();
+    let beat = Ticks::QUARTER.0;
+    let keys = song.track(TrackKind::Midi, "Keys", None);
+    let id = song.editor.new_id();
+    let mut analog = analog_type().device(id);
+    let choice =
+        |list: &[&str], name: &str| list.iter().position(|n| *n == name).expect("listed") as f64;
+    for (param, value) in [
+        (osc::id(0, osc::SHAPE), choice(&SHAPES, "Rectangle")),
+        (osc::id(0, osc::PULSE_WIDTH), 30.0),
+        (osc::id(0, osc::SUB_SYNC), choice(&SUB_SYNC, "Sub")),
+        (osc::id(0, osc::SUB_SYNC_AMOUNT), 50.0),
+        (osc::id(0, osc::BALANCE), 20.0),
+        (osc::id(1, osc::ON), 1.0),
+        (osc::id(1, osc::LEVEL), 0.35),
+        (osc::id(1, osc::OCTAVE), -1.0),
+        (osc::id(1, osc::DETUNE), 7.0),
+        (osc::id(1, osc::SUB_SYNC), choice(&SUB_SYNC, "Sync")),
+        (osc::id(1, osc::SUB_SYNC_AMOUNT), 45.0),
+        (osc::id(1, osc::BALANCE), 90.0),
+        (noise::id(noise::ON), 1.0),
+        (noise::id(noise::LEVEL), 0.05),
+        (noise::id(noise::COLOR), 4_000.0),
+        (filter::id(0, filter::MODE), choice(&MODES, "LP24")),
+        (filter::id(0, filter::FREQ), 600.0),
+        (filter::id(0, filter::RESO), 55.0),
+        (filter::id(0, filter::DRIVE), choice(&DRIVES, "Asym 1")),
+        (filter::id(0, filter::FREQ_ENV), 55.0),
+        (filter::id(0, filter::EXTRA), 40.0),
+        (filter::id(1, filter::ON), 1.0),
+        (filter::id(1, filter::MODE), choice(&MODES, "Formant12")),
+        (filter::id(1, filter::FREQ), 1_000.0),
+        (filter::id(1, filter::RESO), 35.0),
+        (amp::id(0, amp::LEVEL), 0.08),
+        (amp::id(1, amp::LEVEL), 0.08),
+        (env::id(0, env::ATTACK), 40.0),
+        (env::id(0, env::DECAY), 350.0),
+        (env::id(0, env::SUSTAIN), 25.0),
+        (env::id(0, env::SLOPE), 1.0),
+        (env::id(2, env::ATTACK), 8.0),
+        (env::id(2, env::DECAY), 250.0),
+        (env::id(2, env::SUSTAIN), 70.0),
+        (env::id(2, env::RELEASE), 180.0),
+        (env::id(2, env::LOOP), choice(&LOOPS, "ADR-R")),
+        (env::id(3, env::ATTACK), 8.0),
+        (env::id(3, env::DECAY), 250.0),
+        (env::id(3, env::SUSTAIN), 70.0),
+        (env::id(3, env::RELEASE), 180.0),
+    ] {
+        analog.params.insert(param, value);
+    }
+    song.apply(Command::InsertDevice {
+        track: keys,
+        index: 0,
+        device: analog,
+    });
+    let clip = song.editor.new_id();
+    let notes = [
+        (45u8, 0i64, 6i64, 100u8),
+        (52, 4, 8, 70),
+        (57, 10, 6, 120),
+        (64, 14, 8, 90),
+    ];
+    song.apply(Command::CreateClip {
+        track: keys,
+        clip: Clip::new(
+            clip,
+            Ticks::ZERO,
+            Ticks::QUARTER * 8,
+            ClipData::Midi(bl_model::MidiData::new(
+                notes
+                    .iter()
+                    .map(|&(key, start, length, velocity)| {
+                        bl_model::Note::new(
+                            key,
+                            Ticks(start * beat / 4),
+                            Ticks(length * beat / 4),
+                            velocity,
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            )),
+        ),
+    });
+    song.finish(4.0)
 }
 
 /// CV Clock Out over a tempo ramp, captured on its device channel after

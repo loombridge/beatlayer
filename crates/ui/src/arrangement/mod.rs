@@ -15,8 +15,10 @@
 //! keyboard is in [`editing`] (WP-1.8b), whose behaviour is in the
 //! arrangement editing spec.
 
+pub mod arranger;
 pub mod automation;
 pub mod benchmark;
+mod chord_lane;
 pub mod context_menu;
 pub mod editing;
 pub mod fades;
@@ -39,6 +41,7 @@ use bl_shell::arrangement::snapping::Dragged;
 use bl_shell::arrangement::{ArrangementView, Horizontal};
 use bl_shell::arrangement_commands::{self as ids, Lane};
 use bl_shell::clip_drag::{ClipDragEvent, DragSource, DropSpot};
+use bl_shell::editing_commands as edit_ids;
 use bl_shell::locator_commands as locator_ids;
 use bl_shell::{GesturePhase, InfoTarget, Invocation, Shell};
 use egui::accesskit::Role;
@@ -179,6 +182,68 @@ enum Drag {
     /// Dragging a breakpoint or curving a segment on an automation lane
     /// (WP-2.12).
     Automation,
+    /// Dragging the loop brace's ends or bar (WP-6.73), from the brace it
+    /// began on and the position it grabbed.
+    Brace {
+        part: BracePart,
+        start: Ticks,
+        length: Ticks,
+        grab: Ticks,
+    },
+}
+
+/// The part of the loop brace a press lands on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum BracePart {
+    Start,
+    End,
+    Bar,
+}
+
+/// How far from the brace's ends, in points, a press grabs the end.
+const BRACE_END_GRAB: f32 = 4.0;
+
+/// The part of the brace `rect` a press at `x` lands on.
+fn brace_part(rect: Rect, x: f32) -> BracePart {
+    if x < rect.left() + BRACE_END_GRAB {
+        BracePart::Start
+    } else if x > rect.right() - BRACE_END_GRAB {
+        BracePart::End
+    } else {
+        BracePart::Bar
+    }
+}
+
+/// Where dragging the brace's `part` to `at` puts it, snapped to the grid
+/// while snapping is on, and where the insert marker goes (the transport
+/// spec, R34). An end can't pass the other: the brace stays a beat long.
+fn dragged_brace(
+    view: &ArrangementView,
+    doc: &Document,
+    drag: (BracePart, Ticks, Ticks, Ticks),
+    at: Ticks,
+) -> (Ticks, Ticks, &'static str) {
+    let (part, start, length, grab) = drag;
+    let end = start + length;
+    let beat = doc
+        .settings()
+        .time_signatures
+        .signature_at(start)
+        .beat_length();
+    match part {
+        BracePart::Start => {
+            let to = view.snap(doc, at).min(end - beat).max(Ticks::ZERO);
+            (to, end - to, "start")
+        }
+        BracePart::End => {
+            let to = view.snap(doc, at).max(start + beat);
+            (start, to - start, "end")
+        }
+        BracePart::Bar => {
+            let to = view.snap(doc, start + (at - grab)).max(Ticks::ZERO);
+            (to, length, "start")
+        }
+    }
 }
 
 /// The Arrangement View's state between frames: caches and gestures, never
@@ -221,6 +286,10 @@ pub struct ArrangementUi {
     locator_drag: Option<bl_model::LocatorId>,
     /// The time-signature lane's gestures (WP-6.61).
     signature_lane: signatures::SignatureLane,
+    /// The arranger track's gestures (WP-6.45).
+    arranger_lane: arranger::ArrangerLane,
+    /// The chord lane's gestures (WP-6.48).
+    chord_lane: chord_lane::ChordLane,
     /// The point a held press in the scrub area or the beat-time ruler is
     /// looping, until the button is released (WP-6.59; time-editing R25).
     scrub_hold: Option<Ticks>,
@@ -396,6 +465,8 @@ impl ArrangementUi {
             snap_line: None,
             locator_drag: None,
             signature_lane: signatures::SignatureLane::default(),
+            arranger_lane: arranger::ArrangerLane::default(),
+            chord_lane: chord_lane::ChordLane::default(),
             scrub_hold: None,
             locators_drawn: Vec::new(),
             mixer: None,
@@ -517,6 +588,11 @@ impl ArrangementUi {
         self.stats
     }
 
+    /// The clips the last frame drew, each with its rectangle on screen.
+    pub fn shown_clips(&self) -> impl Iterator<Item = (bl_model::ClipId, Rect)> + '_ {
+        self.shown.iter().map(|shown| (shown.clip, shown.rect))
+    }
+
     /// The block the GPU callback reads, for hosts and benchmarks that
     /// render offscreen.
     #[must_use]
@@ -560,6 +636,18 @@ impl ArrangementUi {
         // Spec: time-editing R29. The lane shows while the set has changes.
         let layout = if doc.settings().time_signatures.has_changes() {
             layout.with_signature_lane()
+        } else {
+            layout
+        };
+        // Spec: arranger-track R2. The lane shows while the set says so.
+        let layout = if doc.settings().arranger_track {
+            layout.with_arranger_lane()
+        } else {
+            layout
+        };
+        // Spec: chord-lane R1. The lane shows while View > Chord Lane is on.
+        let layout = if view.chord_lane() {
+            layout.with_chord_lane()
         } else {
             layout
         };
@@ -665,6 +753,7 @@ impl ArrangementUi {
             ));
         self.draw_labels(ui, doc, theme, lanes);
         let lanes_response = self.lanes_input(ui, shell, view, doc, &layout, horizontal, events);
+        self.link_marks(ui, theme, doc, lanes, events);
         // WP-1.8b: right-clicking a clip or the lanes opens their menu.
         if lanes_response.secondary_clicked()
             && let Some(pos) = lanes_response.interact_pointer_pos()
@@ -803,6 +892,26 @@ impl ArrangementUi {
             doc.settings().song_start,
             theme,
         );
+        if let (Some(lane), Some(header)) = (layout.chord_lane, layout.chord_header) {
+            rulers::chord_lane(
+                &ui.painter_at(lane),
+                lane,
+                horizontal,
+                doc.chord_lane(),
+                view.selected_chord_region(),
+                theme,
+            );
+            // The header column's cell, which names the lane.
+            ui.painter_at(header)
+                .rect_filled(header, 0.0, theme.colors.bar.0);
+            ui.painter_at(header).text(
+                pos2(header.left() + 6.0, header.center().y),
+                egui::Align2::LEFT_CENTER,
+                "Chord Lane",
+                theme.small_font(),
+                theme.colors.text_dim.0,
+            );
+        }
         rulers::time_ruler(
             &ui.painter_at(layout.time_ruler),
             layout.time_ruler,
@@ -821,6 +930,36 @@ impl ArrangementUi {
                 &mut self.snap_line,
                 events,
             );
+        }
+        // Spec: arranger-track R2 to R7. The arranger track, over the track
+        // lanes' top, and its header.
+        if let (Some(lane), Some(header)) = (layout.arranger, layout.arranger_header) {
+            rulers::arranger_header(&ui.painter_at(header), header, theme);
+            rulers::arranger_lane(
+                &ui.painter_at(lane),
+                lane,
+                doc.sections(),
+                view.selected_sections(),
+                horizontal,
+                theme,
+            );
+            self.arranger_lane.show(
+                ui,
+                shell,
+                theme,
+                lane,
+                &mut self.menus,
+                &mut self.snap_line,
+                events,
+            );
+        } else {
+            self.arranger_lane.tab.clear();
+            self.arranger_lane.tab_lane = None;
+        }
+
+        if let Some(lane) = layout.chord_lane {
+            self.chord_lane
+                .show(ui, shell, lane, &mut self.snap_line, events);
         }
 
         // The playhead, over the rulers and the lanes.
@@ -881,13 +1020,48 @@ impl ArrangementUi {
             if clip.name.is_empty() {
                 continue;
             }
-            painter.with_clip_rect(label.rect.intersect(lanes)).text(
+            // Spec: linked-clips R10. A linked clip's name stops short of its
+            // link mark.
+            let room = if clip.link.is_some() {
+                crate::link_mark::rect(label.rect).map_or(label.rect, |mark| {
+                    Rect::from_min_max(label.rect.min, pos2(mark.left(), label.rect.bottom()))
+                })
+            } else {
+                label.rect
+            };
+            painter.with_clip_rect(room.intersect(lanes)).text(
                 pos2(label.rect.left() + 3.0, label.rect.center().y),
                 Align2::LEFT_CENTER,
                 &clip.name,
                 theme.small_font(),
                 theme.colors.clip_text.0,
             );
+        }
+    }
+
+    /// Spec: linked-clips R10. The link mark at the right end of each linked
+    /// clip's title bar, over the lanes' own input so that clicking it selects
+    /// the link's clips and nothing else.
+    fn link_marks(
+        &self,
+        ui: &Ui,
+        theme: &Theme,
+        doc: &Document,
+        lanes: Rect,
+        events: &mut Vec<UiEvent>,
+    ) {
+        for label in &self.labels {
+            let Some(clip) = doc.clip(label.clip).filter(|clip| clip.link.is_some()) else {
+                continue;
+            };
+            let Some(area) = crate::link_mark::rect(label.rect.intersect(lanes)) else {
+                continue;
+            };
+            let id = egui::Id::new(("link-mark", clip.id));
+            let others = doc.linked_clip_ids(clip.id).len();
+            if crate::link_mark::show(ui, id, area, theme.colors.clip_text.0, others, events) {
+                crate::link_mark::select_link(doc, clip.id, events);
+            }
         }
     }
 
@@ -1931,9 +2105,56 @@ impl ArrangementUi {
         if !on_locator {
             scrub.context_menu(|ui| self.menus.show(ui, theme, shell, events));
         }
-        // The loop brace's menu (C-TIME-023).
-        let brace = brace_rect(layout.beat_ruler, horizontal, &view.transport());
-        let brace = ui.interact(brace, brace_id(), Sense::click());
+        // The loop brace: a click on its bar selects it, and dragging its ends
+        // or bar moves it, with no undo step (the transport spec, R32, R34).
+        // Its menu is C-TIME-023.
+        let transport = view.transport();
+        let rect = brace_rect(layout.beat_ruler, horizontal, &transport);
+        let brace = ui.interact(
+            rect.expand2(egui::vec2(BRACE_END_GRAB, 0.0)),
+            brace_id(),
+            Sense::click_and_drag(),
+        );
+        let brace_at = |pos: Pos2| horizontal.at(f64::from(pos.x - layout.beat_ruler.left()));
+        // The drag starts a few points after the press: the part it grabbed is
+        // where the press was.
+        if brace.drag_started()
+            && let Some(pos) = ui.input(|i| i.pointer.press_origin())
+        {
+            self.drag = Some(Drag::Brace {
+                part: brace_part(rect, pos.x),
+                start: transport.loop_start,
+                length: transport.loop_length,
+                grab: brace_at(pos),
+            });
+        }
+        if brace.dragged()
+            && let Some(Drag::Brace {
+                part,
+                start,
+                length,
+                grab,
+            }) = self.drag
+            && let Some(pos) = brace.interact_pointer_pos()
+        {
+            let (to, long, marker) =
+                dragged_brace(view, doc, (part, start, length, grab), brace_at(pos));
+            if (to, long) != (transport.loop_start, transport.loop_length) {
+                invoke(
+                    events,
+                    edit_ids::SET_LOOP_BRACE,
+                    json!({ "start": to, "length": long, "insert_marker": marker, "selected": part == BracePart::Bar }),
+                );
+            }
+        }
+        if brace.drag_stopped() && matches!(self.drag, Some(Drag::Brace { .. })) {
+            self.drag = None;
+        }
+        if brace.clicked() {
+            invoke(events, edit_ids::SELECT_LOOP_BRACE, json!({}));
+        }
+        brace
+            .widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Arrangement Loop Brace"));
         if brace.secondary_clicked() {
             self.menus.open_brace();
         }
@@ -2431,6 +2652,15 @@ impl ArrangementUi {
             // Spec: accessibility R10. The switch is in the Tab order,
             // after Automation Mode.
             crate::focus::register(ui.ctx(), id, bl_shell::Area::MainView, None);
+            // Spec: arranger-track R14. The sections follow it, in time order.
+            for section in self
+                .arranger_lane
+                .tab
+                .iter()
+                .chain(&self.arranger_lane.tab_lane)
+            {
+                crate::focus::register(ui.ctx(), *section, bl_shell::Area::MainView, None);
+            }
             response.widget_info(|| {
                 WidgetInfo::selected(WidgetType::Checkbox, true, on, "Lock Envelopes")
             });
@@ -2594,7 +2824,11 @@ impl ArrangementUi {
                 } else {
                     &clip.name
                 };
-                node.set_label(name.to_owned());
+                node.set_label(if clip.link.is_some() {
+                    crate::link_mark::described(name, doc.linked_clip_ids(clip.id).len())
+                } else {
+                    name.to_owned()
+                });
                 if let Some((_, text)) = shell.info_text_shown(InfoTarget::Clip(clip.id)) {
                     node.set_description(text);
                 }
@@ -2979,6 +3213,19 @@ impl ArrangementUi {
                 );
             }
         }
+        // Spec: chord-lane R3. The Delete key deletes the selected region,
+        // unless clips or time chosen since are what Edit > Delete deletes.
+        if let Some(region) = view.selected_chord_region()
+            && view.selected_clips().is_empty()
+            && view.time_selection().is_none()
+            && ui.input(|i| i.key_pressed(Key::Delete))
+        {
+            invoke(
+                events,
+                bl_shell::chord_lane_commands::DELETE_REGION,
+                json!({ "region": region }),
+            );
+        }
         // Spec: time-editing R8. Cmd-R renames the selected locators.
         if !view.selected_locators().is_empty()
             && ui.input(|i| {
@@ -3014,6 +3261,37 @@ impl ArrangementUi {
             })
         {
             invoke(events, locator_ids::DELETE, json!({}));
+        }
+        // Spec: arranger-track R7, R10, R11. With a section selected, Cmd-R
+        // renames it, Cmd-D duplicates it and Delete deletes it, unless its
+        // name is being typed.
+        // Not while a text field has the keyboard: Delete there edits text.
+        if !view.selected_sections().is_empty()
+            && !arranger::is_renaming(ui.ctx())
+            && !ui.ctx().egui_wants_keyboard_input()
+        {
+            let pressed = |wanted: Key, command: bool| {
+                ui.input(|i| {
+                    i.events.iter().any(|event| {
+                        matches!(
+                            event,
+                            egui::Event::Key { key, pressed: true, modifiers, .. }
+                                if *key == wanted
+                                    && modifiers.command == command
+                                    && !modifiers.shift
+                                    && !modifiers.alt
+                        )
+                    })
+                })
+            };
+            use bl_shell::arranger_commands as section_ids;
+            if pressed(Key::R, true) {
+                invoke(events, section_ids::RENAME_SECTION, json!({}));
+            } else if pressed(Key::D, true) {
+                invoke(events, section_ids::DUPLICATE_SECTION, json!({}));
+            } else if pressed(Key::Delete, false) {
+                invoke(events, section_ids::DELETE_SECTION, json!({}));
+            }
         }
         // WP-1.8b: nudging, clip edges, extending the selection, and
         // resizing from the keyboard.

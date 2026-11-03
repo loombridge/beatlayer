@@ -25,15 +25,21 @@
 
 pub mod alignment_delay;
 pub mod amp;
+pub mod analog;
+mod analogue;
 pub mod arpeggiator;
 pub mod articulation_map;
 pub mod auto_filter;
 pub mod auto_pan_tremolo;
+pub mod bass;
 pub mod beat_repeat;
 pub mod bus_compressor;
 pub mod channel_eq;
 pub mod chorus_ensemble;
+pub mod collision;
+pub mod color_limiter;
 pub mod compressor;
+pub mod corpus;
 pub mod crusher;
 mod cv;
 pub mod cv_clock_in;
@@ -48,16 +54,29 @@ pub mod delay;
 pub mod dice;
 pub mod drum_bus;
 pub mod drum_sampler;
+pub mod drum_synth;
+pub mod ds_clap;
+pub mod ds_kick;
+pub mod ds_snare;
+pub mod ds_tom;
 mod dynamics;
+pub mod echo;
+pub mod electric;
 pub mod eq;
 pub mod filter_delay;
+mod filters;
+pub mod fm;
 mod framework;
 pub mod gate;
 pub mod gate_mod;
+pub mod gated_delay;
 pub mod grain_delay;
+pub mod granulator_iii;
 pub mod hardware;
 pub mod hardware_effect;
 pub mod hold;
+pub mod instrument;
+pub mod instrument_filter;
 pub mod kit;
 pub mod kitbag;
 pub mod level_mod;
@@ -65,6 +84,9 @@ pub mod lfo;
 pub mod lift;
 pub mod limiter;
 pub mod looper;
+pub mod meld;
+mod meld_gen;
+mod meld_osc;
 pub mod midi_cc;
 mod midi_fx;
 pub mod midi_monitor;
@@ -74,38 +96,61 @@ pub mod multiband_dynamics;
 pub mod multisampler;
 mod multisampler_tabs;
 pub mod note_echo;
+pub mod operator;
+pub mod operator_envelope;
 pub mod oscilloscope;
 pub mod overdrive;
+pub mod pedal;
 pub mod phaser_flanger;
+pub mod pitch_hack;
+pub mod pitchloop89;
 pub mod play_mod;
+pub mod poli;
 pub mod polysynth;
+pub mod re_enveloper;
 pub mod remap;
+pub mod resonators;
 pub mod reverb;
+mod ring;
+pub mod roar;
+mod roar_parts;
 pub mod sampler;
 pub mod saturator;
 mod sections;
 pub mod shifter;
 mod signal_mod;
+pub mod spectral_blur;
+pub mod spectral_resonator;
+pub mod spectral_time;
 pub mod spectrum_analyser;
 pub mod stack;
 pub mod strike_mod;
+pub mod tension;
 pub mod testing;
 pub mod three_band_eq;
 pub mod touch;
 pub mod tube;
 pub mod tuner;
 pub mod utility;
+pub mod vector_delay;
+pub mod vocoder;
+pub mod wavetable;
+pub mod wavetable_mod;
+pub mod wavetables;
 pub mod wax;
 
 pub use alignment_delay::{ALIGNMENT_DELAY, alignment_delay_type};
 pub use amp::{AMP, amp_type};
+pub use analog::{ANALOG, Analog, analog_type};
 pub use arpeggiator::{ARPEGGIATOR, arpeggiator_type};
 pub use auto_filter::{AUTO_FILTER, AutoFilter, auto_filter_type};
 pub use auto_pan_tremolo::{AUTO_PAN_TREMOLO, auto_pan_tremolo_type};
+pub use bass::{BASS, bass_type};
 pub use beat_repeat::{BEAT_REPEAT, beat_repeat_type};
 pub use bus_compressor::{BUS_COMPRESSOR, Bond, bus_compressor_type};
 pub use channel_eq::{CHANNEL_EQ, Strip, channel_eq_type};
 pub use chorus_ensemble::{CHORUS_ENSEMBLE, chorus_ensemble_type};
+pub use color_limiter::{COLOR_LIMITER, ColorLimiter, color_limiter_type};
 pub use compressor::{COMPRESSOR, Squeeze, compressor_type};
 pub use crusher::{CRUSHER, crusher_type};
 pub use cv_clock_in::{CV_CLOCK_IN, cv_clock_in_type};
@@ -120,10 +165,13 @@ pub use delay::{DELAY, delay_type};
 pub use dice::{DICE, dice_type};
 pub use drum_bus::{DRUM_BUSS, drum_buss_type};
 pub use drum_sampler::{DRUM_SAMPLER, DrumSampler, drum_sampler_type};
+pub use echo::{ECHO, echo_type};
+pub use electric::{ELECTRIC, electric_type};
 pub use eq::{Contour, EQ, eq_type};
 pub use filter_delay::{FILTER_DELAY, filter_delay_type};
 pub use framework::{Audio, Modulation, NativeDevice, NativeNode, ParamBank, add};
 pub use gate::{GATE, Shutter, gate_type};
+pub use gated_delay::{GATED_DELAY, gated_delay_type};
 pub use grain_delay::{GRAIN_DELAY, grain_delay_type};
 pub use hardware::{HARDWARE_INSTRUMENT, hardware_instrument_type};
 pub use hardware_effect::{HARDWARE_EFFECT, hardware_effect_type};
@@ -140,21 +188,36 @@ pub use midi_mpe::{MPE_CONTROL, mpe_control_type};
 pub use multiband_dynamics::{MULTIBAND_DYNAMICS, Triband, multiband_dynamics_type};
 pub use multisampler::{MULTISAMPLER, Multisampler, multisampler_type};
 pub use note_echo::{NOTE_ECHO, note_echo_type};
+pub use operator::{OPERATOR, Operator, operator_type};
 pub use oscilloscope::{OSCILLOSCOPE, Oscilloscope, oscilloscope_type};
 pub use overdrive::{OVERDRIVE, overdrive_type};
+pub use pedal::{PEDAL, pedal_type};
 pub use phaser_flanger::{PHASER_FLANGER, phaser_flanger_type};
+pub use pitch_hack::{PITCH_HACK, pitch_hack_type};
+pub use pitchloop89::{PITCHLOOP89, pitchloop89_type};
+pub use poli::{POLI, poli_type};
 pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
+pub use re_enveloper::{RE_ENVELOPER, ReEnveloper, re_enveloper_type};
 pub use remap::{REMAP, remap_type};
+pub use resonators::{RESONATORS, resonators_type};
 pub use reverb::{REVERB, reverb_type};
+pub use roar::{ROAR, roar_type};
 pub use sampler::{Sampler, sampler_type, slice_boundaries};
 pub use saturator::{SATURATOR, saturator_type};
 pub use shifter::{SHIFTER, shifter_type};
+pub use spectral_blur::{SPECTRAL_BLUR, spectral_blur_type};
+pub use spectral_resonator::{SPECTRAL_RESONATOR, spectral_resonator_type};
+pub use spectral_time::{SPECTRAL_TIME, spectral_time_type};
 pub use spectrum_analyser::{SPECTRUM, Spectrum, spectrum_type};
 pub use stack::{STACK, stack_type};
+pub use tension::{TENSION, tension_type};
 pub use three_band_eq::{THREE_BAND_EQ, Triad, three_band_eq_type};
 pub use touch::{TOUCH, touch_type};
 pub use tube::{TUBE, tube_type};
 pub use tuner::{TUNER, Tuner, tuner_type};
+pub use vector_delay::{VECTOR_DELAY, vector_delay_type};
+pub use vocoder::{VOCODER, vocoder_type};
+pub use wavetable::{WAVETABLE, Wavetable, wavetable_type};
 pub use wax::{WAX, wax_type};
 
 use bl_engine::{DeviceType, Registry};
@@ -203,18 +266,29 @@ pub fn display_in(
 ) -> Option<DeviceDisplay> {
     match device_type {
         EQ => Some(eq::display(device, description, values, data)),
+        ECHO => Some(echo::display(device, description, values, data, view)),
         COMPRESSOR => Some(compressor::display(device, description, values, data)),
+        corpus::CORPUS => Some(corpus::display(device, data)),
         CHANNEL_EQ => Some(channel_eq::display(device, description, values, data)),
         BUS_COMPRESSOR => Some(bus_compressor::display(device, description, values, data)),
         GATE => Some(gate::display(device, description, values, data)),
         THREE_BAND_EQ => Some(three_band_eq::display(device, description, values, data)),
         DEGRADE => Some(degrade::display(device, data)),
+        GATED_DELAY => Some(gated_delay::display(device, description, values, data)),
+        COLOR_LIMITER => Some(color_limiter::display(device, data)),
+        RE_ENVELOPER => Some(re_enveloper::display(device, data)),
         AUTO_FILTER => Some(auto_filter::display(device, description, values, data)),
         AUTO_PAN_TREMOLO => Some(auto_pan_tremolo::display(device, description, values, data)),
         DRUM_BUSS => Some(drum_bus::display(device, description, values, data)),
+        ds_kick::DS_KICK => Some(ds_kick::display(device, description, values)),
+        ds_snare::DS_SNARE => Some(ds_snare::display(device, description, values)),
+        ds_tom::DS_TOM => Some(ds_tom::display(device, description, values)),
+        ds_clap::DS_CLAP => Some(ds_clap::display(device, description, values)),
         SATURATOR => Some(saturator::display(device, description, values, data)),
         OVERDRIVE => Some(overdrive::display(device, description, values, data)),
         TUBE => Some(tube::display(device, description, values, data)),
+        ROAR => Some(roar::display(device, description, values, data, view)),
+        SPECTRAL_RESONATOR => Some(spectral_resonator::display(device, description, data)),
         bl_model::modulator::WAVE_MOD => Some(modulator::wave_display(device, description, values)),
         bl_model::modulator::PLAY_MOD => Some(play_mod::display(device, description, values, data)),
         bl_model::modulator::STRIKE_MOD => {
@@ -239,6 +313,7 @@ pub fn display_in(
             values,
             data,
         )),
+        SPECTRAL_TIME => Some(spectral_time::display(device, description, data)),
         TUNER => Some(tuner::display_in(
             device,
             description,
@@ -249,6 +324,12 @@ pub fn display_in(
         )),
         OSCILLOSCOPE => Some(oscilloscope::display(device, description, values, data)),
         LOOPER => Some(looper::display(device, description, values, data)),
+        VECTOR_DELAY => Some(vector_delay::display(device, description, values, data)),
+        VOCODER => Some(vocoder::display(device, description, values, data)),
+        granulator_iii::GRANULATOR_III => {
+            Some(granulator_iii::display(device, description, values, data))
+        }
+        SPECTRAL_BLUR => Some(spectral_blur::display(device, description, values, data)),
         CV_INSTRUMENT => Some(cv_instrument::display(device, data)),
         CV_TRIGGERS => Some(cv_triggers::display(device, data)),
         CV_CLOCK_OUT => Some(cv_clock_out::display(device, data)),
@@ -268,6 +349,7 @@ pub fn display_in(
             values,
             data,
         )),
+        testing::SPECTROGRAM => Some(testing::spectrogram_display(device, description, data)),
         _ => None,
     }
 }
@@ -275,10 +357,18 @@ pub fn display_in(
 /// Adds every Beatlayer native device to `registry`.
 pub fn register(registry: &mut Registry) {
     compressor::register(registry);
+    corpus::register(registry);
     polysynth::register(registry);
+    electric::register(registry);
+    tension::register(registry);
+    meld::register(registry);
+    collision::register(registry);
+    operator::register(registry);
+    analog::register(registry);
     limiter::register(registry);
     delay::register(registry);
     filter_delay::register(registry);
+    echo::register(registry);
     grain_delay::register(registry);
     alignment_delay::register(registry);
     reverb::register(registry);
@@ -291,6 +381,10 @@ pub fn register(registry: &mut Registry) {
     sampler::register(registry);
     multisampler::register(registry);
     drum_sampler::register(registry);
+    ds_kick::register(registry);
+    ds_snare::register(registry);
+    ds_tom::register(registry);
+    ds_clap::register(registry);
     kitbag::register(registry);
     modulator::register(registry);
     level_mod::register(registry);
@@ -328,15 +422,32 @@ pub fn register(registry: &mut Registry) {
     overdrive::register(registry);
     tube::register(registry);
     amp::register(registry);
+    roar::register(registry);
+    pedal::register(registry);
+    resonators::register(registry);
+    spectral_resonator::register(registry);
     beat_repeat::register(registry);
     multiband_dynamics::register(registry);
+    color_limiter::register(registry);
+    re_enveloper::register(registry);
     shifter::register(registry);
+    gated_delay::register(registry);
+    pitch_hack::register(registry);
     phaser_flanger::register(registry);
     chorus_ensemble::register(registry);
     spectrum_analyser::register(registry);
+    spectral_time::register(registry);
     tuner::register(registry);
     oscilloscope::register(registry);
     looper::register(registry);
+    pitchloop89::register(registry);
+    vector_delay::register(registry);
+    vocoder::register(registry);
+    wavetable::register(registry);
+    granulator_iii::register(registry);
+    bass::register(registry);
+    poli::register(registry);
+    spectral_blur::register(registry);
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell.
@@ -361,14 +472,22 @@ pub fn relative_clip_envelopes(document: &mut bl_model::Document) {
 }
 
 /// Whether the native device type `device_type` plays samples that
-/// `device.load_sample` loads into it: the sampler and the two drum
-/// samplers.
+/// `device.load_sample` loads into it: the sampler, the two drum samplers
+/// and Granulator III.
 #[must_use]
 pub fn plays_samples(device_type: &str) -> bool {
     matches!(
         device_type,
-        sampler::SAMPLER | kitbag::KITBAG | DRUM_SAMPLER
+        sampler::SAMPLER | kitbag::KITBAG | DRUM_SAMPLER | granulator_iii::GRANULATOR_III
     )
+}
+
+/// Whether a device of this type swaps its sample for similar ones
+/// (sound similarity R20): Simpler and Drum Sampler, not the multisampler
+/// or the eight-slot drum sampler.
+#[must_use]
+pub fn swaps_similar(device_type: &str) -> bool {
+    matches!(device_type, sampler::SAMPLER | DRUM_SAMPLER)
 }
 
 /// A [`KitHost`] with the kit plug-ins compiled into Beatlayer: its

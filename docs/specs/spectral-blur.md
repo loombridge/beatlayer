@@ -37,7 +37,13 @@ Live's Spectral Blur comes in its Creative Extensions pack as a Max device; Beat
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1, R2 | to be written in WP-8.49 | unit (description; reported latency) |
-| R3 to R6 | to be written in WP-8.49 | unit (energy outside the range passes; inside, spread over Halo's time within 10 %; Residual's ends; Freeze holds within 0.5 dB) |
-| R7, R8 | to be written in WP-8.49 | golden renders at four block sizes; real-time trap |
-| R9 to R12 | to be written in WP-8.49 | `crates/devices/tests/rules.rs`; agent API; `crates/devices/tests/banks.rs`; UI script; save and reopen |
+| R1, R2 | `crates/devices/tests/spectral_blur.rs`: `it_is_an_audio_effect_named_for_live_with_one_display_cell_and_reports_its_latency`, `what_lies_outside_the_range_passes_unchanged_after_the_latency`, `high_is_kept_at_or_above_low` | unit (description; reported latency; energy outside the range passes within 0.1 dB) |
+| R3 | `a_tone_burst_in_the_range_decays_over_halos_time_within_ten_per_cent` | unit (a tone burst decays over Halo's time within 10 %) |
+| R4, R6 | `residual_keeps_the_ranges_own_signal_and_wet_gain_at_minus_infinity_leaves_only_it`, `wet_gain_sets_the_clouds_level_and_dry_wet_balances_it_against_the_dry_signal` | unit (Residual's ends; Wet Gain at −∞; Dry/Wet) |
+| R5 | `freeze_holds_the_cloud_within_half_a_decibel_while_the_rest_passes` | unit (Freeze holds within 0.5 dB over 30 s) |
+| R7 | `a_render_is_the_same_at_every_block_size_and_every_run_and_follows_the_seed` | golden renders at four block sizes |
+| R8 | `rtsan/tests/devices.rs`: `spectral_blur_passes_under_rtsan`; every block of the tests above runs under the allocation trap | real-time trap |
+| R9 | `crates/devices/tests/rules.rs`; `crates/cli/tests/agent.rs`: `an_agent_sets_spectral_blur_by_id_and_finds_it_after_a_reopen` | agent API |
+| R10 | `crates/devices/tests/banks.rs` | banks |
+| R11 | `the_display_reads_the_range_and_the_input_spectrum_headless`; `crates/ui/tests/spectral_blur.rs`: `dragging_an_edge_of_the_range_sets_low_or_high_as_one_undo_step` | display read headless; UI script |
+| R12 | `crates/cli/tests/agent.rs`: `an_agent_sets_spectral_blur_by_id_and_finds_it_after_a_reopen` | save and reopen |

@@ -15,20 +15,22 @@ use crate::automation::{
     AutomationTarget, Breakpoint, Envelope, MixerParam, PointError, check_bend, entry,
     override_device,
 };
+use crate::chord_lane::ChordRegion;
 use crate::clip::{
     AudioData, Clip, ClipData, ClipEnvelope, EnvelopeKind, MIN_MIDI_BRACE, MidiData, NewTakeLane,
     TakeLane, clip_entry, crossfades,
 };
 use crate::clip_param::ClipParam;
-use crate::device::{Device, DeviceKind, DeviceRole};
+use crate::colour::Colour;
+use crate::device::{Device, DeviceKind, DeviceRole, WavetableChoice};
 use crate::document::Document;
 use crate::error::ModelError;
 use crate::external::{CvCalibration, ExternalPort, HardwareLatency};
 use crate::follow::FollowPatch;
 use crate::groove::{GLOBAL_AMOUNT_MAX, Groove, GrooveBase, check_percent};
 use crate::ids::{
-    ChainId, ClipId, ContentHash, DeviceId, GrooveId, LinkGroupId, LocatorId, ParamId, SceneId,
-    TakeLaneId, TrackId,
+    ChainId, ChordRegionId, ClipId, ContentHash, DeviceId, GrooveId, LinkGroupId, LocatorId,
+    ParamId, SceneId, SectionId, TakeLaneId, TrackId,
 };
 use crate::launch::{ClipLaunch, LaunchMode, LaunchQuantization};
 use crate::layers::{
@@ -44,9 +46,10 @@ use crate::record_quantization::RecordQuantization;
 use crate::sample_edits::{SampleEdit, SampleRange, SampleRegion};
 use crate::scale::{Scale, ScaleName};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
+use crate::section::SongSection;
 use crate::shared::Shared;
 use crate::track::{
-    Channel, CrossfadeAssign, Input, MidiTo, Mixer, Monitor, Output, PanMode, SendTap, Track,
+    Channel, CrossfadeAssign, Input, MidiTo, Mixer, Monitor, Output, PanMode, SendTap, Tap, Track,
     TrackDelay, TrackKind,
 };
 use crate::tuning::{Tuning, TuningNote};
@@ -264,6 +267,53 @@ pub enum Command {
         /// The locator.
         locator: LocatorId,
     },
+    /// Adds a region to the chord lane, as drawing one in the lane does (the
+    /// chord lane spec, R3). The region must start at 1.1.1 or later, end after
+    /// it starts and overlap no other.
+    AddChordRegion {
+        /// The region, with a new ID.
+        region: ChordRegion,
+    },
+    /// Moves a chord region, or resizes it, to `start..end`.
+    MoveChordRegion {
+        /// The region.
+        region: ChordRegionId,
+        /// Where it starts: 1.1.1 or later.
+        start: Ticks,
+        /// Where it ends: after its start, and overlapping no other region.
+        end: Ticks,
+    },
+    /// Sets a chord region's scale and transposition (the chord lane spec,
+    /// R4). It leaves the values it isn't given as they were.
+    SetChordRegion {
+        /// The region.
+        region: ChordRegionId,
+        /// Whether the region names a scale: false leaves the clips' own.
+        #[serde(default)]
+        enabled: Option<bool>,
+        /// The scale's root note: 0 (C) to 11 (B).
+        #[serde(default)]
+        root: Option<u8>,
+        /// The scale's name, from the scale list.
+        #[serde(default)]
+        name: Option<String>,
+        /// How far the region moves the notes of the tracks that follow the
+        /// lane: from -24 to 24.
+        #[serde(default)]
+        transpose: Option<i32>,
+    },
+    /// Deletes a chord region.
+    DeleteChordRegion {
+        /// The region.
+        region: ChordRegionId,
+    },
+    /// Switches a MIDI track's Follow Chord Lane (the chord lane spec, R5).
+    SetFollowChordLane {
+        /// The track.
+        track: TrackId,
+        /// Whether it plays its Arrangement clips through the chord lane.
+        follow: bool,
+    },
     /// Sets where the song starts: a locator, the loop brace's start, or
     /// nothing, which leaves the song starting as it otherwise does.
     SetSongStart {
@@ -301,6 +351,42 @@ pub enum Command {
         /// issues them.
         #[serde(default)]
         clips: Vec<ClipId>,
+    },
+    /// Adds a section to the arranger track (the arranger track spec, R3 and
+    /// R5). A section with no name of its own is named "Section" and the
+    /// next whole number.
+    AddSection {
+        /// The section, with a new ID.
+        section: SongSection,
+    },
+    /// Removes a section and nothing else: the tracks stay as they are (R11).
+    RemoveSection {
+        /// The section.
+        section: SectionId,
+    },
+    /// Changes a section's name, colour, start or length, leaving what is
+    /// left out as it was (R7). The tracks stay as they are.
+    EditSection {
+        /// The section.
+        section: SectionId,
+        /// The new name.
+        #[serde(default)]
+        name: Option<String>,
+        /// The new colour, a swatch from 0 to 69.
+        #[serde(default)]
+        colour: Option<u8>,
+        /// The new start: 0 (1.1.1) or later.
+        #[serde(default)]
+        start: Option<Ticks>,
+        /// The new length: more than 0. A span that would overlap another
+        /// section is refused.
+        #[serde(default)]
+        length: Option<Ticks>,
+    },
+    /// Shows or hides the arranger track (R1). It is no undo step.
+    SetArrangerTrack {
+        /// Whether the track shows.
+        shown: bool,
     },
     /// Switches Punch-In on or off: with it on, recording into the
     /// Arrangement starts at the loop brace's start, whether or not the Loop
@@ -385,8 +471,8 @@ pub enum Command {
     SetTrackColour {
         /// The tracks, each listed once.
         tracks: Vec<TrackId>,
-        /// The swatch.
-        colour: u8,
+        /// The swatch, or a `#RRGGBB` colour.
+        colour: Colour,
     },
     /// Gives every clip of each track its track's colour: in the
     /// Arrangement, in its Session slots and in its take lanes. Tracks that
@@ -953,8 +1039,25 @@ pub enum Command {
     SetClipColour {
         /// The clips, each listed once.
         clips: Vec<ClipId>,
-        /// The swatch.
-        colour: u8,
+        /// The swatch, or a `#RRGGBB` colour.
+        colour: Colour,
+    },
+    /// Links clips that hold the same contents (the linked clips spec, R2):
+    /// from then on an edit to one clip's contents reaches the others (R4).
+    /// The clips are all of one kind and already hold the same contents, so
+    /// nothing in them changes; clips that already belong to a link join it,
+    /// and they may belong to only one. `clip.duplicate_linked` makes its
+    /// copies this way.
+    LinkClips {
+        /// The clips, at least two, each listed once.
+        clips: Vec<ClipId>,
+    },
+    /// Takes clips out of their links (R8), keeping the contents they have.
+    /// A link left with one clip ends. A clip that is in no link is left as
+    /// it is.
+    UnlinkClips {
+        /// The clips, each listed once.
+        clips: Vec<ClipId>,
     },
     /// Changes a clip's length, keeping its start.
     SetClipLength {
@@ -1704,7 +1807,7 @@ pub enum Command {
         /// The scenes, each listed once.
         scenes: Vec<SceneId>,
         /// The swatch, or `null` for none.
-        colour: Option<u8>,
+        colour: Option<Colour>,
     },
 
     /// Puts a clip in a track's Session slot at `scene`: what Insert Empty
@@ -1816,10 +1919,19 @@ pub enum Command {
         /// device has.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         articulations: Option<Vec<crate::articulation::Articulation>>,
+        /// The routes of an instrument's modulation matrix (the instrument
+        /// modulation spec, R10), which a preset of one holds; `null` to
+        /// keep the ones the device has.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        routes: Option<Vec<crate::matrix::ModRoute>>,
         /// A plug-in's MPE Mode and settings (the MPE spec, R14), which a
         /// preset of one holds; `null` to keep the ones the device has.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         mpe: Option<crate::PluginMpe>,
+        /// A sampler's similarity reference (sound similarity R23), which
+        /// its preset holds; `null` to keep the one the device has.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        similarity_reference: Option<ContentHash>,
     },
     /// Switches a plug-in device's MPE Mode (the MPE spec, R14): on, the
     /// plug-in gets each note's pitch, slide and pressure as its format takes
@@ -1990,6 +2102,28 @@ pub enum Command {
         )]
         channel: Option<Option<u8>>,
     },
+    /// Puts a route in a free slot of an instrument's modulation matrix (the
+    /// instrument modulation spec, R8, R10): the source and the destination
+    /// by name. The slot's amount is a parameter, which `device.set_param`
+    /// sets.
+    SetModRoute {
+        /// The device.
+        device: DeviceId,
+        /// The slot's number.
+        slot: u8,
+        /// The source's name.
+        source: String,
+        /// The destination's name.
+        destination: String,
+    },
+    /// Empties a free slot of an instrument's modulation matrix (the
+    /// instrument modulation spec, R9).
+    ClearModRoute {
+        /// The device.
+        device: DeviceId,
+        /// The slot's number.
+        slot: u8,
+    },
     /// Sets the media a device plays, by content hash (WP-2.16): the
     /// sampler's sample, which the media store holds like a clip's audio.
     SetDeviceSample {
@@ -2003,6 +2137,30 @@ pub enum Command {
         /// given; the eight-slot drum sampler's are 0 to 7 (WP-5.17).
         #[serde(default)]
         slot: u8,
+    },
+    /// Sets the sample similar-sample swapping goes by (sound similarity
+    /// R23): the one the device holds, or `media`.
+    SetSimilarityReference {
+        /// The device.
+        device: DeviceId,
+        /// The reference, by content hash; the sample the device holds if
+        /// left out.
+        #[serde(default)]
+        media: Option<ContentHash>,
+    },
+    /// Gives a wavetable oscillator its table (WP-8.8; the wavetable spec,
+    /// R8).
+    SetDeviceWavetable {
+        /// The device.
+        device: DeviceId,
+        /// The oscillator: 1 or 2.
+        oscillator: u8,
+        /// The table: a factory table by category and name, or a user table.
+        choice: WavetableChoice,
+        /// A user table's file, as media by content hash; left out for a
+        /// factory table.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        media: Option<ContentHash>,
     },
     /// Switches a device's Warp on or off (WP-5.15b).
     SetDeviceWarp {
@@ -2273,6 +2431,11 @@ pub enum Command {
         /// hears (its own track too), or `None` for No Input.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         track: Option<TrackId>,
+        /// Where on that track the device takes the notes (the routing
+        /// spec, R39); left out, it stays as it is. Only a device whose
+        /// type gives its MIDI sidechain a tapping point has one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tap: Option<Tap>,
     },
     /// Sets a device's sidechain gain, as linear gain (finite, at least 0).
     SetSidechainGain {
@@ -2437,6 +2600,14 @@ pub enum Command {
     SetChainColour {
         /// The chain.
         chain: ChainId,
+        /// The swatch, or a `#RRGGBB` colour, or `null` for none.
+        colour: Option<Colour>,
+    },
+    /// Gives a drum rack's chain the swatch Push 2 shows for its pad, from
+    /// 0 to 69, or `null` to show the track's colour again.
+    SetChainPushColour {
+        /// The chain.
+        chain: ChainId,
         /// The swatch, or `null` for none.
         colour: Option<u8>,
     },
@@ -2589,7 +2760,7 @@ pub enum Command {
         /// The macro, numbered from 1.
         macro_number: u8,
         /// The swatch, or `null` for none.
-        colour: Option<u8>,
+        colour: Option<Colour>,
     },
     /// Sets a macro's info text (macros spec, R14). Empty clears it.
     SetMacroInfo {
@@ -2729,6 +2900,22 @@ pub enum Command {
         /// The scale's name, from the scale list.
         #[serde(default)]
         name: Option<String>,
+    },
+    /// Sets how a note-playing controller lays the scale out on its pads
+    /// (the notes on Push 2 spec, R32 and R37). It is no undo step.
+    SetPadLayout {
+        /// In Key (true) or Chromatic.
+        #[serde(default)]
+        in_key: Option<bool>,
+        /// Whether the bottom-left pad stays on C.
+        #[serde(default)]
+        fixed: Option<bool>,
+        /// The interval between rows.
+        #[serde(default)]
+        spacing: Option<crate::PadSpacing>,
+        /// Which way the rows run.
+        #[serde(default)]
+        direction: Option<crate::PadDirection>,
     },
     /// Makes a tuning the set's, in place of any other (the tunings spec,
     /// R2 and R15). With `retune`, every note of the MIDI clips on tracks
@@ -2896,11 +3083,21 @@ impl Command {
             Self::DeleteLocator { .. } => "Delete Locator",
             Self::MoveLocator { .. } => "Move Locator",
             Self::RenameLocator { .. } => "Rename Locator",
+            // Spec: chord-lane R3 to R5. Beatlayer's own names.
+            Self::AddChordRegion { .. } => "Add Chord Region",
+            Self::MoveChordRegion { .. } => "Move Chord Region",
+            Self::SetChordRegion { .. } => "Change Chord Region",
+            Self::DeleteChordRegion { .. } => "Delete Chord Region",
+            Self::SetFollowChordLane { .. } => "Follow Chord Lane",
             Self::SetLocatorInfoText { .. } => "Edit Info Text",
             Self::LoopToNextLocator { .. } => "Loop to Next Locator",
             Self::SetSongStart { .. } => "Set Song Start Time",
             Self::InsertTime { .. } => "Insert Silence",
             Self::DeleteTime { .. } => "Delete Time",
+            Self::AddSection { .. } => "Add Section",
+            Self::RemoveSection { .. } => "Remove Section",
+            Self::EditSection { .. } => "Edit Section",
+            Self::SetArrangerTrack { .. } => "Arranger Track",
             Self::SetPunchIn { .. } => "Punch-In",
             Self::SetPunchOut { .. } => "Punch-Out",
             Self::SetMetronomeEnabled { .. } => "Metronome",
@@ -2924,6 +3121,8 @@ impl Command {
             Self::AssignColourToClips { .. } => "Assign Track Color to Clips",
             Self::AssignColourToGrouped { .. } => "Assign Track Color to Grouped Tracks and Clips",
             Self::SetClipColour { .. } => "Change Clip Color",
+            Self::LinkClips { .. } => "Link Clips",
+            Self::UnlinkClips { .. } => "Unlink Clip",
             Self::SetSceneColour { .. } => "Change Scene Color",
             Self::FreezeTracks { .. } => "Freeze tracks",
             Self::UnfreezeTracks { .. } => "Unfreeze tracks",
@@ -2962,6 +3161,7 @@ impl Command {
             Self::SetLockEnvelopes { .. } => "Switch Lock Envelopes",
             Self::SetRemoteMappings { .. } => "Change MIDI and key mappings",
             Self::SetCueMode { .. } => "Switch Cue mode",
+            Self::SetPadLayout { .. } => "Change Pad Layout",
             Self::SetCueVolume { .. } => "Change \"Preview Volume\"",
             Self::SetInput { .. }
             | Self::SetOutput { .. }
@@ -3101,8 +3301,14 @@ impl Command {
             Self::DeleteArticulation { .. } => "Delete Articulation",
             Self::MoveArticulation { .. } => "Move Articulation",
             Self::SetArticulation { .. } => "Change Articulation",
+            // WP-8.4: Beatlayer's own names.
+            Self::SetModRoute { .. } => "Change Modulation Route",
+            Self::ClearModRoute { .. } => "Clear Modulation Route",
             Self::SetDeviceSample { media: Some(_), .. } => "Load Sample",
             Self::SetDeviceSample { media: None, .. } => "Clear Sample",
+            // Spec: sound-similarity R23.
+            Self::SetSimilarityReference { .. } => "Save as Similarity Reference",
+            Self::SetDeviceWavetable { .. } => "Load Wavetable",
             // WP-5.15b: Warp controls and slices.
             Self::SetDeviceWarp { .. } => "Switch Warp",
             Self::SetDeviceWarpMode { .. } => "Change Warp Mode",
@@ -3168,7 +3374,7 @@ impl Command {
             // WP-5.1. Beatlayer's own names, after the device ones.
             Self::InsertChainDevice { .. } => "Insert Device",
             Self::MoveDeviceToChain { .. } => "Move Device",
-            Self::GroupDevices { .. } => "Group",
+            Self::GroupDevices { .. } => "Group Devices",
             Self::UngroupDevice { .. } => "Ungroup",
             Self::SetDeviceEnabledAll { .. } => "Change \"Device On\"",
             Self::AddChain { .. } => "Insert Chain",
@@ -3176,6 +3382,7 @@ impl Command {
             Self::MoveChain { .. } => "Move Chain",
             Self::RenameChain { .. } => "Change \"Chain Name\"",
             Self::SetChainColour { .. } => "Change Chain Color",
+            Self::SetChainPushColour { .. } => "Change Pad Color on Push",
             Self::SetChainInfo { .. } => "Change Chain Info Text",
             Self::SetChainVolume { .. } => "Change chain volume",
             Self::SetChainPan { .. } => "Change chain pan",
@@ -3235,9 +3442,13 @@ impl Command {
 
     /// Whether running the command outside a transaction is an undo step.
     /// Cue mode is not: Live's Solo/Cue button and Options items add none.
+    /// Nor is the pad layout a controller plays the scale in.
     #[must_use]
     pub fn records_undo(&self) -> bool {
-        !matches!(self, Self::SetCueMode { .. })
+        !matches!(
+            self,
+            Self::SetCueMode { .. } | Self::SetPadLayout { .. } | Self::SetArrangerTrack { .. }
+        )
     }
 
     /// The undo step's name for this command run on `before`: the same as
@@ -3329,6 +3540,8 @@ impl Command {
             Self::GroupDevices { rack, .. } => rack.ids(),
             Self::CreateScene { id, .. } => vec![id.0],
             Self::AddLocator { locator } => vec![locator.id.0],
+            Self::AddSection { section } => vec![section.id.0],
+            Self::AddChordRegion { region } => vec![region.id.0],
             Self::InsertTime { clips, .. } | Self::DeleteTime { clips, .. } => {
                 clips.iter().map(|clip| clip.0).collect()
             }
@@ -3365,6 +3578,9 @@ impl Document {
         // The copy shares every node with `self` until it's edited.
         let mut next = self.clone();
         next.apply_in_place(command)?;
+        // Spec: linked-clips R4. An edit to a linked clip's contents reaches
+        // every clip of its link in the same step.
+        next.sync_links(self);
         // Spec: macros R18. A device or chain that left its rack takes its
         // mappings with it, in the same undo step.
         next.prune_macro_mappings();
@@ -3426,7 +3642,52 @@ impl Document {
             }
             Command::InsertTime { at, length, clips } => self.insert_time(*at, *length, clips),
             Command::DeleteTime { start, end, clips } => self.delete_time(*start, *end, clips),
+            Command::AddSection { section } => self.add_section(section.clone()),
+            Command::RemoveSection { section } => self.remove_section(*section),
+            Command::EditSection {
+                section,
+                name,
+                colour,
+                start,
+                length,
+            } => self.edit_section(*section, name.as_deref(), *colour, *start, *length),
+            Command::SetArrangerTrack { shown } => {
+                self.settings.arranger_track = *shown;
+                Ok(())
+            }
             Command::AddLocator { locator } => self.add_locator(locator.clone()),
+            // Spec: chord-lane R2 to R5.
+            Command::AddChordRegion { region } => self.add_chord_region(*region),
+            Command::MoveChordRegion { region, start, end } => {
+                self.move_chord_region(*region, *start, *end)
+            }
+            Command::SetChordRegion {
+                region,
+                enabled,
+                root,
+                name,
+                transpose,
+            } => self.set_chord_region(*region, *enabled, *root, name.as_deref(), *transpose),
+            Command::DeleteChordRegion { region } => {
+                let places = &mut self.settings.chord_lane;
+                let at = places
+                    .iter()
+                    .position(|other| other.id == *region)
+                    .ok_or(ModelError::NoSuchChordRegion(*region))?;
+                places.remove(at);
+                Ok(())
+            }
+            Command::SetFollowChordLane { track, follow } => {
+                check_kind(
+                    self.track_ref(*track)?,
+                    |kind| kind == TrackKind::Midi,
+                    "a MIDI track",
+                )?;
+                if self.track_ref(*track)?.follow_chord_lane != *follow {
+                    self.track_mut(*track)?.follow_chord_lane = *follow;
+                }
+                Ok(())
+            }
             Command::DeleteLocator { locator } => self.delete_locator(*locator),
             Command::MoveLocator { locator, to } => self.move_locator(*locator, *to),
             Command::RenameLocator { locator, name } => self.rename_locator(*locator, name.clone()),
@@ -3529,7 +3790,7 @@ impl Document {
                 Ok(())
             }
             Command::SetTrackColour { tracks, colour } => {
-                crate::colour::check_swatch("track colour", *colour)?;
+                colour.check("track colour")?;
                 for track in each_once(tracks, |t| t.0)? {
                     self.track_ref(track)?;
                     self.colour_track(track, *colour)?;
@@ -3933,6 +4194,21 @@ impl Document {
                 self.settings.remote.clone_from(mappings);
                 Ok(())
             }
+            Command::SetPadLayout {
+                in_key,
+                fixed,
+                spacing,
+                direction,
+            } => {
+                let now = self.settings.pad_layout;
+                self.settings.pad_layout = crate::PadLayout {
+                    in_key: in_key.unwrap_or(now.in_key),
+                    fixed: fixed.unwrap_or(now.fixed),
+                    spacing: spacing.unwrap_or(now.spacing),
+                    direction: direction.unwrap_or(now.direction),
+                };
+                Ok(())
+            }
             Command::SetCueMode { enabled } => {
                 if *enabled && !self.cue_available() {
                     return Err(ModelError::CueOverlapsMain);
@@ -4071,9 +4347,12 @@ impl Document {
             Command::SetCueOut { channel } => {
                 self.set_main_channel(*channel, |routing| &mut routing.cue_out)
             }
-            Command::CreateClip { track, clip } => self.create_clip(*track, clip),
+            // Spec: linked-clips R7. A clip a command makes belongs to no link.
+            Command::CreateClip { track, clip } => self.create_clip(*track, &clip.unlinked()),
             Command::AddTakeLane { track, lane, index } => self.add_take_lane(*track, lane, *index),
-            Command::CreateTakeClip { lane, clip } => self.create_take_clip(*lane, clip),
+            Command::CreateTakeClip { lane, clip } => {
+                self.create_take_clip(*lane, &clip.unlinked())
+            }
             Command::RenameTakeLane { lane, name } => self.rename_take_lane(*lane, name),
             Command::DeleteTakeLanes { lanes } => self.remove_take_lanes(lanes),
             Command::DeleteAllTakeLanes { tracks } => self.delete_all_take_lanes(tracks),
@@ -4090,7 +4369,7 @@ impl Document {
             } => self.move_clip_to_lane(*clip, *track, *lane, *start),
             Command::MoveClips { clips, by } => self.move_clips(clips, *by),
             Command::SetClipColour { clips, colour } => {
-                crate::colour::check_swatch("clip colour", *colour)?;
+                colour.check("clip colour")?;
                 for clip in each_once(clips, |c| c.0)? {
                     if self.clip_ref(clip)?.colour != Some(*colour) {
                         self.clip_mut(clip)?.colour = Some(*colour);
@@ -4098,6 +4377,8 @@ impl Document {
                 }
                 Ok(())
             }
+            Command::LinkClips { clips } => self.link_clips(clips),
+            Command::UnlinkClips { clips } => self.unlink_clips(clips),
             Command::SetClipLength { clip, length } => {
                 let current = self.clip_ref(*clip)?;
                 check_extent(current.start, *length)?;
@@ -4315,27 +4596,33 @@ impl Document {
                 media,
                 seconds,
             } => {
-                let current = self.clip_ref(*clip)?.clone();
-                let ClipData::Audio(audio) = &current.data else {
-                    return Err(ModelError::NotAudioClip(*clip));
-                };
                 if !seconds.is_finite() || *seconds <= 0.0 {
                     return Err(ModelError::InvalidValue {
                         what: "the file's length",
                         value: *seconds,
                     });
                 }
-                let mut data = audio.reversed(*seconds, *media);
-                // The transient edits belong to the file they were made on
-                // (the warping spec, R27).
-                if data.media != audio.media {
-                    data.transient_edits = TransientEdits::default();
+                // Spec: linked-clips R4. Each clip of the link mirrors its
+                // own markers about the file.
+                let mut reversed = vec![*clip];
+                reversed.extend(self.linked_clip_ids(*clip));
+                for id in reversed {
+                    let current = self.clip_ref(id)?.clone();
+                    let ClipData::Audio(audio) = &current.data else {
+                        return Err(ModelError::NotAudioClip(id));
+                    };
+                    let mut data = audio.reversed(*seconds, *media);
+                    // The transient edits belong to the file they were made on
+                    // (the warping spec, R27).
+                    if data.media != audio.media {
+                        data.transient_edits = TransientEdits::default();
+                    }
+                    let mut next = current;
+                    next.data = ClipData::Audio(data);
+                    check_clip_data(&next.data)?;
+                    check_clip_fits(self.track_ref(self.clip_owner(id)?)?, &next.data)?;
+                    *self.clip_mut(id)? = next;
                 }
-                let mut next = current;
-                next.data = ClipData::Audio(data);
-                check_clip_data(&next.data)?;
-                check_clip_fits(self.track_ref(self.clip_owner(*clip)?)?, &next.data)?;
-                *self.clip_mut(*clip)? = next;
                 Ok(())
             }
             Command::SetClipData { clip, data } => {
@@ -4707,7 +4994,7 @@ impl Document {
             }
             Command::SetSceneColour { scenes, colour } => {
                 if let Some(colour) = colour {
-                    crate::colour::check_swatch("scene colour", *colour)?;
+                    colour.check("scene colour")?;
                 }
                 for id in each_once(scenes, |s| s.0)? {
                     let position = self.scene_position(id).ok_or(ModelError::NoSuchScene(id))?;
@@ -4738,7 +5025,7 @@ impl Document {
                 self.set_scene_signature(*scene, *signature)
             }
             Command::CreateSlotClip { track, scene, clip } => {
-                self.create_slot_clip(*track, *scene, clip)
+                self.create_slot_clip(*track, *scene, &clip.unlinked())
             }
             Command::MoveSlotClip { clip, track, scene } => {
                 self.move_slot_clip(*clip, *track, *scene)
@@ -4792,13 +5079,22 @@ impl Document {
                 name,
                 shape,
                 articulations,
+                routes,
                 mpe,
+                similarity_reference,
             } => {
                 let mut loaded = self.device_ref(*device)?.clone();
+                if similarity_reference.is_some() {
+                    loaded.similarity_reference = *similarity_reference;
+                }
                 loaded.set_both(params.clone());
                 loaded.shape.clone_from(shape);
                 if let Some(articulations) = articulations {
                     loaded.set_articulations(articulations.clone());
+                }
+                if let Some(routes) = routes {
+                    crate::matrix::check_routes(routes)?;
+                    loaded.routes.clone_from(routes);
                 }
                 if let Some(mpe) = mpe {
                     mpe.settings.check()?;
@@ -4918,6 +5214,13 @@ impl Document {
                 outputs.as_deref(),
                 *channel,
             ),
+            Command::SetModRoute {
+                device,
+                slot,
+                source,
+                destination,
+            } => self.set_mod_route(*device, *slot, source, destination),
+            Command::ClearModRoute { device, slot } => self.clear_mod_route(*device, *slot),
             Command::CompareSwitch { device } => {
                 if !self.device_ref(*device)?.can_compare() {
                     return Err(ModelError::NoCompare(*device));
@@ -4950,6 +5253,34 @@ impl Document {
                     self.device_mut(*device)?
                         .set_media(usize::from(*slot), *media);
                 }
+                Ok(())
+            }
+            Command::SetSimilarityReference { device, media } => {
+                let device = self.device_mut(*device)?;
+                device.similarity_reference = media.or_else(|| device.media_at(0));
+                Ok(())
+            }
+            Command::SetDeviceWavetable {
+                device,
+                oscillator,
+                choice,
+                media,
+            } => {
+                check_value(
+                    "oscillator",
+                    f64::from(*oscillator),
+                    (1..=crate::device::MAX_WAVETABLES as u8).contains(oscillator),
+                )?;
+                check_value(
+                    "wavetable media",
+                    f64::from(u8::from(media.is_some())),
+                    media.is_some() == matches!(choice, WavetableChoice::User { .. }),
+                )?;
+                self.device_mut(*device)?.set_wavetable(
+                    usize::from(*oscillator) - 1,
+                    choice.clone(),
+                    *media,
+                );
                 Ok(())
             }
             Command::SetDeviceWarp { device, warp } => {
@@ -5142,13 +5473,19 @@ impl Document {
                 self.edit_sidechain(*device, |s| s.input = input)?;
                 self.check_routing(self.device_owner(*device)?)
             }
-            Command::SetMidiSidechainSource { device, track } => {
+            Command::SetMidiSidechainSource { device, track, tap } => {
                 let mut sidechain = self
                     .device_ref(*device)?
                     .midi_sidechain
                     .clone()
                     .ok_or(ModelError::NoMidiSidechain(*device))?;
                 sidechain.source = *track;
+                if let Some(tap) = tap {
+                    if sidechain.tap.is_none() {
+                        return Err(ModelError::NoMidiTap(*device));
+                    }
+                    sidechain.tap = Some(*tap);
+                }
                 self.device_mut(*device)?.midi_sidechain = Some(sidechain);
                 self.check_routing(self.device_owner(*device)?)
             }
@@ -5321,12 +5658,18 @@ impl Document {
             }
             Command::SetChainColour { chain, colour } => {
                 if let Some(colour) = colour {
-                    check_value("chain colour", f64::from(*colour), *colour < CHAIN_COLOURS)?;
+                    colour.check("chain colour")?;
                 }
                 if self.chain_ref(*chain)?.colour != *colour {
                     self.chain_mut(*chain)?.colour = *colour;
                 }
                 Ok(())
+            }
+            Command::SetChainPushColour { chain, colour } => {
+                if let Some(colour) = colour {
+                    check_value("pad colour", f64::from(*colour), *colour < CHAIN_COLOURS)?;
+                }
+                self.edit_drum_chain(*chain, false, |c| c.push_colour = *colour)
             }
             Command::SetChainInfo { chain, info } => {
                 if self.chain_ref(*chain)?.info != *info {
@@ -5479,7 +5822,7 @@ impl Document {
                 colour,
             } => {
                 if let Some(colour) = colour {
-                    check_value("macro colour", f64::from(*colour), *colour < CHAIN_COLOURS)?;
+                    colour.check("macro colour")?;
                 }
                 self.edit_macro(*rack, *macro_number, |m| m.colour = *colour)
             }
@@ -6691,9 +7034,11 @@ impl Document {
             .expect("just checked the scene exists")
             .clone();
         for (track, clip, source) in copies {
+            // Spec: linked-clips R7. A scene's copies are independent clips.
             let copied = Clip {
                 id: clip,
                 start: Ticks::ZERO,
+                link: None,
                 ..source
             };
             self.track_mut(track)?
@@ -6741,6 +7086,11 @@ impl Document {
             clip.scale = self.settings.scale;
         }
         clip.colour.get_or_insert(target.colour);
+        // Spec: video R5, R8. A slot has no picture: a video clip put in one
+        // is an audio clip.
+        if let ClipData::Audio(audio) = &mut clip.data {
+            audio.video = false;
+        }
         let id = clip.id;
         self.track_mut(track)?
             .slots
@@ -6772,6 +7122,10 @@ impl Document {
             start: Ticks::ZERO,
             ..current
         };
+        // Spec: video R8. A video clip moved into a slot is an audio clip.
+        if let ClipData::Audio(audio) = &mut moved.data {
+            audio.video = false;
+        }
         // An envelope names a parameter of the track the clip is on, so one
         // moving to another track keeps only those its new track has
         // (WP-3.15).
@@ -6953,6 +7307,9 @@ impl Document {
     ) -> Result<(), ModelError> {
         let current = self.clip_ref(id)?.clone();
         let mut next = current.clone();
+        // Spec: linked-clips R5. A cropped clip leaves its link, so the
+        // others keep their contents.
+        next.link = None;
         match &current.data {
             ClipData::Audio(audio) => {
                 let Some(media) = media else {
@@ -6962,6 +7319,7 @@ impl Document {
                 };
                 let mut data = audio.cropped(from, to)?;
                 data.media = media;
+                data.video = false;
                 next.data = ClipData::Audio(data);
             }
             ClipData::Midi(midi) => {
@@ -8308,6 +8666,87 @@ impl Document {
         Ok(())
     }
 
+    /// Adds a chord region (the chord lane spec, R2, R3).
+    fn add_chord_region(&mut self, region: ChordRegion) -> Result<(), ModelError> {
+        region.check()?;
+        self.check_fresh(region.id.0)?;
+        self.check_chord_room(None, region.start, region.end)?;
+        self.settings.chord_lane.push(region);
+        self.settings.chord_lane.sort_by_key(|region| region.start);
+        Ok(())
+    }
+
+    /// Moves a chord region to `start..end`.
+    fn move_chord_region(
+        &mut self,
+        id: ChordRegionId,
+        start: Ticks,
+        end: Ticks,
+    ) -> Result<(), ModelError> {
+        let mut region = *self
+            .chord_region(id)
+            .ok_or(ModelError::NoSuchChordRegion(id))?;
+        region.start = start;
+        region.end = end;
+        region.check()?;
+        self.check_chord_room(Some(id), start, end)?;
+        self.chord_region_mut(id).start = start;
+        self.chord_region_mut(id).end = end;
+        self.settings.chord_lane.sort_by_key(|region| region.start);
+        Ok(())
+    }
+
+    /// Sets a chord region's scale and transposition.
+    fn set_chord_region(
+        &mut self,
+        id: ChordRegionId,
+        enabled: Option<bool>,
+        root: Option<u8>,
+        name: Option<&str>,
+        transpose: Option<i32>,
+    ) -> Result<(), ModelError> {
+        let current = *self
+            .chord_region(id)
+            .ok_or(ModelError::NoSuchChordRegion(id))?;
+        let scale = scaled(current.scale, enabled, root, name)?;
+        let transpose = match transpose {
+            Some(by) => i8::try_from(by).map_err(|_| ModelError::InvalidValue {
+                what: "transposition",
+                value: f64::from(by),
+            })?,
+            None => current.transpose,
+        };
+        crate::chord_lane::check_transpose(transpose)?;
+        let region = self.chord_region_mut(id);
+        region.scale = scale;
+        region.transpose = transpose;
+        Ok(())
+    }
+
+    /// Refuses a stretch that overlaps a chord region other than `except`.
+    fn check_chord_room(
+        &self,
+        except: Option<ChordRegionId>,
+        start: Ticks,
+        end: Ticks,
+    ) -> Result<(), ModelError> {
+        match crate::chord_lane::overlaps(&self.settings.chord_lane, except, start, end) {
+            Some(at) => Err(ModelError::ChangeInUse {
+                what: "chord region",
+                at,
+            }),
+            None => Ok(()),
+        }
+    }
+
+    fn chord_region_mut(&mut self, id: ChordRegionId) -> &mut ChordRegion {
+        self.settings
+            .chord_lane
+            .iter_mut()
+            .find(|region| region.id == id)
+            .expect("the region was just found")
+    }
+
     /// Deletes a locator. A song start time on it goes with it.
     fn delete_locator(&mut self, id: LocatorId) -> Result<(), ModelError> {
         let position = self
@@ -8626,7 +9065,7 @@ impl Document {
             .ok_or(ModelError::NoSuchClip(id))
     }
 
-    fn colour_track(&mut self, id: TrackId, colour: u8) -> Result<(), ModelError> {
+    fn colour_track(&mut self, id: TrackId, colour: Colour) -> Result<(), ModelError> {
         if self.track_ref(id)?.colour != colour {
             self.track_mut(id)?.colour = colour;
         }
@@ -8635,7 +9074,7 @@ impl Document {
 
     /// Colours every clip a track holds: its Arrangement lane, its Session
     /// slots and its take lanes.
-    fn colour_clips_of(&mut self, id: TrackId, colour: u8) -> Result<(), ModelError> {
+    fn colour_clips_of(&mut self, id: TrackId, colour: Colour) -> Result<(), ModelError> {
         let clips: Vec<ClipId> = self
             .track_ref(id)?
             .all_clips()
@@ -8706,6 +9145,16 @@ impl Document {
     ) -> Result<(), ModelError> {
         if self.device_ref(id)?.plugin != state {
             self.device_mut(id)?.plugin = state;
+        }
+        Ok(())
+    }
+
+    /// Arms or disarms a track outside the command system:
+    /// [`Editor::follow_arm`](crate::Editor::follow_arm) calls it.
+    pub(crate) fn follow_arm(&mut self, track: TrackId, arm: bool) -> Result<(), ModelError> {
+        check_kind(self.track_ref(track)?, TrackKind::has_arm, AUDIO_OR_MIDI)?;
+        if self.track_ref(track)?.mixer.arm != arm {
+            self.track_mut(track)?.mixer.arm = arm;
         }
         Ok(())
     }
@@ -8835,7 +9284,7 @@ impl Document {
         Ok(())
     }
 
-    fn check_fresh(&self, id: Id) -> Result<(), ModelError> {
+    pub(crate) fn check_fresh(&self, id: Id) -> Result<(), ModelError> {
         if self.contains(id) {
             Err(ModelError::IdInUse(id))
         } else {
@@ -9280,7 +9729,7 @@ pub(crate) fn check_marker_order(audio: &AudioData) -> Result<(), ModelError> {
 /// playing (the audio clips spec, R16).
 pub(crate) fn check_clip(clip: &Clip) -> Result<(), ModelError> {
     if let Some(colour) = clip.colour {
-        crate::colour::check_swatch("clip colour", colour)?;
+        colour.check("clip colour")?;
     }
     check_offset(clip.offset)?;
     if clip.data.is_audio() && clip.offset != Ticks::ZERO {
@@ -9329,6 +9778,9 @@ fn check_one_device(device: &Device) -> Result<(), ModelError> {
     if device.is_articulation_map() {
         crate::articulation::check(&device.articulations).map_err(ModelError::InvalidInput)?;
     }
+    // Spec: instrument modulation R10. A saved device whose routes repeat a
+    // slot or name nothing doesn't load.
+    crate::matrix::check_routes(&device.routes)?;
     if !device.can_compare() && (device.b_active || device.other_params.is_some()) {
         return Err(ModelError::NoCompare(device.id));
     }
@@ -9616,6 +10068,7 @@ mod tests {
         song.apply(Command::SetMidiSidechainSource {
             device: listener,
             track: Some(source),
+            tap: None,
         })
         .unwrap();
         let tapping = song.track(TrackKind::Audio, None);
@@ -12118,7 +12571,9 @@ mod tests {
             name: "Warm".to_owned(),
             shape: None,
             articulations: None,
+            routes: None,
             mpe: None,
+            similarity_reference: None,
         })
         .unwrap();
         let loaded = song.doc.device(device).unwrap();
@@ -12132,7 +12587,9 @@ mod tests {
                 name: String::new(),
                 shape: None,
                 articulations: None,
+                routes: None,
                 mpe: None,
+                similarity_reference: None,
             }),
             ModelError::InvalidValue { .. }
         ));
@@ -14417,7 +14874,9 @@ mod tests {
             name: String::new(),
             shape: None,
             articulations: None,
+            routes: None,
             mpe: None,
+            similarity_reference: None,
         })
         .unwrap();
         let d = song.doc.device(device).unwrap();

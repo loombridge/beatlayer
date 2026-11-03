@@ -331,6 +331,7 @@ pub fn display(
     let offset = operating_point(model, value(BIAS) / 100.0);
     let through = |x: f32| tube(model, offset, gain * x);
     let mut out = DeviceDisplay {
+        spectrograms: Vec::new(),
         device,
         live: data.is_some(),
         view: None,
@@ -359,6 +360,7 @@ pub fn display(
         if input > LEVEL_FLOOR_DB {
             let x = (db_to_gain(f64::from(input)) as f32).min(1.0);
             out.markers.push(DisplayMarker {
+                handle: None,
                 name: "Level".to_owned(),
                 series: "Tube Curve".to_owned(),
                 x,

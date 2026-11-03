@@ -14,6 +14,7 @@ fn main() {
         .cpp(true)
         .std("c++17")
         .file(link.join("abl_link.cpp"))
+        .file("src/shim.cpp")
         .include(link)
         .include(asio)
         .define("ASIO_STANDALONE", "1")
@@ -54,5 +55,6 @@ fn main() {
     }
     println!("cargo:rerun-if-changed=vendor/link/abl_link.cpp");
     println!("cargo:rerun-if-changed=vendor/link/abl_link.h");
+    println!("cargo:rerun-if-changed=src/shim.cpp");
     println!("cargo:rerun-if-changed=build.rs");
 }

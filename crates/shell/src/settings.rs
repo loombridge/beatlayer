@@ -12,7 +12,7 @@ use bl_model::PluginFormat;
 pub use bl_shell_spec::midi_io::PortDirection;
 pub use bl_shell_spec::settings::{
     Appearance, AutomationRecordMode, BRIGHTNESS, BUNDLED_THEME, COLOR_HUE, COLOR_INTENSITY,
-    ClipColour, CollectFiles, DefaultWarpMode, GRID_LINE_INTENSITY, LaunchPrefs,
+    ClipColour, CollectFiles, CustomColours, DefaultWarpMode, GRID_LINE_INTENSITY, LaunchPrefs,
     LoopWarpShortSamples, SessionAutomationTracks, SettingsPage, TakeoverMode, ThemeLook, Tone,
     WarpPrefs, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor, zoom_percent,
     zoom_step,
@@ -94,6 +94,16 @@ pub struct Preferences {
     /// not saved with the set. Off in a new install, so the returns stay
     /// pinned, as in Live.
     pub return_tracks_scroll: bool,
+    /// How the MIDI Note Editor colours notes (View ▸ Note Colors; the view
+    /// options spec, R2): By Velocity, Live's, in a new install.
+    pub note_colors: bl_shell_spec::view_options::NoteColors,
+    /// Mark Empty Tracks (View menu; the view options spec, R6): off in a
+    /// new install.
+    pub mark_empty_tracks: bool,
+    /// Adjust Values with Mouse Wheel (Display & Input; the view options
+    /// spec, R10): off in a new install, so the wheel only scrolls, as in
+    /// Live.
+    pub wheel_adjusts_values: bool,
     /// The MIDI Note Editor's Preview switch (Options > MIDI Note Editor
     /// Preview; WP-6.5, the step recording spec, R1): one switch for every
     /// MIDI clip, off in a new install.
@@ -156,6 +166,14 @@ pub struct Preferences {
     /// as Live's plug-in windows do. On by default, as observed in Live
     /// 12.4.6.
     pub auto_hide_plug_in_windows: OnByDefault,
+    /// Multiple Plug-In Windows (Plug-Ins, Plug-In Windows, L-SET-017):
+    /// while it's off, opening a plug-in's window closes the other
+    /// plug-in windows (WP-6.75). On by default, as observed in Live 12.
+    pub multiple_plug_in_windows: OnByDefault,
+    /// Auto-Open Plug-In Windows (Plug-Ins, Plug-In Windows, L-SET-017):
+    /// inserting a plug-in device opens its window (WP-6.75). On by
+    /// default, as observed in Live 12.
+    pub auto_open_plug_in_windows: OnByDefault,
     /// The plug-ins the browser hides, as `format/plugin_id` keys
     /// (WP-2.9, IMP-07). A set that uses a hidden plug-in still loads it.
     pub hidden_plugins: BTreeSet<String>,
@@ -208,11 +226,38 @@ pub struct Preferences {
     pub midi: MidiPrefs,
     /// Link's switches (the Link spec, R1 and R8).
     pub link: LinkPrefs,
+    /// Tempo Follower's two settings (the Tempo Follower spec, R1).
+    pub tempo_follower: TempoFollowerPrefs,
+}
+
+/// What the app keeps of Tempo Follower between starts (the Tempo Follower
+/// spec, R1): the toggle hidden and the first mono channel in a new install.
+/// Follow itself isn't kept (R3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TempoFollowerPrefs {
+    /// Show Tempo Follower Toggle (Settings ▸ Tempo & MIDI): whether the
+    /// Control Bar shows the Follow toggle.
+    pub show_toggle: bool,
+    /// Input Channel (Settings ▸ Tempo & MIDI): the audio input it listens
+    /// to, counted from 1.
+    pub input: bl_model::Channel,
+}
+
+impl Default for TempoFollowerPrefs {
+    fn default() -> Self {
+        Self {
+            show_toggle: false,
+            input: bl_model::Channel::Mono(1),
+        }
+    }
 }
 
 /// What the app keeps of Link between starts (the Link spec, R1, R8 and
-/// R17): Link and Start Stop Sync off in a new install, the toggle shown.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// R17; the Link Audio spec, R1, R3, R7, R8): Link, Start Stop Sync, Link
+/// Audio and Sync to Incoming Audio off in a new install, the toggle shown,
+/// the Latency 20 ms and the name the computer's.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LinkPrefs {
     /// Whether Link is on: the app joins the Link session on its networks.
@@ -222,6 +267,27 @@ pub struct LinkPrefs {
     /// Show Link Toggle (Settings ▸ Link): whether the Control Bar shows the
     /// Link toggle and its menu.
     pub show_toggle: OnByDefault,
+    /// Whether Link Audio is on (the Link Audio spec, R1).
+    pub audio: bool,
+    /// The name other peers see the app by; empty for the computer's name
+    /// (R3).
+    pub audio_name: String,
+    /// The Latency of incoming audio, in milliseconds (R7).
+    pub audio_latency_ms: LatencyMs,
+    /// Whether the app delays its own playback by the Latency (R8).
+    pub sync_to_incoming_audio: bool,
+}
+
+/// Link Audio's Latency in milliseconds, 20 until the preferences say
+/// otherwise, read and written as a plain number.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct LatencyMs(pub f64);
+
+impl Default for LatencyMs {
+    fn default() -> Self {
+        Self(bl_shell_spec::link::DEFAULT_LATENCY_MS)
+    }
 }
 
 /// What the app keeps of MIDI input between starts (the MIDI I/O spec, R3
@@ -273,6 +339,13 @@ pub struct PushPrefs {
     pub workflow_clip: bool,
     /// The swing amount in thousandths, 0 to 1,000.
     pub swing: u16,
+    /// Whether Fixed Length is on (push-2-notes R50).
+    pub fixed_length_on: bool,
+    /// Fixed Length's length, as a place in the list the lower display
+    /// buttons choose from: 1 bar in a new install.
+    pub fixed_length: u8,
+    /// Whether Phrase Sync is on.
+    pub phrase_sync: bool,
 }
 
 impl Default for PushPrefs {
@@ -286,6 +359,9 @@ impl Default for PushPrefs {
             led_brightness: setup.led_brightness,
             workflow_clip: false,
             swing: 0,
+            fixed_length_on: false,
+            fixed_length: bl_push::recording::FixedLength::default().length,
+            phrase_sync: false,
         }
     }
 }
@@ -309,9 +385,24 @@ impl PushPrefs {
         .clamped()
     }
 
-    /// The preferences that keep `setup` and `swing` (0 to 1).
+    /// Fixed Length's settings these preferences keep.
     #[must_use]
-    pub fn of(setup: bl_push::curve::Setup, swing: f64) -> Self {
+    pub fn fixed(&self) -> bl_push::recording::FixedLength {
+        bl_push::recording::FixedLength {
+            on: self.fixed_length_on,
+            length: self.fixed_length,
+            phrase_sync: self.phrase_sync,
+        }
+        .clamped()
+    }
+
+    /// The preferences that keep `setup`, `swing` (0 to 1) and `fixed`.
+    #[must_use]
+    pub fn of(
+        setup: bl_push::curve::Setup,
+        swing: f64,
+        fixed: bl_push::recording::FixedLength,
+    ) -> Self {
         Self {
             pad_sensitivity: setup.sensitivity,
             pad_gain: setup.gain,
@@ -320,6 +411,9 @@ impl PushPrefs {
             led_brightness: setup.led_brightness,
             workflow_clip: setup.workflow == bl_push::curve::Workflow::Clip,
             swing: (swing.clamp(0.0, 1.0) * 1000.0).round() as u16,
+            fixed_length_on: fixed.on,
+            fixed_length: fixed.length,
+            phrase_sync: fixed.phrase_sync,
         }
     }
 }

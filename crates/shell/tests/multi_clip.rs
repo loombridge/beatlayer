@@ -790,3 +790,26 @@ fn duplicate_loop_gives_the_copies_groups_of_their_own() {
     assert_eq!(notes[2].group, notes[3].group);
     assert_ne!(notes[0].group, notes[2].group);
 }
+
+// Spec: multi-clip-editing R2. Select All in the Session View shows the
+// clips of the filled slots by track, then scene, whatever order they were
+// made in; the empty slots add nothing.
+#[test]
+fn select_all_shows_the_session_clips_by_track_then_scene() {
+    let mut build = build();
+    let mut made = Vec::new();
+    for (track, scene) in [(1, 1), (0, 1), (1, 0), (0, 0)] {
+        made.push(((track, scene), build.slot(track, scene, BAR, vec![], true)));
+    }
+    made.sort_by_key(|(place, _)| *place);
+    let mut song = build.open();
+    song.run("session.select_all", json!({}));
+    let shown = song
+        .shell
+        .clip_view()
+        .shown(song.doc(), song.shell.arrangement());
+    assert_eq!(
+        shown,
+        made.into_iter().map(|(_, clip)| clip).collect::<Vec<_>>()
+    );
+}

@@ -153,7 +153,9 @@ fn last_step(h: &Harness) -> String {
 fn swatches(nodes: &[Node]) -> Vec<Node> {
     nodes
         .iter()
-        .filter(|n| n.role == Role::Button && n.label.starts_with("Row "))
+        .filter(|n| {
+            n.role == Role::Button && n.label.starts_with("Row ") && !n.label.starts_with("Row 6")
+        })
         .cloned()
         .collect()
 }
@@ -183,7 +185,15 @@ fn the_palette_ticks_the_tracks_swatch_and_colours_the_selected_tracks() {
     let mut h = arrangement();
     let all = tracks(&h);
     let audio = all[2];
-    let own = h.shell.editor().document().track(audio).unwrap().colour();
+    let own = h
+        .shell
+        .editor()
+        .document()
+        .track(audio)
+        .unwrap()
+        .colour()
+        .swatch()
+        .unwrap();
     let at = header_title(&mut h, "3 Audio");
     let nodes = Harness::nodes(&right_click(&mut h, at));
 
@@ -191,7 +201,11 @@ fn the_palette_ticks_the_tracks_swatch_and_colours_the_selected_tracks() {
         .iter()
         .find(|n| n.role == Role::Grid && n.label == "Colour palette")
         .expect("the palette is one control in the tree");
-    assert_eq!(grid.children.len(), 70, "a grid of 70 buttons");
+    assert_eq!(
+        grid.children.len(),
+        70 + 14 + 1,
+        "70 swatches, the 14 places of the custom row and Custom Color…"
+    );
     let buttons = swatches(&nodes);
     assert_eq!(buttons.len(), 70);
     let ticked: Vec<_> = buttons
@@ -207,7 +221,7 @@ fn the_palette_ticks_the_tracks_swatch_and_colours_the_selected_tracks() {
     assert!(invoked(&mut h, "track.set_colour"));
     assert_eq!(
         h.shell.editor().document().track(audio).unwrap().colour(),
-        2 * 14 + 3
+        bl_model::Colour::Swatch(2 * 14 + 3)
     );
     assert_eq!(last_step(&h), "Change Track Color");
     assert!(
@@ -228,8 +242,14 @@ fn the_palette_ticks_the_tracks_swatch_and_colours_the_selected_tracks() {
     let nodes = Harness::nodes(&right_click(&mut h, at));
     click_node(&mut h, &swatch_named(&nodes, 5, 14));
     let doc = h.shell.editor().document();
-    assert_eq!(doc.track(all[0]).unwrap().colour(), 69);
-    assert_eq!(doc.track(all[2]).unwrap().colour(), 69);
+    assert_eq!(
+        doc.track(all[0]).unwrap().colour(),
+        bl_model::Colour::Swatch(69)
+    );
+    assert_eq!(
+        doc.track(all[2]).unwrap().colour(),
+        bl_model::Colour::Swatch(69)
+    );
     assert_eq!(h.shell.editor().undo_history().len(), steps + 1);
 }
 
@@ -298,6 +318,18 @@ fn the_palette_is_reached_from_the_keyboard() {
         h.key(Key::ArrowDown, Modifiers::NONE);
     }
     assert_eq!(focused_label(&h.settle()), "Row 5, colour 1");
+    // Spec: themes R31. The custom row and Custom Color… are rows 6 and 7 of
+    // the grid, which Down reaches in turn before it leaves the palette; Up
+    // from Custom Color… comes back to the column the keyboard was in.
+    h.key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(focused_label(&h.settle()), "Row 6, colour 1, empty");
+    h.key(Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(focused_label(&h.settle()), "Row 6, colour 2, empty");
+    h.key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(focused_label(&h.settle()), "Custom Color…");
+    h.key(Key::ArrowUp, Modifiers::NONE);
+    assert_eq!(focused_label(&h.settle()), "Row 6, colour 2, empty");
+    h.key(Key::ArrowDown, Modifiers::NONE);
     h.key(Key::ArrowDown, Modifiers::NONE);
     assert!(focused_label(&h.settle()).starts_with("Assign Track Color to Clips"));
     // Back in, then to the swatch the test chooses.
@@ -312,7 +344,7 @@ fn the_palette_is_reached_from_the_keyboard() {
     assert!(invoked(&mut h, "track.set_colour"));
     assert_eq!(
         h.shell.editor().document().track(audio).unwrap().colour(),
-        14 + 1
+        bl_model::Colour::Swatch(14 + 1)
     );
 }
 
@@ -347,7 +379,7 @@ fn assign_track_color_to_clips_gives_the_clips_the_tracks_colour() {
         .unwrap();
     assert_ne!(
         h.shell.editor().document().clip(clip).unwrap().colour,
-        Some(44)
+        Some(bl_model::Colour::Swatch(44))
     );
     h.settle();
     let at = header_title(&mut h, "3 Audio");
@@ -357,7 +389,7 @@ fn assign_track_color_to_clips_gives_the_clips_the_tracks_colour() {
     assert!(invoked(&mut h, "track.assign_colour_to_clips"));
     assert_eq!(
         h.shell.editor().document().clip(clip).unwrap().colour,
-        Some(44)
+        Some(bl_model::Colour::Swatch(44))
     );
     assert_eq!(last_step(&h), "Assign Track Color to Clips");
 }
@@ -1116,4 +1148,239 @@ fn clicking_the_linked_track_indicator_selects_its_group() {
     );
     assert!(h.shell.arrangement().title_bars_selected());
     assert_eq!(h.shell.editor().undo_history().count(), steps);
+}
+
+/// Types `text` into the picker's hex field, replacing what it holds.
+fn type_hex(h: &mut Harness, text: &str) {
+    let nodes = Harness::nodes(&h.settle());
+    let field = Harness::node(&nodes, "Hex color").clone();
+    click_node(h, &field);
+    h.key(Key::A, common::command());
+    h.frame(vec![Event::Text(text.to_owned())]);
+    h.settle();
+}
+
+/// The custom row as the shell holds it: the colour in each place, if any.
+fn custom_row(h: &Harness) -> Vec<Option<bl_model::Colour>> {
+    let mut row = h.shell.look().custom_colours.places.clone();
+    row.resize(14, None);
+    row
+}
+
+// Spec: themes R28, R29, R31. Custom Color… is the grid's seventh row: it
+// closes the menu and opens the colour picker on the track's colour; its hex
+// field takes a typed colour, OK colours the selected tracks with it as one
+// undo step, and puts it in the first place of the custom row.
+#[test]
+fn custom_color_colours_a_track_through_the_picker_and_fills_the_row() {
+    let mut h = arrangement();
+    let audio = tracks(&h)[2];
+    let at = header_title(&mut h, "3 Audio");
+    let nodes = Harness::nodes(&right_click(&mut h, at));
+    // The grid's rows 6 and 7 are there, with the row empty.
+    let empty: Vec<_> = swatches_and_places(&nodes);
+    assert_eq!(empty.len(), 14, "the 14 places of the custom row");
+    assert!(
+        empty.iter().all(|label| label.ends_with(", empty")),
+        "{empty:?}"
+    );
+    assert!(!bl_ui::palette::picker_is_open(&h.ctx));
+
+    click_node(&mut h, &item(&nodes, "Custom Color…"));
+    assert!(bl_ui::palette::picker_is_open(&h.ctx), "the picker opens");
+    assert!(
+        !egui::Popup::is_any_open(&h.ctx),
+        "Custom Color… closes the menu"
+    );
+    let own = h.shell.editor().document().track(audio).unwrap().colour();
+    assert_ne!(own, bl_model::Colour::Custom([0x33, 0x66, 0x99]));
+    let steps = h.shell.editor().undo_history().len();
+
+    type_hex(&mut h, "#336699");
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(
+        Harness::node(&nodes, "Hex color").value,
+        "#336699",
+        "the field holds what was typed"
+    );
+    // Nothing is coloured until OK.
+    assert_eq!(
+        h.shell.editor().document().track(audio).unwrap().colour(),
+        own
+    );
+    h.take_events();
+    click_node(&mut h, &item(&nodes, "OK"));
+    assert!(
+        !bl_ui::palette::picker_is_open(&h.ctx),
+        "OK closes the picker"
+    );
+    assert!(invoked(&mut h, "track.set_colour"));
+    assert_eq!(
+        h.shell.editor().document().track(audio).unwrap().colour(),
+        bl_model::Colour::Custom([0x33, 0x66, 0x99])
+    );
+    assert_eq!(h.shell.editor().undo_history().len(), steps + 1);
+    assert_eq!(last_step(&h), "Change Track Color");
+    assert_eq!(
+        custom_row(&h)[0],
+        Some(bl_model::Colour::Custom([0x33, 0x66, 0x99])),
+        "the first empty place"
+    );
+
+    // The menu reads the new colour back: the track's place in the row is
+    // the ticked one, named by its row, column and colour.
+    let at = header_title(&mut h, "3 Audio");
+    let nodes = Harness::nodes(&right_click(&mut h, at));
+    let ticked: Vec<_> = nodes
+        .iter()
+        .filter(|n| {
+            n.role == Role::Button
+                && n.label.starts_with("Row ")
+                && (n.selected == Some(true) || n.toggled == Some(true))
+        })
+        .map(|n| n.label.clone())
+        .collect();
+    assert_eq!(ticked, ["Row 6, colour 1, #336699"]);
+
+    // A bad hex leaves the colour as it was; Cancel leaves everything.
+    click_node(&mut h, &item(&nodes, "Custom Color…"));
+    type_hex(&mut h, "#12345");
+    // Enter and OK wait for a colour that is #RRGGBB.
+    h.key(Key::Enter, Modifiers::NONE);
+    h.settle();
+    assert!(bl_ui::palette::picker_is_open(&h.ctx), "Enter waits");
+    let nodes = Harness::nodes(&h.settle());
+    assert!(item(&nodes, "OK").disabled, "OK is disabled");
+    let before = h.shell.look().custom_colours.clone();
+    click_node(&mut h, &item(&nodes, "Cancel"));
+    assert!(!bl_ui::palette::picker_is_open(&h.ctx));
+    assert_eq!(
+        h.shell.editor().document().track(audio).unwrap().colour(),
+        bl_model::Colour::Custom([0x33, 0x66, 0x99])
+    );
+    assert_eq!(h.shell.look().custom_colours, before);
+}
+
+/// The labels of the custom row's places in a menu.
+fn swatches_and_places(nodes: &[Node]) -> Vec<String> {
+    nodes
+        .iter()
+        .filter(|n| n.role == Role::Button && n.label.starts_with("Row 6, "))
+        .map(|n| n.label.clone())
+        .collect()
+}
+
+// Spec: themes R28, R31. A filled place of the custom row colours the
+// selected tracks with its colour as one undo step, whatever the colour of
+// the swatches around it; an empty place does nothing.
+#[test]
+fn a_swatch_of_the_custom_row_colours_the_selection() {
+    let mut h = arrangement();
+    let all = tracks(&h);
+    h.shell
+        .run("settings.use_custom_colour", json!({ "colour": "#FF8800" }))
+        .unwrap();
+    h.shell
+        .run("settings.use_custom_colour", json!({ "colour": "#0088FF" }))
+        .unwrap();
+    h.shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [all[0], all[2]], "title_bars": true }),
+        )
+        .unwrap();
+    h.settle();
+    let at = header_title(&mut h, "3 Audio");
+    let nodes = Harness::nodes(&right_click(&mut h, at));
+    let places = swatches_and_places(&nodes);
+    assert_eq!(places.len(), 14);
+    assert!(
+        places.contains(&"Row 6, colour 1, #FF8800".to_owned()),
+        "{places:?}"
+    );
+    assert!(places.contains(&"Row 6, colour 2, #0088FF".to_owned()));
+    assert!(places.contains(&"Row 6, colour 3, empty".to_owned()));
+
+    // An empty place colours nothing.
+    let steps = h.shell.editor().undo_history().len();
+    let empty = Harness::node(&nodes, "Row 6, colour 3, empty").clone();
+    click_node(&mut h, &empty);
+    assert_eq!(h.shell.editor().undo_history().len(), steps);
+
+    let at = header_title(&mut h, "3 Audio");
+    let nodes = Harness::nodes(&right_click(&mut h, at));
+    let filled = Harness::node(&nodes, "Row 6, colour 2, #0088FF").clone();
+    h.take_events();
+    click_node(&mut h, &filled);
+    assert!(invoked(&mut h, "track.set_colour"));
+    let doc = h.shell.editor().document();
+    for track in [all[0], all[2]] {
+        assert_eq!(
+            doc.track(track).unwrap().colour(),
+            bl_model::Colour::Custom([0x00, 0x88, 0xFF])
+        );
+    }
+    assert_eq!(h.shell.editor().undo_history().len(), steps + 1);
+    assert!(
+        !egui::Popup::is_any_open(&h.ctx),
+        "choosing closes the menu"
+    );
+    // Using it again marks it as used and puts nothing new in the row.
+    assert_eq!(custom_row(&h).iter().filter(|c| c.is_some()).count(), 2);
+}
+
+// Spec: themes R31. The custom row and Custom Color… are rows 6 and 7 of the
+// palette's grid in the accessibility tree: one grid, its buttons named by
+// row and column, a filled place by its colour too, an empty one as empty.
+#[test]
+fn the_grid_reads_the_custom_row_and_custom_color_as_its_last_rows() {
+    let mut h = arrangement();
+    h.shell
+        .run("settings.use_custom_colour", json!({ "colour": "#010203" }))
+        .unwrap();
+    let at = header_title(&mut h, "3 Audio");
+    let nodes = Harness::nodes(&right_click(&mut h, at));
+    let grid = nodes
+        .iter()
+        .find(|n| n.role == Role::Grid && n.label == "Colour palette")
+        .expect("one grid");
+    assert_eq!(grid.children.len(), 70 + 14 + 1);
+    let label_of = |id| {
+        nodes
+            .iter()
+            .find(|n| n.id == id)
+            .map(|n| n.label.clone())
+            .unwrap()
+    };
+    let labels: Vec<String> = grid.children.iter().map(|id| label_of(*id)).collect();
+    let position = |label: &str| labels.iter().position(|l| l == label).unwrap();
+    assert_eq!(position("Row 5, colour 14"), 69, "the swatches come first");
+    assert_eq!(position("Row 6, colour 1, #010203"), 70);
+    assert_eq!(position("Row 6, colour 14, empty"), 83);
+    assert_eq!(labels[84], "Custom Color…", "the last row");
+    let own = Harness::node(&nodes, "Row 6, colour 1, #010203");
+    assert_eq!(own.role, Role::Button);
+}
+
+// Spec: session-context-menus R18 (C-MAIN). The Main track's header opens a
+// menu of Live's rows: no rename, delete, freeze, group or colour-
+// automatically items.
+#[test]
+fn the_main_tracks_header_opens_its_own_menu() {
+    let mut h = arrangement();
+    let at = header_title(&mut h, "Main");
+    let nodes = Harness::nodes(&right_click(&mut h, at));
+    use common::MenuRow::{Dim, Item, Sep};
+    common::assert_menu(
+        &nodes,
+        &[
+            Item("Edit Info Text"),
+            Sep,
+            Item("Insert Audio Track"),
+            Item("Insert MIDI Track"),
+            Item("Insert Return Track"),
+            Sep,
+            Dim("Select Track Content"),
+        ],
+    );
 }

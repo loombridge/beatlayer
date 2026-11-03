@@ -189,6 +189,9 @@ pub struct SessionViewState {
     pub title_tracks: bool,
     /// How far the scenes are scrolled down, in points at 100%.
     pub scroll_y: f64,
+    /// The scene whose Scene View is open in the detail area.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scene_view: Option<SceneId>,
 }
 
 /// Arguments of `session.select`.
@@ -204,6 +207,10 @@ pub struct SelectArgs {
     /// How the click changes the selection.
     #[serde(default)]
     pub mode: SessionSelectMode,
+    /// Also open the Scene View for `scene`, as a double-click on the scene's
+    /// number does. Ignored when `track` is given.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub scene_view: bool,
 }
 
 /// Which edge of the current scene to select (S-SES-020 to S-SES-022).
@@ -277,6 +284,15 @@ pub struct CopyClipArgs {
     pub track: TrackId,
     /// The scene whose slot it goes in.
     pub scene: SceneId,
+}
+
+/// Arguments of `session.capture_and_insert_scene`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CaptureArgs {
+    /// Tracks whose playing clips aren't copied into the new scene.
+    #[serde(default)]
+    pub except: Vec<TrackId>,
 }
 
 /// Arguments of `session.drop_files`.
@@ -404,7 +420,8 @@ fn specs() -> Vec<CommandSpec> {
              alone a title bar. `mode` is `replace` for a plain click, `add` for Cmd-click \
              (Ctrl on Windows and Linux), which adds the item or removes it when it's already \
              selected, and `range` for Shift-click, which selects from the last item clicked \
-             to this one. Changes only the view.",
+             to this one. With `scene_view` true, `scene` also opens its Scene View in the detail \
+             area, as a double-click on the scene's number does. Changes only the view.",
         )
         .context(Session)
         .args::<SelectArgs>(),

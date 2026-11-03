@@ -8,7 +8,7 @@
 
 use bl_control::browse::{Browse as Lists, Entry, Load};
 use bl_control::{Cx, ReadModel};
-use bl_model::{DeviceId, DeviceRole, TrackKind};
+use bl_model::{DeviceId, DeviceRole, SceneId, TrackId, TrackKind};
 use serde_json::{Value, json};
 
 use crate::content::{Content, Ctx, Enter, Gesture, Paint, Turn};
@@ -28,6 +28,10 @@ const KINDS: [(&str, &str, Option<DeviceRole>); 3] = [
     ("return", "Return", Some(DeviceRole::AudioEffect)),
 ];
 
+/// The key of the one label of the list Clip Mode offers an empty audio slot
+/// (R43).
+const SAMPLES: &str = "samples";
+
 /// What Load does (R5, R12).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LoadKind {
@@ -37,6 +41,9 @@ pub enum LoadKind {
     Replace(DeviceId),
     /// Adds a track, with the device on it when one is chosen.
     AddTrack,
+    /// Puts the chosen audio file in the empty slot Clip Mode offered it for
+    /// (R43).
+    Sample,
 }
 
 /// What `push.state` reads of Browse Mode (R14).
@@ -76,18 +83,32 @@ impl Col {
 struct Target {
     replace: Option<DeviceId>,
     role: Option<DeviceRole>,
+    /// The instrument at the top of the selected track's chain, which an
+    /// instrument Add Device loads replaces (R25).
+    instrument: Option<DeviceId>,
 }
 
 impl Target {
-    fn of(model: &ReadModel) -> Self {
+    /// What Load acts on: with `adding`, Add Device's target, which adds
+    /// after the selected device whatever it is (R25).
+    fn of(model: &ReadModel, adding: bool) -> Self {
         let doc = &model.document;
+        let instrument = model
+            .selection
+            .tracks
+            .first()
+            .and_then(|&track| doc.track(track))
+            .and_then(|track| track.devices().find(|d| d.role == DeviceRole::Instrument))
+            .map(|d| d.id);
         let selected = model
             .selected_device
+            .filter(|_| !adding)
             .and_then(|id| doc.device(id).map(|device| (id, device.role)));
         if let Some((id, role)) = selected {
             return Self {
                 replace: Some(id),
                 role: Some(role),
+                instrument,
             };
         }
         // An audio, group or return track takes audio effects only; a MIDI
@@ -101,6 +122,7 @@ impl Target {
         Self {
             replace: None,
             role: (!midi).then_some(DeviceRole::AudioEffect),
+            instrument,
         }
     }
 }
@@ -108,7 +130,10 @@ impl Target {
 /// Browse Mode's content.
 pub struct Browse {
     add_track: bool,
+    add_device: bool,
     target: Option<Target>,
+    /// The empty audio slot Clip Mode is loading a sample into (R43).
+    samples: Option<(TrackId, SceneId)>,
     columns: Vec<Col>,
     in_use: usize,
     seen: Option<u64>,
@@ -128,7 +153,9 @@ impl Browse {
     pub fn new() -> Self {
         Self {
             add_track: false,
+            add_device: false,
             target: None,
+            samples: None,
             columns: Vec::new(),
             in_use: 0,
             seen: None,
@@ -152,6 +179,15 @@ impl Browse {
     fn list(&self, lists: &Lists, above: Option<&Entry>) -> Vec<Entry> {
         let role = self.role();
         match above {
+            None if self.samples.is_some() => vec![Entry {
+                key: SAMPLES.to_owned(),
+                name: "Samples".to_owned(),
+                load: None,
+                folder: true,
+            }],
+            Some(entry) if self.samples.is_some() && entry.key == SAMPLES => {
+                lists.catalogue.samples()
+            }
             None if self.add_track => KINDS
                 .iter()
                 .map(|(key, name, _)| Entry {
@@ -290,11 +326,24 @@ impl Browse {
         self.columns.get(self.in_use).and_then(Col::entry)
     }
 
+    /// The instrument the chosen entry replaces, when Add Device is on an
+    /// instrument and the track has one (R25).
+    fn replaced_instrument(&self) -> Option<DeviceId> {
+        let instrument = self.target.and_then(|t| t.instrument)?;
+        let chosen = self.chosen()?.load.as_ref()?;
+        (self.add_device && chosen.role() == Some(DeviceRole::Instrument)).then_some(instrument)
+    }
+
     fn load_kind(&self) -> LoadKind {
+        if self.samples.is_some() {
+            return LoadKind::Sample;
+        }
         match (self.add_track, self.target.and_then(|t| t.replace)) {
             (true, _) => LoadKind::AddTrack,
             (false, Some(device)) => LoadKind::Replace(device),
-            (false, None) => LoadKind::Add,
+            (false, None) => self
+                .replaced_instrument()
+                .map_or(LoadKind::Add, LoadKind::Replace),
         }
     }
 
@@ -303,7 +352,9 @@ impl Browse {
         let replace = if self.add_track {
             None
         } else {
-            self.target.and_then(|t| t.replace)
+            self.target
+                .and_then(|t| t.replace)
+                .or_else(|| self.replaced_instrument())
         };
         match (load, replace) {
             (Load::Device { new_device, .. }, Some(device)) => (
@@ -324,6 +375,15 @@ impl Browse {
             (Load::Plugin { path, plugin, .. }, _) => (
                 "plugin.load".to_owned(),
                 json!({ "path": path, "plugin": plugin }),
+            ),
+            // A sample goes in the slot Clip Mode offered it for (R43).
+            (Load::Sample { path }, _) => (
+                "session.drop_files".to_owned(),
+                json!({
+                    "paths": [path],
+                    "track": self.samples.map(|(track, _)| track),
+                    "scene": self.samples.map(|(_, scene)| scene),
+                }),
             ),
         }
     }
@@ -377,7 +437,12 @@ impl Content for Browse {
 
     fn enter(&mut self, why: Enter, ctx: &mut Ctx<'_>) {
         self.add_track = why == Enter::AddTrack;
-        self.target = ctx.model.map(Target::of);
+        self.add_device = why == Enter::AddDevice;
+        self.samples = match why {
+            Enter::Samples { track, scene } => Some((track, scene)),
+            _ => None,
+        };
+        self.target = ctx.model.map(|model| Target::of(model, self.add_device));
         self.columns.clear();
         self.in_use = 0;
         self.counts.iter_mut().for_each(Counting::reset);
@@ -442,14 +507,14 @@ impl Content for Browse {
     }
 
     fn paint(&mut self, paint: &mut Paint<'_>) {
-        let target = Target::of(paint.model);
+        let target = Target::of(paint.model, self.add_device);
         let Some(lists) = &paint.model.browse else {
             return;
         };
         // What Load acts on follows the window (R3); the lists are fetched
         // again when it changes what is offered or the catalogue changes.
-        let offered = self.target.map(|t| t.role) != Some(target.role);
-        if !self.add_track {
+        let offered = self.samples.is_none() && self.target.map(|t| t.role) != Some(target.role);
+        if !self.add_track && self.samples.is_none() {
             self.target = Some(target);
         }
         if self.seen != Some(lists.revision) || (offered && !self.add_track) {

@@ -19,11 +19,14 @@ use crate::modulator::{Mapping, ShapePoint};
 use crate::mpe_settings::PluginMpe;
 use crate::rack::{Chain, RackKind, RackMacros};
 use crate::sample_edits::{SampleEdit, SampleRegion};
-use crate::track::{Channel, Input};
+use crate::track::{Channel, Input, Tap};
 use crate::warp_settings::{WarpMode, WarpSettings};
 
 /// The most sample slots a device's media can fill.
 pub const MAX_MEDIA_SLOTS: usize = 16;
+
+/// The wavetable oscillators a device has (the wavetable spec, R8).
+pub const MAX_WAVETABLES: usize = 2;
 
 /// The most modifiable parameters a plug-in may have and still start with
 /// them all configured (manual 24.1); one with more starts with none.
@@ -145,12 +148,27 @@ pub struct Device {
     /// there are none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sample_edits: Vec<SampleEdit>,
+    /// What each wavetable oscillator plays (WP-8.8; the wavetable spec, R7,
+    /// R8): oscillator 1's choice first. A user table's file is the media in
+    /// the oscillator's own sample slot, so the set's media table, missing
+    /// files and Collect All and Save treat it as a sample. An oscillator
+    /// with no choice plays the device's default table, and the list never
+    /// ends in one. Left out of the saved set for a device that has none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub wavetables: Vec<Option<WavetableChoice>>,
     /// The part of slot 0's sample a Simpler plays, between its Start and End
     /// flags (the sampler spec, R22): `None` for the whole sample. Loading
     /// another sample clears it; an edit that changes the sample's length
     /// moves it. Left out of the saved set while it is the whole sample.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub region: Option<SampleRegion>,
+    /// The sample similar-sample swapping goes by (sound similarity R23):
+    /// the one Save as Similarity Reference kept, or the one a swap started
+    /// from. `None` while it is the sample the device was loaded with,
+    /// slot 0's own; loading another sample clears it. Left out of the saved
+    /// set while it is `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub similarity_reference: Option<ContentHash>,
     /// A multisampler's layers and the options of its layer list (WP-5.13,
     /// the multisampler spec, R2). Left out of the saved set for a device
     /// that holds none.
@@ -188,9 +206,35 @@ pub struct Device {
     /// articulation map, and left out of the saved set then.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub articulations: Vec<crate::articulation::Articulation>,
+    /// The routes an instrument's modulation matrix holds in its free slots
+    /// (the instrument modulation spec, R8 to R10), by slot number. A
+    /// route's amount is the slot's parameter. Empty for a device without
+    /// free slots or with none set, and left out of the saved set then.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub routes: Vec<crate::matrix::ModRoute>,
     /// The user's own info text (Edit Info Text), which the Info View shows while the pointer is over the device; empty for none, and left out of the saved set then (the Info View spec, R9).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub info_text: String,
+}
+
+/// What a wavetable oscillator plays (WP-8.8; the wavetable spec, R6 to R8).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WavetableChoice {
+    /// One of Beatlayer's factory tables, by category and name.
+    Factory {
+        /// The table's category.
+        category: String,
+        /// The table's name in it.
+        name: String,
+    },
+    /// A table made from the file in the oscillator's sample slot.
+    User {
+        /// Whether the file's frames are used as they are, with no clean-up.
+        raw: bool,
+        /// How many frames the file made.
+        frames: u16,
+    },
 }
 
 /// Warp settings for a device that plays media (WP-5.15b, Simpler).
@@ -349,18 +393,34 @@ impl Default for Sidechain {
 }
 
 /// A device's MIDI sidechain input (the routing spec, R32): the MIDI track
-/// whose notes and channel messages the device hears, played before that
-/// track's own devices. A new device has none.
+/// whose notes and channel messages the device hears, and where on that
+/// track it takes them (R39). A new device has none.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[schemars(
     description = "A device's MIDI sidechain input: `source`, the MIDI track whose notes and \
-                   channel messages the device hears, or absent for No Input."
+                   channel messages the device hears, or absent for No Input; and, on a device \
+                   whose type gives its MIDI sidechain a tapping point, `tap`: `pre_fx` for \
+                   what the track's clips and input played, `post_fx` (a new device's) for what \
+                   leaves its MIDI effects, or `post_mixer`, the same as `post_fx`."
 )]
 pub struct MidiSidechain {
     /// The MIDI track it listens to, or `None` (No Input), as on a new
     /// device.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<TrackId>,
+    /// Where the device takes the source's notes, for a device type that
+    /// gives its MIDI sidechain a tapping point; `None` for one that
+    /// doesn't, which hears them [`Tap::PreFx`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tap: Option<Tap>,
+}
+
+impl MidiSidechain {
+    /// Where the device takes its source's notes.
+    #[must_use]
+    pub fn tapped(&self) -> Tap {
+        self.tap.unwrap_or(Tap::PreFx)
+    }
 }
 
 /// Reads a device's media: a list of slots, or the one hash (or `null`) a
@@ -462,7 +522,9 @@ impl Device {
             configured: None,
             media: Vec::new(),
             sample_edits: Vec::new(),
+            wavetables: Vec::new(),
             region: None,
+            similarity_reference: None,
             layers: Layers::default(),
             mappings: Vec::new(),
             shape: None,
@@ -471,6 +533,7 @@ impl Device {
             warp: DeviceWarp::default(),
             slices: Vec::new(),
             articulations,
+            routes: Vec::new(),
             info_text: String::new(),
         }
     }
@@ -481,14 +544,23 @@ impl Device {
         self.media.get(slot).copied().flatten()
     }
 
+    /// The sample similar-sample swapping goes by: the one kept as the
+    /// reference, else the one slot 0 holds (sound similarity R20, R23).
+    #[must_use]
+    pub fn similarity_reference(&self) -> Option<ContentHash> {
+        self.similarity_reference.or_else(|| self.media_at(0))
+    }
+
     /// Puts `media` in sample slot `slot`, growing the list to reach it and
     /// trimming empty slots off its end. Another sample in slot 0 clears the
-    /// edits made to the one before it, any manual slices and the region.
+    /// edits made to the one before it, any manual slices, the region and the
+    /// similarity reference.
     pub fn set_media(&mut self, slot: usize, media: Option<ContentHash>) {
         if slot == 0 && self.media_at(0) != media {
             self.sample_edits.clear();
             self.slices.clear();
             self.region = None;
+            self.similarity_reference = None;
         }
         if self.media.len() <= slot {
             if media.is_none() {
@@ -500,6 +572,29 @@ impl Device {
         while self.media.last() == Some(&None) {
             self.media.pop();
         }
+    }
+
+    /// What oscillator `oscillator` (counted from 0) plays, if it was given
+    /// a table.
+    #[must_use]
+    pub fn wavetable_at(&self, oscillator: usize) -> Option<&WavetableChoice> {
+        self.wavetables.get(oscillator)?.as_ref()
+    }
+
+    /// Gives oscillator `oscillator` (counted from 0) `choice`, with the file
+    /// of a user table in its sample slot, and clears the slot for a factory
+    /// table.
+    pub fn set_wavetable(
+        &mut self,
+        oscillator: usize,
+        choice: WavetableChoice,
+        media: Option<ContentHash>,
+    ) {
+        if self.wavetables.len() <= oscillator {
+            self.wavetables.resize(oscillator + 1, None);
+        }
+        self.wavetables[oscillator] = Some(choice);
+        self.set_media(oscillator, media);
     }
 
     /// Whether the device can float in a window of its own: native devices
@@ -648,6 +743,17 @@ impl Device {
     #[must_use]
     pub fn with_midi_sidechain(mut self) -> Self {
         self.midi_sidechain = Some(MidiSidechain::default());
+        self
+    }
+
+    /// The same, with a tapping point on its MIDI sidechain, Post FX in a
+    /// new device (the routing spec, R39).
+    #[must_use]
+    pub fn with_midi_sidechain_tap(mut self) -> Self {
+        self.midi_sidechain = Some(MidiSidechain {
+            source: None,
+            tap: Some(Tap::PostFx),
+        });
         self
     }
 
@@ -953,5 +1059,28 @@ mod tests {
         assert!(device.region.is_some());
         device.set_media(0, Some(b));
         assert_eq!(device.region, None);
+    }
+
+    // Spec: sound-similarity R20, R23. A device's reference is the sample it
+    // was loaded with until one is kept; loading another sample starts over.
+    #[test]
+    fn the_reference_is_the_loaded_sample_until_kept_and_another_load_clears_it() {
+        let mut device = plugin();
+        let (a, b, c) = (
+            ContentHash([1; 32]),
+            ContentHash([2; 32]),
+            ContentHash([3; 32]),
+        );
+        assert_eq!(device.similarity_reference(), None);
+        device.set_media(0, Some(a));
+        assert_eq!(device.similarity_reference(), Some(a));
+        device.similarity_reference = Some(a);
+        device.set_media(0, Some(a));
+        assert_eq!(device.similarity_reference(), Some(a), "the same sample");
+        device.set_media(0, Some(b));
+        assert_eq!(device.similarity_reference, None, "another sample");
+        assert_eq!(device.similarity_reference(), Some(b));
+        device.similarity_reference = Some(c);
+        assert_eq!(device.similarity_reference(), Some(c));
     }
 }

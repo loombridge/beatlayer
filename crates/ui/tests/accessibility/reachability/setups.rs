@@ -127,6 +127,23 @@ pub(crate) fn the_link_toggle_shown(h: &mut Harness) {
         .unwrap();
 }
 
+/// Show Tempo Follower Toggle is on and the audio device's input is on, so
+/// the Control Bar has the Follow toggle and it can be switched.
+pub(crate) fn the_follow_toggle_shown(h: &mut Harness) {
+    h.shell
+        .run(
+            "audio.configure",
+            serde_json::json!({ "input_device": "null:null" }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            "settings.set_show_tempo_follower_toggle",
+            serde_json::json!({ "on": true }),
+        )
+        .unwrap();
+}
+
 /// The Arrangement View has the keyboard.
 pub(crate) fn arrangement_view(h: &mut Harness) {
     h.key(Key::Num2, Modifiers::ALT);
@@ -387,6 +404,24 @@ pub(crate) fn a_drum_sampler(h: &mut Harness) {
         .run("arrangement.select_tracks", json!({ "tracks": [track] }))
         .unwrap();
     let t = bl_devices::kitbag_type();
+    h.shell
+        .run(
+            "device.add",
+            json!({ "device": { "kind": t.kind, "name": t.name, "role": t.role } }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
+/// DS Kick on the third track, the selected track, no device selected (WP-8.24).
+pub(crate) fn a_drum_synth(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let t = bl_devices::ds_kick::ds_kick_type();
     h.shell
         .run(
             "device.add",
@@ -788,6 +823,27 @@ pub(crate) fn midi_tools_shown(h: &mut Harness) {
     h.shell
         .run("clip_view.show_panel", json!({ "panel": "transform" }))
         .unwrap();
+}
+
+/// A MIDI clip in the first Session slot with a note, selected, in a major
+/// scale, shown in the Clip View with the Pitch and Time Utilities showing
+/// (WP-6.16).
+pub(crate) fn utilities_shown(h: &mut Harness) {
+    midi_tools_shown(h);
+    for (id, args) in [
+        ("clip_view.show_panel", json!({ "panel": "utilities" })),
+        (
+            "note.add",
+            json!({ "key": 60, "start": 0, "length": 705_600 }),
+        ),
+        ("clip_view.select_notes", json!({ "notes": [0] })),
+        (
+            "clip.set_scale",
+            json!({ "enabled": true, "root": 0, "name": "major" }),
+        ),
+    ] {
+        h.shell.run(id, args).unwrap();
+    }
 }
 
 /// A MIDI clip in the first Session slot, shown in the Clip View on its MPE

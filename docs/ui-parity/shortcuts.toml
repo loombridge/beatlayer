@@ -729,7 +729,7 @@ trigger = "press"
 milestone = "M6"
 source = "manual 42.4; observed in Live 12 (macOS), 12 October 2026: Info View text of the plug-in device's window button"
 confirmed = true
-notes = "Moved to M6 by WP-6.70: Plug-in windows do not yet close the others when one opens, which is what the key undoes, and the Multiple Plug-In Windows setting is not built. WP-6.75 builds it."
+notes = "Moved to M6 by WP-6.70, built by WP-6.75: with Multiple Plug-In Windows off, opening a plug-in's window closes the others, and this click keeps them (clap-hosting R27)."
 
 [[shortcut]]
 id = "S-DEV-011"
@@ -1174,8 +1174,8 @@ win = ["Left", "Right"]
 kind = "key"
 trigger = "press"
 milestone = "M6"
-source = "manual 42.8"
-notes = "Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it."
+source = "manual 42.8; observed in 12.4.16 (macOS), 1 November 2026"
+notes = "Moved to M6 by WP-6.70, when the loop brace couldn't be selected. WP-6.73 builds it: the key acts while the brace is selected."
 
 [[shortcut]]
 id = "S-LOOP-008"
@@ -1186,8 +1186,8 @@ win = ["Down", "Up"]
 kind = "key"
 trigger = "press"
 milestone = "M6"
-source = "manual 42.8"
-notes = "Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it."
+source = "manual 42.8; observed in 12.4.16 (macOS), 1 November 2026"
+notes = "Moved to M6 by WP-6.70, when the loop brace couldn't be selected. WP-6.73 builds it: the key acts while the brace is selected."
 
 [[shortcut]]
 id = "S-LOOP-009"
@@ -1198,8 +1198,8 @@ win = ["Ctrl+Down", "Ctrl+Up"]
 kind = "key"
 trigger = "press"
 milestone = "M6"
-source = "manual 42.8"
-notes = "Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it."
+source = "manual 42.8; observed in 12.4.16 (macOS), 1 November 2026"
+notes = "Moved to M6 by WP-6.70, when the loop brace couldn't be selected. WP-6.73 builds it: the key acts while the brace is selected."
 
 [[shortcut]]
 id = "S-LOOP-010"
@@ -1210,8 +1210,8 @@ win = ["Ctrl+Left", "Ctrl+Right"]
 kind = "key"
 trigger = "press"
 milestone = "M6"
-source = "manual 42.8"
-notes = "Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it."
+source = "manual 42.8; observed in 12.4.16 (macOS), 1 November 2026"
+notes = "Moved to M6 by WP-6.70, when the loop brace couldn't be selected. WP-6.73 builds it: the key acts while the brace is selected."
 
 [[shortcut]]
 id = "S-LOOP-011"
@@ -2533,9 +2533,9 @@ win = ["Ctrl+Left", "Ctrl+Right"]
 kind = "key"
 trigger = "press"
 milestone = "M6"
-source = "manual 42.16"
+source = "manual 42.16; observed in 12.4.16 (macOS), 1 November 2026"
 same_as = "S-LOOP-010"
-notes = "Placed in the loop-brace context because 42.8 says the brace must be selected. Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it."
+notes = "Placed in the loop-brace context because 42.8 says the brace must be selected. Moved to M6 by WP-6.70, when the loop brace couldn't be selected. WP-6.73 builds it: the key acts while the brace is selected."
 
 [[shortcut]]
 id = "S-ARR-013"
@@ -3159,8 +3159,8 @@ win = ["Ctrl+Space"]
 kind = "key"
 trigger = "press"
 milestone = "M6"
-source = "manual 42.20"
-notes = "Live 12.4.3's Playback menu shows these keys beside Play From Insert Marker (S-ARR-032), with the Session View focused. Moved to M6 by WP-6.70: The manual gives Option+Space (Ctrl+Space) two actions, this one and Play From Insert Marker (S-ARR-032), without saying when each applies; it needs an observation of Live. WP-6.74 builds it."
+source = "manual 42.20; observed in 12.4.16 (macOS), 1 November 2026"
+notes = "Live 12.4.3's Playback menu shows these keys beside Play From Insert Marker (S-ARR-032), with the Session View focused. Moved to M6 by WP-6.70, when it wasn't known when each of the two actions applies. WP-6.74 builds it: with a time selection the key plays it and stops at its end, and with none it plays from the insert marker."
 
 [[shortcut]]
 id = "S-TRANS-004"
@@ -3171,9 +3171,9 @@ win = ["Space"]
 kind = "key"
 trigger = "press"
 milestone = "M6"
-source = "manual 42.20"
+source = "manual 42.20; observed in 12.4.16 (macOS), 1 November 2026"
 same_as = "S-TRANS-001"
-notes = "Same key as Play: with a time selection, playback starts from it. Moved to M6 by WP-6.70: It is the same key as Play, and the manual does not say what Play does with a time selection beyond starting from it; it needs an observation of Live. WP-6.74 builds it."
+notes = "Same key as Play: with a time selection, playback starts from its start and goes on past its end. Moved to M6 by WP-6.70, when it wasn't known what Play does with a time selection. WP-6.74 builds it."
 
 [[shortcut]]
 id = "S-TRANS-005"
@@ -4236,6 +4236,32 @@ milestone = "M2"
 source = "Beatlayer (IMP-14, WP-2.5b), decided 12 October 2026; not in Live"
 confirmed = true
 notes = "Beatlayer's own key for Float, its item after Fold in the device's context menu. Scoped by focus: only with the Device View or a floating device's window focused and a device selected. On Windows and Linux it's Ctrl+Alt+F, which with the Arrangement focused stays Create Fade/Crossfade (S-ARR-008); Alt+F alone opens the File menu there (S-MENU-001). On macOS Option+F, beside Cmd+Option+F for fades."
+
+[[shortcut]]
+id = "S-DEV-016"
+action = "Step Roar's Feedback Note by a semitone"
+context = "device-view"
+mac = ["Down", "Up"]
+win = ["Down", "Up"]
+kind = "key"
+trigger = "press"
+milestone = "M5"
+source = "manual 29.33.4; Live 12.4 release notes (Roar)"
+confirmed = false
+notes = "With the focus on the Note control while Roar's Feedback Mode is Note, Up and Down step the key by a semitone, as every focused value control's keys do (S-VAL-001). Whether Live steps a semitone is to observe."
+
+[[shortcut]]
+id = "S-DEV-017"
+action = "Step Roar's Feedback Note by an octave"
+context = "device-view"
+mac = ["Shift+Down", "Shift+Up"]
+win = ["Shift+Down", "Shift+Up"]
+kind = "key"
+trigger = "press"
+milestone = "M5"
+source = "Live 12.4 release notes (Roar)"
+confirmed = false
+notes = "With the focus on the Note control while Roar's Feedback Mode is Note, Shift with Up or Down moves the pitch by an octave: the note control's coarse step, where S-VAL-002 gives other value controls a fine step. Each press is one undo step."
 
 [[shortcut]]
 id = "S-SES-024"

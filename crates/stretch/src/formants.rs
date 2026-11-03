@@ -255,7 +255,7 @@ impl Work {
             &mut self.cepstrum,
             &mut self.scratch_inverse,
         );
-        lifter(&mut self.cepstrum, cutoff);
+        bl_dsp::stft::lifter(&mut self.cepstrum, cutoff);
     }
 
     /// Smooths the log amplitude of the spectrum in `self.source` or
@@ -359,20 +359,6 @@ impl Work {
 enum Target {
     Source,
     Output,
-}
-
-/// Scales `cepstrum` (of a real, even spectrum, so even itself) by `1 / FRAME`
-/// and by a raised-cosine lifter that is 1 at quefrency 0 and 0 from `cutoff`.
-fn lifter(cepstrum: &mut [f32], cutoff: usize) {
-    let scale = 1.0 / FRAME as f32;
-    for (n, value) in cepstrum.iter_mut().enumerate() {
-        let quefrency = n.min(FRAME - n);
-        *value *= if quefrency < cutoff {
-            scale * (0.5 + 0.5 * (PI * quefrency as f32 / cutoff as f32).cos())
-        } else {
-            0.0
-        };
-    }
 }
 
 /// The log2 of the convolution's transform size.

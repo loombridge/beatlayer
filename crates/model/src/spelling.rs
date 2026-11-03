@@ -62,7 +62,8 @@ impl NoteSpelling {
 
     /// Auto settled: Flats where the scale is on and its root is one of the
     /// flat keys, Sharps otherwise; the other choices as they are.
-    fn settled(self, scale: &Scale) -> Self {
+    #[must_use]
+    pub fn settled(self, scale: &Scale) -> Self {
         match self {
             Self::Auto if scale.enabled && matches!(scale.root, 1 | 3 | 5 | 6 | 8 | 10) => {
                 Self::Flats

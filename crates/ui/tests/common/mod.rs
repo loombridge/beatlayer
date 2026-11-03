@@ -329,6 +329,8 @@ impl Harness {
         // Spec: view-options R1. The middle button pans the area under the
         // pointer, so egui never sees it.
         bl_ui::middle::take(&mut input, &self.ctx);
+        // Spec: view-options R10 to R13. The wheel over a control is its own.
+        let wheel = bl_ui::wheel::take(&mut input, &self.ctx, self.shell.wheel_adjusts_values());
         // As the app does: the keys go to a value being typed as to a text
         // field, and the frame draws what the engine last published.
         let text_focused = self.ctx.text_edit_focused() || self.main.is_typing();
@@ -392,6 +394,9 @@ impl Harness {
             };
         });
         output.textures_delta.clear();
+        for gesture in wheel {
+            gesture.run(&mut self.shell);
+        }
         for invocation in invocations {
             let _ = self.shell.invoke(&invocation.id, invocation.args.clone());
             self.events.push(UiEvent::Invoke(invocation));
@@ -532,6 +537,7 @@ impl Harness {
             ..Default::default()
         };
         bl_ui::middle::take(&mut input, &side.ctx);
+        let wheel = bl_ui::wheel::take(&mut input, &side.ctx, self.shell.wheel_adjusts_values());
         let text_focused = side.ctx.text_edit_focused() || side.ui.is_typing();
         side.dispatcher
             .leave_space_to_focus(bl_ui::clip_panels::tab_has_focus(&side.ctx));
@@ -545,6 +551,9 @@ impl Harness {
             ui_events = ui.show(root, shell, theme, title_bar, None);
         });
         output.textures_delta.clear();
+        for gesture in wheel {
+            gesture.run(&mut self.shell);
+        }
         for invocation in invocations {
             let _ = self.shell.invoke(&invocation.id, invocation.args.clone());
             self.events.push(UiEvent::Invoke(invocation));
@@ -796,4 +805,173 @@ pub fn painted_rects(output: &FullOutput) -> Vec<(Rect, Color32)> {
         walk(&clipped.shape, &mut out);
     }
     out
+}
+
+/// Every circle a frame strokes, as its centre and radius.
+pub fn stroked_circles(output: &FullOutput) -> Vec<(Pos2, f32)> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<(Pos2, f32)>) {
+        match shape {
+            egui::Shape::Circle(circle)
+                if !circle.stroke.is_empty() && circle.fill == Color32::TRANSPARENT =>
+            {
+                out.push((circle.center, circle.radius));
+            }
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    walk(shape, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, &mut out);
+    }
+    out
+}
+
+/// One row of a context menu, as a test lists it: an item, a dim one, a
+/// ticked one, or a separator. A ticked item reads its tick before its
+/// label, and an item shows its keys after the label, which the test leaves
+/// out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MenuRow<'a> {
+    /// An item that can be chosen.
+    Item(&'a str),
+    /// An item drawn disabled, or a heading.
+    Dim(&'a str),
+    /// An item that can be chosen and is ticked.
+    Tick(&'a str),
+    /// A ticked item drawn disabled.
+    DimTick(&'a str),
+    /// A line between groups.
+    Sep,
+}
+
+/// Asserts that the context menu in `nodes` lists `rows` in order, from its
+/// first item to its last: the labels, which are dim and which ticked, and
+/// where the separators fall (a separator is a gap between rows wider than
+/// the rows' own spacing). Items that sit side by side, as the grid's
+/// choices do, follow one another in the order left to right.
+pub fn assert_menu(nodes: &[Node], rows: &[MenuRow<'_>]) {
+    fn label_of<'a>(row: &MenuRow<'a>) -> Option<&'a str> {
+        match *row {
+            MenuRow::Item(l) | MenuRow::Dim(l) | MenuRow::Tick(l) | MenuRow::DimTick(l) => Some(l),
+            MenuRow::Sep => None,
+        }
+    }
+    let labels: Vec<&str> = rows.iter().filter_map(label_of).collect();
+    let (first, last) = (labels[0], *labels.last().unwrap());
+    let reads = |node: &Node, wanted: &str| {
+        let text = node.label.strip_prefix("✔ ").unwrap_or(&node.label);
+        text == wanted
+            || text
+                .strip_prefix(wanted)
+                .and_then(|keys| keys.strip_prefix(' '))
+                .is_some_and(|keys| !keys.contains(' '))
+    };
+    let items = |role: &Role| {
+        matches!(
+            role,
+            Role::Button | Role::CheckBox | Role::MenuItem | Role::RadioButton
+        )
+    };
+    let top = nodes
+        .iter()
+        .filter(|n| items(&n.role) && reads(n, first))
+        .filter_map(|n| n.bounds)
+        // The menu is the last thing drawn: the lowest-left candidate that
+        // is followed by the rest. Taking the one with the greatest y keeps
+        // a button of the same name under the menu out of it.
+        .max_by(|a, b| a.y0.total_cmp(&b.y0))
+        .unwrap_or_else(|| panic!("no menu item {first:?}"));
+    let bottom = nodes
+        .iter()
+        .filter(|n| items(&n.role) && reads(n, last))
+        .filter_map(|n| n.bounds)
+        .filter(|b| b.y0 >= top.y0)
+        .min_by(|a, b| a.y0.total_cmp(&b.y0))
+        .unwrap_or_else(|| panic!("no menu item {last:?}"));
+    let between: Vec<&Node> = nodes
+        .iter()
+        .filter(|n| items(&n.role))
+        .filter(|n| {
+            n.bounds.is_some_and(|b| {
+                b.y0 >= top.y0 - 0.5 && b.y0 <= bottom.y0 + 0.5 && b.x0 >= top.x0 - 0.5
+            })
+        })
+        .collect();
+    // The menu's rows start at its left edge; an item further right belongs
+    // to it only if it shares a line with one that does (the grid's choices),
+    // which keeps out what the menu covers.
+    let column: Vec<f64> = between
+        .iter()
+        .map(|n| n.bounds.unwrap())
+        .filter(|b| (b.x0 - top.x0).abs() <= 0.5 && (b.y1 - b.y0 - (top.y1 - top.y0)).abs() <= 0.5)
+        .map(|b| b.y0)
+        .collect();
+    let mut found: Vec<&Node> = between
+        .into_iter()
+        .filter(|n| {
+            let b = n.bounds.unwrap();
+            b.x0 < top.x0 + 320.0
+                && (b.y1 - b.y0 - (top.y1 - top.y0)).abs() <= 0.5
+                && column.iter().any(|y| (y - b.y0).abs() < 3.0)
+        })
+        .collect();
+    found.sort_by(|a, b| {
+        let (a, b) = (a.bounds.unwrap(), b.bounds.unwrap());
+        // Rows on one line are one row of the menu.
+        if (a.y0 - b.y0).abs() < 3.0 {
+            a.x0.total_cmp(&b.x0)
+        } else {
+            a.y0.total_cmp(&b.y0)
+        }
+    });
+    let got: Vec<String> = found.iter().map(|n| n.label.clone()).collect();
+    assert_eq!(
+        found.len(),
+        labels.len(),
+        "the menu reads {got:?}, not {labels:?}"
+    );
+    // The spacing of rows with nothing between them.
+    let steps: Vec<f64> = found
+        .windows(2)
+        .map(|w| w[1].bounds.unwrap().y0 - w[0].bounds.unwrap().y0)
+        .filter(|step| *step > 3.0)
+        .collect();
+    let spacing = steps.iter().copied().fold(f64::INFINITY, f64::min);
+    let mut at = 0;
+    let mut wants_gap = false;
+    for row in rows {
+        if *row == MenuRow::Sep {
+            wants_gap = true;
+            continue;
+        }
+        let node = found[at];
+        let label = label_of(row).unwrap();
+        assert!(
+            reads(node, label),
+            "row {at} reads {:?}, not {label:?}: {got:?}",
+            node.label
+        );
+        let ticked = node.label.starts_with("✔ ") || node.toggled == Some(true);
+        match row {
+            MenuRow::Item(_) => assert!(!node.disabled && !ticked, "{label} is plain: {got:?}"),
+            MenuRow::Dim(_) => assert!(node.disabled && !ticked, "{label} is dim: {got:?}"),
+            MenuRow::Tick(_) => assert!(!node.disabled && ticked, "{label} is ticked: {got:?}"),
+            MenuRow::DimTick(_) => assert!(node.disabled && ticked, "{label} is dim and ticked"),
+            MenuRow::Sep => {}
+        }
+        if at > 0 {
+            let (a, b) = (found[at - 1].bounds.unwrap(), node.bounds.unwrap());
+            if (a.y0 - b.y0).abs() >= 3.0 {
+                let gap = b.y0 - a.y0 > spacing + 3.0;
+                assert_eq!(gap, wants_gap, "a separator before {label}: {got:?}");
+            }
+        }
+        wants_gap = false;
+        at += 1;
+    }
 }

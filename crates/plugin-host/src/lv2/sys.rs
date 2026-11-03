@@ -224,6 +224,7 @@ lilv_api! {
     lilv_nodes_begin(Nodes) -> Iter;
     lilv_nodes_is_end(Nodes, Iter) -> bool;
     lilv_nodes_get(Nodes, Iter) -> Node;
+    lilv_nodes_next(Nodes, Iter) -> Iter;
     lilv_nodes_contains(Nodes, Node) -> bool;
     lilv_node_is_uri(Node) -> bool;
     lilv_node_get_path(Node, *mut *mut c_char) -> *mut c_char;

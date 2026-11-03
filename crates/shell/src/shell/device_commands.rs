@@ -5,6 +5,7 @@ use crate::browser;
 use crate::devices;
 use crate::devices::DeviceView;
 use bl_devices::KitHost;
+use bl_devices::drum_synth::PreviewHit;
 use bl_model::TrackId;
 use bl_model::registry as model;
 use bl_shell_spec::browser as browser_ids;
@@ -67,6 +68,18 @@ impl Shell {
     #[must_use]
     pub fn device_command_ids(&self, device: bl_model::DeviceId) -> &[String] {
         self.device_commands.get(&device).map_or(&[], Vec::as_slice)
+    }
+
+    /// The modulation matrix of `device`: its type's sources and destinations
+    /// and every slot as the device has it (the instrument modulation spec,
+    /// R11), or none for a device without one.
+    #[must_use]
+    pub fn device_matrix(
+        &self,
+        device: &bl_model::Device,
+    ) -> Option<bl_model::matrix::MatrixState> {
+        let layout = self.devices.device_type(&device.kind)?.matrix.as_ref()?;
+        Some(layout.state(device))
     }
 
     /// The kit plug-ins compiled in as native devices: their instances, on
@@ -323,6 +336,15 @@ impl Shell {
         if id == device_ids::LOAD_SAMPLE {
             return self.load_sample(id, args);
         }
+        if matches!(
+            id,
+            device_ids::SWAP_SIMILAR | device_ids::RETURN_TO_REFERENCE | device_ids::SIMILAR
+        ) {
+            return self.run_sample_swap(id, args);
+        }
+        if id == device_ids::LOAD_WAVETABLE {
+            return self.load_wavetable(id, args);
+        }
         if id == pad_ids::PAD_DROP {
             return self.pad_drop(args);
         }
@@ -354,6 +376,15 @@ impl Shell {
             .then(|| serde_json::from_value::<device_ids::SelectDeviceArgs>(args.clone()).ok())
             .flatten()
             .and_then(|a| a.device);
+        // Spec: plugin-scanning R16. A plug-in preset's own state goes to its
+        // plug-in once the preset is loaded, added or put in a device's place.
+        let preset_file = match id {
+            device_ids::LOAD_PRESET | device_ids::ADD_PRESET => args.get("path"),
+            device_ids::REPLACE => args.get("preset"),
+            _ => None,
+        }
+        .and_then(Value::as_str)
+        .map(PathBuf::from);
         let user_library = self.browser_view.user_library().map(Path::to_path_buf);
         let zoom = self.zoom();
         let auto_hide = self.prefs.auto_hide_plug_in_windows.0;
@@ -373,8 +404,33 @@ impl Shell {
             },
         );
         let mut outcome = result.map_err(|error| device_error(id, error))?;
+        if let Some(file) = preset_file
+            && let Some(device) = outcome
+                .value
+                .get("device")
+                .and_then(|d| serde_json::from_value(d.clone()).ok())
+            && let Err(why) = self.give_preset_state(device, &file)
+        {
+            self.set_message(
+                format!("The plug-in refused the preset's state: {why}"),
+                true,
+            );
+        }
+        if id == device_ids::HOT_SWAP
+            && let Some(device) = self.devices.hot_swap()
+            && self.show_plugin_presets(device)
+        {
+            // Spec: plugin-scanning R18. A plug-in's presets are listed under
+            // its row, not in the User Library's folder for the device.
+            outcome.browse = None;
+        }
         if id == device_ids::STATE {
             outcome.value = to_value(&self.device_view_report());
+        }
+        // Spec: plugin-scanning R15. A preset saved from a plug-in lists under
+        // its row once the places are indexed again.
+        if id == device_ids::SAVE_PRESET {
+            self.browser_view.files_written();
         }
         // Spec: browser-tags R31. Starting hot-swap clears the search words
         // and the selected tags as a new step.
@@ -389,6 +445,14 @@ impl Shell {
                 bl_engine::drum::param::PREVIEW,
                 f64::from(u8::from(on)),
             );
+        }
+        // Spec: drum-synths R6. A click in a Drum Synth's display plays a hit.
+        if let Some(device) = outcome.hit.take() {
+            let sent = self
+                .audio
+                .send_node_data(bl_engine::NodeKey::Device(device), PreviewHit)
+                .is_ok();
+            outcome.value = to_value(&device_ids::HitPreviewed { sent });
         }
         // Spec: racks R42. Samples a rack or chain preset brought in.
         for file in &outcome.media {
@@ -586,6 +650,139 @@ impl Shell {
         }))
     }
 
+    /// Gives a wavetable oscillator its table (`device.load_wavetable`, WP-8.8;
+    /// the wavetable spec, R8): a factory table by name, or a file the set
+    /// then references as it does a sample. One undo step.
+    pub(super) fn load_wavetable(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        use bl_devices::wavetables::{factory, user};
+        let device_ids::LoadWavetableArgs {
+            device,
+            oscillator,
+            category,
+            name,
+            file,
+            raw,
+        } = Self::args(id, args)?;
+        let invalid = |message: String| ShellError::InvalidArgs {
+            command: id.to_owned(),
+            message,
+        };
+        let device =
+            device
+                .or_else(|| self.devices.selected())
+                .ok_or_else(|| ShellError::Unavailable {
+                    command: id.to_owned(),
+                    reason: "select a device first".to_owned(),
+                })?;
+        let target = self
+            .editor
+            .document()
+            .device(device)
+            .cloned()
+            .ok_or_else(|| invalid(format!("no {device}")))?;
+        let plays = matches!(
+            &target.kind,
+            bl_model::DeviceKind::Native { device_type } if bl_devices::wavetables::plays_wavetables(device_type)
+        );
+        if !plays {
+            return Err(ShellError::Failed {
+                command: id.to_owned(),
+                message: format!("{device} doesn't play a wavetable"),
+            });
+        }
+        if !(1..=bl_model::MAX_WAVETABLES as u8).contains(&oscillator) {
+            return Err(invalid(format!(
+                "oscillator {oscillator}: a device has oscillators 1 and 2"
+            )));
+        }
+        let failed = |message: String| ShellError::Failed {
+            command: id.to_owned(),
+            message,
+        };
+        let (choice, media, frames) = match (category, name, file) {
+            (Some(category), Some(name), None) => {
+                let table = factory(&category, &name)
+                    .ok_or_else(|| failed(format!("no wavetable {name} in {category}")))?;
+                let choice = bl_model::WavetableChoice::Factory { category, name };
+                (choice, None, table.frames)
+            }
+            (None, None, Some(file)) => {
+                let path = PathBuf::from(file);
+                let table = user::read(&path, raw).map_err(failed)?;
+                let hash = self
+                    .media
+                    .import(&path)
+                    .map_err(|error| failed(format!("{}: {error}", path.display())))?;
+                let entry = self
+                    .media
+                    .entry(hash)
+                    .ok_or_else(|| failed("the media store lost the file".to_owned()))?;
+                // The set records where the file is, so it reopens with the
+                // table (WP-2.25's media table).
+                let media = bl_model::ContentHash(*hash.as_bytes());
+                self.store.add_media(media, &entry.path, entry.size);
+                let frames = table.frame_count();
+                let choice = bl_model::WavetableChoice::User {
+                    raw,
+                    frames: frames as u16,
+                };
+                (choice, Some(media), frames)
+            }
+            _ => {
+                return Err(invalid(
+                    "give a factory table's `category` and `name`, or a `file`".to_owned(),
+                ));
+            }
+        };
+        self.editor
+            .apply(bl_model::Command::SetDeviceWavetable {
+                device,
+                oscillator,
+                choice: choice.clone(),
+                media,
+            })
+            .map_err(|error| failed(error.to_string()))?;
+        self.dirty = true;
+        self.document_changed();
+        self.touch();
+        Ok(to_value(&device_ids::LoadWavetableResult {
+            device,
+            oscillator,
+            choice,
+            frames: frames as u16,
+        }))
+    }
+
+    /// What each of `device`'s wavetable oscillators plays, as the query
+    /// tool's `device` result reports it (the wavetable spec, R8): the
+    /// oscillator, its factory category and name, or its file and Raw, and
+    /// its frame count.
+    #[must_use]
+    pub fn wavetables_of(&self, device: &bl_model::Device) -> Vec<Value> {
+        (0..bl_model::MAX_WAVETABLES)
+            .filter_map(|at| {
+                let oscillator = at + 1;
+                Some(match device.wavetable_at(at)? {
+                    bl_model::WavetableChoice::Factory { category, name } => {
+                        let frames = bl_devices::wavetables::factory(category, name)
+                            .map(|table| table.frames);
+                        json!({ "oscillator": oscillator, "category": category, "name": name, "frames": frames })
+                    }
+                    bl_model::WavetableChoice::User { raw, frames } => {
+                        let file = device
+                            .media_at(at)
+                            .and_then(|media| {
+                                self.media
+                                    .entry(bl_media::ContentHash::from_bytes(media.0))
+                            })
+                            .map(|entry| entry.path.to_string_lossy().into_owned());
+                        json!({ "oscillator": oscillator, "file": file, "raw": raw, "frames": frames })
+                    }
+                })
+            })
+            .collect()
+    }
+
     /// Whether every top-level device on `tracks` is switched off, with at
     /// least one device among them (IMP-25, the device chains spec R39).
     pub(super) fn all_devices_off(&self, tracks: &[TrackId]) -> bool {
@@ -626,6 +823,24 @@ impl Shell {
         let swapping = self.devices.hot_swap().is_some() || armed_chain.is_some();
         match load {
             DevicesLoad::Preset(path) => {
+                // Spec: plugin-scanning R17. A preset saved from a plug-in the
+                // browser lists loads that plug-in with it: onto the selected
+                // track, a new track, or in place of the device armed.
+                if armed_chain.is_none()
+                    && let Some((format, plugin_id)) = bl_project::preset::Preset::plugin_of(&path)
+                    && let Some(plugin) = self
+                        .browser_view
+                        .scanned_plugin(format, &plugin_id)
+                        .cloned()
+                {
+                    let loaded = self.load_browser_plugin(
+                        browser_ids::LOAD_SELECTED,
+                        &plugin,
+                        Some(browser::PluginPreset::Beatlayer(path)),
+                    )?;
+                    self.touch();
+                    return Ok(loaded);
+                }
                 let path = path.to_string_lossy().into_owned();
                 if devices::is_chain_preset(Path::new(&path)) {
                     self.run_devices(device_ids::CHAIN_LOAD_PRESET, json!({ "path": path }))

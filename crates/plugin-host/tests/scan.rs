@@ -54,6 +54,8 @@ fn a_scan_describes_the_test_plugin_and_caches_it() {
     assert_eq!(plugin.vendor.as_deref(), Some("Beatlayer tests"));
     assert_eq!(plugin.version.as_deref(), Some("1.0.0"));
     assert_eq!(plugin.format, clap());
+    // Spec: browser-tags R49. The features its descriptor declares.
+    assert_eq!(plugin.categories, ["audio-effect", "delay", "stereo"]);
 
     // Spec: plugin-scanning R2. An unchanged file is answered from the cache.
     let second = scanner.scan(clap(), &paths);
@@ -321,6 +323,39 @@ fn the_cache_round_trips_through_the_store_file() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// Spec: browser-tags R49. A cache from before the scanner kept categories is
+// scanned again, so the plug-ins in it get theirs.
+#[test]
+fn a_cache_without_categories_is_scanned_again() {
+    let dir = std::env::temp_dir().join(format!("bl-scan-old-cache-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let store = dir.join("plugins.json");
+    let paths = [bundle().to_path_buf()];
+    let _ = Scanner::new()
+        .with_program(SCANNER)
+        .with_store(&store)
+        .scan(clap(), &paths);
+    // The file as an older build wrote it: no version, no categories.
+    let mut text: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&store).unwrap()).unwrap();
+    for file in text["cache"].as_object_mut().unwrap().values_mut() {
+        file.as_object_mut().unwrap().remove("version");
+        for plugin in file["plugins"].as_array_mut().unwrap() {
+            plugin.as_object_mut().unwrap().remove("categories");
+        }
+    }
+    std::fs::write(&store, text.to_string()).unwrap();
+    let report = Scanner::new()
+        .with_program(SCANNER)
+        .with_store(&store)
+        .scan(clap(), &paths);
+    assert_eq!(report.cached, 0);
+    assert_eq!(report.scanned, 1);
+    assert!(!report.plugins[0].categories.is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 // Spec: plugin-scanning R3. A folder of plug-ins is searched.
 #[test]
 fn a_folder_is_searched_for_plugin_files() {
@@ -363,6 +398,8 @@ fn a_scan_finds_apples_built_in_audio_units() {
     assert_eq!(delay.role, bl_model::DeviceRole::AudioEffect);
     assert!(delay.vendor.is_some(), "a vendor");
     assert_eq!(delay.key(), "au/aufx/dely/appl");
+    // Spec: browser-tags R49. An Audio Unit's type and subtype.
+    assert_eq!(delay.categories, ["aufx", "dely"]);
     assert!(
         delay.path.to_string_lossy().ends_with(".component"),
         "{:?}",
@@ -415,6 +452,8 @@ fn a_scan_describes_the_test_vst3_plugin_and_caches_it() {
     assert_eq!(plugin.vendor.as_deref(), Some("Beatlayer tests"));
     assert_eq!(plugin.version.as_deref(), Some("1.0.0"));
     assert_eq!(plugin.format, vst3());
+    // Spec: browser-tags R49. The class's subcategories.
+    assert_eq!(plugin.categories, ["Fx", "Delay"]);
 
     // Spec: plugin-scanning R2. An unchanged file is answered from the cache.
     let second = scanner.scan(vst3(), &paths);
@@ -599,6 +638,8 @@ fn a_scan_describes_the_test_lv2_plugin_and_caches_it() {
     assert_eq!(plugin.role, bl_model::DeviceRole::AudioEffect);
     assert!(plugin.note_output);
     assert_eq!(plugin.path, bl_test_lv2::bundle());
+    // Spec: browser-tags R49. The classes it declares in LV2's vocabulary.
+    assert_eq!(plugin.categories, ["DelayPlugin"]);
 
     // An unchanged bundle is answered from the cache.
     let second = scanner.scan(lv2(), &paths);

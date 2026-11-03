@@ -3,7 +3,7 @@
 //! column's name, and moving a column by dragging it.
 
 use bl_shell::Shell;
-use bl_shell::browser_commands::{self as ids, Column, ItemDetails};
+use bl_shell::browser_commands::{self as ids, Column, ItemDetails, Label};
 use egui::accesskit::{Role, SortDirection};
 use egui::{Align2, DragAndDrop, Id, Rect, Sense, Stroke, Ui, pos2, vec2};
 use serde_json::json;
@@ -321,12 +321,14 @@ impl BrowserUi {
             .count()
     }
 
-    /// The Content Options menu (C-CONTENT; spec: browser-tags R27): the
-    /// optional columns, ticked while shown, and Show File Extensions.
+    /// The Content Options menu (C-CONTENT; spec: browser-tags R27), in
+    /// Live's order: Date Modified, Size, Type, Rank and Place, ticked while
+    /// they show; Hide All Extra Columns; Show File Extensions. Rank and
+    /// Place are dim: Beatlayer has no such columns.
     pub(super) fn content_options(&self, ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
         let state = shell.browser_view().columns().clone();
         let mut first = true;
-        for column in Column::OPTIONAL {
+        for column in [Column::DateModified, Column::Size, Column::Kind] {
             let on = state.shown.contains(&column);
             let mark = if on { "\u{2714} " } else { "" };
             let response = ui.button(format!("{mark}{}", column.title()));
@@ -346,7 +348,21 @@ impl BrowserUi {
                 ui.close();
             }
         }
-        ui.separator();
+        for dim in ["Rank", "Place"] {
+            let response = ui.add_enabled(false, egui::Button::new(dim));
+            crate::menus::register_item(ui.ctx(), &response);
+        }
+        crate::menus::separator(ui);
+        let response = ui.add_enabled(
+            !state.shown.is_empty(),
+            egui::Button::new("Hide All Extra Columns"),
+        );
+        crate::menus::register_item(ui.ctx(), &response);
+        if response.clicked() {
+            invoke(events, ids::SET_COLUMNS, json!({ "shown": [] }));
+            ui.close();
+        }
+        crate::menus::separator(ui);
         let mark = if state.file_extensions {
             "\u{2714} "
         } else {
@@ -361,6 +377,21 @@ impl BrowserUi {
                 json!({ "file_extensions": !state.file_extensions }),
             );
             ui.close();
+        }
+        // Spec: browser-tags R43. Under the Plug-Ins label only.
+        if *shell.browser_view().label() == Label::PlugIns {
+            let shown = shell.plugin_settings().show_hidden;
+            let mark = if shown { "\u{2714} " } else { "" };
+            let response = ui.button(format!("{mark}Show Hidden Plug-Ins"));
+            crate::menus::register_item(ui.ctx(), &response);
+            if response.clicked() {
+                invoke(
+                    events,
+                    bl_shell::plugin_commands::SETTINGS,
+                    json!({ "show_hidden": !shown }),
+                );
+                ui.close();
+            }
         }
     }
 }

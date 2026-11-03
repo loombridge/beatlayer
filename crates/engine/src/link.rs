@@ -55,6 +55,14 @@ pub trait Session: Send {
     /// Tells the main thread a peer set the tempo to `bpm`, which becomes
     /// the set's tempo (R3). It must not allocate or lock.
     fn peer_tempo(&mut self, bpm: f64);
+    /// How many microseconds Beatlayer delays its own playback by: the
+    /// Latency while Link Audio is on with Sync to Incoming Audio (the Link
+    /// Audio spec, R8), else none. The moment each block is heard on the
+    /// session's beat is that much earlier than the clock says, so the song
+    /// sounds that much after the session's beat.
+    fn audio_delay(&self) -> i64 {
+        0
+    }
 }
 
 /// A tempo this far from the last one, in BPM, is a change: Link keeps its
@@ -207,7 +215,13 @@ impl<S: Session> Follower for LinkFollower<S> {
         // Spec: metronome R10. No count-in plays while Link is on.
         answer.no_count_in();
         self.session.capture();
-        let heard = self.heard(ask);
+        let real = self.heard(ask);
+        // Spec: link-audio R6. Peers' audio is read and the song's tracks
+        // are offered for where the block is heard, as the clock has it.
+        answer.moment(real);
+        // Spec: link-audio R8. With Sync to Incoming Audio the song plays
+        // the session's beat as it was the Latency ago.
+        let heard = real - self.session.audio_delay();
         if !self.active {
             self.begin(ask);
         }

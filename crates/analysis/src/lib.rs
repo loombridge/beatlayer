@@ -13,11 +13,20 @@
 //! | [`measure`] | A steady tone's pitch, a vowel's first two formants, how far below its harmonics the rest of a tone lies, and a swept tone's level against the rest of the output (warp-modes R34 to R36) | The strongest peak of one-second Hann frames with a parabolic refinement; the peaks of an all-pole fit to the average spectrum; the power outside the harmonics' bins; Kaiser-windowed frames around the swept frequency |
 //! | [`onsets`] | Transient times | Spectral flux with adaptive peak picking (after Böck, Krebs and Schedl, 2012), refined in the waveform |
 //! | [`tempo`] | Tempo (BPM) | The onset function's autocorrelation, weighted towards 120 BPM (after Ellis, 2007), refined by a line through the transients |
+//! | [`tempo_tracker`] | Tempo, beat phase and confidence in real time, for Tempo Follower (WP-9.12) | A comb-filter bank over the last 6 s of spectral-flux onset strength, a causal beat grid, and a lock-free copy of the input off the audio thread |
 //! | [`key`] | Key and mode | A chromagram correlated with Krumhansl and Kessler's key profiles (1982) |
+//! | [`similarity`] | A sound's descriptor, for finding sounds that sound alike (sound-similarity R3) | Log-mel and cepstral statistics, spectral shape envelopes, onset density, length and pitchedness, compared by cosine distance |
+//! | [`autotag`] | A sample's automatic tags, for the browser (browser-tags R53) | Loop by onsets and length; a class by a softmax regression over the descriptor, fitted from generated sounds |
 //! | [`loops`] | The span of a sample that repeats, for the autosampler | Rising zero crossings of the left channel, matched over 10 ms |
 //!
 //! [`stems`] separates a mix into drums, bass, others, and vocals with a
 //! Demucs network (IMP-11).
+//!
+//! [`transcribe`] finds the notes of pitched audio with basic-pitch's network
+//! (IMP-06).
+//!
+//! [`drums`] finds the kick, snare and hi-hat hits of drum audio with a
+//! classifier of Beatlayer's own (IMP-06).
 //!
 //! [`cache`] keeps what is found in each audio file, by the file's content
 //! hash (WP-4.3).
@@ -25,16 +34,24 @@
 //! Analysis runs offline, on whatever thread calls it, never on an audio
 //! thread: it allocates freely.
 
+pub mod autotag;
 pub mod cache;
+pub mod drums;
 pub mod key;
 pub mod levels;
 pub mod loops;
 pub mod loudness;
 pub mod measure;
 pub mod onsets;
+pub mod similarity;
 pub mod spectrum;
 pub mod stems;
 pub mod tempo;
+pub mod tempo_tracker;
+pub mod transcribe;
+
+#[cfg(test)]
+bl_rt::install_trap!();
 
 mod stft;
 

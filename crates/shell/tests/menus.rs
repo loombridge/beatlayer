@@ -72,7 +72,8 @@ fn every_item_reaches_a_command_or_is_pending() {
                     Action::Pending(None)
                     | Action::System(_)
                     | Action::Omitted(_)
-                    | Action::Separator => {}
+                    | Action::Separator
+                    | Action::Heading => {}
                 }
                 if item.is_shown() {
                     assert!(!item.label.contains("Live"), "{}: {}", item.row, item.label);
@@ -106,6 +107,8 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         commands::SETTINGS_SET_DEFAULT_TRACK_COLOUR,
         commands::SETTINGS_SET_REDUCED_AUTOMATIC_COLOURS,
         commands::SETTINGS_SET_CLIP_COLOUR,
+        commands::SETTINGS_SET_NEW_TRACKS_TAKE_GROUP_COLOUR,
+        commands::SETTINGS_USE_CUSTOM_COLOUR,
         // The Record, Warp & Launch page's switch (the audio clips spec,
         // R22).
         commands::SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
@@ -139,7 +142,9 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         // spec, R28).
         commands::SETTINGS_SET_TAKEOVER_MODE,
         // The Plug-Ins page's switch (the device chains spec, R31).
+        commands::SETTINGS_SET_MULTIPLE_PLUG_IN_WINDOWS,
         commands::SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
+        commands::SETTINGS_SET_AUTO_OPEN_PLUG_IN_WINDOWS,
         // The Display & Input page's Zoom (interface-zoom R4).
         commands::VIEW_SET_ZOOM,
         // The Display & Input page's Outline View in Focus (the

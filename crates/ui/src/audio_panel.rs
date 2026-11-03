@@ -576,8 +576,9 @@ pub fn show(
             Rect::from_min_size(at, vec2(SWITCH, CONTROL.y)),
             leader,
             // Spec: warping R46, R55. With EXT on every clip follows: the
-            // switch keeps showing what the clip is and can't be changed.
-            audio.warp && !shell.external_sync(),
+            // switch keeps showing what the clip is and can't be changed. So
+            // under Tempo Follower (tempo-follower R8).
+            audio.warp && !shell.external_sync() && !shell.tempo_follower_on(),
         ) {
             each(events, "clip.set_tempo_leader", json!({ "leader": on }));
         }
@@ -586,6 +587,13 @@ pub fn show(
                 .accesskit_node_builder(Id::new(("switch", "audio-tempo-leader")), |node| {
                     node.set_description(
                         "External Sync is on: every clip follows the incoming clock".to_owned(),
+                    );
+                });
+        } else if shell.tempo_follower_on() {
+            ui.ctx()
+                .accesskit_node_builder(Id::new(("switch", "audio-tempo-leader")), |node| {
+                    node.set_description(
+                        "Tempo Follower is on: every clip follows the followed tempo".to_owned(),
                     );
                 });
         }

@@ -12,7 +12,7 @@
 //! its key and its context-menu item do. The behaviour they follow is in the
 //! device chains spec.
 
-use bl_commands::Context::{Browser, DeviceView, Global, RackChains};
+use bl_commands::Context::{Browser, DeviceView, Global, RackChains, SampleSwap};
 use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_model::device_layout::BODY_HEIGHT;
 use bl_model::{
@@ -58,10 +58,22 @@ pub const REPLACE: &str = "device.replace";
 /// `device.load_sample`: load an audio file into a device that plays one
 /// sample (WP-2.16).
 pub const LOAD_SAMPLE: &str = "device.load_sample";
+/// `device.load_wavetable`: give a wavetable oscillator a factory table by
+/// name or a user table from a file (WP-8.8).
+pub const LOAD_WAVETABLE: &str = "device.load_wavetable";
 /// `device.swap_to_snapshot`: replace a Drum Sampler with the Simpler
 /// sampler, keeping its sample's start and length (one-shot drum sampler
 /// R22).
 pub const SWAP_TO_SNAPSHOT: &str = "device.swap_to_snapshot";
+/// `device.swap_similar`: swap a sampler's sample for the next or previous
+/// similar one (sound similarity R21).
+pub const SWAP_SIMILAR: &str = "device.swap_similar";
+/// `device.return_to_reference`: load a sampler's similarity reference back
+/// (sound similarity R23).
+pub const RETURN_TO_REFERENCE: &str = "device.return_to_reference";
+/// `device.similar`: where a sampler's sample stands in its similar list
+/// (sound similarity R27, R28).
+pub const SIMILAR: &str = "device.similar";
 /// `device.select_slot`: select a sample slot of a device that has them
 /// (WP-5.17).
 pub const SELECT_SLOT: &str = "device.select_slot";
@@ -74,6 +86,9 @@ pub const PARAMETERS: &str = "device.parameters";
 pub const SHOW_SIDECHAIN: &str = "device.show_sidechain";
 /// `device.display`: what a device's display shows now (WP-5.43).
 pub const DISPLAY: &str = "device.display";
+/// `device.preview_hit`: play a Drum Synth's hit through its track (the drum
+/// synths spec, R6).
+pub const PREVIEW_HIT: &str = "device.preview_hit";
 /// `device.set_display_view`: choose the view a device's display shows
 /// (WP-5.43).
 pub const SET_DISPLAY_VIEW: &str = "device.set_display_view";
@@ -157,6 +172,17 @@ pub const COMPARE_SWITCH: &str = "device.compare_switch";
 /// other (`bl-model`'s).
 pub const COMPARE_COPY: &str = "device.compare_copy";
 
+/// `device.set_route`: puts a route in a free slot of an instrument's
+/// modulation matrix.
+pub const SET_ROUTE: &str = "device.set_route";
+/// `device.clear_route`: empties a free slot of an instrument's modulation
+/// matrix.
+pub const CLEAR_ROUTE: &str = "device.clear_route";
+
+/// `collision.copy_resonator`: copies every setting of one of Collision's
+/// resonators to the other.
+pub const COPY_RESONATOR: &str = "collision.copy_resonator";
+
 /// `articulation.list`: the articulations an Articulation Map holds.
 pub const ARTICULATION_LIST: &str = "articulation.list";
 /// `articulation.learn`: arms a row's Learn button.
@@ -181,12 +207,17 @@ pub const IDS: &[&str] = &[
     ADD_PRESET,
     REPLACE,
     LOAD_SAMPLE,
+    LOAD_WAVETABLE,
     SWAP_TO_SNAPSHOT,
+    SWAP_SIMILAR,
+    RETURN_TO_REFERENCE,
+    SIMILAR,
     SELECT_SLOT,
     HOT_SWAP,
     PARAMETERS,
     SHOW_SIDECHAIN,
     DISPLAY,
+    PREVIEW_HIT,
     SET_DISPLAY_VIEW,
     SET_PAGE,
     ARM_MAP,
@@ -215,6 +246,9 @@ pub const IDS: &[&str] = &[
     RACK_SELECT_MACRO,
     RACK_SHOW_VARIATIONS,
     RACK_SELECT_VARIATION,
+    SET_ROUTE,
+    CLEAR_ROUTE,
+    COPY_RESONATOR,
     ARTICULATION_LIST,
     ARTICULATION_LEARN,
 ];
@@ -230,6 +264,7 @@ pub const ON_SELECTED: &[&str] = &[
     SET_ROLE,
     COMPARE_SWITCH,
     COMPARE_COPY,
+    "device.set_similarity_reference",
 ];
 
 /// Whether `id` is one of the Device View's commands.
@@ -249,6 +284,11 @@ pub const DEVICE_GAP: f32 = 7.0;
 /// describe its layout (the test devices of WP-2.4): a described device is
 /// its layout's docked width ([`frame_width`]).
 pub const DEFAULT_DEVICE_WIDTH: f32 = 120.0;
+
+/// The least width at 100%, in points, of an unfolded device's body: its title
+/// bar holds the activator, a title switch and the three round buttons, with
+/// room for a few letters of the name between (Beatlayer's own; to observe).
+pub const MIN_DEVICE_WIDTH: f32 = 96.0;
 
 /// The width of a device's sidechain strip at 100%, in points: the strip
 /// down its left edge with the section's show/hide toggle and Sidechain
@@ -388,7 +428,8 @@ pub fn rack_width(rack: &RackFrame) -> f32 {
 }
 
 /// The width at 100%, in points, of a device's own body: its layout's
-/// docked width when its type describes one (WP-2.5), and
+/// docked width when its type describes one (WP-2.5), at least
+/// [`MIN_DEVICE_WIDTH`], and
 /// [`DEFAULT_DEVICE_WIDTH`] otherwise.
 #[must_use]
 pub fn body_width(frame: &DeviceFrame) -> f32 {
@@ -396,7 +437,11 @@ pub fn body_width(frame: &DeviceFrame) -> f32 {
         return rack_width(rack);
     }
     frame.panel.as_ref().map_or(DEFAULT_DEVICE_WIDTH, |panel| {
-        panel.layout(frame.expanded).docked_size().width
+        panel
+            .layout(frame.expanded)
+            .docked_size()
+            .width
+            .max(MIN_DEVICE_WIDTH)
     })
 }
 
@@ -425,8 +470,20 @@ pub fn sidechain_width(frame: &DeviceFrame) -> f32 {
         .as_ref()
         .map(|s| s.shown)
         .or_else(|| frame.midi_sidechain.as_ref().map(|s| s.shown));
+    // Spec: routing R38. A device with both sidechains has two columns, the
+    // audio's and the MIDI's, each as wide as a section.
+    let columns = if frame.sidechain.is_some() && frame.midi_sidechain.is_some() {
+        2.0
+    } else {
+        1.0
+    };
     shown.map_or(0.0, |shown| {
-        SIDECHAIN_STRIP_WIDTH + if shown { SIDECHAIN_SECTION_WIDTH } else { 0.0 }
+        SIDECHAIN_STRIP_WIDTH
+            + if shown {
+                columns * SIDECHAIN_SECTION_WIDTH
+            } else {
+                0.0
+            }
     }) + external_width(frame)
 }
 
@@ -526,11 +583,26 @@ pub struct DevicePanel {
     /// panel's state, not the set's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub learning: Option<u8>,
+    /// For each parameter an instrument's modulation matrix moves, the
+    /// sources routed into it, in slot order (the instrument modulation
+    /// spec, R12): what assistive technology reads beside the control's
+    /// value. Empty for a device without a matrix or with no route.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub matrix_routes: Vec<MatrixRoutes>,
     /// The parameters drawn disabled because the device takes them from its
     /// current scale: Scale's Base and Scale Name and Arpeggiator's Root and
     /// Scale, while Use Current Scale is on (the scales spec, R16).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub locked: Vec<ParamId>,
+}
+
+/// The sources routed into one parameter of an instrument's matrix.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MatrixRoutes {
+    /// The parameter.
+    pub param: ParamId,
+    /// The names of the sources routed into it, in slot order.
+    pub sources: Vec<String>,
 }
 
 /// A pages node of a device's layout as the panel shows it (device framework
@@ -568,6 +640,36 @@ impl DevicePanel {
             .map(|p| (p.node.clone(), p.shown.clone()))
             .collect();
         self.description.layout.shown(expanded).with_pages(&choice)
+    }
+
+    /// The parameter whose control sits where `param`'s does, as the
+    /// panel's values stand: the alternate while its switch is on.
+    #[must_use]
+    pub fn drawn(&self, param: ParamId) -> ParamId {
+        self.description
+            .alternates
+            .iter()
+            .find(|a| {
+                a.off == param
+                    && self
+                        .description
+                        .params
+                        .iter()
+                        .position(|p| p.id == a.switch)
+                        .is_some_and(|i| self.value(i) >= 0.5)
+            })
+            .map_or(param, |a| a.on)
+    }
+
+    /// The value of the parameter `id`: what a relabelled parameter's label
+    /// follows.
+    #[must_use]
+    pub fn read(&self, id: bl_model::ParamId) -> f64 {
+        self.description
+            .params
+            .iter()
+            .position(|p| p.id == id)
+            .map_or(0.0, |index| self.value(index))
     }
 
     /// The value of the parameter at `index` in the description.
@@ -646,10 +748,20 @@ pub struct ParameterState {
     /// a device that isn't a plug-in, since its panel shows them all.
     #[serde(default)]
     pub configured: bool,
+    /// Whether its control is shown: false for the parameter a switch has put
+    /// away, such as Limiter's Ceiling while Maximize is on (the control then
+    /// is Threshold's). A parameter that isn't shown keeps its value, its
+    /// lane and its place in its banks, and still plays.
+    #[serde(default = "shown_by_default")]
+    pub shown: bool,
     /// Its value in the A and B state that isn't active (device compare
     /// R11); left out for a device without two states.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub other: Option<f64>,
+}
+
+fn shown_by_default() -> bool {
+    true
 }
 
 /// What `device.parameters` returns.
@@ -865,8 +977,8 @@ pub struct ChainRow {
     pub id: ChainId,
     /// Its name.
     pub name: String,
-    /// Its colour, a swatch of the palette of 5 rows of 14, if it has one.
-    pub colour: Option<u8>,
+    /// Its colour, a swatch of the palette of 5 rows of 14 or a `#RRGGBB` colour, if it has one.
+    pub colour: Option<bl_model::Colour>,
     /// Its Chain Activator.
     pub enabled: bool,
     /// Whether it's soloed.
@@ -1033,7 +1145,9 @@ fn returns_default() -> bool {
 
 /// A device's MIDI sidechain section, in the same left strip as a
 /// sidechain's (WP-5.27; the routing spec, R34): the toggle shows the
-/// section, which holds the MIDI source chooser.
+/// section, which holds the MIDI source chooser and, where the device has
+/// one, the tapping point chooser (R39). A device with both sidechains
+/// reports both sections (R38).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MidiSidechainSection {
     /// Whether the section is shown, by the toggle at the top of the
@@ -1042,6 +1156,11 @@ pub struct MidiSidechainSection {
     /// What the MIDI source chooser shows: a MIDI track's label (`1-MIDI`)
     /// or `No Input`.
     pub source: String,
+    /// What the tapping point chooser under it shows (`Pre FX`, `Post FX`
+    /// or `Post Mixer`), for a device whose MIDI sidechain has one (the
+    /// routing spec, R39).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tap: Option<String>,
 }
 
 /// A floating device's window, as `device.windows` reports it (WP-2.5b).
@@ -1105,8 +1224,12 @@ pub struct DeviceViewState {
     pub track_kind: Option<TrackKind>,
     /// Its devices, in signal order.
     pub devices: Vec<DeviceFrame>,
-    /// The selected device, if it's in this chain.
+    /// The first selected device, if it's in this chain.
     pub selected: Option<DeviceId>,
+    /// Every selected device in this chain, in order: one run of
+    /// neighbouring devices (device chains R47).
+    #[serde(default)]
+    pub selection: Vec<DeviceId>,
     /// The device being hot-swapped, on any track, and what the browser's
     /// bar says ("Swapping Audio Effect").
     pub hot_swap: Option<HotSwap>,
@@ -1185,6 +1308,14 @@ pub struct DeviceArgs {
     pub device: Option<DeviceId>,
 }
 
+/// What `device.preview_hit` returns.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct HitPreviewed {
+    /// Whether the audio engine took it: it is off, or has no such device,
+    /// when this is `false`, and nothing plays.
+    pub sent: bool,
+}
+
 /// Arguments of `articulation.list`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -1227,6 +1358,78 @@ pub struct ArticulationLearn {
     pub index: Option<u8>,
 }
 
+/// Arguments of `device.set_route`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetRouteArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The free slot, by its number; without one, the free slot that already
+    /// routes this source to this destination, else the first empty one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<u8>,
+    /// The source's name, as the device's `matrix` lists it.
+    pub source: String,
+    /// The destination's name, as the device's `matrix` lists it.
+    pub destination: String,
+    /// The route's amount, in per cent from -100 to 100; the slot's amount
+    /// is left as it is if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amount: Option<f64>,
+}
+
+/// Arguments of `device.clear_route`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ClearRouteArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The free slot, by its number; or name its source and destination.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<u8>,
+    /// The source of the route to clear, with its destination.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// The destination of the route to clear, with its source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destination: Option<String>,
+}
+
+/// Arguments of `collision.copy_resonator`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CopyResonatorArgs {
+    /// The Collision; the selected device if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The resonator to copy from, 1 or 2; its settings go to the other.
+    pub from: u8,
+}
+
+/// What `collision.copy_resonator` returns: the Collision and the
+/// resonators it copied between.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ResonatorCopied {
+    /// The device.
+    pub device: DeviceId,
+    /// The resonator copied from, 1 or 2.
+    pub from: u8,
+    /// The resonator copied to, 1 or 2.
+    pub to: u8,
+}
+
+/// What `device.set_route` and `device.clear_route` return: the slot they
+/// changed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RouteChanged {
+    /// The device.
+    pub device: DeviceId,
+    /// The slot's number.
+    pub slot: u8,
+}
+
 /// Arguments of `device_view.scroll`.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -1236,11 +1439,20 @@ pub struct ScrollDeviceViewArgs {
 }
 
 /// Arguments of `device.select`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SelectDeviceArgs {
-    /// The device, or `null` to select none.
+    /// The device, or `null` to select none; left out with `devices`.
+    #[serde(default)]
     pub device: Option<DeviceId>,
+    /// Neighbouring devices of one chain to select together, as a range;
+    /// instead of `device`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub devices: Option<Vec<DeviceId>>,
+    /// Select the range from the device selected last on its own to
+    /// `device`, never fewer devices than before, as Shift-click does.
+    #[serde(default)]
+    pub range: bool,
 }
 
 /// Arguments of `device.expand`.
@@ -1632,8 +1844,8 @@ pub struct MacroInfo {
     /// Its name: Rename's, its one parameter's, or "Macro N" (macros spec,
     /// R10).
     pub name: String,
-    /// Its colour: a swatch of the palette of 5 rows of 14, or null.
-    pub colour: Option<u8>,
+    /// Its colour: a swatch of the palette of 5 rows of 14, a `#RRGGBB` colour, or null.
+    pub colour: Option<bl_model::Colour>,
     /// Its value, from 0 to 1.
     pub value: f64,
     /// How it reads: its parameter's value and unit, 0 to 127, or a shared
@@ -1834,6 +2046,152 @@ pub struct LoadSampleArgs {
     pub slot: Option<u8>,
 }
 
+/// Which way `device.swap_similar` goes in the similar list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SwapDirection {
+    /// The next sample after the one the device holds.
+    Next,
+    /// The sample before the one the device holds.
+    Previous,
+}
+
+/// Which sampler the swap commands act on: `device`, or the pad `note` of
+/// the drum rack `rack`, or else the selected device (or the selected pad,
+/// when a drum rack is selected).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SwapTarget {
+    /// The Simpler or Drum Sampler; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The drum rack whose pad `note` is meant; the rack in focus if left
+    /// out. Used with `note`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rack: Option<DeviceId>,
+    /// The pad's note, 0 to 127: the sampler in the pad's one chain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<u8>,
+}
+
+/// Arguments of `device.swap_similar`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SwapSimilarArgs {
+    /// Next or previous.
+    pub direction: SwapDirection,
+    /// The Simpler or Drum Sampler; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The drum rack whose pad `note` is meant; the rack in focus if left
+    /// out. Used with `note`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rack: Option<DeviceId>,
+    /// The pad's note, 0 to 127: the sampler in the pad's one chain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<u8>,
+}
+
+impl SwapSimilarArgs {
+    /// The sampler the swap is for.
+    #[must_use]
+    pub const fn target(&self) -> SwapTarget {
+        SwapTarget {
+            device: self.device,
+            rack: self.rack,
+            note: self.note,
+        }
+    }
+}
+
+/// What `device.swap_similar` and `device.return_to_reference` return.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Swapped {
+    /// The device that took the sample.
+    pub device: DeviceId,
+    /// The sample it holds now, by content hash.
+    pub media: ContentHash,
+    /// The sample's file name, without its extension.
+    pub name: String,
+    /// The sample's place in the reference's similar list, counted from 0.
+    pub position: u32,
+    /// How many samples the list holds, the reference first.
+    pub count: u32,
+}
+
+/// What `device.similar` returns: where a sampler's sample stands in the
+/// similar list of its reference (sound similarity R27, R28).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SimilarState {
+    /// The sampler.
+    pub device: DeviceId,
+    /// The sample it holds, by content hash.
+    pub sample: Option<ContentHash>,
+    /// Its similarity reference, by content hash: the sample it was loaded
+    /// with unless one was saved or a swap began from another.
+    pub reference: Option<ContentHash>,
+    /// The sample's place in the reference's list, counted from 0 (the
+    /// reference is 0); `null` if the list can't be made or doesn't hold it.
+    pub position: Option<u32>,
+    /// How many samples the list holds, the reference first; `null` if the
+    /// list can't be made.
+    pub count: Option<u32>,
+    /// The file of the reference in the browser's places, which Show
+    /// Similar Files lists the neighbours of; `null` if the list can't be
+    /// made.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_path: Option<String>,
+    /// Whether the previous similar sample can be loaded.
+    pub can_previous: bool,
+    /// Whether the next similar sample can be loaded.
+    pub can_next: bool,
+    /// Whether Return to Reference can load the reference: the device holds
+    /// another sample.
+    pub can_return: bool,
+    /// Why the list can't be made or the swap controls are disabled, if so
+    /// (R27); `null` when the list exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// Arguments of `device.load_wavetable`: a factory table by `category` and
+/// `name`, or a user table by `file`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LoadWavetableArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The oscillator that takes the table: 1 or 2.
+    pub oscillator: u8,
+    /// A factory table's category, with `name`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// A factory table's name in its category.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// A WAV or AIFF file to make the table from, instead of a factory
+    /// table.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    /// For a file: use its frames as they are, with no clean-up.
+    #[serde(default)]
+    pub raw: bool,
+}
+
+/// What `device.load_wavetable` returns.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct LoadWavetableResult {
+    /// The device that took the table.
+    pub device: DeviceId,
+    /// The oscillator that took it.
+    pub oscillator: u8,
+    /// What the oscillator plays now.
+    pub choice: bl_model::WavetableChoice,
+    /// How many frames the table has.
+    pub frames: u16,
+}
+
 /// Arguments of `device.select_slot`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -1990,10 +2348,13 @@ fn specs() -> Vec<CommandSpec> {
             .result::<DeviceAdded>(),
         CommandSpec::new(SELECT, "Select Device")
             .description(
-                "Selects a device, as clicking its title bar does, or none with `null`. The \
-                 Device View's keys (Delete, Cmd-C, Cmd-D, Cmd-R) act on it. A device that \
-                 floats in its own window also brings that window to the front. Selecting \
-                 changes nothing in the set.",
+                "Selects a device, as clicking its title bar does, or none with `null`; with \
+                 `devices` it selects that run of neighbouring devices of one chain, and with \
+                 `range` it grows the selection to `device`, as Shift-click does. The Device \
+                 View's keys (Delete, Cmd-C, Cmd-D, Cmd-G, Cmd-X) act on every selected device, \
+                 which `device_view.state` lists in `selection`. A device that floats in its \
+                 own window also brings that window to the front. Selecting changes nothing in \
+                 the set.",
             )
             .permission(Permission::Read)
             .context(DeviceView)
@@ -2027,8 +2388,9 @@ fn specs() -> Vec<CommandSpec> {
         CommandSpec::new(CUT, "Cut Device")
             .description(
                 "Copies a device to the clipboard, with its settings, and deletes it from its \
-                 chain: one undo step, named Delete Device(s). Because it removes the person's \
-                 work an agent asks first. `device.paste` puts it back, anywhere.",
+                 chain: one undo step, named Delete Device(s). With `device` left out it cuts \
+                 every selected device, and selects the device after them. Because it removes \
+                 the person's work an agent asks first. `device.paste` puts it back, anywhere.",
             )
             .permission(Permission::Destructive)
             .context(DeviceView)
@@ -2037,8 +2399,8 @@ fn specs() -> Vec<CommandSpec> {
             .result::<DeviceViewState>(),
         CommandSpec::new(COPY, "Copy Device")
             .description(
-                "Copies a device to the clipboard, with its settings, for `device.paste`. \
-                 Changes nothing in the set.",
+                "Copies a device to the clipboard, with its settings, for `device.paste`; with \
+                 `device` left out, every selected device. Changes nothing in the set.",
             )
             .permission(Permission::Read)
             .context(DeviceView)
@@ -2047,10 +2409,10 @@ fn specs() -> Vec<CommandSpec> {
             .result::<DeviceViewState>(),
         CommandSpec::new(PASTE, "Paste Device")
             .description(
-                "Pastes the clipboard's device, as a new device with its settings, before the \
-                 selected device (or `before`), or at the end of the chain with none selected, \
-                 on the selected track (or `track`), and selects it: one undo step, named Copy \
-                 Device. The chain keeps Live's order, so an audio effect can't go before an \
+                "Pastes the clipboard's devices, as new devices with their settings, before the \
+                 first selected device (or `before`), or at the end of the chain with none \
+                 selected, on the selected track (or `track`), and selects them: one undo step, \
+                 named Copy Device. The result names the first. The chain keeps Live's order, so an audio effect can't go before an \
                  instrument, and instruments and MIDI effects only go on MIDI tracks. With \
                  `chain` it pastes into that rack chain, or before a device that is in one.",
             )
@@ -2062,7 +2424,9 @@ fn specs() -> Vec<CommandSpec> {
         CommandSpec::new(DUPLICATE, "Duplicate Device")
             .description(
                 "Puts a copy of a device, with its settings, straight after it, and selects the \
-                 copy: one undo step, named Duplicate Device. A chain holds one instrument, so \
+                 copy: one undo step, named Duplicate Device. With `device` left out it copies \
+                 every selected device, in order, after the last of them; the result names the \
+                 first copy. A chain holds one instrument, so \
                  an instrument can't be duplicated; a rack is copied whole, with new IDs for \
                  its chains and devices.",
             )
@@ -2173,6 +2537,25 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .args::<LoadSampleArgs>()
             .result::<LoadSampleResult>(),
+        CommandSpec::new(LOAD_WAVETABLE, "Load Wavetable")
+            .description(
+                "Gives a wavetable oscillator (`oscillator` 1 or 2) its table: a factory table \
+                 by its `category` and `name`, or a user table made from the WAV or AIFF \
+                 `file`. A WAV with a `clm ` chunk is cut into frames of its frame size; any \
+                 other file into frames of 2,048 samples, up to 256, and a file shorter than \
+                 a frame fills one. With `raw` off (the default) each frame's DC offset is \
+                 removed and its ends are made to meet; with `raw` on the frames are used as \
+                 they are. A file goes into the set's media store like a sample, so the set \
+                 reopens with it and Collect All and Save copies it. One undo step, named \
+                 Load Wavetable. An unknown table, an unreadable file, a file with no audio \
+                 or a device that plays no wavetable is refused. Reads a file outside the \
+                 project. What each oscillator plays is `wavetables` in the `device` query \
+                 result.",
+            )
+            .permission(Permission::External)
+            .context(DeviceView)
+            .args::<LoadWavetableArgs>()
+            .result::<LoadWavetableResult>(),
         CommandSpec::new(SWAP_TO_SNAPSHOT, "Swap to Simpler")
             .description(
                 "Replaces a Drum Sampler with Simpler in One-Shot mode, as \
@@ -2185,6 +2568,58 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .args::<DeviceArgs>()
             .result::<DeviceAdded>(),
+        CommandSpec::new(SWAP_SIMILAR, "Swap to Similar Sample")
+            .description(
+                "Swaps the sample a Simpler, a Drum Sampler, or a Drum Rack pad's Simpler or \
+                 Drum Sampler holds for the next (`direction` `next`) or previous (`previous`) \
+                 sample in the similar list of its reference (`browser.similar`'s: the \
+                 reference first, then the nearest samples of the browser's places), as Cmd-Right \
+                 and Cmd-Left (Ctrl on Windows and Linux) and the display's and the pads' \
+                 buttons do. Name the sampler with `device`, or the pad with `note` (and `rack`), \
+                 or leave both out for the selected device or pad. Only the sample is replaced: \
+                 every parameter keeps its value, the region goes back to the whole of the new \
+                 sample, manual slices are cleared, and on a pad the note, choke group and \
+                 chain settings stay, the chain's name following the sample's when it was the \
+                 old sample's. The device's similarity reference doesn't change (it becomes \
+                 the sample the device held before, if none was saved). The list doesn't wrap: \
+                 past either end, and for a sample or reference that isn't analysed or has no \
+                 similar samples, the command is refused with the reason. One undo step, named \
+                 Swap Sample. Reads a file outside the project. Read the result in \
+                 `device.similar`.",
+            )
+            .permission(Permission::Edit)
+            .contexts([DeviceView, SampleSwap])
+            .binding(Binding::new("S-SWAP-001").arg("direction", "next"))
+            .binding(Binding::new("S-SWAP-002").arg("direction", "previous"))
+            .args::<SwapSimilarArgs>()
+            .result::<Swapped>(),
+        CommandSpec::new(RETURN_TO_REFERENCE, "Return to Reference")
+            .description(
+                "Loads the similarity reference of a Simpler, a Drum Sampler or a Drum Rack pad's \
+                 sampler back into it, as Return to Reference and Cmd-Down (Ctrl on Windows and \
+                 Linux) do, with everything a swap keeps and resets (`device.swap_similar`). \
+                 Refused while the device holds its reference. One undo step, named Return to \
+                 Reference. Read the result in `device.similar`.",
+            )
+            .permission(Permission::Edit)
+            .contexts([DeviceView, SampleSwap])
+            .binding("S-SWAP-004")
+            .args::<SwapTarget>()
+            .result::<Swapped>(),
+        CommandSpec::new(SIMILAR, "Similar Sample State")
+            .description(
+                "Reports where a sampler's sample stands among the similar samples of its \
+                 reference, the readback of `device.swap_similar`, `device.return_to_reference` \
+                 and `device.set_similarity_reference`: the sample, the reference, the sample's \
+                 place in the reference's list and the list's length, whether the previous \
+                 and next samples and the reference can be loaded, and, when the swap controls \
+                 are disabled, why. Name the sampler as `device.swap_similar` does. Changes \
+                 nothing.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<SwapTarget>()
+            .result::<SimilarState>(),
         CommandSpec::new(SELECT_SLOT, "Select Sample Slot")
             .description(
                 "Selects one of a device's sample slots, as clicking its cell in the panel \
@@ -2255,8 +2690,8 @@ fn specs() -> Vec<CommandSpec> {
                  rack for MIDI effects alone, and an instrument rack for any other mix. A \
                  selection that grouping would put out of the chain's order is refused. With \
                  `chains` (several chains of one rack) they become the chains of a new rack of \
-                 the same kind, inside a new chain in the first one's place. One undo step \
-                 (Group).",
+                 the same kind, inside a new chain in the first one's place. With neither it \
+                 groups every selected device. One undo step (Group Devices).",
             )
             .permission(Permission::Edit)
             .contexts([DeviceView, RackChains])
@@ -2558,6 +2993,19 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .args::<DeviceArgs>()
             .result::<DeviceDisplay>(),
+        CommandSpec::new(PREVIEW_HIT, "Preview Hit")
+            .description(
+                "Plays a hit of a Drum Synth (DS Kick, DS Snare, DS Tom or DS Clap) at \
+                 velocity 100 through its track and the track's mixer, as a click in the \
+                 upper half of its display does, whether or not the song plays. The hit runs \
+                 its own length. It records nothing, changes nothing in the set and isn't an \
+                 undo step. It needs the audio engine on; `sent` says whether it was. A \
+                 device that isn't a Drum Synth is refused.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<DeviceArgs>()
+            .result::<HitPreviewed>(),
         CommandSpec::new(SET_DISPLAY_VIEW, "Set Display View")
             .description(
                 "Chooses the view a device's display shows, as its view buttons do: a \
@@ -2583,6 +3031,46 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .args::<SetPageArgs>()
             .result::<DeviceViewState>(),
+        CommandSpec::new(SET_ROUTE, "Change Modulation Route")
+            .description(
+                "Routes a modulation source to a destination in a free slot of an instrument's \
+                 matrix, as dragging in its Matrix tab does: `source` and `destination` by the \
+                 names the device's `matrix` (in the query tool's `device` result) lists, in \
+                 the slot named by `slot` or, without one, the free slot that already routes \
+                 them, else the first empty free slot. `amount` is in per cent from -100 to 100 \
+                 and goes to the slot's amount parameter in the same undo step; without it the \
+                 amount stays. A fixed or chosen slot, an unknown name, a pair the device \
+                 refuses and a matrix with every free slot taken are refused. One undo step \
+                 (Change Modulation Route) restoring source, destination and amount together.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<SetRouteArgs>()
+            .result::<RouteChanged>(),
+        CommandSpec::new(CLEAR_ROUTE, "Clear Modulation Route")
+            .description(
+                "Empties a free slot of an instrument's matrix, by `slot` or by the `source` \
+                 and `destination` it routes, and sets the slot's amount to 0 %, in one undo \
+                 step (Clear Modulation Route) that restores both. A fixed or chosen slot, an \
+                 empty one and a pair no slot routes are refused.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<ClearRouteArgs>()
+            .result::<RouteChanged>(),
+        CommandSpec::new(COPY_RESONATOR, "Copy Resonator")
+            .description(
+                "Copies every setting of one of Collision's two resonators to the other, as \
+                 the Copy buttons of its resonator tabs do: `from` is 1 to copy Resonator 1 \
+                 into Resonator 2, or 2 to copy Resonator 2 into Resonator 1. The device is a \
+                 Collision, by ID or the selected one. Every parameter of the resonator is \
+                 copied, its switch included, and the device's `params` read back the result. \
+                 One undo step (Copy Resonator).",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<CopyResonatorArgs>()
+            .result::<ResonatorCopied>(),
         CommandSpec::new(ARTICULATION_LIST, "List Articulations")
             .description(
                 "Reports the articulations an Articulation Map holds, in order: each with its \

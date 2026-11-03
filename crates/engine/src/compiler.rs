@@ -375,6 +375,11 @@ impl Compiler {
         Ok(())
     }
 
+    /// Whether the loader still owes an answer for some clip's source.
+    pub(crate) fn loading(&self) -> bool {
+        self.sources.loading()
+    }
+
     /// What the audio thread needs now that the loader has answered: the
     /// clips of the track whose clip's source is open, or the media it
     /// couldn't open. Nothing if the answer is stale, or no document has
@@ -521,6 +526,21 @@ impl Compiler {
             matches!((old.track(id), document.track(id)),
                 (Some(was), Some(now)) if was.audition() != now.audition())
         }));
+        // Spec: chord-lane R6, R8, R11. The lane reaches the players of the
+        // tracks that follow it as node data, sent again when it or a
+        // track's switch changes: no program is made.
+        let lane_changed = old.chord_lane() != document.chord_lane();
+        tracks.extend(
+            document
+                .tracks()
+                .filter(|track| {
+                    track.kind() == TrackKind::Midi
+                        && (track.follow_chord_lane()
+                            != old.track(track.id()).is_some_and(Track::follow_chord_lane)
+                            || (lane_changed && track.follow_chord_lane()))
+                })
+                .map(Track::id),
+        );
         // Spec: grooves R15. A groove's parameters, the Global Amount and the
         // pool reach the clips that use them as node data: their tracks'
         // lists are sent again, and no program is made.
@@ -610,15 +630,28 @@ impl Compiler {
             {
                 self.send_layers(document, id, &mut update);
             }
-            // A sampler whose sample's edits, warp or slices changed gets the
-            // edited sample again as node data, with no new program (R57).
+            // A wavetable device whose oscillators' tables changed gets them
+            // again as node data, with no new program (WP-8.9).
             if let (Change::Modified, Some(before), Some(after)) =
                 (change, old.device(id), document.device(id))
-                && (before.sample_edits != after.sample_edits
+                && before.wavetables != after.wavetables
+                && before.media == after.media
+            {
+                self.send_device_data(document, id, &mut update);
+            }
+            // A sampler whose sample's edits, warp or slices changed gets the
+            // edited sample again as node data, with no new program (R57);
+            // so does one that swaps samples in place, for another sample.
+            if let (Change::Modified, Some(before), Some(after)) =
+                (change, old.device(id), document.device(id))
+                && (((before.sample_edits != after.sample_edits
                     || before.warp != after.warp
                     || before.slices != after.slices
                     || before.region != after.region)
-                && before.media == after.media
+                    && before.media == after.media)
+                    || (before.media != after.media
+                        && before.media_at(0).is_some()
+                        && self.registry.swaps_samples_in_place(&after.kind)))
                 && let Some(media) = after.media_at(0)
             {
                 self.send_slot_sample(document, id, 0, media, &after.sample_edits, &mut update);
@@ -672,6 +705,25 @@ impl Compiler {
                 update.data.push((
                     NodeKey::Device(id),
                     self.gc.data(crate::node::Articulations(list)),
+                ));
+            }
+        }
+        // Spec: instrument modulation R10. An instrument's free routes,
+        // set or cleared, reach its node as node data, resolved here on the
+        // main thread, with no new program.
+        for (&id, &change) in &changes.devices {
+            if let (Change::Modified, Some(before), Some(after)) =
+                (change, old.device(id), document.device(id))
+                && before.routes != after.routes
+                && let Some(layout) = self
+                    .registry
+                    .device_type(&after.kind)
+                    .and_then(|device_type| device_type.matrix)
+            {
+                update.data.push((
+                    NodeKey::Device(id),
+                    self.gc
+                        .data(crate::node::ModRoutes(layout.free_routes(after))),
                 ));
             }
         }
@@ -865,6 +917,25 @@ impl Compiler {
         }
     }
 
+    /// Sends a device's node the data its factory builds from it (WP-8.9;
+    /// the wavetable spec, R3, R10): a wavetable device's tables, built here,
+    /// on the compiler's thread; media the library can't find is reported
+    /// missing.
+    fn send_device_data(&mut self, document: &Document, device: DeviceId, update: &mut Update) {
+        let Some(device_ref) = document.device(device) else {
+            return;
+        };
+        let library = self.registry.media();
+        let file = |media| library.and_then(|library| library.file(media));
+        let Some(data) = self.registry.data(device_ref, &file) else {
+            return;
+        };
+        update.missing.extend(data.missing);
+        for item in data.items {
+            update.data.push((NodeKey::Device(device), item(&self.gc)));
+        }
+    }
+
     /// Sends a multisampler's node its layers, each with its decoded audio
     /// (WP-5.13, R31): the media library decodes here, on the compiler's
     /// thread, and shares each file with every other reader; a layer whose
@@ -1001,6 +1072,7 @@ impl Compiler {
                     &document.settings().tempo,
                     self.config.sample_rate,
                     &document.settings().grooves,
+                    document.chord_lane(),
                 );
                 update
                     .data
@@ -1049,7 +1121,7 @@ impl Compiler {
         let build_midi_sources = graph
             .midi_links
             .iter()
-            .filter_map(|link| Some((link.device, *task_of.get(&link.from)?)))
+            .filter_map(|link| Some((link.device, (*task_of.get(&link.from)?, link.tap))))
             .collect();
         let mut build = Build {
             midi_sources: build_midi_sources,
@@ -1186,7 +1258,13 @@ impl Compiler {
             if from == NO_TASK {
                 continue;
             }
-            let keep = &mut build.tasks[from as usize].midi_keep;
+            // Spec: routing R39. Post FX and Post Mixer keep the notes that
+            // leave the track's MIDI effects.
+            let task = &mut build.tasks[from as usize];
+            let keep = match build.midi_sidechains[at].tap {
+                Tap::PreFx => &mut task.midi_keep,
+                Tap::PostFx | Tap::PostMixer => &mut task.midi_post,
+            };
             let index = *keep.get_or_insert_with(|| {
                 midi_kept += 1;
                 midi_kept - 1
@@ -1478,6 +1556,8 @@ impl Compiler {
             note_migrations,
             device_input: vec![0.0; self.config.input_channels * self.config.max_frames],
             device_input_channels: self.config.input_channels,
+            link_input: vec![0.0; build.link_inputs.len() * 2 * self.config.max_frames],
+            link_inputs: build.link_inputs,
             channels: self.config.channels,
             max_frames: self.config.max_frames,
             output: task_of[&document.main_id()],
@@ -1630,6 +1710,11 @@ impl Compiler {
                     self.gc.data(crate::node::PluginMpeData(device.mpe)),
                 ));
             }
+        }
+        // New nodes whose factories build data from their device (WP-8.9),
+        // after their automation.
+        for &device in &build.dataful {
+            self.send_device_data(document, device, &mut update);
         }
         update
     }
@@ -1886,6 +1971,7 @@ impl Compiler {
             pre_fx: None,
             post_fx: None,
             midi_keep: None,
+            midi_post: None,
             dependents: Span::default(),
             dependencies,
         });
@@ -1914,8 +2000,28 @@ impl Compiler {
         // The track's own input from the audio interface, Ext. In
         // (WP-2.13): its own route, whose Monitor gate opens and closes it
         // like any other input.
+        // Or a peer's channel from Link Audio (R5), through a route of its
+        // own just the same.
+        let link_input = match &track.routing().input {
+            bl_model::Input::LinkAudio { peer, channel } if track.kind() == TrackKind::Audio => {
+                let slot = build.link_inputs.len() as u16;
+                build.link_inputs.push(crate::program::LinkInput {
+                    peer: peer.clone(),
+                    channel: channel.clone(),
+                    track: track.id(),
+                });
+                Some(slot)
+            }
+            _ => None,
+        };
         let device_input = match track.routing().input {
-            bl_model::Input::External { channel } if track.kind() == TrackKind::Audio => {
+            bl_model::Input::External { .. } | bl_model::Input::LinkAudio { .. }
+                if track.kind() == TrackKind::Audio =>
+            {
+                let channel = match track.routing().input {
+                    bl_model::Input::External { channel } => channel,
+                    _ => bl_model::Channel::Pair(link_input.map_or(1, |slot| slot * 2 + 1)),
+                };
                 let key = NodeKey::DeviceInput(track.id());
                 let closed = !track.routing().monitoring(track.mixer().arm);
                 let auto = track.routing().monitor == bl_model::Monitor::Auto;
@@ -1934,7 +2040,11 @@ impl Compiler {
                         Route::new(1.0, false, &config).closed(closed).auto(auto),
                     ))
                 });
-                Some(DeviceInput { route, channel })
+                Some(DeviceInput {
+                    route,
+                    channel,
+                    link: link_input.is_some(),
+                })
             }
             _ => None,
         };
@@ -2047,6 +2157,7 @@ impl Compiler {
             sidechains,
             midi_sidechains,
             midi_keep: None,
+            midi_post: None,
             mixer,
             clip_delay: NO_DELAY,
             note_delay,
@@ -2111,9 +2222,19 @@ impl Compiler {
                             .frames(self.config.sample_rate.hz()),
                     )
                 });
+            // A node that swaps samples in place is the same node while it
+            // holds one, whichever it is (sound similarity R29).
+            let media = if self.registry.swaps_samples_in_place(&device.kind) {
+                device
+                    .media_at(0)
+                    .map(|_| vec![Some(ContentHash([0; 32]))])
+                    .unwrap_or_default()
+            } else {
+                device.media.clone()
+            };
             let identity = Identity::Device(
                 device.kind.clone(),
-                device.media.clone(),
+                media,
                 external_latency,
                 device
                     .external
@@ -2130,8 +2251,14 @@ impl Compiler {
                         }
                         // A new node that plays media gets its decoded audio
                         // with this compile's update (WP-2.16).
+                        // A device with wavetables reads its media as tables,
+                        // sent as data, not as decoded audio.
+                        let wavetables = device.wavetables.iter().any(Option::is_some);
+                        build.dataful.push(device.id);
                         for (slot, media) in device.media.iter().enumerate() {
-                            if let Some(media) = *media {
+                            if let Some(media) = *media
+                                && !wavetables
+                            {
                                 // Only slot 0 has edits (the sampler's one
                                 // sample).
                                 let edits = if slot == 0 {
@@ -2207,11 +2334,12 @@ impl Compiler {
                 self.add_sidechain(build, device.id, settings, slot, sources);
             }
             if device.midi_sidechain.is_some() {
-                let from = build.midi_sources.get(&device.id).copied();
-                *dependencies += u32::from(from.is_some_and(|from| from != own));
+                let source = build.midi_sources.get(&device.id).copied();
+                *dependencies += u32::from(source.is_some_and(|(from, _)| from != own));
                 build.midi_sidechains.push(DeviceMidiSidechain {
                     device: slot,
-                    from: from.unwrap_or(NO_TASK),
+                    from: source.map_or(NO_TASK, |(from, _)| from),
+                    tap: source.map_or(Tap::PreFx, |(_, tap)| tap),
                     kept: NO_TASK,
                 });
             }
@@ -2565,10 +2693,12 @@ struct Build {
     sidechains: Vec<DeviceSidechain>,
     sidechain_inputs: Vec<Input>,
     /// The task each device's MIDI sidechain listens to (WP-5.27).
-    midi_sources: BTreeMap<DeviceId, u32>,
+    midi_sources: BTreeMap<DeviceId, (u32, Tap)>,
     /// The slot each device has in `slots` (WP-5.45).
     device_slots: BTreeMap<DeviceId, u32>,
     midi_sidechains: Vec<DeviceMidiSidechain>,
+    /// The peers' channels the tracks take (the Link Audio spec, R5).
+    link_inputs: Vec<crate::program::LinkInput>,
     unhosted: Vec<DeviceId>,
     /// The modulators' slots and devices, in the order their rows sit on the
     /// bus (WP-5.10).
@@ -2583,6 +2713,8 @@ struct Build {
     /// Devices new in this program that hold layers (WP-5.13): their layers,
     /// with each one's decoded audio, go with this compile's update.
     layered: Vec<DeviceId>,
+    /// New nodes, whose factories may build data for them (WP-8.9).
+    dataful: Vec<DeviceId>,
     /// Tracks whose clip player is new in this program.
     new_players: BTreeSet<TrackId>,
     /// The state of routes and players that migrate in, which an edit may
@@ -3649,7 +3781,10 @@ fn route_events(changes: &ChangeSet, old: &Document, new: &Document, params: &mu
         // Ext. In hears the interface while the track monitors it; Monitor
         // or Arm alone doesn't recompile (WP-2.13). Under Monitor Auto it
         // also closes while the track's clips play (the routing spec, R11).
-        if matches!(track.routing().input, bl_model::Input::External { .. }) {
+        if matches!(
+            track.routing().input,
+            bl_model::Input::External { .. } | bl_model::Input::LinkAudio { .. }
+        ) {
             let closed = |t: &Track| !t.routing().monitoring(t.mixer().arm);
             if closed(then) != closed(track) {
                 params.push(ParamEvent::now(
@@ -3858,15 +3993,15 @@ mod tests {
         for command in [
             Command::SetTrackColour {
                 tracks: vec![audio_track, f.group],
-                colour: 40,
+                colour: bl_model::Colour::Swatch(40),
             },
             Command::SetClipColour {
                 clips: vec![clip_id],
-                colour: 41,
+                colour: bl_model::Colour::Swatch(41),
             },
             Command::SetSceneColour {
                 scenes: vec![scene],
-                colour: Some(42),
+                colour: Some(bl_model::Colour::Swatch(42)),
             },
             Command::AssignColourToClips {
                 tracks: vec![audio_track],

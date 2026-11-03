@@ -44,6 +44,29 @@ impl Shell {
         self.browser_view.wait_for_index(timeout)
     }
 
+    /// Uses `folders` as the Audio Units presets' folders, for tests, in
+    /// place of the system's and the person's (plugin scanning R15).
+    #[doc(hidden)]
+    pub fn set_audio_unit_preset_folders(&mut self, folders: Vec<std::path::PathBuf>) {
+        self.browser_view.set_au_preset_folders(folders);
+        self.touch();
+    }
+
+    /// Paces sound analysis by hand, for tests: it begins a file only when
+    /// [`Shell::release_analysis`] allows it (sound-similarity R5).
+    #[doc(hidden)]
+    pub fn pace_analysis_by_hand(&mut self) {
+        self.browser_view.pace_analysis_by_hand();
+    }
+
+    /// Lets sound analysis do `files` more files, and waits for them, for
+    /// tests that pace it by hand.
+    #[doc(hidden)]
+    pub fn release_analysis(&mut self, files: usize) {
+        self.browser_view.release_analysis(files);
+        self.touch();
+    }
+
     /// Waits for the sets opened in the browser to be read, for tests and
     /// tools (set exchange R1).
     #[doc(hidden)]

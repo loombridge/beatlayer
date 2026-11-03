@@ -288,9 +288,9 @@ fn the_view_menu_ticks_and_switches_the_arrangement() {
     assert_eq!(h.shell.editor().undo_history().len(), steps);
 }
 
-// Spec: detail-views R20, R23 (C-CLIPTITLE-004 to C-CLIPTITLE-007). The title
-// bar's menu has the same items, and Fold ticked while the panels are
-// folded.
+// Spec: detail-views R20, R23 (C-CLIPTITLE-003, C-CLIPTITLE-004). The title
+// bar's menu has the automatic arrangement and Fold, ticked while the panels
+// are folded.
 #[test]
 fn the_title_bars_menu_arranges_and_folds_the_panels() {
     let (mut h, _) = session_clip();
@@ -326,11 +326,17 @@ fn the_title_bars_menu_arranges_and_folds_the_panels() {
         }
         h.settle();
     };
+    h.shell
+        .run(
+            "clip_view.arrange_panels",
+            json!({ "arrangement": "vertical" }),
+        )
+        .unwrap();
     open(&mut h);
-    click_item(&mut h, "Arrange Clip View Panels Vertically");
+    click_item(&mut h, "Arrange Clip View Panels Automatically");
     assert_eq!(
         h.shell.clip_view().panel_arrangement(),
-        PanelArrangement::Vertical
+        PanelArrangement::Automatic
     );
     open(&mut h);
     click_item(&mut h, "Fold");

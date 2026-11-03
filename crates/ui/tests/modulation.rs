@@ -849,3 +849,105 @@ fn an_arrangement_clip_has_no_automation_switch() {
         .collect();
     assert!(switches.is_empty(), "{switches:?}");
 }
+
+// Spec: modulation R30, R31; instrument modulation R12
+#[test]
+fn a_knob_an_instruments_matrix_moves_shows_the_newest_voice_and_names_its_routes() {
+    let mut h = Harness::with_title_bar(Window::Main);
+    engine_off(&mut h);
+    h.shell.set_device_types(testing::device_types());
+    h.settle();
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let t = testing::instrument_type();
+    let device = json!({ "kind": t.kind, "name": t.name, "role": t.role });
+    let added: DeviceAdded = serde_json::from_value(
+        h.shell
+            .run("device.add", json!({ "device": device }))
+            .unwrap(),
+    )
+    .unwrap();
+    h.shell
+        .run(
+            "device.set_route",
+            json!({
+                "device": added.device,
+                "source": "Velocity",
+                "destination": "Note Level",
+                "amount": -50.0,
+            }),
+        )
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    let view = rect_of_node(Harness::node(&nodes, "Device View"));
+    let frame = layout(&h.shell, view)
+        .into_iter()
+        .find(|(id, _)| *id == added.device)
+        .unwrap()
+        .1;
+    let panel = h
+        .shell
+        .device_view_state()
+        .devices
+        .iter()
+        .find(|d| d.id == added.device)
+        .unwrap()
+        .panel
+        .clone()
+        .unwrap();
+    assert_eq!(panel.matrix_routes.len(), 1, "{:?}", panel.matrix_routes);
+    assert_eq!(panel.matrix_routes[0].sources, ["Velocity"]);
+    let knob = place(&panel, body_rect(frame, TITLE_BAR_HEIGHT))
+        .0
+        .into_iter()
+        .find(|(p, _, _)| *p == testing::INSTRUMENT_NOTE_LEVEL)
+        .unwrap()
+        .2;
+    let level = t
+        .description
+        .param(testing::INSTRUMENT_NOTE_LEVEL)
+        .unwrap()
+        .clone();
+    let target = AutomationTarget::Device {
+        device: added.device,
+        param: testing::INSTRUMENT_NOTE_LEVEL,
+    };
+    let (base, played) = (100.0, 75.0);
+    let n_played = level.normalize(played) as f32;
+    check_knob(
+        &mut h,
+        knob,
+        |h| {
+            let (node, param) = target_node(track, &target).unwrap();
+            h.shell.set_matrix_played(vec![PlayedParam {
+                node,
+                param,
+                base,
+                played,
+            }]);
+        },
+        |centre, radius| {
+            let from = std::f32::consts::PI * 0.5 + std::f32::consts::PI / 6.0;
+            let angle = from + std::f32::consts::PI * 5.0 / 3.0 * n_played;
+            centre + vec2(angle.cos(), angle.sin()) * radius
+        },
+    );
+    // Assistive technology reads the base, the value the newest voice plays
+    // and the routes into the control.
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    assert_eq!(
+        Harness::node(&nodes, "Note Level").value,
+        format!(
+            "{}, modulated to {}, routed from Velocity",
+            level.format(base),
+            level.format(played)
+        )
+    );
+    // The matrix's movement is no modulation: `modulation.state` and the
+    // shell's played value don't see it (modulation R30).
+    assert_eq!(h.shell.played(track, &target), None);
+    let state = h.shell.run("modulation.state", json!({})).unwrap();
+    assert_eq!(state["parameters"], json!([]));
+}

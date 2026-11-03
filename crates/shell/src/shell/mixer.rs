@@ -182,6 +182,12 @@ impl Shell {
         self.modulated = modulated;
     }
 
+    /// Sets the parameters an instrument's matrix moved, for a host with no
+    /// engine and for tests; a running engine's replace them.
+    pub fn set_matrix_played(&mut self, played: Vec<bl_engine::PlayedParam>) {
+        self.matrix_played = played;
+    }
+
     /// Runs the Mixer View's commands.
     pub(super) fn run_mixer_view(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         let front = self.front_mixer();

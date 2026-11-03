@@ -12,39 +12,44 @@
 //! where it sits in its range; a display cell is black with a thin border.
 //! Switched off, a device's knob arcs, lit buttons, number boxes' fill, and
 //! display curves turn grey while its names and values stay as they were.
-//! What isn't observed yet (each in the spec's "To observe"): the knob's
-//! size and arc, Shift's factor (3, as pan's), the Status Bar's text while
-//! dragging (the mixer's `<Name>: <value>`), and the spacing.
+//! The parts' sizes, text and spacing were measured in Live 12.4.16 on 2
+//! November 2026 (layout L-DEV-042 to L-DEV-046; [`parts`] draws them). What
+//! isn't observed yet (each in the spec's "To observe"): Shift's factor (3,
+//! as pan's) and the Status Bar's text while dragging (the mixer's
+//! `<Name>: <value>`).
 //!
 //! Every change runs `device.set_param`, which an agent runs too.
 
-use std::f32::consts::PI;
-
-use bl_model::device_layout::{PlacedPages, Size, Widget};
+use bl_model::device_layout::{
+    BUTTON_GAP, PADDING, PageStyle, PlacedPages, Size, UNIT_PAIR_WIDTH, Widget,
+};
 use bl_model::modulator::ModTarget;
-use bl_model::{DeviceDisplay, DeviceId, ParamDescriptor, ParamId, ParamKind};
+use bl_model::{DeviceDisplay, DeviceId, ParamDescriptor, ParamId};
 use bl_shell::Invocation;
 use bl_shell::device_commands as ids;
 use bl_shell::device_commands::{ConfiguredParam, DeviceFrame, DevicePanel};
 use bl_shell::plugin_commands;
 use egui::accesskit::{Action, Role};
 use egui::{
-    Align2, Color32, Event, Id, Key, Rect, Response, Sense, Shape, Stroke, StrokeKind, Ui,
-    WidgetInfo, WidgetType, pos2, vec2,
+    Align2, Color32, Event, Id, Key, Rect, Response, Sense, Stroke, StrokeKind, Ui, WidgetInfo,
+    WidgetType, pos2, vec2,
 };
 use serde_json::json;
 
 use crate::main_window::UiEvent;
 use crate::param_menu::ParamMenu;
 use crate::theme::Theme;
-use crate::widgets::{modulated_text, paint_ring_segment, ring_segment};
+use crate::widgets::modulated_text;
+
+mod parts;
+pub use parts::{BOX_CORNER, DEVICE_TEXT, glyph_for, paint_glyph, title_parts, truncated};
 
 /// What the panel asks of the device view for each parameter: its base and
 /// played value while a clip modulates it, and its context menu's automation
 /// items (the automation spec, R29).
 pub type ParamLookups<'a> = (
     &'a dyn Fn(ParamId) -> Option<(f64, f64)>,
-    &'a dyn Fn(ParamId) -> Option<ParamMenu>,
+    &'a dyn Fn(ParamId) -> Option<ParamMenu<'a>>,
 );
 
 /// Points of vertical drag that move a control from one end of its range to
@@ -149,7 +154,7 @@ pub fn place_with_pages(
         placed
             .controls
             .iter()
-            .map(|c| (c.param, c.widget, at(c.rect)))
+            .map(|c| (panel.drawn(c.param), c.widget, at(c.rect)))
             .collect(),
         placed
             .cells
@@ -284,6 +289,29 @@ fn page_row(
     crate::clip_panels::selector_keys(ui, &ids);
 }
 
+/// The width of a title-bar tab reading `name`.
+fn tab_width(name: &str) -> f32 {
+    name.chars().count() as f32 * 6.0 + 16.0
+}
+
+/// The width the title-bar tabs of a device take, which its name doesn't use.
+#[must_use]
+pub fn title_tabs_width(frame: &DeviceFrame) -> f32 {
+    frame
+        .panel
+        .as_ref()
+        .filter(|_| frame.multisampler.is_none())
+        .map_or(0.0, |panel| {
+            panel
+                .pages
+                .iter()
+                .filter(|p| p.style == PageStyle::TitleBar)
+                .flat_map(|node| &node.pages)
+                .map(|page| tab_width(page) + 2.0)
+                .sum()
+        })
+}
+
 /// The tabs of the pages nodes in the title-bar style, in a run at the right
 /// of the title (L-DEV-017), except a multisampler's, which its own title-bar
 /// tabs draw (device framework R41; multisampler R75).
@@ -307,18 +335,20 @@ pub fn title_tabs(
         .iter()
         .filter(|p| p.style == bl_model::device_layout::PageStyle::TitleBar)
     {
-        let width = |name: &str| name.chars().count() as f32 * 6.0 + 16.0;
-        let total: f32 = node.pages.iter().map(|p| width(p) + 2.0).sum();
+        let total: f32 = node.pages.iter().map(|p| tab_width(p) + 2.0).sum();
         let mut x = (title.right() - total).max(title.left() + 70.0);
         let rects: Vec<Rect> = node
             .pages
             .iter()
             .map(|page| {
                 let rect = Rect::from_min_size(
-                    pos2(x, title.top() + 1.0),
-                    vec2(width(page), title.height() - 2.0),
+                    pos2(
+                        x,
+                        title.center().y - bl_model::device_layout::BOX_HEIGHT / 2.0,
+                    ),
+                    vec2(tab_width(page), bl_model::device_layout::BOX_HEIGHT),
                 );
-                x += width(page) + 2.0;
+                x += tab_width(page) + 2.0;
                 rect
             })
             .collect();
@@ -362,12 +392,23 @@ pub fn show(
     };
     let c = &theme.colors;
     let (controls, cells, pages) = place_with_pages(panel, frame.expanded, body);
+    // The layout again, for what a control carries beyond its place.
+    let laid = panel
+        .layout(frame.expanded)
+        .place_for(Size::new(body.width(), body.height()), panel.selected_slot);
+    for heading in &laid.headings {
+        parts::heading(ui, theme, heading, body.min);
+    }
     for placed in pages.iter().filter(|p| !p.buttons.is_empty()) {
         let rects: Vec<Rect> = placed
             .buttons
             .iter()
             .map(|r| Rect::from_min_size(pos2(r.x, r.y), vec2(r.width, r.height)))
             .collect();
+        if placed.style == PageStyle::Strip {
+            parts::side_strip(ui, theme, frame, (placed, rects[0], body.min), events);
+            continue;
+        }
         page_row(
             ui,
             theme,
@@ -393,7 +434,32 @@ pub fn show(
             slot_cell(ui, theme, frame, panel, (id, &name, slot, rect), events);
             continue;
         }
+        // Spec: corpus R1. Corpus's X–Y control is its display cell.
+        if matches!(&frame.kind, bl_model::DeviceKind::Native { device_type }
+            if device_type == bl_devices::corpus::CORPUS)
+            && name == bl_devices::corpus::XY_CELL
+        {
+            corpus_xy(ui, theme, frame, (panel, display), (id, rect), events);
+            continue;
+        }
         let _ = ui.interact(rect, id, Sense::hover());
+        // Spec: drum-synths R6. A click in the upper half of a Drum Synth's
+        // display plays a hit.
+        if bl_devices::drum_synth::is_drum_synth(&frame.kind)
+            && name == bl_devices::drum_synth::ENVELOPE
+        {
+            let upper = Rect::from_min_max(rect.min, pos2(rect.right(), rect.center().y));
+            let preview = id.with("preview");
+            let response = ui.interact(upper, preview, Sense::click());
+            crate::focus::register(ui.ctx(), preview, bl_shell::Area::Detail, None);
+            response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, "Preview Hit"));
+            if response.clicked() {
+                events.push(UiEvent::Invoke(Invocation::new(
+                    "device.preview_hit",
+                    json!({ "device": frame.id }),
+                )));
+            }
+        }
         // Spec: modulation R15, R23. A modulator's cells show its slots'
         // mappings and, for the Shaper, its shape.
         if let Some(modulator) = &frame.modulator {
@@ -426,6 +492,7 @@ pub fn show(
         let shown = match display {
             Some(d) if d.series.iter().any(|s| s.name == name) => {
                 own = DeviceDisplay {
+                    spectrograms: Vec::new(),
                     series: d
                         .series
                         .iter()
@@ -438,20 +505,31 @@ pub fn show(
                 };
                 Some(&own)
             }
-            Some(d) if index == 0 && has_drawing(d) => Some(d),
+            // Spec: roar R31. Roar's source traces have cells of their own
+            // on their pages; the shaper's cell leaves them out.
+            Some(d) if index == 0 && has_drawing(d) => {
+                let roar = frame.kind
+                    == bl_model::DeviceKind::Native {
+                        device_type: bl_devices::roar::ROAR.to_owned(),
+                    };
+                own = DeviceDisplay {
+                    series: d
+                        .series
+                        .iter()
+                        .filter(|s| !(roar && bl_devices::roar::SOURCES.contains(&s.name.as_str())))
+                        .cloned()
+                        .collect(),
+                    ..d.clone()
+                };
+                Some(&own)
+            }
             _ => None,
         };
         if let Some(display) = shown {
-            crate::device_display::draw(
-                ui,
-                theme,
-                rect,
-                id,
-                frame.enabled,
-                display,
-                &panel.description.views,
-                events,
-            );
+            // The drag goes under the display, so its view buttons stay on
+            // top and take their clicks.
+            display_drag(ui, frame, panel, display, rect, id, events);
+            crate::device_display::draw(ui, theme, rect, id, frame.enabled, display, panel, events);
         }
         // Spec: articulation-map R15. The Articulation Map's list shows
         // every articulation, the current one lit.
@@ -474,7 +552,17 @@ pub fn show(
             }
         });
     }
-    for (at, (param, widget, rect)) in controls.into_iter().enumerate() {
+    for (at, (param, widget, whole)) in controls.into_iter().enumerate() {
+        let extra = laid.controls.get(at);
+        // A knob with a unit pair beside it keeps the rest of its place.
+        let rect = if extra.is_some_and(|e| e.unit.is_some()) {
+            Rect::from_min_max(
+                pos2(whole.left() + UNIT_PAIR_WIDTH + PADDING, whole.top()),
+                whole.max,
+            )
+        } else {
+            whole
+        };
         // A plug-in panel's controls are its knobs, in the panel's own order
         // (WP-5.40), so a control's place is its knob; any other device's
         // controls are found by their parameter.
@@ -486,14 +574,29 @@ pub fn show(
             };
             found
         };
-        let descriptor = &panel.description.params[index];
+        // Spec: meld R3, R5. A relabelled parameter shows its label's name,
+        // and its number in the label's unit.
+        let read = |id| panel.read(id);
+        let descriptor = panel
+            .description
+            .described(&read, &panel.description.params[index]);
         let value = panel.value(index);
+        let relabelled_text = panel
+            .description
+            .label(&read, param)
+            .is_some_and(|label| label.unit.is_some())
+            .then(|| panel.description.text(&read, &descriptor, value));
         let control = Control {
             device: frame.id,
             enabled: frame.enabled,
-            descriptor,
+            descriptor: &descriptor,
             value,
             modulated: played(param),
+            routes: panel
+                .matrix_routes
+                .iter()
+                .find(|routes| routes.param == param)
+                .map_or(&[][..], |routes| &routes.sources),
             rect,
             stops: if frame.multisampler.is_some()
                 && param == bl_devices::multisampler::FILTER_MORPH
@@ -517,17 +620,51 @@ pub fn show(
                     .and_then(|display| display.reading("Name"))
                     .map(|reading| reading.text.clone())
             })
-            .flatten(),
+            .flatten()
+            .or(relabelled_text),
             automation: menu(param),
+            coarse: if frame.kind
+                == (bl_model::DeviceKind::Native {
+                    device_type: bl_devices::roar::ROAR.to_owned(),
+                })
+                && param == bl_devices::roar::FB_NOTE
+            {
+                12
+            } else {
+                1
+            },
         };
         // Spec: scales R16. A parameter the device takes from its current
         // scale is drawn disabled.
         let locked = panel.locked.contains(&param);
+        let glyph = extra.and_then(|e| e.glyph);
         let mut draw = |ui: &mut Ui| match widget {
-            Widget::Knob => control.knob(ui, theme, events),
-            Widget::Number => control.number(ui, theme, events),
-            Widget::Toggle => control.toggle(ui, theme, events),
+            Widget::Knob => control.knob(ui, theme, events, false),
+            Widget::SmallKnob => control.knob(ui, theme, events, true),
+            Widget::Number => control.number(ui, theme, events, (false, false)),
+            Widget::Slider => control.number(ui, theme, events, (true, false)),
+            Widget::Marked => control.number(ui, theme, events, (false, true)),
+            Widget::Toggle => control.toggle(ui, theme, events, false),
+            Widget::Outlined => control.toggle(ui, theme, events, true),
+            Widget::IconToggle => control.icon_toggle(ui, theme, events, (glyph, false)),
+            Widget::Round => control.icon_toggle(ui, theme, events, (glyph, true)),
             Widget::Chooser => control.chooser(ui, theme, events),
+            Widget::Segments(n) => {
+                let cells = button_cells(rect, usize::from(n), 1);
+                control.choice_buttons(ui, theme, events, (&cells, false));
+            }
+            Widget::IconSegments(n) => {
+                let cells = button_cells(rect, usize::from(n), 1);
+                control.choice_buttons(ui, theme, events, (&cells, true));
+            }
+            Widget::Stack(n) => {
+                let cells = button_cells(rect, 1, usize::from(n));
+                control.choice_buttons(ui, theme, events, (&cells, false));
+            }
+            Widget::Grid { columns, rows } => {
+                let cells = button_cells(rect, usize::from(columns), usize::from(rows));
+                control.choice_buttons(ui, theme, events, (&cells, false));
+            }
         };
         if locked {
             ui.add_enabled_ui(false, draw);
@@ -538,6 +675,33 @@ pub fn show(
             );
         } else {
             draw(ui);
+        }
+        // The unit pair beside a knob sets the switch between its two
+        // parameters (L-DEV-043).
+        if let Some(pair) = extra.and_then(|e| e.unit)
+            && let Some(mode_at) = panel
+                .description
+                .params
+                .iter()
+                .position(|p| p.id == pair.mode)
+        {
+            let pair_rect = Rect::from_min_max(
+                whole.min,
+                pos2(whole.left() + UNIT_PAIR_WIDTH, whole.bottom()),
+            );
+            let mode = parts::plain_control(frame, panel, mode_at, pair_rect);
+            control.unit_pair(ui, theme, events, &pair, &mode);
+        }
+        // Greyed while another control's value says it doesn't apply: still
+        // drawn and usable (L-DEV-011, L-DEV-044).
+        if let Some(grey) = extra.and_then(|e| e.grey)
+            && panel.read(grey.param).round() as i32 == grey.value
+        {
+            ui.painter().rect_filled(
+                rect,
+                theme.sizes.corner,
+                theme.colors.window.0.gamma_multiply(0.5),
+            );
         }
         // Spec: automation R29. A click shows the parameter's envelope while
         // Automation Mode is on, and its context menu holds the automation
@@ -579,7 +743,14 @@ pub fn show(
                     device: frame.id,
                     param,
                 },
-                matches!(widget, Widget::Knob | Widget::Number),
+                matches!(
+                    widget,
+                    Widget::Knob
+                        | Widget::SmallKnob
+                        | Widget::Number
+                        | Widget::Slider
+                        | Widget::Marked
+                ),
                 events,
             );
         }
@@ -604,6 +775,49 @@ pub fn show(
                 });
         }
     }
+}
+
+/// Spec: roar R12. A vertical drag on a display that names parameters to drag
+/// (the description's `display_drag`, one for each view) changes the shown
+/// view's, as a drag on its knob does: one undo step named for the parameter.
+fn display_drag(
+    ui: &mut Ui,
+    frame: &DeviceFrame,
+    panel: &DevicePanel,
+    display: &DeviceDisplay,
+    rect: Rect,
+    id: Id,
+    events: &mut Vec<UiEvent>,
+) {
+    let description = &panel.description;
+    let view = description
+        .views
+        .iter()
+        .position(|v| Some(v.as_str()) == display.view.as_deref())
+        .unwrap_or(0);
+    let Some(param) = description.display_drag.get(view) else {
+        return;
+    };
+    let Some(index) = description.params.iter().position(|p| p.id == *param) else {
+        return;
+    };
+    let control = Control {
+        device: frame.id,
+        enabled: frame.enabled,
+        descriptor: &description.params[index],
+        value: panel.value(index),
+        modulated: None,
+        routes: &[],
+        rect,
+        stops: &[],
+        knob: None,
+        configured: &[],
+        text: None,
+        automation: None,
+        coarse: 1,
+    };
+    let response = ui.interact(rect, id.with("drag"), Sense::click_and_drag());
+    control.value_input(ui, &response, events);
 }
 
 /// What a control's name above it reads: a sample slot's parameter drops the
@@ -714,9 +928,100 @@ fn slot_cell(
     });
 }
 
+/// Corpus's X–Y control (the Corpus spec, R1): Decay across and Material up,
+/// or Radius up for a pipe and a tube, a dot where they stand and the
+/// limiter's lamp in a corner. A press or a drag sets both at the pointer, as
+/// one undo step.
+fn corpus_xy(
+    ui: &mut Ui,
+    theme: &Theme,
+    frame: &DeviceFrame,
+    (panel, display): (&DevicePanel, Option<&DeviceDisplay>),
+    (id, rect): (Id, Rect),
+    events: &mut Vec<UiEvent>,
+) {
+    use bl_devices::corpus::{DECAY, LAMP_DB, LIMITER, TYPE, xy_vertical};
+    let find = |param: ParamId| panel.description.params.iter().position(|p| p.id == param);
+    let (Some(x_at), Some(type_at)) = (find(DECAY), find(TYPE)) else {
+        return;
+    };
+    let Some(y_at) = find(xy_vertical(panel.value(type_at) as usize)) else {
+        return;
+    };
+    let (x, y) = (
+        &panel.description.params[x_at],
+        &panel.description.params[y_at],
+    );
+    let response = ui.interact(rect, id, Sense::click_and_drag());
+    crate::focus::register(ui.ctx(), id, bl_shell::Area::Detail, None);
+    let set = |param: &ParamDescriptor, value: f64| {
+        UiEvent::Invoke(Invocation::new(
+            "device.set_param",
+            json!({ "device": frame.id, "param": param.id, "value": value }),
+        ))
+    };
+    let at_pointer = |events: &mut Vec<UiEvent>| {
+        let Some(pointer) = response.interact_pointer_pos() else {
+            return;
+        };
+        let across = f64::from(((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0));
+        let up = f64::from(((rect.bottom() - pointer.y) / rect.height()).clamp(0.0, 1.0));
+        events.push(set(x, x.denormalize(across)));
+        events.push(set(y, y.denormalize(up)));
+    };
+    let gesture =
+        || UiEvent::BeginNamedGesture(format!("Change \"{}\" and \"{}\"", x.name, y.name));
+    if response.drag_started() {
+        events.push(gesture());
+    }
+    if response.dragged() {
+        at_pointer(events);
+    }
+    if response.drag_stopped() {
+        events.push(UiEvent::EndGesture);
+    }
+    if response.clicked() {
+        events.push(gesture());
+        at_pointer(events);
+        events.push(UiEvent::EndGesture);
+    }
+    let ink = highlight(theme, frame.enabled);
+    let painter = ui.painter_at(rect);
+    let dot = pos2(
+        rect.left() + rect.width() * x.normalize(panel.value(x_at)) as f32,
+        rect.bottom() - rect.height() * y.normalize(panel.value(y_at)) as f32,
+    );
+    let line = Stroke::new(1.0, ink.gamma_multiply(0.4));
+    painter.hline(rect.x_range(), dot.y, line);
+    painter.vline(dot.x, rect.y_range(), line);
+    painter.circle_filled(dot, 4.0, ink);
+    let lamp = display
+        .and_then(|d| d.reading(LIMITER))
+        .is_some_and(|reading| reading.value < LAMP_DB);
+    painter.circle(
+        pos2(rect.right() - 7.0, rect.top() + 7.0),
+        3.0,
+        if lamp { ink } else { Color32::TRANSPARENT },
+        Stroke::new(1.0, theme.colors.separator.0),
+    );
+    focus_ring(ui, theme, rect, &response);
+    ui.ctx().accesskit_node_builder(id, |node| {
+        node.set_role(Role::Image);
+        node.set_label(bl_devices::corpus::XY_CELL.to_owned());
+        node.set_value(format!(
+            "{} {}, {} {}{}",
+            x.name,
+            x.format(panel.value(x_at)),
+            y.name,
+            y.format(panel.value(y_at)),
+            if lamp { ", limiter on" } else { "" }
+        ));
+    });
+}
+
 /// Whether a display has anything to draw.
 fn has_drawing(display: &DeviceDisplay) -> bool {
-    !(display.series.is_empty() && display.readings.is_empty())
+    !(display.series.is_empty() && display.readings.is_empty() && display.spectrograms.is_empty())
 }
 
 /// One control being drawn.
@@ -727,6 +1032,9 @@ struct Control<'a> {
     value: f64,
     /// Its base and what it plays while a clip modulates it.
     modulated: Option<(f64, f64)>,
+    /// The sources an instrument's matrix routes into it, read beside its
+    /// value (instrument modulation R12).
+    routes: &'a [String],
     rect: Rect,
     /// For a knob whose context menu snaps it to a stop: the stops' names
     /// and values (the multisampler's Morph, spec R37).
@@ -743,7 +1051,10 @@ struct Control<'a> {
     /// articulation's name).
     text: Option<String>,
     /// The automation items of its context menu (the automation spec, R29).
-    automation: Option<ParamMenu>,
+    automation: Option<ParamMenu<'a>>,
+    /// How many steps Shift with Up or Down moves it: 12 for Roar's
+    /// Feedback Note, an octave (the roar spec, R26), else 1.
+    coarse: i32,
 }
 
 impl Control<'_> {
@@ -767,20 +1078,6 @@ impl Control<'_> {
         events.push(UiEvent::BeginNamedGesture(gesture_name(self.descriptor)));
         events.push(UiEvent::Invoke(self.set(value)));
         events.push(UiEvent::EndGesture);
-    }
-
-    /// The name above the control; it stays as it is when the device is
-    /// switched off (observed).
-    fn label(&self, ui: &Ui, theme: &Theme) -> Rect {
-        let top = Rect::from_min_size(self.rect.min, vec2(self.rect.width(), 12.0));
-        ui.painter().text(
-            top.center(),
-            Align2::CENTER_CENTER,
-            short_name(&self.descriptor.name),
-            theme.small_font(),
-            theme.colors.text.0,
-        );
-        Rect::from_min_max(pos2(self.rect.left(), top.bottom()), self.rect.max)
     }
 
     /// The colour of a lit highlight: the accent, or grey while the device
@@ -862,18 +1159,39 @@ impl Control<'_> {
             ui.input(|i| {
                 for event in &i.events {
                     if let Event::Key {
-                        key, pressed: true, ..
+                        key,
+                        pressed: true,
+                        modifiers,
+                        ..
                     } = event
                     {
+                        // Spec: roar R26. Shift moves a coarse control by
+                        // its coarse step.
+                        let by = if modifiers.shift { self.coarse } else { 1 };
                         match key {
-                            Key::ArrowUp => steps += 1,
-                            Key::ArrowDown => steps -= 1,
+                            Key::ArrowUp => steps += by,
+                            Key::ArrowDown => steps -= by,
                             Key::Delete | Key::Backspace => reset = true,
                             _ => {}
                         }
                     }
                 }
             });
+        }
+        // Spec: view-options R11 to R13. A turn of the wheel moves it as the
+        // keys do, a tenth of a step with Shift (a stepped value has no
+        // finer step), in the run's one undo step.
+        if let Some(turn) = crate::wheel::input(response, || gesture_name(d)) {
+            let value = if turn.fine && !d.is_stepped() {
+                d.denormalize(d.normalize(self.value) + f64::from(turn.steps) * 0.001)
+            } else {
+                step(d, self.value, turn.steps)
+            };
+            let value = d.clamp(value);
+            crate::mixer::show_readout(ui.ctx(), readout(d, value));
+            if value != self.value {
+                events.push(UiEvent::Invoke(self.set(value)));
+            }
         }
         if reset {
             self.change(d.default, events);
@@ -889,9 +1207,12 @@ impl Control<'_> {
 
     fn describe(&self, ui: &Ui, response: &Response, role: Role) {
         let d = self.descriptor;
-        let text = modulated_text(
-            self.text.clone().unwrap_or_else(|| d.format(self.shown())),
-            self.modulated.map(|(_, played)| d.format(played)),
+        let text = crate::widgets::routed_text(
+            modulated_text(
+                self.text.clone().unwrap_or_else(|| d.format(self.shown())),
+                self.modulated.map(|(_, played)| d.format(played)),
+            ),
+            self.routes,
         );
         response.widget_info(|| WidgetInfo::slider(true, self.value, &d.name));
         ui.ctx().accesskit_node_builder(response.id, |node| {
@@ -909,59 +1230,9 @@ impl Control<'_> {
         });
     }
 
-    /// A knob: its name above, an arc showing the value, the value below.
-    fn knob(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
-        let below = self.label(ui, theme);
-        let value_row = Rect::from_min_max(pos2(below.left(), below.bottom() - 12.0), below.max);
-        let face = Rect::from_min_max(below.min, pos2(below.right(), value_row.top()));
-        let response = ui.interact(self.rect, self.id(), Sense::click_and_drag());
-        crate::focus::register(ui.ctx(), self.id(), bl_shell::Area::Detail, None);
-        self.value_input(ui, &response, events);
-        let c = &theme.colors;
-        let painter = ui.painter();
-        let centre = face.center();
-        let radius = (face.height().min(face.width()) / 2.0 - 2.0).max(4.0);
-        // The arc sweeps 300 degrees, from lower left to lower right.
-        let (from, sweep) = (PI * 0.5 + PI / 6.0, PI * 5.0 / 3.0);
-        let arc = |to: f32| -> Vec<egui::Pos2> {
-            let steps = 32;
-            (0..=steps)
-                .map(|i| {
-                    let a = from + sweep * to * i as f32 / steps as f32;
-                    centre + vec2(a.cos(), a.sin()) * radius
-                })
-                .collect()
-        };
-        painter.add(Shape::line(arc(1.0), Stroke::new(2.0, c.control.0)));
-        let n = self.descriptor.normalize(self.shown()) as f32;
-        if n > 0.0 {
-            painter.add(Shape::line(arc(n), Stroke::new(2.0, self.lit(theme))));
-        }
-        // Spec: modulation R7: the pointer stays at the base, and the ring
-        // shows the way to the value it plays.
-        if let Some(segment) = self
-            .modulated
-            .and_then(|(_, played)| ring_segment(n, self.descriptor.normalize(played) as f32))
-        {
-            paint_ring_segment(painter, theme, segment, |to| {
-                let a = from + sweep * to;
-                centre + vec2(a.cos(), a.sin()) * radius
-            });
-        }
-        let a = from + sweep * n;
-        painter.line_segment(
-            [centre, centre + vec2(a.cos(), a.sin()) * radius],
-            Stroke::new(1.5, c.text.0),
-        );
-        painter.text(
-            value_row.center(),
-            Align2::CENTER_CENTER,
-            self.descriptor.format(self.shown()),
-            theme.small_font(),
-            c.text.0,
-        );
-        focus_ring(ui, theme, self.rect, &response);
-        self.describe(ui, &response, Role::Slider);
+    /// The context menus of a knob: its stops, if it has any, and a
+    /// plug-in panel's remapping.
+    fn knob_menus(&self, response: &Response, events: &mut Vec<UiEvent>) {
         if !self.stops.is_empty() {
             response.context_menu(|ui| {
                 for (name, value) in self.stops {
@@ -992,7 +1263,7 @@ impl Control<'_> {
                     ui.close();
                 }
                 if remapped {
-                    ui.separator();
+                    crate::menus::separator(ui);
                 }
                 for entry in self.configured {
                     if ui.button(&entry.name).clicked() {
@@ -1009,120 +1280,34 @@ impl Control<'_> {
             });
         }
     }
+}
 
-    /// A number box: a dark box with the value centred and a fill showing
-    /// where it sits in its range.
-    fn number(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
-        let below = self.label(ui, theme);
-        let field = Rect::from_center_size(below.center(), vec2(below.width() - 4.0, 16.0));
-        let response = ui.interact(field, self.id(), Sense::click_and_drag());
-        crate::focus::register(ui.ctx(), self.id(), bl_shell::Area::Detail, None);
-        self.value_input(ui, &response, events);
-        let c = &theme.colors;
-        let painter = ui.painter();
-        painter.rect_filled(field, theme.sizes.corner, c.window.0);
-        let n = self.descriptor.normalize(self.value) as f32;
-        let fill_colour = if self.enabled {
-            c.value_fill.0
-        } else {
-            highlight(theme, false)
-        };
-        let fill = Rect::from_min_size(field.min, vec2(field.width() * n, field.height()));
-        painter.rect_filled(fill, theme.sizes.corner, fill_colour);
-        painter.text(
-            field.center(),
-            Align2::CENTER_CENTER,
-            self.text
-                .clone()
-                .unwrap_or_else(|| self.descriptor.format(self.value)),
-            theme.small_font(),
-            c.text.0,
-        );
-        focus_ring(ui, theme, field, &response);
-        self.describe(ui, &response, Role::SpinButton);
-    }
-
-    /// A switch: a rectangular text button, lit while on.
-    fn toggle(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
-        let below = self.label(ui, theme);
-        let button = Rect::from_center_size(below.center(), vec2(below.width() - 4.0, 16.0));
-        let response = ui.interact(button, self.id(), Sense::click());
-        crate::focus::register(ui.ctx(), self.id(), bl_shell::Area::Detail, None);
-        let on = self.value >= 0.5;
-        if response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))) {
-            self.change(if on { 0.0 } else { 1.0 }, events);
-        }
-        let c = &theme.colors;
-        let (face, ink) = if on {
-            (self.lit(theme), c.accent_text.0)
-        } else {
-            (c.control.0, c.text.0)
-        };
-        ui.painter().rect_filled(button, theme.sizes.corner, face);
-        ui.painter().text(
-            button.center(),
-            Align2::CENTER_CENTER,
-            short_name(&self.descriptor.name),
-            theme.small_font(),
-            ink,
-        );
-        focus_ring(ui, theme, button, &response);
-        let name = self.descriptor.name.clone();
-        response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, on, &name));
-        ui.ctx().accesskit_node_builder(response.id, |node| {
-            node.set_role(Role::Switch);
-            node.set_label(self.descriptor.name.clone());
-            node.set_value(self.descriptor.format(self.value));
-        });
-    }
-
-    /// A chooser: a dark box with the value and a ▼, opening a menu of the
-    /// choices.
-    fn chooser(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
-        let below = self.label(ui, theme);
-        let field = Rect::from_center_size(below.center(), vec2(below.width() - 4.0, 16.0));
-        let response = ui.interact(field, self.id(), Sense::click());
-        crate::focus::register(ui.ctx(), self.id(), bl_shell::Area::Detail, None);
-        let c = &theme.colors;
-        ui.painter()
-            .rect_filled(field, theme.sizes.corner, c.window.0);
-        ui.painter().text(
-            pos2(field.left() + 3.0, field.center().y),
-            Align2::LEFT_CENTER,
-            self.descriptor.format(self.value),
-            theme.small_font(),
-            c.text.0,
-        );
-        ui.painter().text(
-            pos2(field.right() - 3.0, field.center().y),
-            Align2::RIGHT_CENTER,
-            "▼",
-            theme.small_font(),
-            c.text_dim.0,
-        );
-        focus_ring(ui, theme, field, &response);
-        if let ParamKind::Choice { choices } = &self.descriptor.kind {
-            egui::Popup::menu(&response).show(|ui| {
-                for (index, choice) in choices.iter().enumerate() {
-                    let chosen = index as f64 == self.value;
-                    if ui.selectable_label(chosen, choice).clicked() {
-                        self.change(index as f64, events);
-                        ui.close();
-                    }
-                }
-            });
-        }
-        ui.ctx().accesskit_node_builder(response.id, |node| {
-            node.set_role(Role::ComboBox);
-            node.set_label(self.descriptor.name.clone());
-            node.set_value(self.descriptor.format(self.value));
-        });
-    }
+/// The cells of `columns` by `rows` buttons filling `rect`, by rows, with
+/// [`BUTTON_GAP`] between them.
+fn button_cells(rect: Rect, columns: usize, rows: usize) -> Vec<Rect> {
+    let gaps = |n: usize| n.saturating_sub(1) as f32 * BUTTON_GAP;
+    let size = vec2(
+        (rect.width() - gaps(columns)) / columns.max(1) as f32,
+        (rect.height() - gaps(rows)) / rows.max(1) as f32,
+    );
+    (0..rows)
+        .flat_map(|row| (0..columns).map(move |column| (row, column)))
+        .map(|(row, column)| {
+            Rect::from_min_size(
+                rect.min
+                    + vec2(
+                        column as f32 * (size.x + BUTTON_GAP),
+                        row as f32 * (size.y + BUTTON_GAP),
+                    ),
+                size,
+            )
+        })
+        .collect()
 }
 
 /// The value `steps` key presses from `value`: one step of a stepped
 /// parameter, or 1% of the travel.
-fn step(param: &ParamDescriptor, value: f64, steps: i32) -> f64 {
+pub(crate) fn step(param: &ParamDescriptor, value: f64, steps: i32) -> f64 {
     if param.is_stepped() {
         param.clamp(value + f64::from(steps))
     } else {

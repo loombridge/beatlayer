@@ -9,7 +9,7 @@
 use std::collections::HashSet;
 
 use bl_shell_spec::context_menus::{
-    self, ADAPTIVE_GRID_ROWS, CHAIN_COLOUR_ROW, FIXED_GRID_ROWS, TrackMenu,
+    self, ADAPTIVE_GRID_ROWS, CHAIN_COLOUR_ROW, FIXED_GRID_ROWS, NoteMenu, TrackMenu,
 };
 use bl_shell_spec::keymap::{Platform, Status, Trigger};
 use bl_shell_spec::menus::{Action, MenuItem, MenuPlatform, menu_bar};
@@ -362,8 +362,12 @@ impl Shell {
                 arrangement: true,
                 time_selection: true,
                 devices_off: false,
+                midi: true,
             }),
-            context_menus::note(),
+            context_menus::note(NoteMenu {
+                grid: true,
+                mpe: true,
+            }),
         ];
         // Rows that need a value the menu supplies by its layout.
         let valued: Vec<&str> = ADAPTIVE_GRID_ROWS
@@ -474,8 +478,11 @@ impl Shell {
                     let path = format!("{path} ▸ {}", item.label);
                     self.add_menu_items(add, &item.items, path, contexts, skip);
                 }
-                Action::Pending(_) | Action::System(_) | Action::Omitted(_) | Action::Separator => {
-                }
+                Action::Pending(_)
+                | Action::System(_)
+                | Action::Omitted(_)
+                | Action::Separator
+                | Action::Heading => {}
             }
         }
     }

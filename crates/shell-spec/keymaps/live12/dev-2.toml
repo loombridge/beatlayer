@@ -55,3 +55,27 @@ status = "bound"
 commands = [
   { id = "device.set_floating", contexts = ["device-view"] },
 ]
+
+[[shortcut]]
+id = "S-DEV-016"
+action = "Step Roar's Feedback Note by a semitone"
+context = "device-view"
+kind = "key"
+trigger = "press"
+milestone = "M5"
+mac = ["Down", "Up"]
+win = ["Down", "Up"]
+status = "widget"
+handler = "Roar's Feedback Note control steps its key by a semitone, as a device control's own keys do (the roar spec R26)"
+
+[[shortcut]]
+id = "S-DEV-017"
+action = "Step Roar's Feedback Note by an octave"
+context = "device-view"
+kind = "key"
+trigger = "press"
+milestone = "M5"
+mac = ["Shift+Down", "Shift+Up"]
+win = ["Shift+Down", "Shift+Up"]
+status = "widget"
+handler = "Roar's Feedback Note control steps its key by an octave, its coarse step (the roar spec R26)"

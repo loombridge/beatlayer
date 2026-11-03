@@ -415,6 +415,7 @@ pub fn display(
     data: Option<&[f32]>,
 ) -> DeviceDisplay {
     let mut out = DeviceDisplay {
+        spectrograms: Vec::new(),
         device,
         live: data.is_some(),
         view: None,

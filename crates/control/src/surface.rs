@@ -15,7 +15,10 @@ use std::time::{Duration, Instant};
 use bl_core::midi::MidiMessage;
 use bl_core::time::{Bpm, Ticks};
 use bl_engine::{SlotStatus, TrackMeter};
-use bl_model::{DeviceId, Document, ParamId, RemoteMode, SceneId, TrackId};
+use bl_model::{
+    ChainId, ClipId, DeviceId, Document, ParamDescriptor, ParamId, RackViewMap, RemoteMode,
+    SceneId, TrackId,
+};
 use serde_json::Value;
 
 use crate::Hit;
@@ -76,6 +79,9 @@ pub struct ReadModel {
     pub selection: Selection,
     /// Where each track's playing Session clip is in its loop, from 0 to 1.
     pub progress: Vec<(TrackId, f32)>,
+    /// How long each track's playing Session clip has played, in ticks of
+    /// its own time, counted from where it started.
+    pub clip_time: Vec<(TrackId, Ticks)>,
     /// What each row of the Control Surfaces table holds: its ring, the
     /// device its device controls reach and its bank (R17 to R35).
     pub rows: Vec<RowView>,
@@ -96,9 +102,100 @@ pub struct ReadModel {
     pub selected_device: Option<DeviceId>,
     /// Whether the Session View is the main view, not the Arrangement.
     pub session_view: bool,
+    /// The tracks armed by selection, not by hand, while a surface that arms
+    /// by selection runs (Push 2 R3).
+    pub selection_armed: Vec<TrackId>,
+    /// What the Device View shows besides the set (push-2-tracks R22, R24).
+    pub devices: DeviceViews,
     /// The folds and the In/Out section Mix Mode acts on (push-2-tracks R31,
     /// R37).
     pub mix: crate::mix::Mix,
+    /// The Clip View's Quantize settings, for Push 2's Quantize menu
+    /// (push-2-notes R58).
+    pub quantize: QuantizeView,
+    /// Whether Automation Arm is on (push-2-notes R61).
+    pub automation_arm: bool,
+    /// The sample of each Simpler a row's device controls reach: what a
+    /// surface that draws it needs (push-2-notes R67).
+    pub samples: Arc<std::collections::BTreeMap<DeviceId, SampleView>>,
+    /// What Convert would act on (push-2-notes R76).
+    pub convert: Convert,
+    /// The clip the Clip View shows, for a surface that shows the selected
+    /// clip while the Arrangement is the main view (push-2-tracks R43).
+    pub clip_view: Option<ClipId>,
+    /// The waveform of the audio clip a surface shows, once its peaks are
+    /// built (push-2-tracks R44).
+    pub waveform: Option<Arc<Waveform>>,
+}
+
+/// An audio clip's waveform along the beats of its display: the lowest and
+/// highest sample of equal stretches of the file's time from `from` to `to`,
+/// all channels together (push-2-tracks R44).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Waveform {
+    /// The clip the peaks are for.
+    pub clip: ClipId,
+    /// The beat of the clip's contents the first point starts on.
+    pub from: f64,
+    /// The beat the last point ends on.
+    pub to: f64,
+    /// Each point's lowest and highest sample, from -1 to 1.
+    pub peaks: Vec<[f32; 2]>,
+}
+
+/// The Quantize tool's grid and amount, as the Clip View keeps them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct QuantizeView {
+    /// The spacing of the grid's lines, before triplets: the division
+    /// chosen, else the editing grid's step.
+    pub grid: Ticks,
+    /// Whether the lines are triplets of the division.
+    pub triplets: bool,
+    /// How far notes move toward the lines, 0 to 100 %.
+    pub amount: u8,
+}
+
+/// What a surface's Convert acts on, by what is selected (push-2-notes R76).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Convert {
+    /// Nothing that can be converted is selected.
+    #[default]
+    Nothing,
+    /// A Simpler in Classic or One-Shot mode.
+    Simpler,
+    /// A Simpler in Slice mode.
+    Slices,
+    /// A pad of a drum rack.
+    Pad,
+    /// An audio clip, which offers its own choices.
+    Clip,
+}
+
+/// A Simpler's sample as a surface draws it (push-2-notes R67, R69).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SampleView {
+    /// The edited sample's peaks.
+    pub peaks: Arc<bl_media::Peaks>,
+    /// The sample's length in frames.
+    pub frames: u64,
+    /// The sample's rate.
+    pub rate: u32,
+    /// Where the slices after the first start, in frames, in Slice mode;
+    /// empty otherwise.
+    pub slices: Arc<Vec<u64>>,
+}
+
+/// What the Device View keeps beside the set, for a surface that follows it:
+/// view state, never saved as the document and never an undo step.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DeviceViews {
+    /// The views each rack shows, whose devices view is the rack's fold. A
+    /// rack that isn't listed shows them all.
+    pub racks: Arc<RackViewMap>,
+    /// The chain each rack's devices view shows, for the racks on the shown
+    /// track: the chain clicked, or the first while none is. A rack with
+    /// several chains selected shows none.
+    pub chains: Arc<std::collections::BTreeMap<DeviceId, ChainId>>,
 }
 
 impl ReadModel {
@@ -123,6 +220,7 @@ impl ReadModel {
             meters: Vec::new(),
             selection: Selection::default(),
             progress: Vec::new(),
+            clip_time: Vec::new(),
             rows: Vec::new(),
             columns: Vec::new(),
             session_record: false,
@@ -131,7 +229,19 @@ impl ReadModel {
             browse: None,
             selected_device: None,
             session_view: false,
+            selection_armed: Vec::new(),
+            devices: DeviceViews::default(),
             mix: crate::mix::Mix::default(),
+            quantize: QuantizeView {
+                grid: Ticks::SIXTEENTH,
+                triplets: false,
+                amount: 100,
+            },
+            automation_arm: false,
+            clip_view: None,
+            waveform: None,
+            samples: Arc::default(),
+            convert: Convert::default(),
         }
     }
 
@@ -178,6 +288,9 @@ pub struct ParamView {
     pub text: String,
     /// Whether a macro holds it, so the surface can't move it (R22).
     pub held: bool,
+    /// What it is: its range, kind and default, which a surface that sets
+    /// it by steps needs.
+    pub descriptor: ParamDescriptor,
 }
 
 /// The device a surface's device controls reach (R17 to R21, R35).
@@ -415,7 +528,7 @@ pub struct Cx {
     pub(crate) out: Vec<Out>,
     pub(crate) requests: Vec<Ask>,
     pub(crate) handed: Vec<(Instant, MidiMessage)>,
-    pub(crate) played: Vec<MidiMessage>,
+    pub(crate) played: Vec<(Option<Instant>, MidiMessage)>,
 }
 
 impl Cx {
@@ -559,7 +672,13 @@ impl Cx {
     /// Plays a message into the tracks as the surface's input port's own,
     /// whatever the port's Track switch says (R5).
     pub fn play(&mut self, message: MidiMessage) {
-        self.played.push(message);
+        self.played.push((None, message));
+    }
+
+    /// [`Cx::play`], stamped with `at`, the moment the controller sent it
+    /// (R5).
+    pub fn play_at(&mut self, at: Instant, message: MidiMessage) {
+        self.played.push((Some(at), message));
     }
 }
 

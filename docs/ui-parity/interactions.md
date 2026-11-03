@@ -26,7 +26,7 @@ Source: `obs` means observed in Live 12.4.3 on macOS on 10 October 2026, unless 
 | I-CLICK-014 | Arrangement scrub area or beat-time ruler | Shift-click | Scrubs even when Permanent Scrub Areas is off | man 6.3 |
 | I-CLICK-015 | Overview | Double-click inside the outline | Zooms out to the whole Arrangement | man 6.1 |
 | I-CLICK-016 | Beat-time ruler | Double-click | Zooms to the selection, or out to the whole Arrangement if nothing is selected | man 6.1 |
-| I-CLICK-017 | Loop brace | Click | Selects everything inside the loop | man 6.9 |
+| I-CLICK-017 | Loop brace's bar | Click | Selects the brace and the time inside it on every track, and puts the insert marker at its start | man 6.9; observed in 12.4.16 (macOS), 1 November 2026 |
 | I-CLICK-018 | Locator | Click; double-click while stopped | Jumps to it; double-click also selects it and starts playback | man 6.4 |
 | I-CLICK-019 | Fold button beside a track name | Click; Option/Alt-click | Folds or unfolds the track; with the modifier, all tracks | man 6.9 |
 | I-CLICK-020 | Pan control | Double-click, or click the triangle above it | Resets the pan to centre | man 18.1 |
@@ -45,7 +45,7 @@ Source: `obs` means observed in Live 12.4.3 on macOS on 10 October 2026, unless 
 | I-CLICK-033 | Session clips, tracks, scenes | Shift-click; Cmd/Ctrl-click | Extends the selection to a range; adds or removes one item | man 7.1, 42.9 |
 | I-CLICK-034 | Envelope breakpoint | Option/Alt-click | Selects the breakpoint and moves the insert marker to it | man 41.5.2 |
 | I-CLICK-035 | Hot-Swap Presets button (device title bar) | Click | The button turns orange and the browser shows the hot-swap bar (L-BRW-015); closing the bar ends hot-swapping | obs (Live 12.4.6, 12 October 2026) |
-| I-CLICK-036 | Scene number (Main track column) | Double-click | Opens the Scene View in the detail area (L-SES-011) | obs (Live 12, 15 October 2026) |
+| I-CLICK-036 | Scene number (Main track column) | Double-click | Opens the Scene View for that scene in the detail area, where the Clip View goes (L-SES-011) | obs (Live 12, 15 October 2026); obs (Live 12.4.16, 2 November 2026) |
 | I-CLICK-037 | Crossfader A or B assign button | Click | Assigns the track to that side and switches the other side off; the two are exclusive | obs (Live 12, 15 October 2026) |
 | I-CLICK-038 | Piano ruler key | Click; Shift-click | Selects that key track's notes; adds them to the selection or removes them | man 10.5.2, 10.5.12.1 |
 | I-CLICK-039 | MIDI note | Shift-click | Adds it to the selection or removes it | man 10.5.2 |
@@ -62,6 +62,7 @@ Source: `obs` means observed in Live 12.4.3 on macOS on 10 October 2026, unless 
 | I-CLICK-050 | Browser | The mouse's back and forward buttons | Browse Back and Browse Forward (S-BRW-011, S-BRW-012) | release notes 12.4 |
 | I-CLICK-051 | Quick Tags tag | Double-click | Searches for the tag | release notes 12.3 |
 | I-CLICK-052 | Peak level readout (mixer strip), with the extended meters shown | Click | Resets it to the current peak (L-MIX-008) | man 18.1.1 |
+| I-CLICK-053 | Scene number (Main track column) | Click | Selects the scene and highlights the Main track; the Scene View stays closed until a double-click (I-CLICK-036) | obs (Live 12.4.16, 2 November 2026); man 7.2.2 |
 
 ## Drags (I-DRAG)
 
@@ -71,7 +72,7 @@ Source: `obs` means observed in Live 12.4.3 on macOS on 10 October 2026, unless 
 | I-DRAG-002 | Session clips | Option-drag (macOS) / Ctrl-drag (Windows) | Copies them (S-SES-004) | man 42.15 |
 | I-DRAG-003 | Session grid | Drag from an empty slot | Rubber-band selects slots and clips | man 7.4 |
 | I-DRAG-004 | Session track title bar edges | Drag; Option/Alt-drag | Resizes the track's width; with the modifier, every track's | man 7.2 |
-| I-DRAG-005 | Main track title bar, left edge | Drag left | Reveals the scene tempo and signature fields | man 7.2.1 |
+| I-DRAG-005 | Main track title bar, left edge | Drag left | Widens the Main track like any track's edge and reveals nothing: a scene's Tempo and Signature are in the Scene View (I-CLICK-036), not behind this edge | obs (Live 12.4.16, 2 November 2026); differs from man 7.2.1 |
 | I-DRAG-006 | Scenes, tracks | Drag | Reorders them; non-adjacent selections close up when dropped | man 7.2, 18.2 |
 | I-DRAG-007 | Overview, beat-time ruler | Drag sideways; drag up or down | Scrolls; zooms | man 6.1 |
 | I-DRAG-008 | Time ruler | Drag sideways | Scrolls | man 6.1 |
@@ -85,7 +86,7 @@ Source: `obs` means observed in Live 12.4.3 on macOS on 10 October 2026, unless 
 | I-DRAG-016 | Clip's title bar | Shift+Option-drag / Shift+Alt-drag | Selects time inside the clip (S-ARR-007) | man 42.16 |
 | I-DRAG-017 | Fade handles (shown on hover) | Drag a fade handle; drag the curve handle; drag past the neighbour's edge | Sets the fade length; shapes the curve; creates a crossfade | man 6.8 |
 | I-DRAG-018 | Track's lower edge (split line) | Drag; Option/Alt-drag | Sets the track's height; with the modifier, every track's | man 6.9 |
-| I-DRAG-019 | Loop brace | Drag an edge; drag the bar | Moves that end; moves the whole loop | man 6.6 |
+| I-DRAG-019 | Loop brace | Drag an edge; drag the bar | Moves that end; moves the whole loop, keeping its length; on the grid, and not an undo step | man 6.6; observed in 12.4.16 (macOS), 1 November 2026 |
 | I-DRAG-020 | Locator, time-signature marker | Drag | Moves it | man 6.4, 6.5 |
 | I-DRAG-021 | Any drag on a grid | Hold Cmd (macOS) / Alt (Windows) | Ignores snapping; if the grid is off, snaps instead (S-EDIT-013) | man 6.10 |
 | I-DRAG-022 | Value controls | Drag up or down; Shift-drag | Changes the value; in finer steps (S-VAL-003) | man 42.6 |

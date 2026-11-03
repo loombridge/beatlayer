@@ -19,8 +19,30 @@ use std::sync::Arc;
 use bl_model::{AraSupport, Device, DeviceDescription, DeviceId, DeviceKind, DeviceRole};
 
 use crate::clips::MediaLibrary;
-use crate::node::{Node, NodeConfig};
+use crate::gc::GcHandle;
+use crate::node::{Node, NodeConfig, NodeData};
 use crate::nodes::{BEAT_TONE, BeatTone, TEST_TONE, TestTone};
+
+/// One piece of node data a factory builds for a device, wrapped for the
+/// audio thread when the compiler sends it.
+pub type DataItem = Box<dyn FnOnce(&GcHandle) -> NodeData + Send>;
+
+/// What a factory builds for a device's node off the audio thread, from the
+/// device in the document (a wavetable device's tables, WP-8.9).
+#[derive(Default)]
+pub struct DeviceData {
+    /// The pieces to send, in order.
+    pub items: Vec<DataItem>,
+    /// Media the device names that `file` couldn't find: reported missing.
+    pub missing: Vec<bl_model::ContentHash>,
+}
+
+/// Names the file a media hash is kept in, for a device that reads files
+/// itself.
+pub type FileOf<'a> = &'a dyn Fn(bl_model::ContentHash) -> Option<std::path::PathBuf>;
+
+/// A native device type's builder of [`DeviceData`].
+pub type DataFn = Arc<dyn Fn(&Device, FileOf<'_>) -> DeviceData + Send + Sync>;
 
 /// Makes nodes for devices. The compiler asks each factory in a
 /// [`Registry`] in turn. It runs off the audio thread, so a factory may
@@ -51,6 +73,15 @@ pub trait NodeFactory: Send + Sync {
     /// to it ([`bl_model::ara_renders`]). The default says none is.
     fn ara_support(&self, device: &Device) -> Option<AraSupport> {
         let _ = device;
+        None
+    }
+
+    /// The data this factory builds for `device`'s node, off the audio
+    /// thread (WP-8.9), or `None` if it builds none for that device. The
+    /// compiler sends it with a new node and again when the device's
+    /// wavetables change.
+    fn data(&self, device: &Device, file: FileOf<'_>) -> Option<DeviceData> {
+        let _ = (device, file);
         None
     }
 }
@@ -91,6 +122,9 @@ pub struct DeviceType {
     /// notes and channel messages of a MIDI track reach the device in its
     /// block's notes ([`Block::notes`](crate::Block::notes)).
     pub midi_sidechain: bool,
+    /// Whether that MIDI sidechain has a tapping point, Pre FX, Post FX or
+    /// Post Mixer, Post FX in a new device (the routing spec, R39).
+    pub midi_tap: bool,
     /// Whether its devices send notes on from a note output (IMP-24): a CLAP
     /// plug-in's note output port, a VST3 class's event output bus, or an
     /// Audio Unit's MIDI output. A device whose type has one can sit in the
@@ -104,6 +138,11 @@ pub struct DeviceType {
     /// ([`Block::outputs_mut`](crate::Block::outputs_mut)). Empty for a
     /// device that offers none.
     pub outputs: Vec<String>,
+    /// Its instrument modulation matrix (the instrument modulation spec,
+    /// R1, R2): the sources, destinations and slots its devices have, which
+    /// the route commands, the readback and the compiler read. `None` for a
+    /// type that has none.
+    pub matrix: Option<Arc<bl_model::matrix::MatrixLayout>>,
 }
 
 impl DeviceType {
@@ -123,9 +162,26 @@ impl DeviceType {
             cv_outputs: Vec::new(),
             cv_inputs: Vec::new(),
             midi_sidechain: false,
+            midi_tap: false,
             note_output: role == DeviceRole::MidiEffect,
             outputs: Vec::new(),
+            matrix: None,
         }
+    }
+
+    /// The same type, with its instrument modulation matrix.
+    ///
+    /// # Panics
+    ///
+    /// If the layout has more than [`bl_model::matrix::MAX_SLOTS`] slots.
+    #[must_use]
+    pub fn with_matrix(mut self, layout: bl_model::matrix::MatrixLayout) -> Self {
+        assert!(
+            layout.slots.len() <= bl_model::matrix::MAX_SLOTS,
+            "too many route slots"
+        );
+        self.matrix = Some(Arc::new(layout));
+        self
     }
 
     /// The same type, with its parameters described.
@@ -188,6 +244,15 @@ impl DeviceType {
         self
     }
 
+    /// The same device type, declaring a MIDI sidechain input with a
+    /// tapping point (the routing spec, R39).
+    #[must_use]
+    pub fn with_midi_sidechain_tap(mut self) -> Self {
+        self.midi_sidechain = true;
+        self.midi_tap = true;
+        self
+    }
+
     /// The same device type, declaring a note output (IMP-24): its devices
     /// send notes on, so they can sit in the MIDI-effect position of a MIDI
     /// track's chain.
@@ -223,7 +288,9 @@ impl DeviceType {
         if !self.cv_outputs.is_empty() || !self.cv_inputs.is_empty() {
             device = device.with_cv(&self.cv_outputs, &self.cv_inputs);
         }
-        if self.midi_sidechain {
+        if self.midi_tap {
+            device = device.with_midi_sidechain_tap();
+        } else if self.midi_sidechain {
             device = device.with_midi_sidechain();
         }
         device
@@ -236,6 +303,7 @@ struct Native<F> {
     offered: Option<DeviceType>,
     outputs: Vec<String>,
     make: F,
+    data: Option<DataFn>,
 }
 
 impl<F> NodeFactory for Native<F>
@@ -263,6 +331,15 @@ where
             _ => Vec::new(),
         }
     }
+
+    fn data(&self, device: &Device, file: FileOf<'_>) -> Option<DeviceData> {
+        match &device.kind {
+            DeviceKind::Native { device_type } if *device_type == self.device_type => {
+                self.data.as_ref().map(|data| data(device, file))
+            }
+            _ => None,
+        }
+    }
 }
 
 /// The node factories the compiler uses, asked in the order they were added,
@@ -276,6 +353,10 @@ where
 pub struct Registry {
     factories: Vec<Box<dyn NodeFactory>>,
     media: Option<Arc<dyn MediaLibrary>>,
+    /// The native device types whose node takes another sample as node
+    /// data, fading out the voices of the one before, so a sample change
+    /// doesn't make a new node.
+    swaps_samples: Vec<String>,
 }
 
 impl Registry {
@@ -297,7 +378,22 @@ impl Registry {
         Self {
             factories: Vec::new(),
             media: None,
+            swaps_samples: Vec::new(),
         }
+    }
+
+    /// Says that the node of the native device type `device_type` takes a
+    /// changed sample as node data and fades the voices of the sample before
+    /// it out (sound similarity R29), so a change of sample keeps the node.
+    pub fn swap_samples_in_place(&mut self, device_type: &str) {
+        self.swaps_samples.push(device_type.to_owned());
+    }
+
+    /// Whether the node of a device of `kind` keeps running when its sample
+    /// changes ([`Registry::swap_samples_in_place`]).
+    #[must_use]
+    pub fn swaps_samples_in_place(&self, kind: &DeviceKind) -> bool {
+        matches!(kind, DeviceKind::Native { device_type } if self.swaps_samples.contains(device_type))
     }
 
     /// Adds a factory, asked after the ones already here.
@@ -316,6 +412,7 @@ impl Registry {
             offered: None,
             outputs: Vec::new(),
             make,
+            data: None,
         });
     }
 
@@ -335,6 +432,7 @@ impl Registry {
             offered: None,
             outputs: outputs.iter().map(|name| (*name).to_owned()).collect(),
             make,
+            data: None,
         });
     }
 
@@ -347,6 +445,23 @@ impl Registry {
     where
         F: Fn(&Device, &NodeConfig) -> Box<dyn Node> + Send + Sync + 'static,
     {
+        self.add_device_with_data(device_type, make, None);
+    }
+
+    /// [`add_device`](Self::add_device), for a type whose nodes are also
+    /// sent the data `data` builds from the device (WP-8.9).
+    ///
+    /// # Panics
+    ///
+    /// If `device_type` isn't a native device type.
+    pub fn add_device_with_data<F>(
+        &mut self,
+        device_type: DeviceType,
+        make: F,
+        data: Option<DataFn>,
+    ) where
+        F: Fn(&Device, &NodeConfig) -> Box<dyn Node> + Send + Sync + 'static,
+    {
         let DeviceKind::Native { device_type: id } = &device_type.kind else {
             panic!("add_device takes native device types");
         };
@@ -356,6 +471,7 @@ impl Registry {
             offered: Some(device_type),
             outputs,
             make,
+            data,
         });
     }
 
@@ -417,6 +533,15 @@ impl Registry {
         self.factories
             .iter()
             .find_map(|factory| factory.create(device, config))
+    }
+
+    /// The data the first factory that builds some builds for `device`'s
+    /// node, off the audio thread (WP-8.9); none for a device whose factory
+    /// builds none.
+    pub(crate) fn data(&self, device: &Device, file: FileOf<'_>) -> Option<DeviceData> {
+        self.factories
+            .iter()
+            .find_map(|factory| factory.data(device, file))
     }
 
     /// Where clips' audio comes from, if anywhere.

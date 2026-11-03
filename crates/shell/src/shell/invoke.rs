@@ -3,7 +3,7 @@
 use super::info_text;
 use super::{
     DELAY_COMPENSATION, Effect, Invocation, LOCK_ENVELOPES, REDUCED_LATENCY_MONITORING,
-    SOLO_IN_PLACE, Shell, ShellError,
+    SOLO_IN_PLACE, Shell, ShellError, device_error,
 };
 use crate::commands as ids;
 use crate::mixer_controls;
@@ -11,6 +11,7 @@ use crate::mixer_controls::Switch;
 use bl_model::TrackId;
 use bl_model::TrackKind;
 use bl_shell_spec::arrangement as view_ids;
+use bl_shell_spec::arranger as arranger_ids;
 use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::dawproject as dawproject_ids;
 use bl_shell_spec::devices as device_ids;
@@ -122,6 +123,15 @@ impl Shell {
                     command: id.to_owned(),
                     reason: "select a device first".to_owned(),
                 })?;
+            // Spec: sound-similarity R24. With a drum rack selected, Cmd-Up
+            // keeps the selected pad's sampler.
+            let device = if id == "device.set_similarity_reference" {
+                self.devices
+                    .swap_device(self.editor.document(), Default::default())
+                    .map_err(|error| device_error(id, error))?
+            } else {
+                device
+            };
             let current = self.editor.document().device(device);
             fields.insert("device".to_owned(), json!(device));
             if id == "device.set_show_preset_name" && !fields.contains_key("shown") {
@@ -506,6 +516,21 @@ impl Shell {
                 self.touch();
                 Ok(Value::Null)
             }
+            arranger_ids::RENAME_SECTION if !has("name") => {
+                // Spec: arranger-track R7. Cmd-R types the new name in
+                // the section.
+                let section = args
+                    .get("section")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .or_else(|| self.arrangement.selected_sections().first().copied())
+                    .ok_or_else(|| ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "select a section first".to_owned(),
+                    })?;
+                self.effects.push(Effect::RenameSection(section));
+                self.touch();
+                Ok(Value::Null)
+            }
             locator_ids::EDIT_SIGNATURE if !has("signature") => {
                 // Spec: time-editing R31. Cmd-R, Edit Time Signature and the
                 // marker's menu type the signature in the lane.
@@ -607,6 +632,11 @@ impl Shell {
                     "rack.delete_variation",
                     json!({ "rack": rack, "index": index }),
                 )
+            }
+            "device.remove" if !has("device") && !self.devices.selection().is_empty() => {
+                // Spec: device-chains R47. Delete removes every selected
+                // device as one undo step.
+                self.run_devices(id, args)
             }
             _ if device_ids::ON_SELECTED.contains(&id) && !has("device") => {
                 let args = self.filled_args(id, args)?;

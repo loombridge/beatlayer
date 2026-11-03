@@ -579,6 +579,7 @@ pub fn display(
     articulations: &[bl_model::Articulation],
 ) -> bl_model::DeviceDisplay {
     let mut display = bl_model::DeviceDisplay {
+        spectrograms: Vec::new(),
         device,
         live: data.is_some(),
         view: None,

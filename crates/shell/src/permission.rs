@@ -29,6 +29,7 @@ use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::groove::{self as groove_ids, GrooveToClipArgs};
 use bl_shell_spec::keymap as keymap_ids;
+use bl_shell_spec::linked_clips as linked_ids;
 use bl_shell_spec::midi_files::{self as midi_ids, MidiImportArgs};
 use bl_shell_spec::midi_tools as tool_ids;
 use bl_shell_spec::pads as pad_ids;
@@ -68,6 +69,7 @@ pub const RAISED_BY_ARGUMENTS: &[&str] = &[
     edit_ids::PASTE,
     session_ids::PASTE,
     session_ids::DUPLICATE,
+    linked_ids::DUPLICATE_LINKED,
     session_ids::COPY_TO_ARRANGEMENT,
     session_ids::COPY_TO_SESSION,
     browser_ids::ADD_TO_ARRANGEMENT,

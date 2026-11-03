@@ -496,6 +496,7 @@ impl Shell {
             value,
             text: descriptor.format(value),
             held: self.devices.macro_holding(doc, device.id, param).is_some(),
+            descriptor: descriptor.clone(),
         })
     }
 

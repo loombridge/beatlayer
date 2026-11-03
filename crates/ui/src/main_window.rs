@@ -469,6 +469,11 @@ impl MainWindowUi {
                 // scrub area.
                 crate::arrangement::start_rename(ctx, *locator);
             }
+            Effect::RenameSection(section) => {
+                // Spec: arranger-track R7. Rename types the name in the
+                // section.
+                crate::arrangement::arranger::start_rename(ctx, *section);
+            }
             Effect::EditTimeSignature(at) => {
                 // Spec: time-editing R31. The signature is typed over its
                 // marker in the lane.
@@ -593,6 +598,7 @@ impl MainWindowUi {
                 .with_global_amount(shell.global_amount_shown())
                 .with_sync(shell.sync_lamps_shown(), shell.resync_button_shown())
                 .with_link(shell.link_toggle_shown())
+                .with_follow(shell.tempo_follower_toggle_shown())
                 .with_new_button(shell.map_mode() != MapMode::Off);
             let layout = if second {
                 // Spec: second-window R2, R12, R17. No Info View, assistant
@@ -814,6 +820,9 @@ impl MainWindowUi {
             // window while there are sets a crash left to offer.
             crate::recovery_dialog::show(ctx, shell, theme, &mut events);
         }
+        // Spec: themes R28. The colour picker Custom Color… opens sits over
+        // the window it was opened in.
+        crate::palette::picker(ctx, theme, &mut events);
         self.mixer_typing = crate::mixer::is_typing(ctx)
             || crate::track_menu::is_renaming(ctx)
             || crate::session_menus::is_renaming(ctx)
@@ -822,6 +831,7 @@ impl MainWindowUi {
             || crate::envelope_keys::is_typing(ctx);
         // An open menu, or a dialog, keeps the keys.
         self.menu_open = egui::Popup::is_any_open(ctx)
+            || crate::palette::picker_is_open(ctx)
             || (!second
                 && (shell.stems_dialog().is_some()
                     || shell.dawproject_report_window().is_some()
@@ -1161,8 +1171,13 @@ impl MainWindowUi {
         }) else {
             return;
         };
-        // A click in the search field isn't a click in the pane under it.
-        if self.search_field.contains(pos) {
+        // A click in the search field, or in a menu or dialog over a pane,
+        // isn't a click in the pane under it.
+        if self.search_field.contains(pos)
+            || ctx
+                .layer_id_at(pos)
+                .is_some_and(|layer| layer.order != egui::Order::Background)
+        {
             return;
         }
         let areas = [
@@ -1230,7 +1245,9 @@ impl MainWindowUi {
             // Spec: midi-clock R10, R15. EXT and the sync lamps show while an
             // input has Sync on, the Resync button while Show Resync Button
             // is on. Spec: link R17. The Link toggle and its arrow show
-            // while Show Link Toggle is Show.
+            // while Show Link Toggle is Show. Spec: tempo-follower R2. The
+            // Tempo Follower toggle shows while Show Tempo Follower Toggle is
+            // Show.
             if matches!(
                 el,
                 Element::ExternalSync
@@ -1239,6 +1256,7 @@ impl MainWindowUi {
                     | Element::ResyncExternalHardware
                     | Element::LinkToggle
                     | Element::LinkMenu
+                    | Element::TempoFollower
             ) && rect.width() <= 0.0
             {
                 continue;
@@ -1341,6 +1359,10 @@ impl MainWindowUi {
             if *el == Element::LinkMenu {
                 egui::Popup::menu(&response).show(|ui| Self::link_menu_content(ui, shell, events));
             }
+            // Menus.md C-CPU: the meter's box and its arrow open one menu.
+            if matches!(*el, Element::Cpu | Element::CpuMenu) {
+                egui::Popup::menu(&response).show(|ui| Self::cpu_menu_content(ui, shell, events));
+            }
             if *el == Element::Tempo {
                 // Spec: warping R46. The tempo field's context menu holds
                 // Unfollow Tempo Automation.
@@ -1383,9 +1405,9 @@ impl MainWindowUi {
         });
     }
 
-    /// The Link menu (the Link spec, R19): Link, Start Stop Sync, Link Audio,
-    /// the peers that have Link Audio on, and Configure Link…. Link Audio
-    /// comes with its own package: its item is off and no peer has it on.
+    /// The Link menu (the Link spec, R19; menus.md C-LINK): Link Start Stop
+    /// Sync and Link Audio, then the peers that have Link Audio on (not
+    /// clickable) or a note that there are none, then Configure Link….
     fn link_menu_content(ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
         let ticked = |on: bool, label: &str| {
             if on {
@@ -1398,18 +1420,82 @@ impl MainWindowUi {
             events.push(UiEvent::Invoke(Invocation::new(id, args)));
             ui.close();
         };
-        let on = shell.link_enabled();
-        if ui.button(ticked(on, "Link")).clicked() {
-            run(ui, link_ids::SET_ENABLED, json!({ "on": !on }));
-        }
         let sync = shell.link_start_stop_sync();
-        if ui.button(ticked(sync, "Start Stop Sync")).clicked() {
+        if ui.button(ticked(sync, "Link Start Stop Sync")).clicked() {
             run(ui, link_ids::SET_START_STOP_SYNC, json!({ "on": !sync }));
         }
-        ui.add_enabled(false, egui::Button::new("Link Audio"));
-        ui.separator();
+        let audio = shell.link_audio_enabled();
+        if ui.button(ticked(audio, "Link Audio")).clicked() {
+            run(ui, link_ids::SET_AUDIO, json!({ "on": !audio }));
+        }
+        crate::menus::separator(ui);
+        let peers = shell.link_audio_peers();
+        if peers.is_empty() {
+            crate::menus::heading(ui, "No Link Audio peers available.");
+        }
+        for peer in peers {
+            ui.add_enabled(false, egui::Button::new(peer.name));
+        }
+        crate::menus::separator(ui);
         if ui.button("Configure Link…").clicked() {
             run(ui, ids::APP_SETTINGS, json!({ "page": "link" }));
+        }
+    }
+
+    /// The CPU meter's menu (menus.md C-CPU), which the meter's box and its
+    /// arrow both open. Beatlayer measures one load, the Current reading;
+    /// Enable CPU Meter, Average, the meter text's choice and Warn on Current
+    /// CPU Overload have nothing behind them yet and are drawn dim.
+    fn cpu_menu_content(ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
+        let status = shell.audio().status();
+        let current = status
+            .cpu_load
+            .filter(|_| status.engine_on)
+            .map_or_else(|| "---".to_owned(), |load| format!("{:.0} %", load.ceil()));
+        let dim = |ui: &mut Ui, text: &str, reading: Option<&str>| {
+            let mut button = egui::Button::new(text);
+            if let Some(reading) = reading {
+                button = button.shortcut_text(reading);
+            }
+            let response = ui.add_enabled(false, button);
+            crate::menus::register_item(ui.ctx(), &response);
+        };
+        dim(ui, "✔ Enable CPU Meter", None);
+        crate::menus::separator(ui);
+        dim(ui, "✔ Average", Some("---"));
+        dim(ui, "Current", Some(&current));
+        crate::menus::separator(ui);
+        crate::menus::heading(ui, "Meter Text Shows:");
+        ui.horizontal(|ui| {
+            for text in ["✔ Average", "Current"] {
+                ui.add_enabled(false, egui::Button::new(text));
+            }
+        });
+        crate::menus::separator(ui);
+        dim(ui, "Warn on Current CPU Overload", None);
+        crate::menus::separator(ui);
+        let keymap = crate::keymap::Keymap::from_data(shell.keymap().clone());
+        let engine = bl_shell::menus::MenuItem {
+            row: "C-CPU-007",
+            label: "Audio Engine On",
+            action: bl_shell::menus::Action::Command(ids::AUDIO_TOGGLE_ENGINE),
+            items: Vec::new(),
+        };
+        let response = crate::menus::item(
+            ui,
+            &engine,
+            shell,
+            &keymap,
+            crate::keymap::Platform::current(),
+            events,
+        );
+        crate::menus::take_focus_first(ui, &response);
+        if ui.button("Configure Audio…").clicked() {
+            events.push(UiEvent::Invoke(Invocation::new(
+                ids::APP_SETTINGS,
+                json!({ "page": "audio" }),
+            )));
+            ui.close();
         }
     }
 
@@ -1481,7 +1567,7 @@ impl MainWindowUi {
             }
         }
 
-        ui.separator();
+        crate::menus::separator(ui);
 
         // Sound
         ui.label(egui::RichText::new("Sound").strong());
@@ -1504,7 +1590,7 @@ impl MainWindowUi {
             }
         }
 
-        ui.separator();
+        crate::menus::separator(ui);
 
         // Rhythm
         ui.label(egui::RichText::new("Rhythm").strong());
@@ -1535,7 +1621,7 @@ impl MainWindowUi {
             }
         }
 
-        ui.separator();
+        crate::menus::separator(ui);
 
         // Enable Only While Recording
         let checked = settings.only_while_recording;
@@ -1724,6 +1810,31 @@ impl MainWindowUi {
                 )));
             }
         }
+        // Spec: sound-similarity R6 (L-STAT-002). While files wait to be
+        // analysed, Pause and Resume sit at the right end of the message
+        // area, left of the mapping mode chooser when that shows.
+        let analysis = shell.browser_view().analysis_state();
+        if analysis.waiting > 0
+            && let Some(message) = message
+        {
+            let right = message.right()
+                - if shell.map_controller_mapping().is_some() {
+                    156.0
+                } else {
+                    4.0
+                };
+            let rect = Rect::from_min_size(
+                pos2(right - 64.0, message.top() + 2.0),
+                egui::vec2(64.0, message.height() - 4.0),
+            );
+            let label = if analysis.paused { "Resume" } else { "Pause" };
+            if ui.put(rect, egui::Button::new(label)).clicked() {
+                events.push(UiEvent::Invoke(Invocation::new(
+                    bl_shell::browser_commands::SET_ANALYSIS_PAUSED,
+                    json!({ "paused": !analysis.paused }),
+                )));
+            }
+        }
         // Spec: macros R11. The macro that holds the parameter under the
         // pointer is named here.
         let hint = crate::mapping::hover_hold(ui.ctx())
@@ -1881,21 +1992,28 @@ impl MainWindowUi {
             egui::FontId::proportional(theme.sizes.heading),
             theme.colors.text.0,
         );
-        y += 20.0;
+        // Lines are `info_line` apart: the title, the wrapped body, and the
+        // shortcut on a line of its own.
+        let line = theme.sizes.info_line;
+        y += line;
         if !self.info.body.is_empty() {
-            let galley = painter.layout(
+            let mut job = egui::text::LayoutJob::simple(
                 self.info.body.clone(),
                 theme.small_font(),
                 theme.colors.text_dim.0,
                 rect.width() - 16.0,
             );
+            for section in &mut job.sections {
+                section.format.line_height = Some(line);
+            }
+            let galley = painter.layout_job(job);
             let height = galley.size().y;
             painter.galley(
                 egui::pos2(rect.left() + 8.0, y),
                 galley,
                 theme.colors.text_dim.0,
             );
-            y += height + 4.0;
+            y += height;
         }
         if let Some(shortcut) = &self.info.shortcut {
             painter.text(
@@ -2450,6 +2568,22 @@ fn look(element: Element, shell: &Shell, window: WindowKind) -> Look {
                 text: shell.note_group_status(),
                 ..Look::default()
             },
+            // Spec: sound-similarity R6. The progress of sound analysis, while
+            // files wait and nothing more urgent is said.
+            (None, None)
+                if shell.missing_files() == 0
+                    && shell.browser_view().analysis_state().waiting > 0 =>
+            {
+                let state = shell.browser_view().analysis_state();
+                Look {
+                    text: Some(format!(
+                        "Analyzing Sounds {:.0} %{}",
+                        state.share.unwrap_or(0.0) * 100.0,
+                        if state.paused { " (paused)" } else { "" }
+                    )),
+                    ..Look::default()
+                }
+            }
             (None, None) => {
                 let missing = shell.missing_files();
                 Look {

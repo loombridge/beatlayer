@@ -4,7 +4,7 @@
 //! order and can't express a track in two places. The derived lookups aren't
 //! saved; loading rebuilds them.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use bl_core::id::Id;
 use bl_core::time::Ticks;
@@ -13,7 +13,7 @@ use schemars::{JsonSchema, Schema, schema_for};
 use serde::{Deserialize, Serialize};
 
 use crate::automation::{AutomationTarget, Breakpoint, Envelope, MixerParam};
-use crate::clip::{Clip, ClipData, TakeLane};
+use crate::clip::{Clip, ClipData, LinkContents, TakeLane};
 use crate::command::{
     check_chain, check_clip, check_clip_fits, check_crossfader, check_device, check_extent,
     check_mixer, check_send_level,
@@ -22,7 +22,7 @@ use crate::device::Device;
 use crate::document::{Document, Index, Settings};
 use crate::error::ModelError;
 use crate::groove::{GLOBAL_AMOUNT_MAX, check_percent};
-use crate::ids::{SceneId, TakeLaneId, TrackId};
+use crate::ids::{LinkId, SceneId, TakeLaneId, TrackId};
 use crate::launch::LaunchSettings;
 use crate::locator::{Locator, SongStart};
 use crate::scene::{Scene, default_scenes};
@@ -39,6 +39,18 @@ pub(crate) struct DocumentRepr {
     /// loads with the default a new set opens with.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     scenes: Option<Vec<Scene>>,
+    /// The contents each link of clips shares, saved once (the linked clips
+    /// spec, R13): the linked clips beside them save only their own
+    /// settings. Nothing in a set saved before WP-6.44.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    links: Vec<LinkRepr>,
+}
+
+/// One link's shared contents as the set saves them.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+struct LinkRepr {
+    id: LinkId,
+    contents: LinkContents,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -102,11 +114,15 @@ struct TrackRepr {
     /// The track's colour (the themes spec, R14). Sets saved before
     /// WP-6.30b have none, which loads as `id mod 14` (R21).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    colour: Option<u8>,
+    colour: Option<crate::Colour>,
     /// The track's own info text (the Info View spec, R9). Sets saved
     /// before WP-6.58 have none.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     info_text: String,
+    /// Whether the track follows the chord lane (WP-6.48, R10). Sets saved
+    /// before it have none, which loads not following.
+    #[serde(default, skip_serializing_if = "is_off")]
+    follow_chord_lane: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     children: Vec<TrackRepr>,
     /// The track's frozen audio (WP-4.14). Sets saved before it have none,
@@ -119,6 +135,11 @@ struct TrackRepr {
 /// it off, so a set that overrode none reads as before.
 fn on() -> bool {
     true
+}
+
+/// For serde's `skip_serializing_if`, which passes a reference.
+fn is_off(value: &bool) -> bool {
+    !*value
 }
 
 /// For serde's `skip_serializing_if`, which passes a reference.
@@ -177,13 +198,23 @@ pub fn saved_schema(object: &str) -> Option<Schema> {
 
 impl From<&Document> for DocumentRepr {
     fn from(doc: &Document) -> Self {
-        let track = |id: &TrackId| TrackRepr::new(doc, *id, true);
+        let track = |id: &TrackId| TrackRepr::new(doc, *id, true, true);
+        let mut links = BTreeMap::new();
+        for clip in doc.tracks.values().flat_map(|track| track.all_clips()) {
+            if let Some(link) = clip.link {
+                links.entry(link).or_insert_with(|| clip.contents());
+            }
+        }
         Self {
             settings: doc.settings.clone(),
             tracks: doc.top.iter().map(track).collect(),
             returns: doc.returns.iter().map(track).collect(),
             main: track(&doc.main),
             scenes: Some(doc.scenes().cloned().collect()),
+            links: links
+                .into_iter()
+                .map(|(id, contents)| LinkRepr { id, contents })
+                .collect(),
         }
     }
 }
@@ -202,12 +233,23 @@ impl Document {
     pub fn saved_track(&self, id: TrackId) -> Option<impl Serialize> {
         self.tracks
             .contains_key(&id)
-            .then(|| TrackRepr::new(self, id, false))
+            .then(|| TrackRepr::new(self, id, false, false))
     }
 }
 
 impl TrackRepr {
-    fn new(doc: &Document, id: TrackId, with_children: bool) -> Self {
+    /// `linked` says whether the track saves its linked clips without their
+    /// contents, which the set holds once for each link: a track saved
+    /// alone saves them whole and independent.
+    fn new(doc: &Document, id: TrackId, with_children: bool, linked: bool) -> Self {
+        let saved = |clip: &Clip| match (clip.link, linked) {
+            (None, _) => clip.clone(),
+            (Some(_), true) => clip.without_contents(),
+            (Some(_), false) => Clip {
+                link: None,
+                ..clip.clone()
+            },
+        };
         let track = doc
             .tracks
             .get(&id)
@@ -228,16 +270,22 @@ impl TrackRepr {
                 })
                 .collect(),
             devices: track.devices().cloned().collect(),
-            clips: track.clips().cloned().collect(),
+            clips: track.clips().map(&saved).collect(),
             slots: track
                 .slots()
                 .map(|(scene, clip)| SlotRepr {
                     scene,
-                    clip: clip.clone(),
+                    clip: saved(clip),
                 })
                 .collect(),
             removed_stop_buttons: track.removed_stop_buttons().collect(),
-            take_lanes: track.take_lanes().cloned().collect(),
+            take_lanes: track
+                .take_lanes()
+                .map(|lane| TakeLane {
+                    clips: lane.clips.iter().map(&saved).collect(),
+                    ..lane.clone()
+                })
+                .collect(),
             audition: track.audition(),
             delay: track.delay(),
             keep_monitoring_latency: track.keep_monitoring_latency(),
@@ -246,12 +294,13 @@ impl TrackRepr {
             link: track.link(),
             colour: Some(track.colour()),
             info_text: track.info_text.clone(),
+            follow_chord_lane: track.follow_chord_lane,
             frozen: track.frozen.clone(),
             children: if with_children {
                 track
                     .children
                     .iter()
-                    .map(|id| Self::new(doc, *id, true))
+                    .map(|id| Self::new(doc, *id, true, linked))
                     .collect()
             } else {
                 Vec::new()
@@ -265,16 +314,21 @@ impl TryFrom<DocumentRepr> for Document {
 
     fn try_from(repr: DocumentRepr) -> Result<Self, ModelError> {
         let DocumentRepr {
-            settings,
+            mut settings,
             tracks,
             returns,
             main,
             scenes,
+            links,
         } = repr;
         let mut loader = Loader {
             tracks: OrdMap::new(),
             index: Index::default(),
             seen: BTreeSet::new(),
+            links: links
+                .into_iter()
+                .map(|link| (link.id, link.contents))
+                .collect(),
         };
         if main.kind != TrackKind::Main {
             return Err(ModelError::MainTrack);
@@ -285,6 +339,16 @@ impl TryFrom<DocumentRepr> for Document {
             settings.arrangement_loop.length,
         )?;
         check_locators(&settings.locators)?;
+        crate::section::check_sections(&settings.sections)?;
+        for section in &settings.sections {
+            loader.claim(section.id.0)?;
+        }
+        crate::chord_lane::check_all(&settings.chord_lane)?;
+        // The engine looks a note's region up by its order.
+        settings.chord_lane.sort_by_key(|region| region.start);
+        for region in &settings.chord_lane {
+            loader.claim(region.id.0)?;
+        }
         crate::remote::check_all(&settings.remote)?;
         if let Some(tuning) = &settings.tuning {
             tuning.check()?;
@@ -318,7 +382,7 @@ impl TryFrom<DocumentRepr> for Document {
             for scene in scenes {
                 loader.claim(scene.id.0)?;
                 if let Some(colour) = scene.colour {
-                    crate::colour::check_swatch("scene colour", colour)?;
+                    colour.check("scene colour")?;
                 }
                 scene.follow.check()?;
             }
@@ -402,6 +466,26 @@ impl TryFrom<DocumentRepr> for Document {
                 document.check_clip_envelopes(id, clip)?;
             }
         }
+        // Spec: linked-clips R2. A link the set saved with one clip left is
+        // no link.
+        let mut sizes: BTreeMap<LinkId, usize> = BTreeMap::new();
+        for link in document
+            .tracks
+            .values()
+            .flat_map(|track| track.all_clips())
+            .filter_map(|clip| clip.link)
+        {
+            *sizes.entry(link).or_default() += 1;
+        }
+        for (link, size) in sizes {
+            if size < 2 {
+                for id in document.link_members(link) {
+                    if let Some(clip) = document.clip_in_place(id) {
+                        clip.link = None;
+                    }
+                }
+            }
+        }
         // Spec: modulation R19. A mapping naming a parameter the set doesn't
         // have doesn't load.
         // Spec: remote-mapping R6. A remote mapping whose control the set
@@ -418,6 +502,8 @@ struct Loader {
     tracks: OrdMap<TrackId, Shared<Track>>,
     index: Index,
     seen: BTreeSet<Id>,
+    /// The contents each saved link shares (the linked clips spec, R13).
+    links: BTreeMap<LinkId, LinkContents>,
 }
 
 impl Loader {
@@ -471,11 +557,12 @@ impl Loader {
         track.tuning_layout = repr.tuning_layout;
         track.link = repr.link;
         if let Some(colour) = repr.colour {
-            crate::colour::check_swatch("track colour", colour)?;
+            colour.check("track colour")?;
             track.colour = colour;
         }
         track.frozen = repr.frozen;
         track.info_text = repr.info_text;
+        track.follow_chord_lane = repr.follow_chord_lane;
         if let Some(routing) = repr.routing {
             track.routing = routing;
         }
@@ -519,6 +606,7 @@ impl Loader {
         check_chain(&track)?;
         for mut clip in repr.clips {
             self.claim(clip.id.0)?;
+            self.fill_link(&mut clip)?;
             if let ClipData::Midi(midi) = &mut clip.data {
                 midi.drop_broken_expressions();
             }
@@ -534,6 +622,7 @@ impl Loader {
         }
         for mut slot in repr.slots {
             self.claim(slot.clip.id.0)?;
+            self.fill_link(&mut slot.clip)?;
             if let ClipData::Midi(midi) = &mut slot.clip.data {
                 midi.drop_broken_expressions();
             }
@@ -560,6 +649,7 @@ impl Loader {
             self.claim(lane.id.0)?;
             for clip in lane.clips.iter_mut() {
                 self.claim(clip.id.0)?;
+                self.fill_link(clip)?;
                 if let ClipData::Midi(midi) = &mut clip.data {
                     midi.drop_broken_expressions();
                 }
@@ -595,6 +685,24 @@ impl Loader {
         }
         self.tracks.insert(id, Shared::new(track));
         Ok(id)
+    }
+
+    /// Gives a linked clip the contents its link saves (R13): the link must
+    /// be one the set holds, of the clip's own kind.
+    fn fill_link(&self, clip: &mut Clip) -> Result<(), ModelError> {
+        let Some(link) = clip.link else {
+            return Ok(());
+        };
+        let contents = self.links.get(&link).ok_or(ModelError::InvalidInput(
+            "a clip names a link the set doesn't hold",
+        ))?;
+        if contents.data.is_audio() != clip.data.is_audio() {
+            return Err(ModelError::InvalidInput(
+                "a link holds clips of one kind, audio or MIDI",
+            ));
+        }
+        *clip = clip.with_contents(contents);
+        Ok(())
     }
 
     fn claim(&mut self, id: Id) -> Result<(), ModelError> {
@@ -892,7 +1000,7 @@ mod tests {
                 },
             ),
         ]);
-        wet_chain.colour = Some(12);
+        wet_chain.colour = Some(12.into());
         wet_chain.info = "the wet one".to_owned();
         wet_chain.mixer.volume = 0.5;
         wet_chain.mixer.pan = -0.25;

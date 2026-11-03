@@ -18,7 +18,7 @@ use serde_json::{Map, Value};
 use crate::error::LoadError;
 
 /// The schema version this build writes, and the newest it can read.
-pub const SCHEMA_VERSION: u32 = 13;
+pub const SCHEMA_VERSION: u32 = 14;
 
 /// The oldest schema version this build can read, through [`MIGRATIONS`].
 pub const OLDEST_SCHEMA_VERSION: u32 = SCHEMA_VERSION - MIGRATIONS.len() as u32;
@@ -132,6 +132,13 @@ pub const MIGRATIONS: &[Migration] = &[
             simpler_regions(&mut value);
             Ok(value)
         },
+    },
+    Migration {
+        from: 13,
+        summary: "an audio clip may be a video clip, naming a QuickTime movie as its media (the \
+                  video spec, R5); a set saved before them holds none, so the saved JSON \
+                  itself needs nothing",
+        apply: Ok,
     },
 ];
 

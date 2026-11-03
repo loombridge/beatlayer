@@ -64,6 +64,7 @@ pub mod automation;
 pub mod base64;
 pub mod bounce;
 mod changes;
+mod chord_lane;
 mod clip;
 mod clip_param;
 mod colour;
@@ -86,8 +87,10 @@ mod ids;
 mod lane_views;
 mod launch;
 mod layers;
+mod link;
 mod linked;
 mod locator;
+pub mod matrix;
 mod metronome;
 pub mod modulation;
 pub mod modulator;
@@ -95,6 +98,7 @@ mod mpe_settings;
 mod mpe_view;
 pub mod note_expression;
 pub mod note_ops;
+mod pad_layout;
 pub mod param;
 pub mod rack;
 mod record_quantization;
@@ -105,6 +109,7 @@ mod routing;
 mod sample_edits;
 mod scale;
 mod scene;
+mod section;
 mod shared;
 mod spelling;
 mod track;
@@ -133,28 +138,33 @@ pub use bounce::{BouncedAutomation, BouncedTrack};
 pub use changes::{Change, ChangeSet};
 pub use clip::{
     AudioData, Clip, ClipData, ClipEnvelope, ClipFolds, Crossfade, EDGE_FADE_SECONDS, EnvelopeKind,
-    GroupKind, MAX_LOOP_REPEATS, MIN_MIDI_BRACE, MidiData, NewTakeLane, Note, NoteGroup, TakeClip,
-    TakeClipData, TakeLane, consolidated_midi, crossfades, fade_power,
+    GroupKind, LinkContents, MAX_LOOP_REPEATS, MIN_MIDI_BRACE, MidiData, NewTakeLane, Note,
+    NoteGroup, TakeClip, TakeClipData, TakeLane, consolidated_midi, crossfades, fade_power,
 };
 pub use clip_param::ClipParam;
 pub use column_widths::{ColumnWidths, MAX_COLUMN_WIDTH, MIN_COLUMN_WIDTH, clamp_column_width};
 pub use command::{Command, tempo_shape, write_tempo_shape};
 pub use device::{
-    Device, DeviceKind, DeviceRole, DeviceWarp, DeviceWindows, MAX_MEDIA_SLOTS, MidiSidechain,
-    PluginFormat, PluginState, Sidechain, WindowFrame,
+    Device, DeviceKind, DeviceRole, DeviceWarp, DeviceWindows, MAX_MEDIA_SLOTS, MAX_WAVETABLES,
+    MidiSidechain, PluginFormat, PluginState, Sidechain, WavetableChoice, WindowFrame,
 };
-pub use device_display::{DeviceDisplay, DisplayMarker, DisplayReading, DisplaySeries};
+pub use device_display::{
+    DeviceDisplay, DisplayHandle, DisplayMarker, DisplayReading, DisplaySeries, DisplaySpectrogram,
+    SpectrogramGrid,
+};
 pub use device_layout::{DeviceLayout, DevicePages, PageChoice};
 pub use document::{ArrangementLoop, Document, MAX_CUE_VOLUME, Settings};
 pub use editor::{EditError, Editor, HistoryStep, Maker};
 pub use error::ModelError;
 pub use fades::{EdgeRoom, FadeLimits};
 pub use lane_views::{LaneChoice, LaneViews, TrackLanes};
+pub use matrix::{FreeRoutes, MatrixError, MatrixLayout, ModRoute};
 pub use mpe_settings::{MAX_NOTE_CHANNELS, MpeMode, MpeSettings, MpeZone, PluginMpe};
 pub use mpe_view::{DEFAULT_LANE_HEIGHT, MpeLane, MpeView};
 pub use note_expression::Expression;
 pub mod freeze;
-pub use colour::{DEFAULT_TRACK_PALETTE, SWATCHES, TRACK_COLOURS, id_swatch, swatch_rgb};
+pub use chord_lane::{ChordRegion, MAX_TRANSPOSE};
+pub use colour::{Colour, DEFAULT_TRACK_PALETTE, SWATCHES, TRACK_COLOURS, id_swatch, swatch_rgb};
 pub use external::{
     CvCalibration, CvPort, CvStep, External, ExternalPort, HardwareLatency, MAX_CV_PORTS,
     MAX_HARDWARE_LATENCY_MS, MAX_HARDWARE_LATENCY_SAMPLES,
@@ -169,8 +179,8 @@ pub use groove::{
     GroovePlay, GroovePool, MovedTransients, clip_seed, noise,
 };
 pub use ids::{
-    ChainId, ClipId, ContentHash, DeviceId, GrooveId, LinkGroupId, LocatorId, ParamId,
-    ParseContentHashError, SceneId, TakeLaneId, TrackId,
+    ChainId, ChordRegionId, ClipId, ContentHash, DeviceId, GrooveId, LinkGroupId, LinkId,
+    LocatorId, ParamId, ParseContentHashError, SceneId, SectionId, TakeLaneId, TrackId,
 };
 /// The persistent collections the document's public types hold.
 pub use imbl::{OrdMap, Vector};
@@ -182,8 +192,10 @@ pub use layers::{
 };
 pub use locator::{Locator, SongStart};
 pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound};
+pub use pad_layout::{PadDirection, PadLayout, PadSpacing};
 pub use param::{
-    BANK_SIZE, Bank, DeviceDescription, ParamDescriptor, ParamKind, ParamUnit, numbered,
+    BANK_SIZE, Bank, DeviceDescription, ParamDescriptor, ParamKind, ParamLabel, ParamUnit, Relabel,
+    numbered,
 };
 pub use rack::{
     CHAIN_COLOURS, CHAIN_SELECTOR, Chain, ChainMixer, ChainSend, ChainZones, DEFAULT_PLAY,
@@ -202,6 +214,7 @@ pub use repr::{SavedSong, saved_schema};
 pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange, SampleRegion};
 pub use scale::{CHROMATIC, Scale, ScaleName};
 pub use scene::{DEFAULT_SCENE_COUNT, SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
+pub use section::{SongSection, next_section_colour, next_section_name};
 pub use spelling::NoteSpelling;
 pub use track::{
     Channel, CrossfadeAssign, DeviceOutput, Input, MAX_TRACK_DELAY_MS, MAX_TRACK_DELAY_SAMPLES,

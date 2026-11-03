@@ -1,6 +1,6 @@
 # The Control Bar's transport: Play, Stop, and the position, loop, tempo, and time-signature fields
 
-- **Status:** partial (R1 to R23 each have a passing test; the Link and EXT parts of R20 and R21 come with their own packages; R24 to R26 are WP-9.13's)
+- **Status:** partial (R1 to R23 each have a passing test; the Link and EXT parts of R20 and R21 come with their own packages; R24 to R26 each have a passing test)
 - **Work packages:** WP-1.18; WP-7.31 (Tap Tempo and Start Transport With Tap Tempo, R18 to R23); WP-9.13 (the Tempo Follower toggle, R24 to R26)
 - **Parity-matrix row:** Views and workflow: Control Bar, Status Bar; Interface placement and key bindings
 - **Checked against:** Live 12.4.3, through the UI parity reference recorded on 10 October 2026, and the Live 12 reference manual as that reference and [transport.md](transport.md) record it; for R18 to R23, the Live 12 reference manual (online edition), read 23 October 2026 (chapter 2, section 2.3.9; chapter 9, section 9.1.2; chapter 36, section 36.17; chapter 42, section 42.20).
@@ -87,4 +87,4 @@ This spec covers the section's controls, the Playback menu's transport items, an
 | R21 | `crates/shell/tests/tap_tempo.rs`, `a_run_is_one_undo_step_and_an_edit_between_taps_starts_another`, `tap_tempo_is_refused_while_the_song_has_tempo_changes`; `crates/model/src/editor.rs`, `a_command_applied_into_the_newest_step_ends_that_step_with_its_result`; `crates/ui/tests/transport.rs`, `tap_tempo_is_disabled_with_a_reason_while_the_song_has_tempo_changes` | unit (undo), UI script (disabled with tempo changes) |
 | R22 | `crates/agent/tests/readback_runtime.rs`, `tap_tempo_and_its_setting_read_back`; `cargo xtask commands` | agent API, `cargo xtask commands` |
 | R23 | `crates/ui/tests/transport.rs`, `tap_tempo_taps_on_the_press_and_reaches_assistive_technology`, `tap_tempo_is_disabled_with_a_reason_while_the_song_has_tempo_changes` | UI script |
-| R24 to R26 | to be written in WP-9.13: `crates/ui/tests/tempo_follower.rs` | UI script |
+| R24 to R26 | `crates/ui/tests/tempo_follower.rs`: `the_toggle_is_hidden_at_first_and_sits_between_link_and_tap`, `the_toggle_is_greyed_out_with_its_reason_while_the_input_cant_be_reached`, `a_click_and_return_switch_follow_and_tap_tempo_is_disabled_while_it_is_on` | UI script |

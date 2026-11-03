@@ -33,9 +33,11 @@ pub mod id {
     pub const SET_AFTERTOUCH_MODE: u8 = 0x1E;
     /// Set Pad Velocity Curve Entry.
     pub const SET_VELOCITY_CURVE: u8 = 0x20;
+    /// Select Pad Settings.
+    pub const SELECT_PAD_SETTINGS: u8 = 0x28;
 
     /// Every command the surface may send.
-    pub const ALLOWED: [u8; 11] = [
+    pub const ALLOWED: [u8; 12] = [
         SET_PALETTE_ENTRY,
         REAPPLY_PALETTE,
         SET_LED_BRIGHTNESS,
@@ -47,6 +49,7 @@ pub mod id {
         SET_PAD_PARAMETERS,
         SET_AFTERTOUCH_MODE,
         SET_VELOCITY_CURVE,
+        SELECT_PAD_SETTINGS,
     ];
 
     /// Flash LED White Balance, Set Temporary 400g Pad Values and Set LED
@@ -158,6 +161,14 @@ pub fn touch_strip_leds(levels: &[u8; 31]) -> Vec<u8> {
         args[n / 2] |= (level & 7) << (3 * (n % 2));
     }
     command(id::SET_TOUCH_STRIP_LEDS, &args)
+}
+
+/// Select Pad Settings `settings` (0 regular, 1 reduced sensitivity) for the
+/// pad in row `row` from the bottom and column `column` from the left, both
+/// from 0: the interface counts scenes from the top and tracks from 1.
+#[must_use]
+pub fn select_pad_settings(row: u8, column: u8, settings: u8) -> Vec<u8> {
+    command(id::SELECT_PAD_SETTINGS, &[8 - row, column + 1, settings])
 }
 
 /// Set Pad Parameters with the aftertouch thresholds `low` and `high` (R30).

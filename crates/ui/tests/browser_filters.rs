@@ -323,27 +323,31 @@ fn the_filter_view_menu_lists_the_groups_and_its_items() {
     let nodes = look(&mut h);
     h.click(centre_of(&nodes, Role::Button, "Filter View Menu"));
     let nodes = look(&mut h);
-    let item = |label: &str| {
-        nodes
-            .iter()
-            .find(|n| {
-                n.role == Role::Button && n.label.trim_start_matches('\u{2714}').trim() == label
-            })
-            .unwrap_or_else(|| panic!("no menu item {label:?}"))
-    };
-    // A group for each the chosen label can show, ticked while it shows.
-    for group in ["Content", "Format", "Creator", "Devices", "Mine", "Feel"] {
-        item(group);
-    }
-    assert!(item("Content").label.starts_with('\u{2714}'));
-    item("Show All Filter Groups");
-    item("Reset Filter Groups to Default");
-    assert!(
-        item("Include Auto Tags").disabled,
-        "waits for automatic tagging"
+    // C-FILTER, in Live's order: the three panels' switches, the groups' bulk
+    // choices, then a group for each the chosen label can show, ticked while
+    // it shows (all do here). Auto tags are on in a new install (browser-tags R55) and
+    // Reset is dim while the groups are the default.
+    use common::MenuRow::{Dim, Item, Sep, Tick};
+    common::assert_menu(
+        &nodes,
+        &[
+            Item("Open Tag Editor"),
+            Tick("Open Quick Tags"),
+            Tick("Enable Auto Tags"),
+            Sep,
+            Item("Show All Filter Groups"),
+            Item("Hide All Filter Groups"),
+            Dim("Reset Filter Groups to Default"),
+            Sep,
+            Tick("Content"),
+            Tick("Format"),
+            Tick("Creator"),
+            Tick("Devices"),
+            Tick("Function"),
+            Tick("Mine"),
+            Tick("Feel"),
+        ],
     );
-    item("Tag Editor");
-    assert!(item("Show Quick Tags").label.starts_with('\u{2714}'));
     // Choosing a group hides it under the chosen label.
     let before = h.shell.browser_view().filter_view().groups.len();
     h.click(centre_of(&nodes, Role::Button, "\u{2714} Mine"));
@@ -351,6 +355,35 @@ fn the_filter_view_menu_lists_the_groups_and_its_items() {
     let after = h.shell.browser_view().filter_view();
     assert_eq!(after.groups.len(), before - 1);
     assert!(after.menu.iter().any(|g| g.name == "Mine" && !g.shown));
+}
+
+// Spec: browser-tags R55, R57. Enable Auto Tags switches automatic tags on
+// and off, and shows its state ticked; it keeps its place in the menu.
+#[test]
+fn include_auto_tags_in_the_menu_switches_automatic_tags() {
+    let scratch = Scratch::new("include-auto");
+    let mut h = harness(&scratch);
+    assert!(h.shell.browser_view().filter_view().include_auto_tags);
+    let open = |h: &mut Harness| {
+        let nodes = look(h);
+        h.click(centre_of(&nodes, Role::Button, "Filter View Menu"));
+        look(h)
+    };
+    let nodes = open(&mut h);
+    h.click(centre_of(&nodes, Role::Button, "\u{2714} Enable Auto Tags"));
+    assert!(invoked(&mut h, ids::SET_INCLUDE_AUTO_TAGS));
+    assert!(!h.shell.browser_view().filter_view().include_auto_tags);
+    // Off, the item is there without its tick, and choosing it turns it on.
+    let nodes = open(&mut h);
+    assert!(
+        nodes
+            .iter()
+            .any(|n| n.role == Role::Button && n.label == "Enable Auto Tags"),
+        "unticked while off"
+    );
+    h.click(centre_of(&nodes, Role::Button, "Enable Auto Tags"));
+    assert!(invoked(&mut h, ids::SET_INCLUDE_AUTO_TAGS));
+    assert!(h.shell.browser_view().filter_view().include_auto_tags);
 }
 
 // Spec: browser-tags R21.
@@ -442,7 +475,7 @@ fn the_results_bar_clears_and_keeps_a_search() {
     h.click(centre_of(&nodes, Role::Button, "Mine|A"));
     let nodes = look(&mut h);
     let bar = Harness::node(&nodes, "Results");
-    assert_eq!(bar.value, "1 filter");
+    assert_eq!(bar.value, "1 Filter");
     // The bar sits between the Filter View and the header row.
     let (filters, header) = (
         Harness::node(&nodes, "Filter View").bounds.unwrap(),
@@ -476,6 +509,33 @@ fn the_results_bar_clears_and_keeps_a_search() {
     assert_eq!(h.shell.browser_view().search_text(), "");
     assert!(h.shell.browser_view().filter_tags().is_empty());
     let _ = (search_id(), add_label_id(), clear_filters_id());
+}
+
+// Spec: browser-tags R22.
+#[test]
+fn the_results_bar_counts_two_tags_and_goes_after_clear() {
+    let scratch = Scratch::new("results-count");
+    let mut h = harness(&scratch);
+    let nodes = look(&mut h);
+    h.click(centre_of(&nodes, Role::Button, "Mine|A"));
+    let nodes = look(&mut h);
+    click_with(&mut h, centre_of(&nodes, Role::Button, "Mine|B"), command());
+    let nodes = look(&mut h);
+    assert_eq!(Harness::node(&nodes, "Results").value, "2 Filters");
+    // Clear is a text button and Add Label sits right of it, both inside the bar.
+    let bar = Harness::node(&nodes, "Results").bounds.unwrap();
+    let clear = Harness::node(&nodes, "Clear").bounds.unwrap();
+    let add = Harness::node(&nodes, "Add Label").bounds.unwrap();
+    assert!(clear.x1 <= add.x0 && add.x1 <= bar.x1);
+    assert!(bar.y0 <= clear.y0 && clear.y1 <= bar.y1);
+    assert!(
+        clear.x1 - clear.x0 > clear.y1 - clear.y0,
+        "Clear is wider than tall"
+    );
+    h.click(centre_of(&nodes, Role::Button, "Clear"));
+    let nodes = look(&mut h);
+    assert!(!nodes.iter().any(|n| n.label == "Results"));
+    assert!(h.shell.browser_view().filter_tags().is_empty());
 }
 
 // Spec: browser-tags R22.
@@ -667,28 +727,28 @@ fn the_content_options_menu_shows_columns_and_the_header_sorts_and_moves_them() 
     let nodes = look(&mut h);
     h.click(centre_of(&nodes, Role::Button, "Content Options"));
     let nodes = look(&mut h);
-    for item in [
-        "Date Modified",
-        "Size",
-        "Kind",
-        "Length",
-        "Sample Rate",
-        "Channels",
-        "Show File Extensions",
-    ] {
-        assert!(
-            nodes
-                .iter()
-                .any(|n| n.label.trim_start_matches('\u{2714}').trim() == item
-                    && n.role == Role::Button),
-            "the menu has {item}"
-        );
-    }
+    // C-CONTENT, in Live's order: Rank and Place have no column here, and
+    // Hide All Extra Columns is dim while none shows.
+    use common::MenuRow::{Dim, Item, Sep, Tick};
+    common::assert_menu(
+        &nodes,
+        &[
+            Item("Date Modified"),
+            Item("Size"),
+            Item("Type"),
+            Dim("Rank"),
+            Dim("Place"),
+            Sep,
+            Dim("Hide All Extra Columns"),
+            Sep,
+            Tick("Show File Extensions"),
+        ],
+    );
     h.click(centre_of(&nodes, Role::Button, "Size"));
     let nodes = look(&mut h);
     h.click(centre_of(&nodes, Role::Button, "Content Options"));
     let nodes = look(&mut h);
-    h.click(centre_of(&nodes, Role::Button, "Kind"));
+    h.click(centre_of(&nodes, Role::Button, "Type"));
     assert_eq!(
         h.shell.browser_view().columns().shown,
         [ids::Column::Size, ids::Column::Kind]
@@ -696,7 +756,7 @@ fn the_content_options_menu_shows_columns_and_the_header_sorts_and_moves_them() 
     // The header row names the columns; the rows show their values.
     let nodes = look(&mut h);
     let size = centre_of(&nodes, Role::ColumnHeader, "Size");
-    let kind = centre_of(&nodes, Role::ColumnHeader, "Kind");
+    let kind = centre_of(&nodes, Role::ColumnHeader, "Type");
     assert!(size.x < kind.x);
     // A click on a column's name sorts by it, again reverses.
     h.click(size);
@@ -710,7 +770,7 @@ fn the_content_options_menu_shows_columns_and_the_header_sorts_and_moves_them() 
     // Dragging a column's name moves the column.
     let nodes = look(&mut h);
     let size = centre_of(&nodes, Role::ColumnHeader, "Size");
-    let kind = centre_of(&nodes, Role::ColumnHeader, "Kind");
+    let kind = centre_of(&nodes, Role::ColumnHeader, "Type");
     drag(&mut h, size, kind + vec2(20.0, 0.0));
     assert_eq!(
         h.shell.browser_view().columns().shown,
@@ -718,7 +778,7 @@ fn the_content_options_menu_shows_columns_and_the_header_sorts_and_moves_them() 
     );
     // Right-clicking a column's name opens the same menu.
     let nodes = look(&mut h);
-    right_click(&mut h, centre_of(&nodes, Role::ColumnHeader, "Kind"));
+    right_click(&mut h, centre_of(&nodes, Role::ColumnHeader, "Type"));
     let nodes = look(&mut h);
     assert!(
         nodes
@@ -958,4 +1018,27 @@ fn deleting_a_tag_a_saved_label_uses_asks_first_and_names_the_label() {
             .contains(&"Mine|A".to_owned())
     );
     assert!(state(&mut h).saved_labels[0].tags.is_empty());
+}
+
+// Spec: browser-tags R13 (C-QTAG). A tag in the Quick Tags bar opens a menu
+// of one item, which shows the tag in the Tag Editor.
+#[test]
+fn a_quick_tags_menu_shows_the_tag_in_the_editor() {
+    let scratch = Scratch::new("quick-tag-menu");
+    let mut h = harness(&scratch);
+    let kick = scratch.0.join("User Library").join("Kick.wav");
+    h.shell
+        .run(ids::SELECT, json!({ "paths": [kick.to_string_lossy()] }))
+        .unwrap();
+    h.shell
+        .run(ids::SHOW_QUICK_TAGS, json!({ "show": true }))
+        .unwrap();
+    let nodes = look(&mut h);
+    let tag = centre_of(&nodes, Role::ListItem, "Mine|A");
+    right_click(&mut h, tag);
+    let nodes = look(&mut h);
+    use common::MenuRow::Item;
+    common::assert_menu(&nodes, &[Item("Show \"A\" tag in Editor")]);
+    h.click(centre_of(&nodes, Role::Button, "Show \"A\" tag in Editor"));
+    assert!(invoked(&mut h, ids::SHOW_TAG_EDITOR));
 }

@@ -523,6 +523,111 @@ fn the_spectrums_cell_draws_in_docked_and_floating_windows() {
     assert!(rects > 0, "spectrum bars painted in floating window");
 }
 
+/// The vertices of the meshes painted inside `cell` in a frame.
+fn mesh_vertices(output: &egui::FullOutput, cell: Rect) -> Vec<usize> {
+    fn count(shape: &egui::Shape, cell: Rect, found: &mut Vec<usize>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| count(s, cell, found)),
+            egui::Shape::Mesh(mesh)
+                if cell.expand(1.0).contains_rect(shape.visual_bounding_rect()) =>
+            {
+                found.push(mesh.vertices.len());
+            }
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    for clipped in &output.shapes {
+        count(&clipped.shape, cell, &mut found);
+    }
+    found
+}
+
+// Spec: device-framework R36, R46
+#[test]
+fn a_spectrograms_cell_draws_its_grid_as_one_image_whatever_the_size_of_the_cell() {
+    let grid = testing::SPECTROGRAM_GRID;
+    let mut h = display_harness();
+    h.shell.set_device_types(testing::device_types());
+    let device = add(&mut h, &testing::spectrogram_type());
+    // Quiet everywhere, and a tone at -6 dB through the newest ten columns.
+    let mut values = vec![grid.levels[0]; grid.columns * grid.rows];
+    let lit = 10 * 3;
+    for column in grid.columns - 10..grid.columns {
+        values[column * grid.rows + 20..column * grid.rows + 23].fill(-6.0);
+    }
+    h.shell.set_device_display_data(device, &values);
+
+    let output = h.frame(vec![]);
+    let nodes = Harness::nodes(&output);
+    let node = nodes
+        .iter()
+        .find(|n| n.label == "Spectrogram" && n.role == Role::Image)
+        .expect("the Spectrogram cell");
+    assert!(
+        node.value.contains("Spectrogram peak"),
+        "the cell says its loudest row: {}",
+        node.value
+    );
+    let frame = frame_of(&mut h, device);
+    let docked = cell_in(&h, device, frame);
+    assert_eq!(
+        mesh_vertices(&output, docked),
+        [4 * lit],
+        "one image, a quad for each cell above the floor"
+    );
+
+    // Floating, and larger: the same grid, drawn bigger.
+    h.shell
+        .run(
+            "device.set_floating",
+            json!({ "device": device, "floating": true }),
+        )
+        .unwrap();
+    let (min_width, min_height) = {
+        let state = h.shell.device_view_state();
+        bl_shell::device_commands::window_min_size(&state.devices[0])
+    };
+    h.window = Window::Device(device);
+    h.size = vec2(min_width + 200.0, min_height + 150.0);
+    let grown = h.settle();
+    let grown_cell = cell_in(&h, device, Rect::from_min_size(Pos2::ZERO, h.size));
+    assert!(grown_cell.width() > docked.width());
+    assert_eq!(mesh_vertices(&grown, grown_cell), [4 * lit]);
+}
+
+// Spec: spectral-time R16
+#[test]
+fn spectral_times_cell_draws_its_spectrogram_as_one_image() {
+    use bl_devices::spectral_time::{GRID, SPECTRAL_TIME};
+    let mut h = display_harness();
+    let device = add_native(&mut h, SPECTRAL_TIME);
+    let mut values = vec![GRID.levels[0]; GRID.columns * GRID.rows];
+    for column in GRID.columns - 10..GRID.columns {
+        values[column * GRID.rows + 20..column * GRID.rows + 23].fill(-6.0);
+    }
+    h.shell.set_device_display_data(device, &values);
+
+    let output = h.frame(vec![]);
+    let nodes = Harness::nodes(&output);
+    let node = nodes
+        .iter()
+        .find(|n| n.label == "Spectrogram" && n.role == Role::Image)
+        .expect("the Spectrogram cell");
+    assert!(
+        node.value.contains("Spectrogram peak"),
+        "the cell says its loudest row: {}",
+        node.value
+    );
+    let frame = frame_of(&mut h, device);
+    let cell = cell_in(&h, device, frame);
+    assert_eq!(
+        mesh_vertices(&output, cell),
+        [4 * 30],
+        "one image, a quad for each cell above the floor"
+    );
+}
+
 // Spec: tuner R7, device-framework R36
 #[test]
 fn the_tuners_cell_draws_in_docked_and_floating_windows() {
@@ -622,17 +727,23 @@ fn a_parameters_menu_has_the_automation_items_and_a_click_shows_its_envelope() {
         modifiers: Modifiers::NONE,
     }]);
     let nodes = Harness::nodes(&h.settle());
-    for label in [
-        "Delete Automation",
-        "Re-Enable Automation",
-        "Show Automation",
-        "Show Automation In New Lane",
-    ] {
-        assert!(nodes.iter().any(|n| n.label == label), "no {label:?}");
-    }
-    assert!(
-        Harness::node(&nodes, "Delete Automation").disabled,
-        "the parameter has no envelope"
+    // C-PARAM, in Live's order: the parameter has no envelope, so no Delete
+    // Automation, and it isn't overridden, so no Re-Enable Automation.
+    use common::MenuRow::{Dim, Item, Sep};
+    common::assert_menu(
+        &nodes,
+        &[
+            Item("Show Automation"),
+            Item("Show Automation In New Lane"),
+            Sep,
+            Dim("Show Modulation Source 1: Clip Envelope"),
+            Sep,
+            Item("Edit MIDI Map"),
+            Item("Edit Key Map"),
+            Sep,
+            Dim("Copy Max for Live Path"),
+            Dim("Copy Parameter Name"),
+        ],
     );
     let item = Harness::node(&nodes, "Show Automation In New Lane")
         .bounds
@@ -667,4 +778,196 @@ fn a_parameters_menu_has_the_automation_items_and_a_click_shows_its_envelope() {
     h.click(knob);
     h.settle();
     assert_eq!(h.shell.arrangement().automation_lane(track), Some(target));
+}
+
+// The mouse wheel on controls (WP-6.49; the view options spec, R10 to R13).
+
+/// One notch of a mouse wheel, up (positive) or down.
+fn notch(h: &mut Harness, notches: f32, modifiers: Modifiers) {
+    h.frame(vec![Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Line,
+        delta: vec2(0.0, notches),
+        phase: egui::TouchPhase::Move,
+        modifiers,
+    }]);
+}
+
+/// Turns the switch on or off, puts the pointer over the Gain knob, and lets
+/// a frame pass so the knob has seen it.
+fn over_gain(h: &mut Harness, switch: bool) -> (DeviceId, Rect) {
+    h.shell
+        .run("settings.set_wheel_adjusts_values", json!({ "on": switch }))
+        .unwrap();
+    let utility = add(h, &testing::utility_type());
+    h.shell
+        .invoke(
+            "device.set_param",
+            json!({ "device": utility, "param": UTILITY_GAIN, "value": 0.5 }),
+        )
+        .unwrap();
+    let knob = control(h, utility, UTILITY_GAIN);
+    h.frame(vec![Event::PointerMoved(knob.center())]);
+    h.frame(vec![]);
+    (utility, knob)
+}
+
+fn gain_position(h: &Harness, device: DeviceId) -> f64 {
+    let gain = testing::utility_type().description.params[0].clone();
+    gain.normalize(value(h, device, UTILITY_GAIN).unwrap())
+}
+
+// Spec: view-options R11, R13.
+#[test]
+fn the_wheel_moves_a_knob_a_percent_a_notch_and_a_run_is_one_undo_step() {
+    let mut h = harness();
+    let (utility, _) = over_gain(&mut h, true);
+    let start = gain_position(&h, utility);
+    let steps = h.shell.editor().undo_history().len();
+    for _ in 0..3 {
+        notch(&mut h, 1.0, Modifiers::NONE);
+    }
+    h.frame(vec![]);
+    let moved = gain_position(&h, utility) - start;
+    assert!((moved - 0.03).abs() < 1e-6, "three notches are 3%: {moved}");
+    // Half a second on the app's clock with no turn ends the run.
+    for _ in 0..40 {
+        h.frame(vec![]);
+    }
+    assert_eq!(h.shell.editor().undo_history().len(), steps + 1);
+    assert_eq!(last_step(&h), "Change \"Gain\"");
+    // Down is down, and a new run is a new step.
+    notch(&mut h, -1.0, Modifiers::NONE);
+    for _ in 0..40 {
+        h.frame(vec![]);
+    }
+    assert!((gain_position(&h, utility) - start - 0.02).abs() < 1e-6);
+    assert_eq!(h.shell.editor().undo_history().len(), steps + 2);
+}
+
+// Spec: view-options R11.
+#[test]
+fn shift_makes_the_wheel_step_finely() {
+    let mut h = harness();
+    let (utility, _) = over_gain(&mut h, true);
+    let start = gain_position(&h, utility);
+    notch(&mut h, 1.0, Modifiers::SHIFT);
+    h.frame(vec![]);
+    let moved = gain_position(&h, utility) - start;
+    assert!((moved - 0.001).abs() < 1e-6, "a tenth of a step: {moved}");
+}
+
+// Spec: view-options R11.
+#[test]
+fn a_trackpad_moves_a_knob_a_step_for_every_twenty_points() {
+    let mut h = harness();
+    let (utility, _) = over_gain(&mut h, true);
+    let start = gain_position(&h, utility);
+    let scroll = |h: &mut Harness, points: f32| {
+        h.frame(vec![Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, points),
+            phase: egui::TouchPhase::Move,
+            modifiers: Modifiers::NONE,
+        }]);
+    };
+    // Fifteen points make no step; five more make one.
+    scroll(&mut h, 15.0);
+    h.frame(vec![]);
+    assert_eq!(gain_position(&h, utility), start);
+    scroll(&mut h, 5.0);
+    h.frame(vec![]);
+    assert!((gain_position(&h, utility) - start - 0.01).abs() < 1e-6);
+}
+
+// Spec: view-options R10.
+#[test]
+fn with_the_switch_off_the_wheel_leaves_the_knob_alone() {
+    let mut h = harness();
+    let (utility, _) = over_gain(&mut h, false);
+    let start = gain_position(&h, utility);
+    let steps = h.shell.editor().undo_history().len();
+    notch(&mut h, 1.0, Modifiers::NONE);
+    for _ in 0..40 {
+        h.frame(vec![]);
+    }
+    assert_eq!(gain_position(&h, utility), start);
+    assert_eq!(h.shell.editor().undo_history().len(), steps);
+}
+
+// Spec: view-options R13.
+#[test]
+fn a_run_ends_when_the_pointer_leaves_the_control_or_a_key_is_pressed() {
+    let mut h = harness();
+    let (_, knob) = over_gain(&mut h, true);
+    let steps = h.shell.editor().undo_history().len();
+    notch(&mut h, 1.0, Modifiers::NONE);
+    h.frame(vec![]);
+    h.frame(vec![Event::PointerMoved(knob.center() + vec2(0.0, 200.0))]);
+    h.frame(vec![]);
+    assert_eq!(
+        h.shell.editor().undo_history().len(),
+        steps + 1,
+        "leaving the knob ended the run well inside half a second"
+    );
+    h.frame(vec![Event::PointerMoved(knob.center())]);
+    h.frame(vec![]);
+    notch(&mut h, 1.0, Modifiers::NONE);
+    h.frame(vec![]);
+    h.key(egui::Key::A, Modifiers::NONE);
+    h.frame(vec![]);
+    assert_eq!(h.shell.editor().undo_history().len(), steps + 2);
+}
+
+// Spec: view-options R12.
+#[test]
+fn the_status_bar_reads_the_knob_while_the_wheel_moves_it() {
+    let mut h = harness();
+    over_gain(&mut h, true);
+    notch(&mut h, 1.0, Modifiers::NONE);
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    assert!(
+        nodes
+            .iter()
+            .any(|n| n.value.starts_with("Gain: ") || n.label.starts_with("Gain: ")),
+        "the Status Bar names the control and its value"
+    );
+}
+
+// Spec: view-options R12 (automation R5). A turn of the wheel on an
+// automated control is a hand move: the envelope is turned off with it.
+#[test]
+fn the_wheel_on_an_automated_knob_overrides_its_envelope_as_a_hand_move_does() {
+    let mut h = harness();
+    let (utility, _) = over_gain(&mut h, true);
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    for (at, level) in [(0, 0.5), (bl_core::time::Ticks::WHOLE.get(), 0.25)] {
+        h.shell
+            .run(
+                "automation.set_breakpoint",
+                json!({ "track": track,
+                        "target": { "type": "device", "device": utility, "param": UTILITY_GAIN },
+                        "at": at, "value": level }),
+            )
+            .unwrap();
+    }
+    h.settle();
+    assert!(
+        !h.shell
+            .editor()
+            .document()
+            .track(track)
+            .unwrap()
+            .automation_overridden()
+    );
+    notch(&mut h, 1.0, Modifiers::NONE);
+    h.frame(vec![]);
+    assert!(
+        h.shell
+            .editor()
+            .document()
+            .track(track)
+            .unwrap()
+            .automation_overridden(),
+        "the envelope is off"
+    );
 }

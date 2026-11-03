@@ -29,6 +29,9 @@ pub struct SavedLabel {
     pub icon: Option<String>,
     /// The tags it keeps, by their IDs.
     pub tags: Vec<i64>,
+    /// The file whose neighbours it lists, reference first (spec:
+    /// sound-similarity R15).
+    pub reference: Option<String>,
 }
 
 impl SavedLabel {
@@ -134,15 +137,21 @@ impl LabelPrefs {
     }
 }
 
-/// A name for a new saved label: its search words and its tags' own names.
+/// A name for a new saved label: its search words and its tags' own names,
+/// after "Similar to" and the reference's name for a list of neighbours.
 #[must_use]
-pub fn default_name(search: &str, tags: &[String]) -> String {
+pub fn default_name(search: &str, tags: &[String], reference: Option<&str>) -> String {
     let mut parts: Vec<&str> = search.split_whitespace().collect();
     parts.extend(tags.iter().map(String::as_str));
-    if parts.is_empty() {
+    let name = if parts.is_empty() {
         "New Label".to_owned()
     } else {
         parts.join(" ")
+    };
+    match reference.and_then(|path| std::path::Path::new(path).file_stem()) {
+        Some(stem) if parts.is_empty() => format!("Similar to {}", stem.to_string_lossy()),
+        Some(stem) => format!("Similar to {} {name}", stem.to_string_lossy()),
+        None => name,
     }
 }
 
@@ -164,6 +173,7 @@ impl BrowserView {
                     .map(|&id| self.tags.full_name(id))
                     .filter(|name| !name.is_empty())
                     .collect(),
+                reference: saved.reference.clone(),
             })
             .collect()
     }
@@ -207,7 +217,7 @@ impl BrowserView {
     /// Whether `label` is a label the sidebar lets the person rename and
     /// hide: a Library label, a saved label or a collection, that exists.
     fn check_shown_label(&self, label: &Label) -> Result<(), BrowserError> {
-        if label.is_collection() {
+        if label.is_collection() || label.is_nested_collection() {
             return self.check_label(label);
         }
         self.check_library_label(label)
@@ -216,7 +226,10 @@ impl BrowserView {
     /// Keeps what the browser shows as a saved label and chooses it, its
     /// name open for editing (spec: browser-tags R24).
     pub(super) fn add_label(&mut self) -> Result<(), BrowserError> {
-        if self.search.trim().is_empty() && self.filter.is_empty() {
+        let reference = self
+            .reference()
+            .map(|path| path.to_string_lossy().into_owned());
+        if self.search.trim().is_empty() && self.filter.is_empty() && reference.is_none() {
             return Err(BrowserError::Unavailable(
                 "there is nothing to keep: type search words or select filter tags first"
                     .to_owned(),
@@ -230,11 +243,12 @@ impl BrowserView {
             .collect();
         let saved = SavedLabel {
             id,
-            name: default_name(&self.search, &names),
+            name: default_name(&self.search, &names, reference.as_deref()),
             base: self.base_label(),
             search: self.search.trim().to_owned(),
             icon: None,
             tags,
+            reference,
         };
         self.saved.push(saved);
         self.save_label(id);
@@ -250,6 +264,7 @@ impl BrowserView {
     pub(super) fn choose_saved(&mut self, id: i64) -> Result<(), BrowserError> {
         let saved = self.saved_label(id)?.clone();
         self.label = saved.label();
+        self.similar = None;
         self.search = saved.search;
         self.filter = saved
             .tags
@@ -264,7 +279,7 @@ impl BrowserView {
     pub(super) fn rename_label(&mut self, args: RenameLabelArgs) -> Result<bool, BrowserError> {
         let RenameLabelArgs { label, name } = args;
         let label = label.unwrap_or_else(|| self.label.clone());
-        if !label.is_library() && !label.is_collection() {
+        if !label.is_library() && !label.is_collection() && !label.is_nested_collection() {
             return Err(BrowserError::InvalidArgs(format!(
                 "{} takes its folder's name and isn't renamed",
                 self.label_name(&label)
@@ -294,6 +309,12 @@ impl BrowserView {
             }
             self.save_label(id);
             return Ok(false);
+        }
+        if let Label::Collection(number) = label
+            && label.is_nested_collection()
+        {
+            // Spec: browser-tags R47. A nested collection keeps its number.
+            return self.rename_nested(number, name).map(|()| false);
         }
         if name.is_empty() || name == label.name() {
             self.label_prefs.names.remove(&label.key());
@@ -357,6 +378,12 @@ impl BrowserView {
     pub(super) fn set_label_shown(&mut self, args: SetLabelShownArgs) -> Result<(), BrowserError> {
         let SetLabelShownArgs { label, shown } = args;
         self.check_shown_label(&label)?;
+        if label.is_nested_collection() {
+            return Err(BrowserError::InvalidArgs(format!(
+                "{} is shown with the collection it is in",
+                self.label_name(&label)
+            )));
+        }
         if label == Label::All && !shown {
             return Err(BrowserError::InvalidArgs("All can't be hidden".to_owned()));
         }
@@ -449,6 +476,7 @@ mod tests {
             search: String::new(),
             icon: None,
             tags: Vec::new(),
+            reference: None,
         }
     }
 

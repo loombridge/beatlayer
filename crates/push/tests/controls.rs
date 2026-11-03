@@ -124,8 +124,9 @@ fn every_control_in_the_table_decodes_and_lights_its_led_with_the_right_message(
             "{}: {heard:?}",
             button.name
         );
-        // Add Track leads to Browse Mode (push-2-tracks R12).
-        if button.name == "add_track" {
+        // Add Track and Add Device lead to Browse Mode (push-2-tracks R12,
+        // R25).
+        if button.name == "add_track" || button.name == "add_device" {
             rig.tap("device");
         }
     }
@@ -379,6 +380,8 @@ fn the_touch_strip_has_three_configurations_and_each_use_sends_its_flags() {
     assert_eq!(rig.sim.device.strip_config, 0x0C);
     rig.tap("add_device");
     assert_eq!(rig.sim.device.strip_config, 0x03);
+    // Add Device leads to Browse Mode (push-2-tracks R25).
+    rig.tap("device");
     rig.tap("repeat");
     assert_eq!(rig.sim.device.strip_config, 0x68);
     assert_eq!(rig.snapshot().strip, bl_push::content::StripUse::PitchBend);

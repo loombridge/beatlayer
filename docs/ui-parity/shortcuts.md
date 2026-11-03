@@ -2,7 +2,7 @@
 
 <!-- Generated from shortcuts.toml by `cargo xtask ui-parity`. Don't edit this file by hand: edit shortcuts.toml and regenerate. `cargo xtask check` fails if the two differ. -->
 
-Live 12.4.3's keyboard shortcuts, the default keymap Beatlayer binds (D16). Source: Ableton Live 12 reference manual, chapters 41 and 42, read 10 October 2026, and observation of Live 12.4.3 where the Source column says so. 381 shortcuts in 24 contexts; 19 need confirming (see the notes at the end). How to read and change this table: [README](README.md).
+Live 12.4.3's keyboard shortcuts, the default keymap Beatlayer binds (D16). Source: Ableton Live 12 reference manual, chapters 41 and 42, read 10 October 2026, and observation of Live 12.4.3 where the Source column says so. 383 shortcuts in 24 contexts; 21 need confirming (see the notes at the end). How to read and change this table: [README](README.md).
 
 ## By milestone
 
@@ -12,7 +12,7 @@ Live 12.4.3's keyboard shortcuts, the default keymap Beatlayer binds (D16). Sour
 | M2 | 85 |
 | M3 | 43 |
 | M4 | 21 |
-| M5 | 10 |
+| M5 | 12 |
 | M6 | 80 |
 | M7 | 2 |
 | M9 | 8 |
@@ -40,7 +40,7 @@ A shortcut applies in its context. The same keys may mean different things in di
 | [`sample-editor`](#sample-editor) | The Clip View shows an audio clip's Sample Editor. | 16 |
 | [`note-editor`](#note-editor) | The Clip View shows a MIDI clip's MIDI Note Editor. | 41 |
 | [`note-selection`](#note-selection) | Notes are selected in the MIDI Note Editor. | 16 |
-| [`device-view`](#device-view) | The Device View has focus. | 12 |
+| [`device-view`](#device-view) | The Device View has focus. | 14 |
 | [`rack-chains`](#rack-chains) | A rack's chain list has focus. | 1 |
 | [`sample-swap`](#sample-swap) | A Drum Rack, a pad, Simpler or Drum Sampler is selected. | 5 |
 | [`browser`](#browser) | The browser's content pane has focus. | 15 |
@@ -133,8 +133,8 @@ Anywhere in a main window, unless a narrower context binds the same keys.
 | S-TRACK-011 | Show or hide the return tracks | `Cmd+Option+R` | `Ctrl+Alt+R` | key | press | M2 | manual 42.19; observed in 12.4.6 (macOS), 11 October 2026: View menu, Mixer Controls |
 | S-TRANS-001 | Play from the start marker, or stop | `Space` | `Space` | key | press | M1 | manual 42.20; observed in 12.4.3 (macOS), 10 October 2026: Playback menu |
 | S-TRANS-002 | Continue playing from where playback stopped | `Shift+Space` | `Shift+Space` | key | press | M1 | manual 42.20; observed in 12.4.3 (macOS), 10 October 2026: Playback menu |
-| S-TRANS-003 | Play and stop at the end of the selection | `Option+Space` | `Ctrl+Space` | key | press | M6 | manual 42.20 |
-| S-TRANS-004 | Play the Arrangement selection | `Space` | `Space` | key | press | M6 | manual 42.20 |
+| S-TRANS-003 | Play and stop at the end of the selection | `Option+Space` | `Ctrl+Space` | key | press | M6 | manual 42.20; observed in 12.4.16 (macOS), 1 November 2026 |
+| S-TRANS-004 | Play the Arrangement selection | `Space` | `Space` | key | press | M6 | manual 42.20; observed in 12.4.16 (macOS), 1 November 2026 |
 | S-TRANS-005 | Move the insert marker to the start | `Home` or `Fn+Left` | `Home` | key | press | M1 | manual 42.20 |
 | S-TRANS-006 | Record | `F9` | `F9` | key | press | M2 | manual 42.20; observed in 12.4.3 (macOS), 10 October 2026: Playback menu |
 | S-TRANS-007 | Arm recording in the Arrangement | `Shift+F9` | `Shift+F9` | key | press | M2 | manual 42.20; observed in 12.4.3 (macOS), 10 October 2026: Playback menu |
@@ -350,14 +350,14 @@ A loop brace or a clip start or end marker is selected, or a multi-clip loop bar
 |---|---|---|---|---|---|---|---|
 | S-LOOP-005 | Move the start marker to the clicked position | Cmd+click | Ctrl+click | mouse | press | M2 | manual 42.8 |
 | S-LOOP-006 | Move the end marker to the clicked position | Cmd+Shift+click | Ctrl+Shift+click | mouse | press | M2 | manual 42.8 |
-| S-LOOP-007 | Nudge the loop brace left or right by the grid | `Left` or `Right` | `Left` or `Right` | key | press | M6 | manual 42.8 |
-| S-LOOP-008 | Move the loop by its own length | `Down` or `Up` | `Down` or `Up` | key | press | M6 | manual 42.8 |
-| S-LOOP-009 | Halve or double the loop length | `Cmd+Down` or `Cmd+Up` | `Ctrl+Down` or `Ctrl+Up` | key | press | M6 | manual 42.8 |
-| S-LOOP-010 | Shorten or lengthen the loop by the grid | `Cmd+Left` or `Cmd+Right` | `Ctrl+Left` or `Ctrl+Right` | key | press | M6 | manual 42.8 |
+| S-LOOP-007 | Nudge the loop brace left or right by the grid | `Left` or `Right` | `Left` or `Right` | key | press | M6 | manual 42.8; observed in 12.4.16 (macOS), 1 November 2026 |
+| S-LOOP-008 | Move the loop by its own length | `Down` or `Up` | `Down` or `Up` | key | press | M6 | manual 42.8; observed in 12.4.16 (macOS), 1 November 2026 |
+| S-LOOP-009 | Halve or double the loop length | `Cmd+Down` or `Cmd+Up` | `Ctrl+Down` or `Ctrl+Up` | key | press | M6 | manual 42.8; observed in 12.4.16 (macOS), 1 November 2026 |
+| S-LOOP-010 | Shorten or lengthen the loop by the grid | `Cmd+Left` or `Cmd+Right` | `Ctrl+Left` or `Ctrl+Right` | key | press | M6 | manual 42.8; observed in 12.4.16 (macOS), 1 November 2026 |
 | S-LOOP-011 | Select the material inside the loop | `Cmd+Shift+L` | `Ctrl+Shift+L` | key | press | M1 | manual 42.8 |
 | S-SAMPLE-006 | Move the clip region with the start marker | `Shift+Left` or `Shift+Right` | `Shift+Left` or `Shift+Right` | key | press | M2 | manual 42.11 |
 | S-NOTE-022 | Move the clip region with the start marker | `Shift+Left` or `Shift+Right` | `Shift+Left` or `Shift+Right` | key | press | M2 | manual 42.12 |
-| S-ARR-012 | Shorten or lengthen the loop brace | `Cmd+Left` or `Cmd+Right` | `Ctrl+Left` or `Ctrl+Right` | key | press | M6 | manual 42.16 |
+| S-ARR-012 | Shorten or lengthen the loop brace | `Cmd+Left` or `Cmd+Right` | `Ctrl+Left` or `Ctrl+Right` | key | press | M6 | manual 42.16; observed in 12.4.16 (macOS), 1 November 2026 |
 | S-LOOP-012 | Duplicate Loop: double the loop and copy its notes into the new half | `Cmd+D` | `Ctrl+D` | key | press | M6 | manual 10.7.3, 10.8 |
 
 ## envelope
@@ -513,6 +513,8 @@ The Device View has focus.
 | S-DEV-013 | Hide the selected rack's chain list | `Minus` | `Minus` | key | press | M5 | observed in 12.4.3 (macOS), 10 October 2026: View menu (Hide Chains) |
 | S-DEV-014 | Fold or unfold the selected device (unconfirmed) | `Minus` | `Minus` | key | press | M2 | observed in 12.4.3 (macOS), 10 October 2026: device title bar's context menu (Fold) |
 | S-DEV-015 | Float the selected device in its own window, or dock it | `Option+F` | `Ctrl+Alt+F` | key | press | M2 | Beatlayer (IMP-14, WP-2.5b), decided 12 October 2026; not in Live |
+| S-DEV-016 | Step Roar's Feedback Note by a semitone (unconfirmed) | `Down` or `Up` | `Down` or `Up` | key | press | M5 | manual 29.33.4; Live 12.4 release notes (Roar) |
+| S-DEV-017 | Step Roar's Feedback Note by an octave (unconfirmed) | `Shift+Down` or `Shift+Up` | `Shift+Down` or `Shift+Up` | key | press | M5 | Live 12.4 release notes (Roar) |
 
 ## rack-chains
 
@@ -614,7 +616,7 @@ The Settings window has focus.
 | S-DEV-006 | same command as S-VAL-004 | Double-clicking the control also resets it. |
 | S-DEV-007 | same command as S-BRW-004 |  |
 | S-DEV-008 | same command as S-VIEW-006 |  |
-| S-DEV-010 | note | Moved to M6 by WP-6.70: Plug-in windows do not yet close the others when one opens, which is what the key undoes, and the Multiple Plug-In Windows setting is not built. WP-6.75 builds it. |
+| S-DEV-010 | note | Moved to M6 by WP-6.70, built by WP-6.75: with Multiple Plug-In Windows off, opening a plug-in's window closes the others, and this click keeps them (clap-hosting R27). |
 | S-EDIT-004 | note | Duplicating a track puts the copy straight after it and selects it; one undo step, Duplicate Track(s) (pressed in 12.4.6 (macOS), 12 October 2026). |
 | S-EDIT-007 | note | Windows uses Ctrl+Y, not Ctrl+Shift+Z. |
 | S-VAL-001 | note | On the volume field Up and Down step 1 dB; from 5.5 dB, Up gives 6.0 dB and stops at the top. |
@@ -627,10 +629,10 @@ The Settings window has focus.
 | S-LOOP-002 | note | The 12.0 release notes say these set the markers to the time selection. |
 | S-LOOP-003 | note | The 12.0 release notes say these set the markers to the time selection. |
 | S-LOOP-004 | note | The 12.0 release notes say these set the markers to the time selection. |
-| S-LOOP-007 | note | Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it. |
-| S-LOOP-008 | note | Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it. |
-| S-LOOP-009 | note | Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it. |
-| S-LOOP-010 | note | Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it. |
+| S-LOOP-007 | note | Moved to M6 by WP-6.70, when the loop brace couldn't be selected. WP-6.73 builds it: the key acts while the brace is selected. |
+| S-LOOP-008 | note | Moved to M6 by WP-6.70, when the loop brace couldn't be selected. WP-6.73 builds it: the key acts while the brace is selected. |
+| S-LOOP-009 | note | Moved to M6 by WP-6.70, when the loop brace couldn't be selected. WP-6.73 builds it: the key acts while the brace is selected. |
+| S-LOOP-010 | note | Moved to M6 by WP-6.70, when the loop brace couldn't be selected. WP-6.73 builds it: the key acts while the brace is selected. |
 | S-ZOOM-003 | note | Manual 41.4.1.3 describes the same keys as widening and narrowing the Arrangement grid; the adaptive grid follows the zoom. |
 | S-ZOOM-005 | unconfirmed | Sections 42.11, 42.12 and 42.16 give Ctrl+Shift+F on Windows for the same command. |
 | S-CLIPMODE-001 | unconfirmed | Manual 8.1.3 gives Alt+Tab on Windows. |
@@ -654,7 +656,7 @@ The Settings window has focus.
 | S-SES-022 | same command as S-SES-021 | The same key as the previous row: a second press moves from the last track to the scene. |
 | S-ARR-005 | unconfirmed | Manual 6.7 gives Ctrl+Shift on Windows. |
 | S-ARR-010 | same command as S-ENV-004 |  |
-| S-ARR-012 | same command as S-LOOP-010 | Placed in the loop-brace context because 42.8 says the brace must be selected. Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it. |
+| S-ARR-012 | same command as S-LOOP-010 | Placed in the loop-brace context because 42.8 says the brace must be selected. Moved to M6 by WP-6.70, when the loop brace couldn't be selected. WP-6.73 builds it: the key acts while the brace is selected. |
 | S-ARR-020 | note | Live 12.4.3's View menu shows U beside Show Selected Grouped Track. |
 | S-ARR-021 | note | Live 12.4.3's View menu shows these keys beside Show Grouped Tracks. |
 | S-ARR-022 | note | It makes selected take lanes taller or shorter too (manual 21.2). |
@@ -674,8 +676,8 @@ The Settings window has focus.
 | S-TRACK-010 | same command as S-ARR-020 |  |
 | S-TRACK-015 | same command as S-BRW-004 |  |
 | S-TRACK-016 | note | Live 12.4.3's Edit menu reads Deactivate Track with this key while an empty slot of the track is selected. |
-| S-TRANS-003 | note | Live 12.4.3's Playback menu shows these keys beside Play From Insert Marker (S-ARR-032), with the Session View focused. Moved to M6 by WP-6.70: The manual gives Option+Space (Ctrl+Space) two actions, this one and Play From Insert Marker (S-ARR-032), without saying when each applies; it needs an observation of Live. WP-6.74 builds it. |
-| S-TRANS-004 | same command as S-TRANS-001 | Same key as Play: with a time selection, playback starts from it. Moved to M6 by WP-6.70: It is the same key as Play, and the manual does not say what Play does with a time selection beyond starting from it; it needs an observation of Live. WP-6.74 builds it. |
+| S-TRANS-003 | note | Live 12.4.3's Playback menu shows these keys beside Play From Insert Marker (S-ARR-032), with the Session View focused. Moved to M6 by WP-6.70, when it wasn't known when each of the two actions applies. WP-6.74 builds it: with a time selection the key plays it and stops at its end, and with none it plays from the insert marker. |
+| S-TRANS-004 | same command as S-TRANS-001 | Same key as Play: with a time selection, playback starts from its start and goes on past its end. Moved to M6 by WP-6.70, when it wasn't known what Play does with a time selection. WP-6.74 builds it. |
 | S-TRANS-005 | note | Live 12.4.3's Playback menu shows no key beside Return Play Position to 1.1.1 (M-PLAY-004). |
 | S-TRANS-010 | note | The keys count group tracks by their number: with a group at position 3, F3 turned the group's activator on or off (pressed in 12.4.6 (macOS), 11 October 2026). |
 | S-BRW-002 | same command as S-VIEW-010 |  |
@@ -699,6 +701,8 @@ The Settings window has focus.
 | S-DEV-013 | shares keys with S-DEV-014 | Live shows the same key beside Fold in the device title bar's context menu (S-DEV-014). |
 | S-DEV-014 | unconfirmed; shares keys with S-DEV-013 | Live shows the minus key beside Fold in the device's context menu and beside Hide Chains in the View menu (S-DEV-013). |
 | S-DEV-015 | note | Beatlayer's own key for Float, its item after Fold in the device's context menu. Scoped by focus: only with the Device View or a floating device's window focused and a device selected. On Windows and Linux it's Ctrl+Alt+F, which with the Arrangement focused stays Create Fade/Crossfade (S-ARR-008); Alt+F alone opens the File menu there (S-MENU-001). On macOS Option+F, beside Cmd+Option+F for fades. |
+| S-DEV-016 | unconfirmed | With the focus on the Note control while Roar's Feedback Mode is Note, Up and Down step the key by a semitone, as every focused value control's keys do (S-VAL-001). Whether Live steps a semitone is to observe. |
+| S-DEV-017 | unconfirmed | With the focus on the Note control while Roar's Feedback Mode is Note, Shift with Up or Down moves the pitch by an octave: the note control's coarse step, where S-VAL-002 gives other value controls a fine step. Each press is one undo step. |
 | S-SES-024 | note | Context-dependent keys: listed in the Options menu with the Session View focused; in the Arrangement the same keys are the grid commands (S-GRID-002 to S-GRID-005). The Windows binding is inferred from macOS (Cmd to Ctrl, Option to Alt). |
 | S-SES-025 | note | Context-dependent keys: listed in the Options menu with the Session View focused; in the Arrangement the same keys are the grid commands (S-GRID-002 to S-GRID-005). The Windows binding is inferred from macOS (Cmd to Ctrl, Option to Alt). |
 | S-SES-026 | note | Context-dependent keys: listed in the Options menu with the Session View focused; in the Arrangement the same keys are the grid commands (S-GRID-002 to S-GRID-005). The Windows binding is inferred from macOS (Cmd to Ctrl, Option to Alt). |

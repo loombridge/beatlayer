@@ -13,6 +13,7 @@ control_pressed = "#b3bac4"
 accent = "#0e766b"
 accent_text = "#f2fffd"
 record = "#c9302c"
+arm_selection = "#d6489a"
 error_text = "#9f1f18"
 text = "#1c2026"
 text_dim = "#55606c"
@@ -61,13 +62,28 @@ search = "#a67c00"
 # The keys of a clip's scale on the piano ruler and the rows Highlight Scales
 # shades (WP-6.7b).
 scale = "#3a64b4"
+# The twelve hues of the note colours By Pitch Class and By Scale Degree, C to
+# B or the root up the scale, and the grey of a note outside the clip's scale
+# (WP-6.49).
+pitch_hues = [
+  "#c74438", "#c78b38", "#bbc738", "#73c738", "#38c744", "#38c78b", "#38bbc7",
+  "#3873c7", "#4438c7", "#8b38c7", "#c738bb", "#c73873",
+]
+out_of_scale = "#a0a7b0"
 track_palette = [
   "#d4584b", "#dd8446", "#d6af3c", "#93b642", "#47a95a", "#35a68b", "#3699c2",
   "#4676cc", "#6a5fc9", "#9156c4", "#c056a3", "#c85c77", "#88939e", "#ad8e6c",
 ]
 
 [sizes]
-text = 11.0
-small_text = 10.0
-heading = 12.0
+text = 9.6
+small_text = 8.9
+heading = 10.3
 corner = 2.0
+control_field = 16.0
+header_chooser = 12.0
+header_chooser_pitch = 17.0
+list_row = 19.0
+menu_row = 15.0
+menu_separator = 6.0
+info_line = 15.0

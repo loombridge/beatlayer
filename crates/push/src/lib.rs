@@ -10,21 +10,27 @@ use std::sync::Arc;
 
 use bl_control::{Kind, Ring};
 
+pub mod automation;
 pub mod browse;
 pub mod buttons;
+pub mod clip;
 pub mod content;
 pub mod controls;
 pub mod curve;
+pub mod device;
 pub mod display;
 pub mod encoder;
 pub mod frame;
 pub mod leds;
 pub mod mix;
+pub mod note;
 pub mod paint;
 pub mod ports;
+pub mod recording;
 pub mod screen;
 pub mod session;
 pub mod sim;
+pub mod simpler;
 pub mod state;
 mod surface;
 pub mod sysex;
@@ -68,15 +74,20 @@ pub fn placeholder_contents() -> MakeContents {
     Arc::new(Contents::placeholders)
 }
 
-/// The contents of the modes that are built: Browse Mode's, Mix Mode's and
-/// Session Mode's own, and the placeholders for the others
-/// (`docs/specs/push-2-tracks.md` R5, R28, R59).
+/// The contents of the modes that are built: Note Mode's, Device Mode's,
+/// Browse Mode's, Mix Mode's, Clip Mode's and Session Mode's own, and the placeholders for
+/// the others (`docs/specs/push-2-notes.md`, `docs/specs/push-2-tracks.md` R5,
+/// R15, R28, R43, R59).
 #[must_use]
 pub fn contents() -> MakeContents {
     Arc::new(|| {
         let mut contents = Contents::placeholders();
+        contents.pads[0] = Box::new(note::Note::new());
+        contents.display[content::DisplayMode::Device.index()] =
+            Box::new(device::DeviceMode::new());
         contents.display[content::DisplayMode::Browse.index()] = Box::new(browse::Browse::new());
         contents.display[content::DisplayMode::Mix.index()] = Box::new(mix::Mix::new());
+        contents.display[content::DisplayMode::Clip.index()] = Box::new(clip::ClipMode::new());
         contents.pads[1] = Box::new(session::Session::new());
         contents
     })

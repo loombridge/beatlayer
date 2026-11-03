@@ -55,7 +55,7 @@ This spec covers the macros in the document, in the engine and in the rack's mac
 
 **Macro styles (IMP-30, Beatlayer's own; WP-5.4b)**
 
-- **R21.** A macro's context menu has a Macro Style submenu, after the exclusion items, offering Knob, Stepped and Radio Buttons, with the current one ticked; every macro starts as a Knob, Live's continuous control, so nothing changes for a rack that never uses the menu. Changing the style is one undo step and saved with the set and with the rack in a preset. (S8)
+- **R21.** A macro's style is Knob, Stepped or Radio Buttons, changed with `rack.set_macro_style`, which the agent API reaches (Live's macro menu, C-MACRO, has no Macro Style item); every macro starts as a Knob, Live's continuous control, so nothing changes for a rack that never uses the menu. Changing the style is one undo step and saved with the set and with the rack in a preset. (S8)
 - **R22.** A stepped macro has a number of steps from 2 to 16 (Steps, in the same submenu; 2 to 16 and the default of 8 are Beatlayer's own). Its position takes only the values `k / (steps − 1)`, `k` from 0 to `steps − 1`: a drag or an arrow key moves it a step at a time, `device.set_param` takes the nearest step, and a value set before it was stepped moves to the nearest step in the same undo step. Its automation lane has a stepped value axis, as a switch's does, and its envelope's and modulation's values play as the nearest step. (S8, S9)
 - **R23.** A radio-button macro is a stepped macro drawn as its steps' buttons in the knob's place, in a column within the macro's slot, the lit button the current step and each labelled with the value text that step gives (R10); clicking a button moves the macro to that step. Assistive technology reads the buttons as a radio group named for the macro. (S8)
 - **R24.** A style changes only how a macro is drawn and which positions it takes: a stepped or radio-button macro maps, automates, modulates, randomises (to a random step) and stores in variations as a knob does (rule G2). (S8)
@@ -102,7 +102,7 @@ This spec covers the macros in the document, in the engine and in the rack's mac
 | R18 | `crates/model/tests/macros.rs`, `a_device_leaving_its_rack_takes_its_mappings`, `a_copied_rack_maps_its_own_devices` | unit |
 | R19 | `crates/model/tests/command_registry.rs`, `every_command_is_complete`, `every_command_runs_by_id`; `crates/shell/tests/macros.rs`, `rack_macros_reads_back_names_values_mappings_and_the_count` | unit |
 | R20 | `crates/ui/tests/macros.rs`, `a_macro_is_a_knob_with_its_name_and_value` | UI script |
-| R21 | `crates/shell/tests/macros.rs`, `a_new_macro_is_a_knob_and_style_changes_are_one_undo_step` | unit |
+| R21 | `crates/shell/tests/macros.rs`, `a_new_macro_is_a_knob_and_style_changes_are_one_undo_step`; `crates/ui/tests/macros.rs`, `a_macro_knobs_menu_lists_lives_rows_in_order` | unit, UI script |
 | R22 | `crates/model/src/rack.rs`, `a_stepped_macro_takes_only_its_steps`; `crates/engine/tests/macros.rs`, `a_stepped_macros_envelope_plays_as_steps` | unit, engine test |
 | R23 | `crates/ui/tests/macros.rs`, `a_radio_button_macro_draws_its_steps_and_a_click_selects_one` | UI script |
 | R24 | `crates/shell/tests/macros.rs`, `a_stepped_macro_maps_randomises_and_stores_as_a_knob_does` | unit |

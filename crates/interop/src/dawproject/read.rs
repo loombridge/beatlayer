@@ -782,7 +782,11 @@ fn timeline(node: &Node, report: &mut ReadReport) -> Option<Timeline> {
         "Warps" => Timeline::Warps(Warps {
             info,
             content_time_unit: node.attribute("contentTimeUnit").and_then(TimeUnit::parse),
-            audio: node.child("Audio").map(|child| media_file(child, report)),
+            audio: node
+                .child("Audio")
+                .or_else(|| node.child("Video"))
+                .map(|child| media_file(child, report)),
+            video: node.child("Audio").is_none() && node.child("Video").is_some(),
             warps: node
                 .children_named("Warp")
                 .map(|child| Warp {

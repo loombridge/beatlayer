@@ -15,7 +15,7 @@ use bl_ui::clip_view::{
 };
 use bl_ui::note_filters::{BAR_HEIGHT, bar_rect, body_rect, magnifier_rect};
 use bl_ui::note_lanes::{NoteLayout, note_layout};
-use common::{Harness, Node, Window, command};
+use common::{Harness, MenuRow, Node, Window, command};
 use egui::{Event, Modifiers, MouseWheelUnit, PointerButton, Pos2, Rect, TouchPhase, pos2, vec2};
 use serde_json::json;
 
@@ -1200,73 +1200,135 @@ fn option_dragging_a_note_copies_it() {
 #[test]
 fn the_context_menu_lists_the_items_in_order() {
     // Spec: piano-roll R30. Right-clicking a note opens the editor's
-    // context menu: the items whose commands exist run them, and the rest
-    // are drawn disabled and name their packages. Group Notes needs two
-    // notes and Ungroup Notes a grouped one.
+    // context menu: Live's rows in Live's order, the items whose commands
+    // exist running them and the rest drawn disabled.
+    // A long note, clicked in its middle, so the menu opens right of the
+    // footer's buttons, which are as tall as its rows.
     let step = n_step();
-    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
-    let at = n.at(60, step / 2);
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, 4 * step, 100)]);
+    let at = n.at(60, 2 * step);
     let nodes = right_click(&mut n, at);
     // The note the menu opened on is selected alone.
     assert_eq!(n.selected(), [0]);
-    for label in [
-        "Cut",
-        "Copy",
-        "Paste",
-        "Duplicate",
-        "Delete",
-        "Invert Selection",
-        "Deactivate Note(s)",
-    ] {
-        let node = menu_item(&nodes, label);
-        assert!(!node.disabled, "{label} works");
-    }
-    for label in ["Group Notes", "Ungroup Notes"] {
-        assert!(menu_item(&nodes, label).disabled, "{label} has no use here");
-    }
-    // Spec: scales R22. Highlight Scales runs its command.
-    assert!(
-        !menu_item(&nodes, "Highlight Scales").disabled,
-        "Highlight Scales works"
-    );
-    // Spec: note-editing R35, R39, R40, R41. WP-6.3's items run their
-    // commands; Split Note(s) shows only while a note would be split.
-    for label in [
-        "Chop Note(s) on Grid",
-        "Join Notes",
-        "Fit to Time Range",
-        "Split Clip",
-    ] {
-        assert!(!menu_item(&nodes, label).disabled, "{label} works");
-    }
-    assert!(
-        !nodes
-            .iter()
-            .any(|node| node.label.starts_with("Split Note(s)")),
-        "no note would split"
+    use MenuRow::{Dim, Item, Sep};
+    common::assert_menu(
+        &nodes,
+        &[
+            Item("Invert Selection"),
+            Item("Duplicate"),
+            Sep,
+            Item("Quantize"),
+            Item("Quantize Settings..."),
+            Item("Deactivate Note"),
+            Item("Extract Groove(s)"),
+            Sep,
+            Item("Chop Note(s) on Grid"),
+            Dim("Join Notes"),
+            Item("Fit to Time Range"),
+            Sep,
+            Dim("Crop Clip to Time Selection"),
+            Sep,
+            Dim("Loop Selection"),
+            Item("Set Start Marker"),
+            Item("Set Loop Start"),
+            Item("Set Loop End"),
+            Item("Set End Marker"),
+            Sep,
+            Item("Zoom to Clip Selection"),
+            Item("Zoom Out Clip Completely"),
+            Item("Fit Content To View Width"),
+            Item("Fit Content To View Height"),
+            Sep,
+            Item("Draw Mode (Pitch Lock Off)"),
+            Sep,
+            Item("Highlight Scales"),
+        ],
     );
 }
 
 #[test]
-fn split_notes_shows_in_the_menu_while_the_insert_marker_crosses_a_note() {
-    // Spec: note-editing R35. C-NOTE-010 runs `note.split`, and shows only
-    // while a note would be split.
+fn join_notes_is_enabled_while_two_selected_notes_share_a_pitch() {
+    // Spec: note-editing R39. Join Notes is dim in the editor's menu until
+    // two selected notes share a pitch, then it works.
     let step = n_step();
-    let mut n = set(vec![Note::new(60, Ticks::ZERO, 4 * step, 100)]);
-    let elsewhere = n.at(61, step);
-    let nodes = right_click(&mut n, elsewhere);
-    assert!(
-        !nodes
-            .iter()
-            .any(|node| node.label.starts_with("Split Note(s)")),
-        "nothing crosses the marker yet"
+    let mut n = set(vec![
+        Note::new(60, Ticks::ZERO, step, 100),
+        Note::new(60, 2 * step, step, 100),
+    ]);
+    n.select(&[0, 1]);
+    let empty = n.at(62, 4 * step);
+    let nodes = right_click(&mut n, empty);
+    assert!(!menu_item(&nodes, "Join Notes").disabled);
+}
+
+#[test]
+fn the_empty_grids_context_menu_adds_the_grid_group() {
+    // Spec: piano-roll R30 (C-NOTE). Right-clicking empty grid opens the same
+    // menu with Set 1.1.1 Here after the editing group and the grid's
+    // settings before Draw Mode.
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
+    let empty = n.at(62, 4 * step);
+    let nodes = right_click(&mut n, empty);
+    use MenuRow::{Dim, Item, Sep, Tick};
+    common::assert_menu(
+        &nodes,
+        &[
+            Item("Invert Selection"),
+            Item("Duplicate"),
+            Sep,
+            Item("Quantize"),
+            Item("Quantize Settings..."),
+            Dim("Deactivate Note"),
+            Item("Extract Groove(s)"),
+            Sep,
+            Dim("Chop Note(s) on Grid"),
+            Dim("Join Notes"),
+            Item("Fit to Time Range"),
+            Sep,
+            Dim("Crop Clip to Time Selection"),
+            Sep,
+            Dim("Set 1.1.1 Here"),
+            Sep,
+            Dim("Loop Selection"),
+            Item("Set Start Marker"),
+            Item("Set Loop Start"),
+            Item("Set Loop End"),
+            Item("Set End Marker"),
+            Sep,
+            Item("Zoom to Clip Selection"),
+            Item("Zoom Out Clip Completely"),
+            Item("Fit Content To View Width"),
+            Item("Fit Content To View Height"),
+            Sep,
+            Dim("Snap to Grid"),
+            Dim("Adaptive Grid:"),
+            Item("Widest"),
+            Item("Wide"),
+            Item("Medium"),
+            Tick("Narrow"),
+            Item("Narrowest"),
+            Dim("Fixed Grid:"),
+            Item("8 Bars"),
+            Item("4 Bars"),
+            Item("2 Bars"),
+            Item("1 Bar"),
+            Item("1/2"),
+            Item("1/4"),
+            Item("1/8"),
+            Item("1/16"),
+            Item("1/32"),
+            Sep,
+            Dim("Narrow Grid"),
+            Dim("Widen Grid"),
+            Sep,
+            Dim("Triplet Grid"),
+            Sep,
+            Item("Draw Mode (Pitch Lock Off)"),
+            Sep,
+            Item("Highlight Scales"),
+        ],
     );
-    n.h.key(egui::Key::Escape, Modifiers::NONE);
-    let at = n.at(62, 2 * step);
-    n.click(at, Modifiers::NONE);
-    let nodes = right_click(&mut n, elsewhere);
-    let item = menu_item(&nodes, "Split Note(s)");
-    assert!(!item.disabled);
 }
 
 #[test]
@@ -1310,17 +1372,28 @@ fn the_clipboard_keys_act_on_the_notes() {
 }
 
 #[test]
-fn the_piano_rulers_menu_lists_its_items_and_their_packages() {
+fn the_piano_rulers_menu_lists_its_items_in_order() {
     // Spec: piano-roll R30. Right-clicking a key in the piano ruler opens
-    // C-KEYS: Deactivate Note(s), and the note spelling submenu (scales R24).
+    // C-KEYS: Deactivate Note, and the accidentals (scales R24), the one in
+    // use ticked (Sharps in a new install).
     let step = n_step();
     let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
     let at = n.key_at(60);
     let nodes = right_click(&mut n, at);
-    assert!(!menu_item(&nodes, "Deactivate Note(s)").disabled);
-    assert!(
-        !menu_item(&nodes, "Note spelling").disabled,
-        "Note spelling works"
+    use MenuRow::{Dim, Item, Sep, Tick};
+    common::assert_menu(
+        &nodes,
+        &[
+            Item("Deactivate Note"),
+            Sep,
+            Dim("Accidentals"),
+            Item("Auto: Sharps (♯)"),
+            Tick("Sharps (♯)"),
+            Item("Flats (♭)"),
+            Item("Sharps and Flats (♯/♭)"),
+            Sep,
+            Item("MIDI Note Number"),
+        ],
     );
 }
 
@@ -1459,13 +1532,25 @@ fn the_lane_selector_the_switch_and_swap_lane_show_hide_and_swap_lanes() {
     let randomize = n.footer("Randomize");
     assert!(randomize.is_positive());
     assert!(n.layout().lane(Chance).is_some());
-    // Swap Lane, in the lane header's menu, hides the Velocity lane and shows
-    // the first hidden lane after it.
+    // The lane header's menu (C-LANE) lists the lanes under Swap Lane: the
+    // one shown ticked, and the one shown beside it dim. Choosing the hidden
+    // one hides the Velocity lane and shows that.
     let velocity = n.lane_of(Velocity);
     let header = pos2(velocity.left() + 4.0, velocity.center().y);
     let nodes = right_click(&mut n, header);
-    let swap = menu_item(&nodes, "Swap Lane");
-    assert!(!swap.disabled);
+    use MenuRow::{DimTick, Item};
+    common::assert_menu(
+        &nodes,
+        &[
+            MenuRow::Dim("Swap Lane:"),
+            DimTick("Velocity"),
+            Item("Release Velocity"),
+            MenuRow::Dim("Chance"),
+            MenuRow::Sep,
+            Item("Hide Lane"),
+        ],
+    );
+    let swap = menu_item(&nodes, "Release Velocity");
     let b = swap.bounds.unwrap();
     n.h.click(pos2(
         ((b.x0 + b.x1) / 2.0) as f32,
@@ -1819,7 +1904,7 @@ fn cmd_dragging_a_note_changes_its_velocity_and_along_the_grid_moves_it() {
 #[test]
 fn deactivating_notes_from_the_menus_and_the_piano_ruler() {
     // Spec: note-editing R18, R19. The editor's and the piano ruler's menus
-    // deactivate the selected notes, and read Activate Note(s) when they are
+    // deactivate the selected notes, and read Activate Note when they are
     // all off; right-clicking a key selects its notes first.
     let step = n_step();
     let mut n = set(vec![
@@ -1829,16 +1914,16 @@ fn deactivating_notes_from_the_menus_and_the_piano_ruler() {
     let key = n.key_at(64);
     let nodes = right_click(&mut n, key);
     assert_eq!(n.selected(), [1], "the key's notes are selected first");
-    let item = menu_item(&nodes, "Deactivate Note(s)");
+    let item = menu_item(&nodes, "Deactivate Note");
     assert!(!item.disabled);
     let before = n.doc().clone();
     n.click_node(&nodes, egui::accesskit::Role::Button, &item.label);
     assert!(!n.notes()[0].mute && n.notes()[1].mute);
     n.one_step(&before, "Deactivate notes");
-    // The editor's menu now reads Activate Note(s) for that note.
+    // The editor's menu now reads Activate Note for that note.
     let at = n.at(64, 4 * step + step / 2);
     let nodes = right_click(&mut n, at);
-    let item = menu_item(&nodes, "Activate Note(s)");
+    let item = menu_item(&nodes, "Activate Note");
     assert!(!item.disabled);
     n.click_node(&nodes, egui::accesskit::Role::Button, &item.label);
     assert!(n.notes().iter().all(|note| !note.mute));
@@ -2982,15 +3067,16 @@ fn the_group_marker_s_menu_changes_its_kind_and_ends_it() {
     assert!(n.groups().is_empty(), "the whole group ended");
     assert_eq!(n.grouped(), [None; 3]);
     n.one_step(&before, "Ungroup Notes");
-    // The editor's own menu has the items too, when they apply: Ungroup
-    // Notes ended the group, and the notes are still selected.
+    // The editor's own menu doesn't have them (C-NOTE): the keys run them.
     let at = n.at(60, n_step() / 2);
     let nodes = right_click(&mut n, at);
     assert_eq!(n.selected(), [0, 1]);
-    assert!(!menu_item(&nodes, "Group Notes").disabled);
     assert!(
-        menu_item(&nodes, "Ungroup Notes").disabled,
-        "none is grouped"
+        !nodes
+            .iter()
+            .any(|node| node.label.starts_with("Group Notes")
+                || node.label.starts_with("Ungroup Notes")),
+        "Live's note menu has no grouping"
     );
 }
 
@@ -3976,10 +4062,8 @@ fn the_spelling_menu_changes_the_rows_names() {
     // The menu on the ruler lists the choices.
     let at = n.key_at(70);
     let nodes = right_click(&mut n, at);
-    assert!(
-        !menu_item(&nodes, "Note spelling").disabled,
-        "the menu opens"
-    );
+    // Auto's row names the spelling the scale gives: flats for F major.
+    assert!(!menu_item(&nodes, "Auto: Flats (♭)").disabled);
     n.h.shell
         .run("view.note_spelling", json!({ "spelling": "flats" }))
         .unwrap();
@@ -4153,4 +4237,154 @@ fn a_held_ruler_preview_ends_when_the_clip_view_leaves_the_note_editor() {
         [(source, 0x80, 57, 64)],
         "the held preview ends once the editor gives way"
     );
+}
+
+// Note colours (WP-6.49; the view options spec, R2 to R5).
+
+/// The colour each of `notes` is painted in, in the order given, with the
+/// editor's frame as it is.
+fn fills(n: &mut Notes, notes: &[Note]) -> Vec<egui::Color32> {
+    let grid = n.grid();
+    let (start, length) = (n.marker(), n.length());
+    let output = n.h.settle();
+    let top = n.h.main.clip_view().top();
+    let rects = common::painted_rects(&output);
+    notes
+        .iter()
+        .map(|note| {
+            let rect = note_rect(grid, start, length, top, note);
+            rects
+                .iter()
+                .find(|(r, _)| *r == rect)
+                .map(|(_, colour)| *colour)
+                .unwrap_or_else(|| panic!("the note at key {} is painted", note.key))
+        })
+        .collect()
+}
+
+// Spec: view-options R3, R4.
+#[test]
+fn by_pitch_class_every_c_has_one_hue_and_a_softer_note_is_paler() {
+    let step = n_step();
+    let mut muted = Note::new(61, step * 4, step, 127);
+    muted.mute = true;
+    let notes = vec![
+        Note::new(60, Ticks::ZERO, step, 127),
+        Note::new(72, Ticks::ZERO, step, 127),
+        Note::new(62, Ticks::ZERO, step, 127),
+        Note::new(60, step * 2, step, 40),
+        muted,
+    ];
+    let mut n = set(notes.clone());
+    n.h.shell
+        .run("view.set_note_colors", json!({ "colors": "pitch_class" }))
+        .unwrap();
+    let painted = fills(&mut n, &notes);
+    let hues = &n.h.theme.colors.pitch_hues;
+    assert_eq!(painted[0], hues[0].0, "C is the first hue");
+    assert_eq!(painted[1], hues[0].0, "and so is the C an octave up");
+    assert_eq!(painted[2], hues[2].0, "D is the third");
+    assert_eq!(
+        painted[3],
+        bl_ui::theme::note_colour(hues[0].0, 40),
+        "a softer C is paler, in the same hue"
+    );
+    assert_ne!(painted[3], painted[0]);
+    assert_eq!(
+        painted[4], n.h.theme.colors.clip_muted.0,
+        "a deactivated note stays grey"
+    );
+}
+
+// Spec: view-options R3.
+#[test]
+fn by_scale_degree_colours_the_clips_degrees_and_greys_the_rest() {
+    let step = n_step();
+    let notes = vec![
+        Note::new(62, Ticks::ZERO, step, 127),
+        Note::new(69, Ticks::ZERO, step, 127),
+        Note::new(65, Ticks::ZERO, step, 127),
+        Note::new(63, Ticks::ZERO, step, 127),
+        Note::new(50, step * 2, step, 127),
+    ];
+    let mut n = set(notes.clone());
+    scale_on(&mut n, 2, "minor");
+    n.h.shell
+        .run("view.set_note_colors", json!({ "colors": "scale_degree" }))
+        .unwrap();
+    let painted = fills(&mut n, &notes);
+    let colours = &n.h.theme.colors;
+    assert_eq!(
+        painted[0], colours.pitch_hues[0].0,
+        "D, the root, takes the first hue"
+    );
+    assert_eq!(
+        painted[1], colours.pitch_hues[4].0,
+        "A, the fifth, the fifth"
+    );
+    assert_eq!(painted[2], colours.pitch_hues[2].0, "F, the third degree");
+    assert_eq!(painted[3], colours.out_of_scale.0, "D# isn't in D minor");
+    assert_eq!(
+        painted[4], colours.pitch_hues[0].0,
+        "the root in any octave"
+    );
+
+    // With Scale Mode off the notes are coloured by velocity.
+    n.h.shell
+        .run(
+            "clip.set_scale",
+            json!({ "clips": [n.clip], "enabled": false }),
+        )
+        .unwrap();
+    let painted = fills(&mut n, &notes);
+    let track = n.doc().clip_track(n.clip).expect("the clip's track");
+    let face = bl_ui::arrangement::scene::track_colour(&n.h.theme, n.doc(), track);
+    assert!(painted.iter().all(|colour| *colour == face), "{painted:?}");
+}
+
+// Spec: view-options R5.
+#[test]
+fn a_note_is_named_for_assistive_technology_with_its_pitch_velocity_and_degree() {
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(69, Ticks::ZERO, step, 100),
+        Note::new(63, Ticks::ZERO, step, 64),
+    ]);
+    scale_on(&mut n, 2, "minor");
+    let note_nodes = |n: &mut Notes| -> Vec<(String, String)> {
+        let output = n.h.settle();
+        Harness::nodes(&output)
+            .into_iter()
+            .filter(|node| node.label.contains(" velocity "))
+            .map(|node| (node.label.clone(), node.value.clone()))
+            .collect()
+    };
+    for colors in ["velocity", "pitch_class"] {
+        n.h.shell
+            .run("view.set_note_colors", json!({ "colors": colors }))
+            .unwrap();
+        let named = note_nodes(&mut n);
+        assert_eq!(named.len(), 2, "{named:?}");
+        assert!(
+            named
+                .iter()
+                .any(|(label, _)| label.ends_with(" velocity 100"))
+        );
+        assert!(
+            named.iter().all(|(_, value)| value.is_empty()),
+            "no degree unless the colours are by degree: {named:?}"
+        );
+    }
+    n.h.shell
+        .run("view.set_note_colors", json!({ "colors": "scale_degree" }))
+        .unwrap();
+    let named = note_nodes(&mut n);
+    let value_of = |velocity: &str| {
+        named
+            .iter()
+            .find(|(label, _)| label.ends_with(velocity))
+            .map(|(_, value)| value.clone())
+    };
+    assert_eq!(value_of("velocity 100").as_deref(), Some("degree 5"));
+    assert_eq!(value_of("velocity 64").as_deref(), Some("not in the scale"));
 }

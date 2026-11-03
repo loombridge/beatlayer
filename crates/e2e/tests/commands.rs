@@ -48,6 +48,7 @@ const SKIPPED: &[(&str, &str)] = &[
     ("agent.set_server", "opens a network port"),
     ("link.set_enabled", "joins a Link session on the network"),
     ("stems.install", "downloads packages from the network"),
+    ("packages.install", "downloads packages from the network"),
     (
         "stems.separate",
         "needs the stem separation packages installed",

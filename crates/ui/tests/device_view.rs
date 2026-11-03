@@ -372,6 +372,132 @@ fn a_rename_ends_when_its_device_goes() {
     assert!(!h.main.is_typing(), "the keys are back");
 }
 
+/// A click on `at` with `modifiers` held.
+fn click_with(h: &mut Harness, at: Pos2, modifiers: Modifiers) {
+    // Long enough after any earlier click that egui doesn't pair them.
+    h.time += 1.0;
+    let held = Event::ModifiersChanged(modifiers);
+    h.frame(vec![held.clone(), Event::PointerMoved(at)]);
+    for pressed in [true, false] {
+        h.frame(vec![
+            held.clone(),
+            Event::PointerButton {
+                pos: at,
+                button: PointerButton::Primary,
+                pressed,
+                modifiers,
+            },
+        ]);
+    }
+    h.frame(vec![Event::ModifiersChanged(Modifiers::NONE)]);
+    h.settle();
+}
+
+/// A click on a device's title bar with `modifiers` held.
+fn click_title(h: &mut Harness, device: DeviceId, modifiers: Modifiers) {
+    let at = title_rect(frame_of(h, device), false).center();
+    click_with(h, at, modifiers);
+}
+
+fn chain(h: &Harness) -> Vec<DeviceId> {
+    h.shell
+        .device_view_state()
+        .devices
+        .iter()
+        .map(|d| d.id)
+        .collect()
+}
+
+// Spec: device-chains R47 (S-DEV-004, S-A11Y-014)
+#[test]
+fn shift_click_and_shift_arrows_select_several_devices_and_the_keys_act_on_all() {
+    let mut h = harness();
+    let ids = [gain(), through(), gain(), through()].map(|device| add(&mut h, device));
+    let [a, b, c, d] = ids;
+    let selection = |h: &Harness| h.shell.device_view_state().selection;
+    let undo = |h: &mut Harness| {
+        h.shell.invoke("edit.undo", json!({})).unwrap();
+        h.settle();
+    };
+
+    click_title(&mut h, a, Modifiers::NONE);
+    click_title(&mut h, c, Modifiers::SHIFT);
+    assert_eq!(selection(&h), [a, b, c], "Shift-click selects the range");
+    click_title(&mut h, b, Modifiers::SHIFT);
+    assert_eq!(selection(&h), [a, b, c], "inside it, nothing changes");
+    click_title(&mut h, d, command());
+    assert_eq!(selection(&h), [d], "Cmd-click selects that device alone");
+
+    // Shift-Left grows by the neighbour; Left and Right select one, from the
+    // edge of the run.
+    h.shell.set_focused_area(Area::Detail);
+    h.settle();
+    h.key(Key::ArrowLeft, Modifiers::SHIFT);
+    h.settle();
+    h.key(Key::ArrowLeft, Modifiers::SHIFT);
+    h.settle();
+    assert_eq!(selection(&h), [b, c, d]);
+    h.key(Key::ArrowLeft, Modifiers::NONE);
+    h.settle();
+    assert_eq!(selection(&h), [a], "Left, from the first of the run");
+    h.key(Key::ArrowRight, Modifiers::SHIFT);
+    h.settle();
+    assert_eq!(selection(&h), [a, b]);
+    h.key(Key::ArrowRight, Modifiers::NONE);
+    h.settle();
+    assert_eq!(selection(&h), [c], "Right, from the last of the run");
+    h.key(Key::ArrowLeft, Modifiers::SHIFT);
+    h.settle();
+    assert_eq!(selection(&h), [b, c]);
+
+    // The keys act on both.
+    h.key(Key::D, command());
+    h.settle();
+    let now = chain(&h);
+    assert_eq!((now[..3].to_vec(), now[5]), ([a, b, c].to_vec(), d));
+    assert_eq!(selection(&h), now[3..5]);
+    assert_eq!(last_step(&h), "Duplicate Device");
+    undo(&mut h);
+    assert_eq!(chain(&h), ids);
+
+    click_title(&mut h, b, Modifiers::NONE);
+    click_title(&mut h, c, Modifiers::SHIFT);
+    h.key(Key::C, command());
+    h.settle();
+    click_title(&mut h, a, Modifiers::NONE);
+    h.key(Key::V, command());
+    h.settle();
+    let now = chain(&h);
+    assert_eq!(now[2..], ids);
+    assert_eq!(selection(&h), now[..2]);
+    assert_eq!(last_step(&h), "Copy Device");
+    undo(&mut h);
+
+    click_title(&mut h, b, Modifiers::NONE);
+    click_title(&mut h, c, Modifiers::SHIFT);
+    h.key(Key::X, command());
+    h.settle();
+    assert_eq!(chain(&h), [a, d]);
+    assert_eq!(last_step(&h), "Delete Device(s)");
+    undo(&mut h);
+
+    click_title(&mut h, b, Modifiers::NONE);
+    click_title(&mut h, c, Modifiers::SHIFT);
+    h.key(Key::Delete, Modifiers::NONE);
+    h.settle();
+    assert_eq!(chain(&h), [a, d]);
+    assert_eq!(selection(&h), [d]);
+    assert_eq!(last_step(&h), "Delete Device(s)");
+    undo(&mut h);
+
+    click_title(&mut h, b, Modifiers::NONE);
+    click_title(&mut h, c, Modifiers::SHIFT);
+    h.key(Key::G, command());
+    h.settle();
+    assert_eq!(chain(&h).len(), 3);
+    assert_eq!(last_step(&h), "Group Devices");
+}
+
 // Spec: device-chains R25 (dragging a title bar moves the device)
 #[test]
 fn dragging_a_title_bar_moves_the_device() {
@@ -593,6 +719,159 @@ fn the_midi_sidechain_strip_shows_the_section_and_its_chooser_sets_the_source() 
     h.settle();
     assert_eq!(midi_section(&h, hear).source, "1-MIDI");
     assert_eq!(last_step(&h), "Change \"Routing\"");
+}
+
+fn corpus() -> Value {
+    let t = bl_devices::corpus::corpus_type();
+    json!({ "kind": t.kind, "name": t.name, "role": t.role, "midi_sidechain": true })
+}
+
+fn param_of(h: &Harness, device: DeviceId, param: bl_model::ParamId) -> f64 {
+    let d = h.shell.editor().document().device(device).unwrap();
+    d.params.get(&param).copied().unwrap_or_else(|| {
+        bl_devices::corpus::corpus_type()
+            .description
+            .param(param)
+            .unwrap()
+            .default
+    })
+}
+
+/// Picks the open list's entry labelled `label`, under `below`.
+fn pick(h: &mut Harness, label: &str, below: Rect) {
+    let nodes = Harness::nodes(&h.settle());
+    let entry = nodes
+        .iter()
+        .find(|n| n.label == label && n.bounds.is_some_and(|b| b.y0 as f32 > below.top()))
+        .unwrap_or_else(|| panic!("{label} is in the open list"));
+    let b = entry.bounds.unwrap();
+    h.click(pos2(
+        ((b.x0 + b.x1) / 2.0) as f32,
+        ((b.y0 + b.y1) / 2.0) as f32,
+    ));
+    h.settle();
+}
+
+/// A drag from `from` to `to` in a few steps.
+fn drag(h: &mut Harness, from: Pos2, to: Pos2) {
+    h.frame(vec![Event::PointerMoved(from)]);
+    h.frame(vec![press(from, true, PointerButton::Primary)]);
+    for step in 1..=5 {
+        h.frame(vec![Event::PointerMoved(
+            from + (to - from) * (step as f32 / 5.0),
+        )]);
+    }
+    h.frame(vec![press(to, false, PointerButton::Primary)]);
+    h.settle();
+}
+
+// Spec: corpus R1, R11 (Corpus's MIDI source and its tapping point), routing
+// R39
+#[test]
+fn corpus_chooses_its_midi_source_and_its_tapping_point_in_its_sidechain_strip() {
+    use bl_ui::sidechain::{rows, strip_buttons};
+    let mut h = harness();
+    let corpus = add(&mut h, corpus());
+    let fc = frame_of(&mut h, corpus);
+    h.click(strip_buttons(fc)[0].center());
+    h.settle();
+    let fc = frame_of(&mut h, corpus);
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(
+        Harness::node(&nodes, "MIDI Sidechain Source").value,
+        "No Input"
+    );
+    assert_eq!(
+        Harness::node(&nodes, "MIDI Sidechain Tapping Point").value,
+        "Post FX",
+        "a new Corpus takes the notes Post FX"
+    );
+    assert_eq!(midi_section(&h, corpus).tap.as_deref(), Some("Post FX"));
+    let [_, source, tap, ..] = rows(fc);
+    h.click(source.center());
+    pick(&mut h, "1-MIDI", source);
+    assert_eq!(midi_section(&h, corpus).source, "1-MIDI");
+    assert_eq!(last_step(&h), "Change \"Routing\"");
+    // The tapping point is one undo step too, and keeps the source.
+    let steps = h.shell.editor().undo_history().len();
+    h.click(tap.center());
+    pick(&mut h, "Pre FX", tap);
+    assert_eq!(midi_section(&h, corpus).tap.as_deref(), Some("Pre FX"));
+    assert_eq!(midi_section(&h, corpus).source, "1-MIDI");
+    assert_eq!(h.shell.editor().undo_history().len(), steps + 1);
+    assert_eq!(last_step(&h), "Change \"Routing\"");
+    let saved = h
+        .shell
+        .editor()
+        .document()
+        .device(corpus)
+        .unwrap()
+        .midi_sidechain
+        .clone()
+        .unwrap();
+    assert_eq!(saved.tapped(), bl_model::Tap::PreFx);
+    h.shell.run("edit.undo", json!({})).unwrap();
+    h.settle();
+    assert_eq!(midi_section(&h, corpus).tap.as_deref(), Some("Post FX"));
+}
+
+// Spec: corpus R1, R2 (the X–Y control, the dimmed controls)
+#[test]
+fn dragging_corpus_xy_control_sets_decay_and_material_or_radius_in_one_undo_step() {
+    use bl_devices::corpus::{DECAY, HIT, MATERIAL, QUALITY, RADIUS, TYPE, unused};
+    let mut h = harness();
+    let corpus = add(&mut h, corpus());
+    let cell = |h: &mut Harness| {
+        let nodes = Harness::nodes(&h.settle());
+        let b = Harness::node(&nodes, "X-Y").bounds.unwrap();
+        Rect::from_min_max(
+            pos2(b.x0 as f32, b.y0 as f32),
+            pos2(b.x1 as f32, b.y1 as f32),
+        )
+    };
+    let at = |r: Rect, across: f32, up: f32| {
+        pos2(r.left() + across * r.width(), r.bottom() - up * r.height())
+    };
+    let r = cell(&mut h);
+    let steps = h.shell.editor().undo_history().len();
+    drag(&mut h, at(r, 0.5, 0.5), at(r, 0.8, 0.25));
+    let (decay, material) = (param_of(&h, corpus, DECAY), param_of(&h, corpus, MATERIAL));
+    assert!((decay - 80.0).abs() < 3.0, "Decay {decay}");
+    assert!((material + 50.0).abs() < 6.0, "Material {material}");
+    assert_eq!(
+        h.shell.editor().undo_history().len(),
+        steps + 1,
+        "one undo step"
+    );
+    assert_eq!(last_step(&h), "Change \"Decay\" and \"Material\"");
+    h.shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(param_of(&h, corpus, DECAY), 50.0);
+    assert_eq!(param_of(&h, corpus, MATERIAL), 0.0);
+    // A pipe's vertical axis is Radius, and its dimmed controls are the
+    // spec's.
+    h.shell
+        .run(
+            "device.set_param",
+            json!({ "device": corpus, "param": TYPE, "value": 5.0 }),
+        )
+        .unwrap();
+    h.settle();
+    let locked = h
+        .shell
+        .device_view_state()
+        .devices
+        .into_iter()
+        .find(|d| d.id == corpus)
+        .and_then(|d| d.panel)
+        .unwrap()
+        .locked;
+    assert_eq!(locked, unused(5));
+    assert!(locked.contains(&HIT) && locked.contains(&QUALITY) && !locked.contains(&RADIUS));
+    let r = cell(&mut h);
+    drag(&mut h, at(r, 0.5, 0.5), at(r, 0.25, 0.75));
+    assert!((param_of(&h, corpus, DECAY) - 25.0).abs() < 3.0);
+    assert!((param_of(&h, corpus, RADIUS) - 75.0).abs() < 6.0);
+    assert_eq!(param_of(&h, corpus, MATERIAL), 0.0, "Material stays");
 }
 
 fn hardware() -> Value {
@@ -1154,7 +1433,12 @@ fn compare_items_follow_the_state_and_are_disabled_for_racks_and_plugins() {
         assert!(!edit_item(&h, row).enabled, "{row} on a plug-in");
     }
     let fp = frame_of(&mut h, plugin);
-    let out = right_click(&mut h, title_rect(fp, false).center());
+    // A plug-in's name starts after its window and Configure buttons.
+    let name = pos2(
+        bl_ui::device_view::plugin_configure_rect(fp, false).right() + 12.0,
+        title_rect(fp, false).center().y,
+    );
+    let out = right_click(&mut h, name);
     let nodes = Harness::nodes(&out);
     for label in ["Compare: Switch to B", "Compare: Copy A to B"] {
         let item = nodes
@@ -1790,4 +2074,56 @@ fn the_cv_modulators_panels_have_a_cv_output_and_min_max_depth_and_no_mapping() 
             .unwrap();
         h.settle();
     }
+}
+
+// Spec: meld R3, R5, R19 (the macros under the type's names, one engine's
+// controls at a time, and Semitones in scale degrees)
+#[test]
+fn meld_draws_its_macros_under_the_types_names_one_engine_at_a_time() {
+    use bl_devices::meld::{SEMITONES, TYPE, USE_SCALE, param};
+
+    let mut h = harness();
+    let t = bl_devices::meld::meld_type();
+    let device = add(
+        &mut h,
+        json!({ "kind": t.kind, "name": t.name, "role": t.role }),
+    );
+    let set = |h: &mut Harness, id, value: f64| {
+        h.shell
+            .run(
+                "device.set_param",
+                json!({ "device": device, "param": id, "value": value }),
+            )
+            .unwrap();
+    };
+    let labels = |h: &mut Harness| -> Vec<(String, String)> {
+        Harness::nodes(&h.settle())
+            .iter()
+            .map(|n| (n.label.clone(), n.value.clone()))
+            .collect()
+    };
+    let has = |labels: &[(String, String)], name: &str| labels.iter().any(|(l, _)| l == name);
+    // Basic Shapes: Shape and Tone; engine B's controls are on its page.
+    let first = labels(&mut h);
+    assert!(has(&first, "Shape") && has(&first, "Tone"));
+    assert!(has(&first, "A Type") && !has(&first, "B Type"));
+    // Sub names them Tone and Aux, and Semitones read in degrees with Use
+    // Current Scale on.
+    set(&mut h, param(0, TYPE), 5.0);
+    set(&mut h, param(0, SEMITONES), 2.0);
+    let second = labels(&mut h);
+    assert!(has(&second, "Tone") && has(&second, "Aux") && !has(&second, "Shape"));
+    assert!(second.iter().any(|(l, v)| l == "Semitones" && v == "2 st"));
+    set(&mut h, USE_SCALE, 1.0);
+    let third = labels(&mut h);
+    assert!(third.iter().any(|(l, v)| l == "Semitones" && v == "2 sd"));
+    // Showing engine B's page swaps the controls.
+    h.shell
+        .run(
+            "device.set_page",
+            json!({ "device": device, "node": "Engine", "page": "B" }),
+        )
+        .unwrap();
+    let fourth = labels(&mut h);
+    assert!(has(&fourth, "B Type") && !has(&fourth, "A Type"));
 }

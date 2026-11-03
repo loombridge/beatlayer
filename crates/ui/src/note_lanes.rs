@@ -865,7 +865,6 @@ impl LaneUi {
             self.divider = false;
             self.settle_heights(frame, events);
         }
-        let shown_count = frame.layout.lanes.len();
         let clip = frame.clip;
         let selected = frame.selected;
         for (index, (field, lane)) in frame.layout.lanes.iter().enumerate() {
@@ -1032,7 +1031,7 @@ impl LaneUi {
                                 ui.close();
                             }
                         }
-                        ui.separator();
+                        crate::menus::separator(ui);
                         let item = ui.button("Ungroup Notes");
                         crate::menus::register_item(ui.ctx(), &item);
                         if item.clicked() {
@@ -1046,16 +1045,47 @@ impl LaneUi {
                     });
                 }
             }
-            // Spec: note-editing R2. The lane header's context menu has
-            // Swap Lane (C-LANE-001), which needs a hidden lane to show.
+            // Spec: note-editing R2. The lane header's context menu (C-LANE):
+            // Swap Lane: lists the lanes, the one shown ticked and dim, and
+            // Hide Lane.
             let header =
                 Rect::from_min_max(lane.min, pos2(frame.layout.grid.left(), lane.bottom()));
             let header_response = ui.interact(header, id.with("header"), Sense::click());
+            let shown: Vec<NoteField> = frame.layout.lanes.iter().map(|(each, _)| *each).collect();
             header_response.context_menu(|ui| {
-                let response = ui.add_enabled(shown_count < 3, egui::Button::new("Swap Lane"));
+                crate::menus::heading(ui, "Swap Lane:");
+                for choice in [
+                    NoteField::Velocity,
+                    NoteField::ReleaseVelocity,
+                    NoteField::Chance,
+                ] {
+                    let current = choice == field;
+                    let name = match choice {
+                        NoteField::ReleaseVelocity => "Release Velocity",
+                        NoteField::Chance => "Chance",
+                        _ => "Velocity",
+                    };
+                    let text = if current {
+                        format!("\u{2714} {name}")
+                    } else {
+                        name.to_owned()
+                    };
+                    // A lane shown elsewhere in the editor can't take this one's
+                    // place.
+                    let free = !current && !shown.contains(&choice);
+                    let response = ui.add_enabled(free, egui::Button::new(text));
+                    crate::menus::register_item(ui.ctx(), &response);
+                    if response.clicked() {
+                        invoke(events, VIEW_LANES, json!({ "lane": field, "show": false }));
+                        invoke(events, VIEW_LANES, json!({ "lane": choice, "show": true }));
+                        ui.close();
+                    }
+                }
+                crate::menus::separator(ui);
+                let response = ui.button("Hide Lane");
                 crate::menus::register_item(ui.ctx(), &response);
                 if response.clicked() {
-                    invoke(events, VIEW_LANES, json!({ "lane": field, "swap": true }));
+                    invoke(events, VIEW_LANES, json!({ "lane": field, "show": false }));
                     ui.close();
                 }
             });

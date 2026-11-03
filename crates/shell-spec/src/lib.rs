@@ -34,6 +34,9 @@
 //! - [`locator`]: the Arrangement's locators (WP-6.24): adding, deleting,
 //!   moving, renaming and describing them, looping to the next one, the
 //!   song start time, and the jumps between them.
+//! - [`arranger`]: the arranger track (WP-6.45): making, renaming,
+//!   colouring, resizing, moving, copying, duplicating, removing and
+//!   deleting sections, selecting them, and showing the lane.
 //! - [`notes`]: the Clip View's note-editing commands (WP-2.3): selecting
 //!   the MIDI Note Editor's notes, drawing, deleting, moving and resizing
 //!   them.
@@ -50,6 +53,7 @@
 //!   (WP-5.13): adding layers from files, Snap, Normalize, and its views.
 //! - [`pads`]: a drum rack's pad view and the commands on pads (WP-5.6).
 //! - [`tracks`]: Duplicate Track Without Clips (WP-2.19b, IMP-12).
+//! - [`linked_clips`]: Duplicate as Linked Clip (WP-6.44, IMP-21).
 //! - [`session_launch`]: the global launch quantisation and its enabled
 //!   switch (WP-3.2), which the Control Bar's Quantization Menu shows.
 //! - [`transport`]: what the Control Bar's transport section shows
@@ -67,6 +71,7 @@
 //! - [`midi_io`]: MIDI ports and the computer MIDI keyboard (`midi.ports`,
 //!   `midi.set_port`, `midi.computer_keyboard_*`, WP-2.2).
 //! - [`link`]: Link's state and switches (`link.*`, WP-7.14).
+//! - [`tempo_follower`]: Tempo Follower's state, switch and settings (WP-9.13).
 //! - [`sync`]: the state of MIDI clock (`sync.state`, WP-7.11).
 //! - [`midi_tools`]: the MIDI Tools' commands (`midi_tool.*`, WP-6.11): the
 //!   Transform and Generate panels, choosing a tool, its settings, applying
@@ -90,6 +95,7 @@
 //! - [`clip_properties`]: the Clip View's Main Properties panel
 //!   (`clip_view.show_properties`, `clip_view.show_marker`,
 //!   `clip.set_marker_at_playhead`, WP-6.55).
+//! - [`video`]: video clips for agents (`video.frame_at`, WP-9.25).
 //! - [`tunings`]: tuning systems (`tuning.load`, `tuning.state`, WP-6.9).
 //! - [`search`]: the search field's commands (`search.*`, WP-6.42): command
 //!   search and track search.
@@ -101,6 +107,7 @@
 
 pub mod agent;
 pub mod arrangement;
+pub mod arranger;
 pub mod assistant;
 pub mod audio;
 pub mod audio_editing;
@@ -110,6 +117,7 @@ pub mod autosampler;
 pub mod bounce;
 pub mod browser;
 pub mod capture_midi;
+pub mod chord_lane;
 pub mod clip_envelope_editing;
 pub mod clip_properties;
 pub mod commands;
@@ -127,6 +135,7 @@ pub mod freeze;
 pub mod groove;
 pub mod keymap;
 pub mod link;
+pub mod linked_clips;
 pub mod locator;
 pub mod menus;
 pub mod midi_files;
@@ -137,6 +146,7 @@ pub mod modulation;
 pub mod multisampler;
 pub mod note_filters;
 pub mod notes;
+pub mod packages;
 pub mod pads;
 pub mod perception;
 pub mod plugins;
@@ -154,9 +164,12 @@ pub mod settings;
 pub mod slice;
 pub mod stems;
 pub mod sync;
+pub mod tempo_follower;
 pub mod tracks;
 pub mod transport;
 pub mod tunings;
+pub mod video;
+pub mod view_options;
 pub mod warping;
 
 use bl_commands::{RegisterError, Registry};
@@ -177,6 +190,8 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     clip_envelope_editing::register(registry)?;
     groove::register(registry)?;
     locator::register(registry)?;
+    arranger::register(registry)?;
+    chord_lane::register(registry)?;
     notes::register(registry)?;
     transport::register(registry)?;
     mixer_view::register(registry)?;
@@ -196,6 +211,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     autosampler::register(registry)?;
     cv::register(registry)?;
     tracks::register(registry)?;
+    linked_clips::register(registry)?;
     session_view::register(registry)?;
     session_launch::register(registry)?;
     session_record::register(registry)?;
@@ -206,6 +222,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     modulation::register(registry)?;
     perception::register(registry)?;
     stems::register(registry)?;
+    packages::register(registry)?;
     sample_editor::register(registry)?;
     audio_editing::register(registry)?;
     audio_panel::register(registry)?;
@@ -214,11 +231,14 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     bounce::register(registry)?;
     comping::register(registry)?;
     slice::register(registry)?;
+    video::register(registry)?;
     warping::register(registry)?;
     scales::register(registry)?;
     tunings::register(registry)?;
     link::register(registry)?;
     sync::register(registry)?;
+    tempo_follower::register(registry)?;
+    view_options::register(registry)?;
     search::register(registry)
 }
 
@@ -234,12 +254,14 @@ mod tests {
         // and asks the person first. `groove.to_clip` is external only when
         // given a `path`: the shell raises its class from its arguments.
         // `browser.remove_folder` names a Places entry, whose files it never
-        // touches. `midi_tool.load_bank` still reads its file as an edit: classing
-        // it external is not done yet.
+        // touches. `browser.similar` names a file the browser's index already
+        // holds and reads only the database. `midi_tool.load_bank` still reads
+        // its file as an edit: classing it external is not done yet.
         let exempt = [
             groove::TO_CLIP,
             midi_tools::LOAD_BANK,
             browser::REMOVE_FOLDER,
+            browser::SIMILAR,
         ];
         let mut registry = Registry::new();
         super::register(&mut registry).unwrap();

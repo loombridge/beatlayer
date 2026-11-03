@@ -25,6 +25,8 @@ use crate::screen::{Column, Graphic, Label, Screen};
 use crate::state::{Command, Handle, Menu, Shared, Snapshot};
 use crate::sysex::{self, MidiMode, Reply};
 
+mod recording;
+
 /// How long a reply to a command may take before the command is sent again,
 /// and then before the surface carries on without it (R4).
 const REPLY: Duration = Duration::from_millis(500);
@@ -36,6 +38,9 @@ const DOUBLE_TAP: Duration = Duration::from_millis(300);
 const CLOCK_AHEAD: Duration = Duration::from_millis(60);
 /// The gesture key of encoder `n` is this plus `n`.
 pub(crate) const ENCODER_GESTURE: u32 = 0x5000;
+/// The control change that silences every voice.
+const ALL_SOUND_OFF: u8 = 120;
+
 /// What the aftertouch thresholds are (R30).
 const AFTERTOUCH: (u16, u16) = (1220, 1570);
 
@@ -110,6 +115,11 @@ pub struct Push {
     momentary_pad: Option<PadMode>,
     momentary_display: Option<(DisplayMode, MixPage)>,
     menu: Option<Menu>,
+    /// Whether a value of the Quantize menu changed since it opened (notes
+    /// R58).
+    quantize_changed: bool,
+    /// Record Quantize's value before its switch turned it off.
+    record_quantize_last: bl_model::RecordQuantization,
     picker: Option<Picker>,
     strip: StripUse,
     strip_sent: StripUse,
@@ -136,10 +146,17 @@ pub struct Push {
     playing: bool,
     count_in: Option<Instant>,
     footswitch: Option<Instant>,
+    /// When the message or tick being handled came, for the contents.
+    at: Instant,
+    /// The pads Push 2 has been told have reduced sensitivity.
+    reduced: u64,
     actions: Vec<Action>,
     /// The track selected before Master selected Main, which a second press
     /// goes back to (push-2-tracks R36).
     before_master: Option<TrackId>,
+    /// Browse Mode's entry a content asked for, made once the content's call
+    /// is over.
+    enter_pending: Option<Enter>,
     /// The surface's row in the Control Surfaces table, from 0.
     row: usize,
 }
@@ -170,6 +187,8 @@ impl Push {
             momentary_pad: None,
             momentary_display: None,
             menu: None,
+            quantize_changed: false,
+            record_quantize_last: bl_model::RecordQuantization::Sixteenth,
             picker: None,
             strip: StripUse::default(),
             strip_sent: StripUse::default(),
@@ -193,8 +212,11 @@ impl Push {
             playing: false,
             count_in: None,
             footswitch: None,
+            at: Instant::now(),
+            reduced: 0,
             actions: Vec::new(),
             before_master: None,
+            enter_pending: None,
             row: 0,
         }
     }
@@ -211,6 +233,26 @@ impl Push {
         match self.pad_mode {
             PadMode::Note => self.contents.pads[0].as_mut(),
             PadMode::Session => self.contents.pads[1].as_mut(),
+        }
+    }
+
+    /// The steps held in Note Mode, which the display modes see.
+    fn held_steps(&self) -> Vec<crate::content::HeldStep> {
+        match self.pad_mode {
+            PadMode::Note => self.contents.pads[0].held_steps(),
+            PadMode::Session => Vec::new(),
+        }
+    }
+
+    /// The key of the slice picked on a slicing Simpler's pads, for the
+    /// display modes (notes R73).
+    fn picked_slice(&self) -> Option<u8> {
+        match self.pad_mode {
+            PadMode::Note => self
+                .model
+                .as_ref()
+                .and_then(|model| self.contents.pads[0].picked_slice(model)),
+            PadMode::Session => None,
         }
     }
 
@@ -376,6 +418,11 @@ impl Push {
                 Action::Picker(target) => self.open_picker(target),
                 Action::Aftertouch(poly) => self.aftertouch = poly,
                 Action::Gesture(column) => self.gestures[usize::from(column)] = true,
+                Action::KeepSteps => self.contents.pads[0].keep_steps(),
+                Action::Browse(why) => {
+                    self.display_mode = DisplayMode::Browse;
+                    self.enter_pending = Some(why);
+                }
             }
         }
     }
@@ -390,6 +437,11 @@ impl Push {
     ) {
         let modifiers = self.buttons.modifiers();
         let setup = self.shared.setup();
+        let swing = self.shared.swing();
+        let held_steps = self.held_steps();
+        let note = self.contents.pads[0].note_state();
+        let slice = self.picked_slice();
+        let pad_slicing = self.contents.display[DisplayMode::Device.index()].pad_slicing();
         let mix_page = self.mix_page;
         let mut actions = std::mem::take(&mut self.actions);
         {
@@ -410,7 +462,14 @@ impl Push {
                     model: self.model.as_ref(),
                     modifiers: &modifiers,
                     setup,
+                    swing,
+                    at: self.at,
+                    held_steps: &held_steps,
                     mix_page,
+                    display: self.display_mode,
+                    note: note.as_ref(),
+                    slice,
+                    pad_slicing,
                     actions: &mut actions,
                 };
                 f(content, &mut ctx);
@@ -418,6 +477,9 @@ impl Push {
         }
         self.actions = actions;
         self.apply(cx.now());
+        if let Some(why) = self.enter_pending.take() {
+            self.enter(why, cx);
+        }
     }
 
     // ----- the ring's tracks (R26) -----
@@ -432,7 +494,9 @@ impl Push {
     }
 
     fn lower_claimed(&mut self) -> bool {
-        self.display_content().claims_lower()
+        // The Scale menu's keys are on the lower buttons too (notes R35).
+        matches!(self.menu, Some(Menu::Scale | Menu::FixedLength))
+            || self.display_content().claims_lower()
     }
 
     // ----- the colour picker (R27) -----
@@ -443,7 +507,7 @@ impl Push {
                 .model
                 .as_ref()
                 .and_then(|m| m.document.track(*track))
-                .map(bl_model::Track::colour),
+                .and_then(|t| t.colour().swatch()),
             Target::Command { current, .. } => *current,
         };
         self.picker = Some(Picker { target, current });
@@ -528,8 +592,46 @@ impl Push {
             self.buttons.mark_used(button);
             return;
         }
+        // Convert's choices for an audio clip are on the upper display
+        // buttons; any other button closes them (notes R76).
+        if self.menu == Some(Menu::Convert) {
+            self.buttons.mark_used(button);
+            if let Some(column) = controls::upper_column(button) {
+                self.convert_choice(column, cx);
+            }
+            self.menu = None;
+            return;
+        }
+        // The Scale menu's keys, scales and switches are on the display
+        // buttons (notes R35).
+        if self.menu == Some(Menu::Scale)
+            && (controls::upper_column(button).is_some()
+                || controls::lower_column(button).is_some())
+        {
+            self.buttons.mark_used(button);
+            self.with_contents(cx, Who::Pads, |content, ctx| {
+                content.scale_button(button, ctx)
+            });
+            return;
+        }
+        // Fixed Length's and Quantize's menus take display buttons (notes
+        // R50, R58).
+        if (self.menu == Some(Menu::FixedLength)
+            && (controls::upper_column(button).is_some()
+                || controls::lower_column(button).is_some()))
+            || (self.menu == Some(Menu::Quantize) && controls::upper_column(button) == Some(4))
+        {
+            self.buttons.mark_used(button);
+            self.recording_menu_button(button, cx);
+            return;
+        }
         if self.stop_clip(button, cx) {
             return;
+        }
+        // Record, Duplicate and Automate with a modifier held (notes R49,
+        // R53, R63); the content hears them too.
+        if others_held {
+            self.recording_combination(button, &others, cx);
         }
         if self.is_core(button) {
             if others_held {
@@ -544,16 +646,53 @@ impl Push {
         self.with_contents(cx, Who::Both, |content, ctx| {
             content.button(button, Gesture::Press, ctx)
         });
+        if button == cc::CONVERT {
+            self.convert(cx);
+        }
+    }
+
+    /// Convert acts on what is selected: the shell works out what that is and
+    /// makes it, one undo step; an audio clip offers its choices first
+    /// (notes R76).
+    fn convert(&mut self, cx: &mut Cx) {
+        match self.model.as_ref().map(|model| model.convert) {
+            Some(
+                bl_control::Convert::Simpler
+                | bl_control::Convert::Slices
+                | bl_control::Convert::Pad,
+            ) => Self::run(cx, "push.convert", json!({})),
+            Some(bl_control::Convert::Clip) => self.menu = Some(Menu::Convert),
+            _ => {}
+        }
+    }
+
+    /// An audio clip's choice on upper button `column`: the first two make
+    /// a Simpler and a Drum Rack; the rest are listed but not built.
+    fn convert_choice(&mut self, column: u8, cx: &mut Cx) {
+        match column {
+            0 => Self::run(cx, "push.convert", json!({ "to": "simpler" })),
+            1 => Self::run(cx, "push.convert", json!({ "to": "drum_rack" })),
+            _ => {}
+        }
     }
 
     /// What a core button does with a modifier held: the combination the
     /// specs give it, and nothing else (R25).
     fn combination(&mut self, button: u8, modifiers: &Modifiers, cx: &mut Cx) {
+        // Record and a lower display button arm the track by hand (notes R4).
+        if modifiers.has(cc::RECORD)
+            && self.pad_mode == PadMode::Note
+            && let Some(column) = controls::lower_column(button)
+        {
+            self.arm_by_hand(column, cx);
+            return;
+        }
         if !modifiers.shift() {
             return;
         }
         match button {
             cc::PLAY => {
+                self.silence_simpler(cx);
                 let playing = self.model.as_ref().is_some_and(|m| m.transport.playing);
                 if playing {
                     Self::run(cx, "transport.play_stop", json!({}));
@@ -571,6 +710,22 @@ impl Push {
                     self.open_picker(Target::Track(track));
                 }
             }
+        }
+    }
+
+    /// Shift with Play/Stop silences the selected track's Simpler at once, a
+    /// One-Shot's voice included, with All Sound Off (notes R71).
+    fn silence_simpler(&self, cx: &mut Cx) {
+        let simpler = self.model.as_ref().is_some_and(|model| {
+            model
+                .selection
+                .tracks
+                .first()
+                .and_then(|track| model.document.track(*track))
+                .is_some_and(|track| track.devices().any(crate::simpler::is_simpler))
+        });
+        if simpler && let Some(off) = MidiMessage::from_bytes(&[0xB0, ALL_SOUND_OFF, 0]) {
+            cx.play(off);
         }
     }
 
@@ -596,6 +751,7 @@ impl Push {
         if self.user_mode {
             return;
         }
+        self.open_hold_menu(button);
         for mode in [PadMode::Note, PadMode::Session] {
             if mode.button() == button && mode != self.pad_mode {
                 self.momentary_pad = Some(self.pad_mode);
@@ -607,6 +763,15 @@ impl Push {
                 self.momentary_display = Some((self.display_mode, self.mix_page));
                 self.display_mode = mode;
             }
+        }
+        // Holding a lower display button arms its track by hand in Note
+        // Mode, and its release then selects nothing (notes R4).
+        if self.pad_mode == PadMode::Note
+            && !self.lower_claimed()
+            && let Some(column) = controls::lower_column(button)
+        {
+            self.arm_by_hand(column, cx);
+            self.buttons.mark_used(button);
         }
         if !self.is_core(button) {
             self.with_contents(cx, Who::Both, |content, ctx| {
@@ -623,6 +788,7 @@ impl Push {
             return;
         }
         if held {
+            self.close_hold_menu(button);
             if [PadMode::Note.button(), PadMode::Session.button()].contains(&button)
                 && let Some(base) = self.momentary_pad.take()
             {
@@ -645,11 +811,18 @@ impl Push {
                 self.with_contents(cx, Who::Both, |content, ctx| {
                     content.button(button, Gesture::Tap, ctx)
                 });
+                self.recording_tap(button, cx);
                 // Add Track leads to Browse Mode with the track kinds
                 // (push-2-tracks R12).
                 if button == cc::ADD_TRACK {
                     self.display_mode = DisplayMode::Browse;
                     self.enter(Enter::AddTrack, cx);
+                }
+                // Add Device leads to Browse Mode with every device the
+                // track can hold (push-2-tracks R25).
+                if button == cc::ADD_DEVICE {
+                    self.display_mode = DisplayMode::Browse;
+                    self.enter(Enter::AddDevice, cx);
                 }
                 // Stop Clip stops the selected track's clip (push-2-tracks
                 // R68).
@@ -704,7 +877,7 @@ impl Push {
                 } else if let Some(column) = controls::lower_column(number)
                     && let Some(&track) = self.ring_tracks(cx.row()).get(usize::from(column))
                 {
-                    Self::run(cx, "session.select", json!({ "track": track }));
+                    Self::select_track(cx, track);
                 }
             }
             number => {
@@ -712,10 +885,39 @@ impl Push {
                 if let Some(column) = controls::lower_column(number)
                     && let Some(&track) = self.ring_tracks(cx.row()).get(usize::from(column))
                 {
-                    Self::run(cx, "session.select", json!({ "track": track }));
+                    Self::select_track(cx, track);
                 }
             }
         }
+    }
+
+    /// Arms the ring's track at `column` by hand, as its Arm switch does, or
+    /// disarms it if it was armed by hand; a track armed by selection
+    /// becomes a manual arm (notes R4).
+    fn arm_by_hand(&mut self, column: u8, cx: &mut Cx) {
+        let Some(&track) = self.ring_tracks(cx.row()).get(usize::from(column)) else {
+            return;
+        };
+        let Some(model) = &self.model else {
+            return;
+        };
+        let Some(t) = model.document.track(track).filter(|t| t.kind().has_arm()) else {
+            return;
+        };
+        let arm = !t.mixer().arm || model.selection_armed.contains(&track);
+        Self::run(cx, "mixer.set_arm", json!({ "track": track, "arm": arm }));
+    }
+
+    /// Selects a track as a click on its title bar does, and as the
+    /// Arrangement's selection too, which the devices and the drum layout
+    /// follow (R26).
+    fn select_track(cx: &mut Cx, track: TrackId) {
+        Self::run(cx, "session.select", json!({ "track": track }));
+        Self::run(
+            cx,
+            "arrangement.select_tracks",
+            json!({ "tracks": [track] }),
+        );
     }
 
     // ----- Stop Clip, in every mode (push-2-tracks R68) -----
@@ -905,7 +1107,7 @@ impl Push {
             // One touch is one undo step (R9).
             cx.end_gesture(ENCODER_GESTURE + u32::from(index));
         }
-        if index < 8 && self.menu != Some(Menu::Setup) {
+        if index < 8 && self.menu.is_none() {
             let turn = if touched { Turn::Touch } else { Turn::Release };
             self.with_contents(cx, Who::Display, |content, ctx| {
                 content.encoder(index, turn, ctx)
@@ -984,6 +1186,14 @@ impl Push {
                 self.notify(now, format!("Swing {:.0} %", swing * 100.0));
             }
             column if self.menu == Some(Menu::Setup) => self.setup_turn(column, steps, shift),
+            column if self.menu == Some(Menu::Quantize) => {
+                self.quantize_turn(column, steps, shift, cx);
+            }
+            column if self.menu == Some(Menu::Scale) => {
+                self.with_contents(cx, Who::Pads, |content, ctx| {
+                    content.scale_turn(column, steps, ctx)
+                });
+            }
             column => {
                 self.with_contents(cx, Who::Display, |content, ctx| {
                     content.encoder(column, Turn::Steps(steps), ctx)
@@ -1049,6 +1259,7 @@ impl Push {
                 content.button(button, gesture, ctx)
             });
         }
+        self.core_tap(button, cx);
     }
 
     // ----- the messages (R6) -----
@@ -1141,6 +1352,22 @@ impl Push {
         }
     }
 
+    /// Selects Pad Settings for the pads whose sensitivity the pad mode
+    /// changed (notes R31).
+    fn pad_settings(&mut self, cx: &mut Cx) {
+        let want = if self.user_mode {
+            0
+        } else {
+            self.pad_content().reduced_pads()
+        };
+        let changed = want ^ self.reduced;
+        for n in (0..64u8).filter(|n| changed >> n & 1 == 1) {
+            let settings = u8::from(want >> n & 1 == 1);
+            Self::send(cx, sysex::select_pad_settings(n / 8, n % 8, settings));
+        }
+        self.reduced = want;
+    }
+
     /// Makes `mode` the display mode, which its content enters afresh when
     /// it is Browse (push-2-tracks R5).
     fn show_display(&mut self, mode: DisplayMode, cx: &mut Cx) {
@@ -1211,7 +1438,7 @@ impl Push {
         self.screen = Screen::default();
         self.leds.clear();
         let colours = self.shared.track_colours();
-        let swatch = |index: u8| bl_model::swatch_rgb(&colours, index);
+        let swatch = |colour: bl_model::Colour| colour.rgb(&colours);
 
         // The ring's tracks label the lower buttons (R26).
         let claimed = self.lower_claimed();
@@ -1219,11 +1446,13 @@ impl Push {
         if !claimed {
             for (column, &track) in tracks.iter().take(8).enumerate() {
                 if let Some(t) = model.document.track(track) {
+                    let by_hand = t.mixer().arm && !model.selection_armed.contains(&track);
                     self.screen.lower[column] = Label::new(
                         t.name(),
                         swatch(t.colour()),
                         model.selection.tracks.contains(&track),
-                    );
+                    )
+                    .with_armed(by_hand);
                     if let Some((_, fraction)) = model.progress.iter().find(|(id, _)| *id == track)
                     {
                         self.screen.progress[column] = Some(*fraction);
@@ -1232,15 +1461,55 @@ impl Push {
             }
         }
 
+        // Recording's buttons (notes R48, R50, R61): the modes may paint
+        // over them.
+        {
+            let mut lights = Lights {
+                leds: &mut self.leds,
+                palette: &mut self.palette,
+            };
+            let recording = model.session_record || model.transport.recording;
+            lights.button(
+                cc::RECORD,
+                Led::steady(if recording {
+                    fixed::RED
+                } else {
+                    fixed::DARK_GREY
+                }),
+            );
+            lights.button(
+                cc::AUTOMATE,
+                Led::steady(if model.automation_arm {
+                    fixed::RED
+                } else {
+                    fixed::DARK_GREY
+                }),
+            );
+            lights.button(
+                cc::FIXED_LENGTH,
+                Led::level(true, self.shared.fixed_length().on),
+            );
+            lights.button(cc::NEW, Led::level(true, false));
+            lights.button(cc::DUPLICATE, Led::level(true, false));
+            lights.button(
+                cc::QUANTIZE,
+                Led::level(true, self.menu == Some(Menu::Quantize)),
+            );
+        }
+
         // The modes draw the pads, the buttons they own and the display.
+        let held_steps = self.held_steps();
+        let slice = self.picked_slice();
         {
             let (pad, display) = match (self.pad_mode, self.display_mode) {
                 (PadMode::Note, mode) => (0, mode.index()),
                 (PadMode::Session, mode) => (1, mode.index()),
             };
-            for content in [
-                self.contents.pads[pad].as_mut(),
-                self.contents.display[display].as_mut(),
+            let session = self.pad_mode == PadMode::Session;
+            let mut note = None;
+            for (which, content) in [
+                (0, self.contents.pads[pad].as_mut()),
+                (1, self.contents.display[display].as_mut()),
             ] {
                 content.paint(&mut Paint {
                     screen: &mut self.screen,
@@ -1250,10 +1519,18 @@ impl Push {
                     },
                     model,
                     modifiers: &modifiers,
+                    held_steps: &held_steps,
+                    note: note.as_ref(),
+                    session,
+                    slice,
                     mix_page: self.mix_page,
                     row: cx.row(),
                     colours: &colours,
                 });
+                // The display follows the layout the pads just drew.
+                if which == 0 {
+                    note = content.note_state();
+                }
             }
         }
 
@@ -1320,6 +1597,13 @@ impl Push {
         }]
         .scale_available();
         lights.button(cc::SCALE, Led::level(scale, self.menu == Some(Menu::Scale)));
+        // Convert is lit while it has something selected to act on.
+        if model.convert != bl_control::Convert::Nothing {
+            lights.button(
+                cc::CONVERT,
+                Led::level(true, self.menu == Some(Menu::Convert)),
+            );
+        }
         lights.button(cc::USER, Led::level(true, false));
         lights.button(cc::SHIFT, Led::level(true, false));
         let main_selected = model.selection.tracks.first() == Some(&model.document.main_id());
@@ -1359,7 +1643,28 @@ impl Push {
         // The menus (R23, R31).
         match self.menu {
             Some(Menu::Setup) => self.paint_setup(),
-            Some(Menu::Scale) => self.screen.title = Some("Scale".to_owned()),
+            Some(Menu::Quantize) => self.paint_quantize(),
+            Some(Menu::FixedLength) => self.paint_fixed_length(),
+            Some(Menu::Convert) => self.paint_convert(),
+            Some(Menu::Scale) => {
+                let mut paint = Paint {
+                    screen: &mut self.screen,
+                    lights: Lights {
+                        leds: &mut self.leds,
+                        palette: &mut self.palette,
+                    },
+                    model,
+                    modifiers: &modifiers,
+                    held_steps: &held_steps,
+                    note: None,
+                    session: false,
+                    slice,
+                    mix_page: self.mix_page,
+                    row: cx.row(),
+                    colours: &colours,
+                };
+                self.contents.pads[0].paint_scale(&mut paint);
+            }
             None => {}
         }
 
@@ -1402,6 +1707,28 @@ impl Push {
                 Addr::Button(cc::USER),
                 Led::steady(crate::leds::white::FULL),
             );
+        }
+    }
+
+    /// An audio clip's Convert choices on the upper buttons, the ones that
+    /// aren't built grey (notes R76).
+    fn paint_convert(&mut self) {
+        const GREY: [u8; 3] = [110, 110, 110];
+        const WHITE: [u8; 3] = [230, 230, 230];
+        self.screen.columns = Default::default();
+        self.screen.upper = Default::default();
+        self.screen.title = Some("Convert to a new MIDI track".to_owned());
+        for (column, (text, built)) in [
+            ("Simpler", true),
+            ("Drum Rack", true),
+            ("Convert Harmony", false),
+            ("Convert Melody", false),
+            ("Convert Drums", false),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            self.screen.upper[column] = Label::new(text, if built { WHITE } else { GREY }, false);
         }
     }
 
@@ -1480,6 +1807,10 @@ impl Push {
         snapshot.display_mode = self.display_mode;
         snapshot.mix_page = self.mix_page;
         snapshot.menu = self.menu;
+        snapshot.note = match self.pad_mode {
+            PadMode::Note => self.contents.pads[0].note_state(),
+            PadMode::Session => None,
+        };
         snapshot.held = self
             .buttons
             .held()
@@ -1501,8 +1832,25 @@ impl Push {
         snapshot.strip = self.strip;
         snapshot.strip_leds = *self.leds.strip();
         snapshot.setup = self.shared.setup();
+        snapshot.fixed_length = self.shared.fixed_length();
+        snapshot.swing = self.shared.swing();
+        snapshot.quantize_menu = self
+            .quantize_values()
+            .filter(|_| self.menu == Some(Menu::Quantize));
+        if let Some(model) = &self.model {
+            snapshot.record = if model.transport.recording {
+                "arrangement"
+            } else if model.session_record {
+                "session"
+            } else {
+                "off"
+            };
+            snapshot.automation_arm = model.automation_arm;
+        }
         snapshot.screen = self.screen.clone();
         snapshot.browse = self.display_content().browse_state();
+        snapshot.device = self.display_content().device_state();
+        snapshot.clip = self.display_content().clip_state();
         if self.pad_mode == PadMode::Session {
             snapshot.session = self.pad_content().session_state();
         }
@@ -1555,11 +1903,16 @@ impl ControlSurface for Push {
             cx.send(bytes);
         }
         Self::send(cx, sysex::display_brightness(0));
+        for n in (0..64u8).filter(|n| self.reduced >> n & 1 == 1) {
+            Self::send(cx, sysex::select_pad_settings(n / 8, n % 8, 0));
+        }
+        self.reduced = 0;
         Self::send(cx, sysex::midi_mode(MidiMode::Live));
         self.display = None;
     }
 
     fn message(&mut self, at: Instant, bytes: &[u8], cx: &mut Cx) {
+        self.at = at;
         if sysex::is_sysex(bytes) {
             self.reply(bytes, cx);
         } else if matches!(self.phase, Phase::Live) {
@@ -1568,6 +1921,7 @@ impl ControlSurface for Push {
     }
 
     fn tick(&mut self, model: &ReadModel, cx: &mut Cx) {
+        self.at = cx.now();
         self.model = Some(model.clone());
         self.row = cx.row();
         self.wait_timeouts(cx);
@@ -1583,8 +1937,21 @@ impl ControlSurface for Push {
                     self.footswitch = None;
                     self.synthetic(cc::RECORD, cx);
                 }
+                if let Some(strip) = self.pad_content().strip_use() {
+                    self.strip = strip;
+                }
                 self.setup_changes(cx);
             }
+            self.with_contents(cx, Who::Both, |content, ctx| content.tick(ctx));
+            // The Scale menu closes where Scale has nothing to open (R23).
+            if self.menu == Some(Menu::Scale) && !self.pad_content().scale_available() {
+                self.menu = None;
+            }
+            // Convert's choices close when no audio clip is selected (R76).
+            if self.menu == Some(Menu::Convert) && model.convert != bl_control::Convert::Clip {
+                self.menu = None;
+            }
+            self.pad_settings(cx);
             self.clock(model, cx);
             self.paint(model, cx);
             self.flush_leds(cx);

@@ -13,6 +13,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::automation::MixerParam;
+use crate::colour::Colour;
 use crate::device::{Device, DeviceKind, DeviceRole};
 use crate::error::ModelError;
 use crate::ids::{ChainId, ContentHash, DeviceId, ParamId, TrackId};
@@ -133,7 +134,7 @@ pub struct Macro {
     pub name: String,
     /// A swatch of the palette of 5 rows of 14, from 0 to 69, or none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub colour: Option<u8>,
+    pub colour: Option<Colour>,
     /// The info text the user gave it (Edit Info Text).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub info: String,
@@ -836,7 +837,12 @@ pub struct Chain {
     /// The chain's colour: an index into the palette of 5 rows of 14
     /// swatches, from 0 to 69, or none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub colour: Option<u8>,
+    pub colour: Option<Colour>,
+    /// The swatch a drum rack's chain shows on Push 2 in place of its
+    /// track's colour (the notes on Push 2 spec, R19), from 0 to 69, or
+    /// none. Only a drum rack's chains have one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub push_colour: Option<u8>,
     /// The info text the user gave the chain (Edit Info Text).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub info: String,
@@ -1068,6 +1074,7 @@ impl Chain {
         self.receive.is_default()
             && self.play == DEFAULT_PLAY
             && self.choke.is_none()
+            && self.push_colour.is_none()
             && self.sends.is_empty()
             && !self.is_return
             && self.audio_to.is_none()
@@ -1089,6 +1096,7 @@ impl Chain {
             self.receive = Receive::default();
             self.play = DEFAULT_PLAY;
             self.choke = None;
+            self.push_colour = None;
             self.sends.clear();
             self.is_return = false;
         }
@@ -1119,6 +1127,7 @@ impl Chain {
             id,
             name: name.into(),
             colour: None,
+            push_colour: None,
             info: String::new(),
             mixer: ChainMixer::default(),
             zones: ChainZones::default(),
@@ -1481,7 +1490,7 @@ fn check_rack(device: &Device) -> Result<(), ModelError> {
         )?;
         crate::command::check_value("chain pan", mixer.pan, (-1.0..=1.0).contains(&mixer.pan))?;
         if let Some(colour) = chain.colour {
-            crate::command::check_value("chain colour", f64::from(colour), colour < CHAIN_COLOURS)?;
+            colour.check("chain colour")?;
         }
         check_zones(kind, chain)?;
     }
@@ -1609,7 +1618,7 @@ fn check_macros(rack: &Device) -> Result<(), ModelError> {
     }
     for macro_settings in &macros.settings {
         if let Some(colour) = macro_settings.colour {
-            crate::command::check_value("macro colour", f64::from(colour), colour < CHAIN_COLOURS)?;
+            colour.check("macro colour")?;
         }
         crate::command::check_value(
             "macro steps",

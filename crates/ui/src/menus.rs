@@ -119,7 +119,7 @@ pub fn item_state_in(
             enabled: shell.can_open_submenu(item.row),
             ..inert(None)
         },
-        Action::System(_) | Action::Omitted(_) | Action::Separator => inert(None),
+        Action::System(_) | Action::Omitted(_) | Action::Separator | Action::Heading => inert(None),
     }
 }
 
@@ -333,7 +333,7 @@ fn items(
 ) {
     for item in shown(items_) {
         if item.is_separator() {
-            ui.separator();
+            separator(ui);
             continue;
         }
         if item.action == Action::Submenu {
@@ -430,6 +430,20 @@ pub(crate) fn item_in_with_args(
     draw_item(ui, state, platform, events)
 }
 
+/// Draws a heading in a menu, such as "Adaptive Grid:": dim text that heads
+/// the items after it. It is no item, so the arrow keys pass it by.
+pub(crate) fn heading(ui: &mut Ui, text: &str) -> egui::Response {
+    ui.add_enabled(false, egui::Button::new(text))
+}
+
+/// Draws a menu's separator, which adds the theme's `menu_separator` between
+/// two rows.
+pub(crate) fn separator(ui: &mut Ui) {
+    let space = ui.spacing().item_spacing.y;
+    let gap = crate::theme::Sizes::bundled().menu_separator - space;
+    ui.add(egui::Separator::default().spacing(gap.max(0.0)));
+}
+
 /// Draws a menu item whose [`ItemState`] the caller has settled, as a
 /// button with its check mark and keys, that runs the state's invocation and
 /// closes the menu when it's clicked.
@@ -443,7 +457,9 @@ pub(crate) fn draw_item(
     if state.checked == Some(true) {
         text = format!("✔ {text}");
     }
-    let mut button = egui::Button::new(text);
+    // An item never wraps: the menu grows to fit its widest one, keys and
+    // all ("Ctrl+Alt+U" is wider than "⌃⌥U").
+    let mut button = egui::Button::new(text).wrap_mode(egui::TextWrapMode::Extend);
     if let Some(chord) = &state.chord {
         button = button.shortcut_text(chord_text(chord, platform));
     }

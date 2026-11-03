@@ -293,6 +293,7 @@ pub enum Element {
     ResyncExternalHardware,
     LinkToggle,
     LinkMenu,
+    TempoFollower,
     TapTempo,
     Tempo,
     NudgeDown,
@@ -420,8 +421,8 @@ pub const D24: &str = "D24";
 /// the right group, the view selector included, sits 20 points (the toggle's
 /// width and a gap) left of Live's measurements. The
 /// Tempo Follower toggle and the Global Groove Amount (L-CTRL-003, 008) are
-/// hidden in Live's default state and come with the packages that build
-/// them. Widths not measured in layout.md run to the
+/// hidden in Live's default state and show when their settings say so.
+/// Widths not measured in layout.md run to the
 /// next element's left edge, less a 2-point gap. The transport section
 /// (Tempo, the time signature, the Arrangement Position, Play, Stop, the
 /// loop fields, and the Loop switch) works from WP-1.18
@@ -436,6 +437,7 @@ pub const ELEMENTS: &[Placement] = &[
     p(E::ResyncExternalHardware, "L-CTRL-029", "Resync External Hardware", CB, 54.0, RESYNC_WIDTH, Left, Button, None),
     p(E::LinkToggle, "L-CTRL-002", "Link", CB, 54.0, LINK_WIDTH, Left, Switch, None),
     p(E::LinkMenu, "L-CTRL-002", "Link Options", CB, 54.0, LINK_MENU_WIDTH, Left, MenuArrow, None),
+    p(E::TempoFollower, "L-CTRL-003", "Tempo Follower", CB, 54.0, FOLLOW_WIDTH, Left, Switch, None),
     p(E::TapTempo, "L-CTRL-004", "Tap Tempo", CB, 54.0, 28.0, Left, Button, None),
     p(E::Tempo, "L-CTRL-005", "Tempo", CB, 82.0, 44.0, Left, Value, None),
     p(E::NudgeDown, "L-CTRL-006", "Phase Nudge Down", CB, 126.0, 18.0, Left, Switch, None),
@@ -478,7 +480,7 @@ pub const ELEMENTS: &[Placement] = &[
     p(E::MidiMap, "L-CTRL-022", "MIDI Map Mode", CB, 1339.0, 28.0, Right, Switch, None),
     p(E::SampleRate, "L-CTRL-023", "Sample Rate", CB, 1369.0, 50.0, Right, Display, None),
     p(E::Cpu, "L-CTRL-024", "CPU Load", CB, 1419.0, 49.0, Right, Meter, None),
-    p(E::CpuMenu, "L-CTRL-024", "CPU Meter Options", CB, 1468.0, 8.0, Right, MenuArrow, Some("M5")),
+    p(E::CpuMenu, "L-CTRL-024", "CPU Meter Options", CB, 1468.0, 8.0, Right, MenuArrow, None),
     p(E::Overload, "L-CTRL-025", "Disk Overload", CB, 1478.0, 18.0, Right, Indicator, Some("WP-1.3")),
     p(E::RemoteIndicators, "L-CTRL-026", "Remote Input and Output Indicators", CB, 1498.0, 7.0, Right, Indicator, None),
     p(E::MidiIndicators, "L-CTRL-026", "MIDI Track Input and Output Indicators", CB, 1507.0, 14.0, Right, Indicator, None),
@@ -525,6 +527,10 @@ pub const LINK_WIDTH: f32 = 44.0;
 /// The width of the Link menu's arrow (L-CTRL-002), when it shows: the
 /// Metronome Settings arrow's.
 pub const LINK_MENU_WIDTH: f32 = 10.0;
+
+/// The width of the Tempo Follower toggle (L-CTRL-003), when it shows:
+/// Beatlayer's own, as Live's isn't measured. It holds "Follow".
+pub const FOLLOW_WIDTH: f32 = 36.0;
 
 /// The width of the New button (L-CTRL-031), when it shows.
 pub const NEW_WIDTH: f32 = 28.0;
@@ -575,6 +581,11 @@ pub struct DetailViews {
     /// it by default; a layout built without it has Live's measured
     /// positions, as with the other optional items.
     pub link: bool,
+    /// Whether the Control Bar shows the Tempo Follower toggle (L-CTRL-003,
+    /// the Tempo Follower spec R2), which sits after the Link toggle, before
+    /// Tap, and moves what is to its right right by its width. The window
+    /// shows it while Show Tempo Follower Toggle is Show.
+    pub follow: bool,
     /// Whether the Control Bar shows the New button (L-CTRL-031), which a
     /// map mode shows just before Session Record and which moves it, and
     /// what follows in the middle group, right (map modes R20).
@@ -595,6 +606,7 @@ impl DetailViews {
             global_amount: false,
             sync: (false, false),
             link: false,
+            follow: false,
             new_button: false,
         }
     }
@@ -611,6 +623,13 @@ impl DetailViews {
     #[must_use]
     pub const fn with_link(mut self, on: bool) -> Self {
         self.link = on;
+        self
+    }
+
+    /// The same, with the Tempo Follower toggle showing or not.
+    #[must_use]
+    pub const fn with_follow(mut self, on: bool) -> Self {
+        self.follow = on;
         self
     }
 
@@ -657,6 +676,7 @@ impl Default for DetailViews {
             global_amount: false,
             sync: (false, false),
             link: false,
+            follow: false,
             new_button: false,
         }
     }
@@ -965,6 +985,14 @@ impl ShellLayout {
         let link_shown =
             detail_views.link && !second && w >= MINIMUM.x + groove_shift + wanted + link_width;
         let link_shift = if link_shown { link_width } else { 0.0 };
+        // Spec: tempo-follower R2, control-bar-transport R24. The Tempo
+        // Follower toggle follows the Link toggle, before Tap, in the same
+        // room; a narrower window, and the second window, hide it.
+        let follow_width = FOLLOW_WIDTH + SYNC_GAP;
+        let follow_shown = detail_views.follow
+            && !second
+            && w >= MINIMUM.x + groove_shift + wanted + link_shift + follow_width;
+        let follow_shift = if follow_shown { follow_width } else { 0.0 };
         let sync_at = placement(Element::TapTempo).x;
         // Spec: map-modes R20. The New button shows in a map mode, before
         // Session Record, out of the room the middle group's gap has; a
@@ -977,8 +1005,13 @@ impl ShellLayout {
             let left_end = placement(Element::ScaleName);
             let middle = placement(Element::Follow);
             let gap = (middle.x + controls_extra * MIDDLE_SHARE)
-                - (left_end.x + left_end.width + groove_shift + sync_shift + link_shift);
-            (-gap).clamp(0.0, groove_shift + sync_shift + link_shift)
+                - (left_end.x
+                    + left_end.width
+                    + groove_shift
+                    + sync_shift
+                    + link_shift
+                    + follow_shift);
+            (-gap).clamp(0.0, groove_shift + sync_shift + link_shift + follow_shift)
         };
         let elements = ELEMENTS
             .iter()
@@ -996,6 +1029,7 @@ impl ShellLayout {
                         | Element::ResyncExternalHardware
                         | Element::LinkToggle
                         | Element::LinkMenu
+                        | Element::TempoFollower
                 );
                 let shift = match placement.anchor {
                     Left if control_bar && !own_sync => {
@@ -1009,7 +1043,7 @@ impl ShellLayout {
                             0.0
                         };
                         let sync = if placement.x >= sync_at {
-                            sync_shift + link_shift
+                            sync_shift + link_shift + follow_shift
                         } else {
                             0.0
                         };
@@ -1048,6 +1082,9 @@ impl ShellLayout {
                 {
                     width = 0.0;
                 }
+                if placement.element == Element::TempoFollower && !follow_shown {
+                    width = 0.0;
+                }
                 if placement.element == Element::New && !new_shown {
                     width = 0.0;
                 }
@@ -1065,6 +1102,11 @@ impl ShellLayout {
                 }
                 if placement.element == Element::LinkMenu && link_shown {
                     x += LINK_WIDTH + SYNC_GAP;
+                }
+                // The Tempo Follower toggle follows the Link toggle and its
+                // arrow.
+                if placement.element == Element::TempoFollower {
+                    x += sync_shift + link_shift;
                 }
                 // The lamps sit beside the EXT switch, one above the other.
                 if matches!(placement.element, Element::SyncInput | Element::SyncOutput)
@@ -1086,7 +1128,12 @@ impl ShellLayout {
                         };
                         Rect::from_min_size(pos2(x, y(top)), vec2(width, 8.0))
                     }
-                    Strip::ControlBar => Rect::from_min_size(pos2(x, y(28.0)), vec2(width, 18.0)),
+                    // A field is `control_field` tall, centred where Live's 18-point
+                    // row was (L-CTRL).
+                    Strip::ControlBar => {
+                        let height = crate::theme::Sizes::bundled().control_field;
+                        Rect::from_min_size(pos2(x, y(37.0 - height / 2.0)), vec2(width, height))
+                    }
                     Strip::StatusBar => Rect::from_min_size(
                         pos2(x, status_bar.top() + 4.0),
                         vec2(width, status_bar.height() - 8.0),
@@ -1260,9 +1307,12 @@ impl ShellLayout {
     }
 }
 
-/// A row's height in the browser's sidebar and content pane. Not measured
-/// in Live (browser, "To observe in Live").
-pub const BROWSER_ROW: f32 = 17.0;
+/// The distance between the rows of a list: the theme's `list_row`, 19
+/// points as Live's lists are (L-WIN-010).
+#[must_use]
+pub fn list_row() -> f32 {
+    crate::theme::Sizes::bundled().list_row
+}
 
 /// The content pane's least width, which a narrowed browser keeps before
 /// its sidebar narrows, as observed in Live 12.4.6 (browser R29).
@@ -1294,8 +1344,8 @@ pub const FILTER_VIEW_HEIGHT: f32 = 120.0;
 pub const FILTER_VIEW_GAP: f32 = 4.0;
 
 /// How high the Results bar is (L-BRW-008). Live's isn't measured; this is
-/// Beatlayer's own.
-pub const RESULTS_BAR_HEIGHT: f32 = 18.0;
+/// Beatlayer's own, tall enough for its rounded buttons.
+pub const RESULTS_BAR_HEIGHT: f32 = 22.0;
 
 /// Which of the content pane's optional parts show, which decide where the
 /// column header row and the list go.
@@ -1516,9 +1566,6 @@ pub const SEARCH_WIDTH: f32 = 480.0;
 /// Show Only Matches.
 pub const SEARCH_HEADER: f32 = 30.0;
 
-/// A row of the search field's list.
-pub const SEARCH_ROW: f32 = 22.0;
-
 /// The most rows the search field's list shows before it scrolls.
 pub const SEARCH_ROWS: usize = 12;
 
@@ -1530,7 +1577,7 @@ const SEARCH_GAP: f32 = 4.0;
 /// list under its top row, which `rows` rows of at most 12 fill.
 #[must_use]
 pub fn search_field_rect(main_view: Rect, rows: usize) -> Rect {
-    let list = rows.min(SEARCH_ROWS) as f32 * SEARCH_ROW;
+    let list = rows.min(SEARCH_ROWS) as f32 * list_row();
     let width = SEARCH_WIDTH.min(main_view.width());
     Rect::from_min_size(
         pos2(
@@ -1577,6 +1624,11 @@ pub mod header_columns {
 /// How tall the time-signature lane is (L-ARR-004).
 pub const SIGNATURE_LANE: f32 = 11.0;
 
+/// The height of the arranger track's lane (L-ARR-023).
+pub const ARRANGER_LANE: f32 = 18.0;
+/// How tall the chord lane is (L-ARR-024).
+pub const CHORD_LANE: f32 = 18.0;
+
 /// How tall the bar numbers are, above the time-signature lane inside the
 /// beat-time ruler.
 const BAR_NUMBERS: f32 = 12.0;
@@ -1600,6 +1652,16 @@ pub struct ArrangementLayout {
     /// its bar numbers and the loop brace, while the set has signature
     /// changes (L-ARR-004).
     pub signature_lane: Option<Rect>,
+    /// The arranger track, across the lanes at the top of the track lanes,
+    /// while it shows (L-ARR-023).
+    pub arranger: Option<Rect>,
+    /// The arranger track's header, in the header column (L-ARR-023).
+    pub arranger_header: Option<Rect>,
+    /// The chord lane, across the lanes' width above the first track, while
+    /// it shows (L-ARR-024), and its header in the header column.
+    pub chord_lane: Option<Rect>,
+    /// The chord lane's header (L-ARR-024).
+    pub chord_header: Option<Rect>,
     /// Set Locator (L-ARR-010, first row).
     pub set_locator: Rect,
     /// Automation Mode (L-ARR-010, first row).
@@ -1683,6 +1745,10 @@ impl ArrangementLayout {
                 pos2(lanes_right, top(115.0) + shift),
             ),
             signature_lane: None,
+            arranger: None,
+            arranger_header: None,
+            chord_lane: None,
+            chord_header: None,
             set_locator: row(1299.0, 1335.0, 82.0),
             automation_mode: row(1340.0, 1356.0, 82.0),
             lock_envelopes: row(1360.0, 1376.0, 82.0),
@@ -1759,6 +1825,10 @@ impl ArrangementLayout {
         .into_iter()
         .chain(self.overview.as_mut())
         .chain(self.signature_lane.as_mut())
+        .chain(self.arranger.as_mut())
+        .chain(self.arranger_header.as_mut())
+        .chain(self.chord_lane.as_mut())
+        .chain(self.chord_header.as_mut())
         {
             rect.min.y = rect.min.y.clamp(top, bottom);
             rect.max.y = rect.max.y.clamp(top, bottom);
@@ -1781,6 +1851,43 @@ impl ArrangementLayout {
         self.scrub = self.scrub.translate(vec2(0.0, SIGNATURE_LANE));
         self.lanes.min.y += SIGNATURE_LANE;
         self.headers.min.y += SIGNATURE_LANE;
+        self.fitted()
+    }
+
+    /// The same layout with the arranger track showing (L-ARR-023): a row
+    /// at the top of the track lanes, under the rulers, the scrub area and
+    /// the time-signature lane, and the lanes and their headers start under
+    /// it. Apply it after [`Self::with_signature_lane`].
+    #[must_use]
+    pub fn with_arranger_lane(mut self) -> Self {
+        let top = self.lanes.top();
+        let row = |left: f32, right: f32| {
+            Rect::from_min_max(pos2(left, top), pos2(right, top + ARRANGER_LANE))
+        };
+        self.arranger = Some(row(self.lanes.left(), self.lanes.right()));
+        self.arranger_header = Some(row(self.headers.left(), self.headers.right()));
+        self.lanes.min.y += ARRANGER_LANE;
+        self.headers.min.y += ARRANGER_LANE;
+        self.fitted()
+    }
+
+    /// The same layout with the chord lane showing (L-ARR-024): a row of its
+    /// own at the top of the track lanes, under the rulers, the scrub area
+    /// and the time-signature lane, which the track lanes and their headers
+    /// start under.
+    #[must_use]
+    pub fn with_chord_lane(mut self) -> Self {
+        let top = self.lanes.top();
+        self.chord_lane = Some(Rect::from_min_max(
+            pos2(self.lanes.left(), top),
+            pos2(self.lanes.right(), top + CHORD_LANE),
+        ));
+        self.chord_header = Some(Rect::from_min_max(
+            pos2(self.headers.left(), top),
+            pos2(self.headers.right(), top + CHORD_LANE),
+        ));
+        self.lanes.min.y += CHORD_LANE;
+        self.headers.min.y += CHORD_LANE;
         self.fitted()
     }
 
@@ -1836,6 +1943,9 @@ impl ArrangementLayout {
         ]);
         if let Some(lane) = self.signature_lane {
             rows.push(row("L-ARR-004", "Time Signature Lane", lane));
+        }
+        if let Some(lane) = self.chord_lane {
+            rows.push(row("L-ARR-024", "Chord Lane", lane));
         }
         if let Some(mixer) = self.mixer {
             rows.push(row("L-ARR-018", "Arrangement Mixer", mixer));

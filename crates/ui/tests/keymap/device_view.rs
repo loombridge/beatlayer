@@ -429,3 +429,37 @@ fn q_toggles_hot_swap() {
         }
     }
 }
+
+// Spec: roar R26. With the focus on Roar's Note control, Up and Down step
+// the key by a semitone and Shift with them by an octave: both rows are in
+// the Device View's context and the focused control handles them.
+#[test]
+fn roars_note_keys_are_in_the_device_context_and_the_control_handles_them() {
+    let keymap = Keymap::live12();
+    for (id, shift) in [("S-DEV-016", false), ("S-DEV-017", true)] {
+        let entry = keymap
+            .entry_for(id)
+            .unwrap_or_else(|| panic!("{id} is in the keymap"));
+        assert_eq!(entry.context, "device-view", "{id}");
+        match &entry.status {
+            Status::Widget(handler) => assert!(handler.contains("Roar"), "{id}: {handler}"),
+            other => panic!("{id} is {other:?}"),
+        }
+        for platform in [Platform::Mac, Platform::Other] {
+            for key in [Key::ArrowUp, Key::ArrowDown] {
+                let modifiers = if shift {
+                    mods(false, false, false, true)
+                } else {
+                    mods(false, false, false, false)
+                };
+                assert!(
+                    entry
+                        .chords(platform)
+                        .iter()
+                        .any(|chord| chord.matches(key, modifiers)),
+                    "{id} on {platform:?} reaches {key:?} with Shift {shift}"
+                );
+            }
+        }
+    }
+}

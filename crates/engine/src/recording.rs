@@ -200,6 +200,22 @@ impl RecordingPlan {
                 Channel::Mono(channel) => (channel, None),
                 Channel::Pair(channel) => (channel, Some(channel.saturating_add(1))),
             };
+            // Spec: link-audio R5. A track that takes a peer's channel
+            // records what it hears, as Ext. In's is recorded: its slot's
+            // pair stands for the channels its input names.
+            let link = program
+                .link_inputs
+                .iter()
+                .position(|input| input.track == track.track);
+            let (planar, device, left, right) = match link {
+                Some(slot) => (
+                    &program.link_input,
+                    program.link_inputs.len() * 2,
+                    (slot * 2 + 1) as u16,
+                    right.map(|_| (slot * 2 + 2) as u16),
+                ),
+                None => (planar, device, left, right),
+            };
             let at = |channel: u16, i: usize| {
                 let index = usize::from(channel.saturating_sub(1));
                 if index < device {

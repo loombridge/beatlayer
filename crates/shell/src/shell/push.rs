@@ -31,6 +31,15 @@ fn setup_info(setup: Setup) -> ids::PushSetup {
     }
 }
 
+fn fixed_info(fixed: bl_push::recording::FixedLength) -> ids::PushFixedLength {
+    ids::PushFixedLength {
+        on: fixed.on,
+        length: ids::PushFixedLengthValue::ALL
+            [usize::from(fixed.length).min(ids::PushFixedLengthValue::ALL.len() - 1)],
+        phrase_sync: fixed.phrase_sync,
+    }
+}
+
 fn led_info(led: Led) -> ids::PushLed {
     ids::PushLed {
         colour: led.colour,
@@ -110,6 +119,51 @@ fn mix_info(mix: &bl_push::mix::State) -> ids::PushMix {
     }
 }
 
+fn clip_info(clip: &bl_push::clip::State) -> ids::PushClipMode {
+    ids::PushClipMode {
+        clip: clip.clip,
+        shows: clip.shows.to_owned(),
+        name: clip.name.clone(),
+        looping: clip.looping,
+        controls: clip
+            .controls
+            .iter()
+            .map(|c| ids::PushClipControl {
+                encoder: c.column + 1,
+                name: c.name.clone(),
+                value: c.value.clone(),
+            })
+            .collect(),
+        zoom: clip.zoom,
+        view: [clip.view.0, clip.view.1],
+        folded: clip.folded,
+        area: clip.area.map(|area| ids::PushClipArea {
+            fit: match area.fit {
+                bl_push::note::Fit::Folded => "folded",
+                bl_push::note::Fit::Sequencer => "sequencer",
+                bl_push::note::Fit::SequencerNotes => "sequencer_notes",
+                bl_push::note::Fit::Pad => "pad",
+            }
+            .to_owned(),
+            from: area.from,
+            to: area.to,
+            low: area.low,
+            high: area.high,
+        }),
+        held_steps: clip
+            .held_steps
+            .iter()
+            .map(|step| ids::PushHeldStep {
+                clip: step.clip,
+                pad: step.key,
+                start: step.start,
+                length: step.length,
+            })
+            .collect(),
+        select_pad: clip.select_pad,
+    }
+}
+
 fn info(row: usize, input: String, output: String, snapshot: Snapshot) -> ids::PushInfo {
     let mix = (snapshot.display_mode == DisplayMode::Mix).then_some(match snapshot.mix_page {
         MixPage::Track => ids::PushMixPage::Track,
@@ -140,7 +194,26 @@ fn info(row: usize, input: String, output: String, snapshot: Snapshot) -> ids::P
         menu: snapshot.menu.map(|menu| match menu {
             bl_push::state::Menu::Setup => ids::PushMenu::Setup,
             bl_push::state::Menu::Scale => ids::PushMenu::Scale,
+            bl_push::state::Menu::Quantize => ids::PushMenu::Quantize,
+            bl_push::state::Menu::FixedLength => ids::PushMenu::FixedLength,
+            bl_push::state::Menu::Convert => ids::PushMenu::Convert,
         }),
+        recording: ids::PushRecording {
+            record: snapshot.record.to_owned(),
+            fixed_length: fixed_info(snapshot.fixed_length),
+            swing: (snapshot.swing * 100.0).round() as u8,
+            automation_arm: snapshot.automation_arm,
+            quantize_menu: snapshot
+                .quantize_menu
+                .clone()
+                .map(|menu| ids::PushQuantizeMenu {
+                    swing: menu.swing,
+                    quantize_to: menu.quantize_to,
+                    amount: menu.amount,
+                    record_quantize: menu.record_quantize,
+                    stays: menu.stays,
+                }),
+        },
         held: snapshot.held.iter().map(|b| (*b).to_owned()).collect(),
         locked: snapshot.locked.iter().map(|b| (*b).to_owned()).collect(),
         colour_picker: snapshot.picker,
@@ -161,6 +234,7 @@ fn info(row: usize, input: String, output: String, snapshot: Snapshot) -> ids::P
                 bl_push::browse::LoadKind::Add => "add",
                 bl_push::browse::LoadKind::Replace(_) => "replace",
                 bl_push::browse::LoadKind::AddTrack => "add_track",
+                bl_push::browse::LoadKind::Sample => "sample",
             }
             .to_owned(),
             replaces: match browse.load {
@@ -177,6 +251,71 @@ fn info(row: usize, input: String, output: String, snapshot: Snapshot) -> ids::P
                 .collect(),
             in_use: browse.in_use,
         }),
+        device: snapshot.device.as_ref().map(|device| ids::PushDeviceMode {
+            devices: device
+                .devices
+                .iter()
+                .map(|d| ids::PushDevice {
+                    button: d.button,
+                    device: d.device,
+                    name: d.name.clone(),
+                    depth: d.depth,
+                    kind: d.kind.to_owned(),
+                    enabled: d.enabled,
+                    selected: d.selected,
+                    unfolded: d.unfolded,
+                })
+                .collect(),
+            left_arrow: device.arrows.0,
+            right_arrow: device.arrows.1,
+            empty: device.empty,
+            edit: device.edit,
+            bank: device.bank,
+            banks: device.banks.clone(),
+            bank_page: device.page,
+            bank_pages: device.pages,
+            params: device
+                .params
+                .iter()
+                .map(|p| ids::PushParam {
+                    name: p.name.clone(),
+                    value: p.value.clone(),
+                    held: p.held,
+                })
+                .collect(),
+            chains: device
+                .chains
+                .iter()
+                .map(|c| ids::PushChain {
+                    chain: c.chain,
+                    name: c.name.clone(),
+                    selected: c.selected,
+                })
+                .collect(),
+            mute_locked: snapshot.locked.contains(&"mute"),
+            simpler: device.simpler.as_ref().map(|simpler| ids::PushSimpler {
+                empty: simpler.empty,
+                mode: simpler.mode.to_owned(),
+                main_bank: simpler.main,
+                zoom: format!("×{:.1}", simpler.zoom),
+                zoom_around: simpler.around.to_owned(),
+                region: simpler.region,
+                slices: simpler.slices,
+                selected_slice: simpler.selected,
+                pad_slicing: simpler.pad_slicing,
+                edit_buttons: simpler
+                    .buttons
+                    .iter()
+                    .map(|button| ids::PushSimplerButton {
+                        button: button.button,
+                        name: button.name.to_owned(),
+                        text: button.text.clone(),
+                        on: button.on,
+                    })
+                    .collect(),
+            }),
+        }),
+        clip: snapshot.clip.as_ref().map(clip_info),
         session: snapshot.session.as_ref().map(|session| {
             let look = |look: &bl_push::session::Look| ids::PushSessionLook {
                 shows: look.what.to_owned(),
@@ -203,12 +342,50 @@ fn info(row: usize, input: String, output: String, snapshot: Snapshot) -> ids::P
             error: snapshot.display.error.clone(),
             frames: snapshot.display.frames,
         },
+        note: snapshot.note.map(|note| ids::PushNote {
+            track: note.track,
+            layout: note.layout,
+            overlay: note.overlay,
+            overlay_locked: note.overlay_locked,
+            bank: note.bank,
+            selected_pad: note.selected_pad,
+            step_size: note.step_size,
+            edited_clip: note.edited_clip,
+            edited_scene: note.edited_scene,
+            page: note.page,
+            following: note.following,
+            velocity: note.velocity,
+            accent: note.accent,
+            repeat: note.repeat,
+            held_steps: note
+                .held_steps
+                .into_iter()
+                .map(|step| ids::PushHeldStep {
+                    clip: step.clip,
+                    pad: step.key,
+                    start: step.start,
+                    length: step.length,
+                })
+                .collect(),
+            melody: note.melody.map(|melody| ids::PushMelody {
+                in_key: melody.in_key,
+                fixed: melody.fixed,
+                layout: melody.spacing,
+                direction: melody.direction,
+                octave: melody.octave,
+                low: melody.low,
+                high: melody.high,
+                range: melody.range,
+                selected_notes: melody.selected_notes,
+                strip_modulation: melody.modulation,
+            }),
+        }),
     }
 }
 
 impl Shell {
     /// The Push 2 surfaces that run: their rows, from 0, and their handles.
-    fn pushes(&self) -> Vec<(usize, Arc<Handle>)> {
+    pub(super) fn pushes(&self) -> Vec<(usize, Arc<Handle>)> {
         let surfaces = self.midi.surfaces();
         let report = self.midi.surface_rows();
         (0..bl_control::ROWS)
@@ -324,6 +501,51 @@ impl Shell {
                 self.prefs.midi = self.midi.prefs();
                 self.save_preferences();
                 Ok(to_value(&setup_info(self.midi.push().setup())))
+            }
+            ids::SET_FIXED_LENGTH => {
+                let args = Self::args::<ids::PushSetFixedLengthArgs>(id, args)?;
+                let mut fixed = self.midi.push().fixed_length();
+                let was = fixed.on;
+                fixed.on = args.enabled.unwrap_or(fixed.on);
+                fixed.phrase_sync = args.phrase_sync.unwrap_or(fixed.phrase_sync);
+                if let Some(length) = args.length {
+                    fixed.length = ids::PushFixedLengthValue::ALL
+                        .iter()
+                        .position(|&l| l == length)
+                        .map_or(fixed.length, |at| at as u8);
+                }
+                self.midi.push().set_fixed_length(fixed);
+                // A preference: kept for the next start, no part of the set.
+                self.surface_push_saved();
+                self.prefs.midi = self.midi.prefs();
+                self.save_preferences();
+                if fixed.on && !was {
+                    let signatures = &self.editor.document().settings().time_signatures;
+                    let at = self.arrangement.transport().position;
+                    let length = fixed.value().ticks(signatures.signature_at(at));
+                    self.loop_last_stretch(length);
+                }
+                Ok(to_value(&fixed_info(fixed)))
+            }
+            ids::SET_SWING => {
+                let args = Self::args::<ids::PushSetSwingArgs>(id, args)?;
+                self.midi.push().set_swing(f64::from(args.amount) / 100.0);
+                self.surface_push_saved();
+                self.prefs.midi = self.midi.prefs();
+                self.save_preferences();
+                Ok(to_value(&args.amount))
+            }
+            ids::NEW => {
+                let args = Self::args::<ids::PushSessionArgs>(id, args)?;
+                self.push_new(id, args)
+            }
+            ids::DUPLICATE => {
+                let args = Self::args::<ids::PushSessionArgs>(id, args)?;
+                self.push_duplicate(id, args)
+            }
+            ids::CONVERT => {
+                let args = Self::args::<ids::PushConvertArgs>(id, args)?;
+                self.push_convert(id, args.to)
             }
             ids::DISPLAY_FRAME => {
                 let args = Self::args::<ids::PushDisplayFrameArgs>(id, args)?;

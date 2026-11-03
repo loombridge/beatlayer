@@ -41,7 +41,7 @@ pub use filter_view::{
 };
 pub use labels::{collections_edit_id, label_check_id, label_rename_id, labels_edit_id};
 
-use crate::layout::{ArrangementLayout, BROWSER_ROW, BrowserLayout, BrowserParts};
+use crate::layout::{ArrangementLayout, BrowserLayout, BrowserParts, list_row};
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
 
@@ -68,6 +68,12 @@ pub fn part_of(id: Id) -> Option<&'static str> {
 #[must_use]
 pub fn control_id(name: &str) -> Id {
     Id::new(("browser-control", name))
+}
+
+/// The reference token in the search field (spec: sound-similarity R12).
+#[must_use]
+pub fn similar_token_id() -> Id {
+    Id::new("browser-similar-token")
 }
 
 /// The search field's ID.
@@ -298,11 +304,56 @@ struct AskCopy {
 }
 
 /// A deletion that waits for the person's answer: saved labels use what it
-/// deletes (browser-tags R8).
+/// deletes (browser-tags R8), or a collection holds items (R47).
 #[derive(Clone, Debug, PartialEq)]
 struct AskDelete {
+    command: &'static str,
+    title: &'static str,
+    message: String,
     args: Value,
-    labels: Vec<String>,
+}
+
+/// Asks before a nested collection that holds items is deleted (spec:
+/// browser-tags R47).
+fn ask_delete_collection(ctx: &egui::Context, args: Value, name: &str, held: usize) {
+    ctx.data_mut(|data| {
+        data.insert_temp(
+            ask_delete_id(),
+            AskDelete {
+                command: ids::DELETE_COLLECTION,
+                title: "Delete Collection",
+                message: format!(
+                    "{name} and the collections inside it hold {held} items. They will leave \
+                     them; no file is deleted."
+                ),
+                args,
+            },
+        );
+    });
+}
+
+/// What a drag of items the other payloads don't cover carries: their keys
+/// (a folder), so a collection's label can take them (spec: browser-tags
+/// R46).
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ItemsDrag {
+    keys: Vec<String>,
+}
+
+/// The keys of the items being dragged from the content pane, whichever
+/// payload they travel in.
+fn dragged_item_keys(ctx: &egui::Context) -> Option<Vec<String>> {
+    if let Some(drag) = DragAndDrop::payload::<BrowserDrag>(ctx) {
+        let keys: Vec<String> = drag.paths.iter().chain(&drag.plugin).cloned().collect();
+        return Some(keys).filter(|keys| !keys.is_empty());
+    }
+    if let Some(drag) = DragAndDrop::payload::<DevicesDrag>(ctx) {
+        return Some(drag.paths.clone());
+    }
+    if let Some(drag) = DragAndDrop::payload::<SetDrag>(ctx) {
+        return drag.tracks.is_none().then(|| vec![drag.path.clone()]);
+    }
+    DragAndDrop::payload::<ItemsDrag>(ctx).map(|drag| drag.keys.clone())
 }
 
 fn ask_delete_id() -> Id {
@@ -537,7 +588,9 @@ enum SideRow {
     CollectionsHeading,
     /// The Library heading, which has Edit and Done at its right.
     LibraryHeading,
-    Label(LabelInfo),
+    /// A label, how deep a nested collection lies (0 for the others), and
+    /// whether it holds nested collections (spec: browser-tags R45).
+    Label(LabelInfo, u16, bool),
     AddFolder,
 }
 
@@ -681,10 +734,14 @@ fn command(modifiers: egui::Modifiers) -> bool {
 }
 
 impl BrowserUi {
-    /// A browser scrolled to the top.
+    /// A browser scrolled to the top, its Tag Editor showing the Function
+    /// group folded: the group is long, and the person's own groups come
+    /// after it (spec: browser-tags R11, R49).
     #[must_use]
     pub fn new() -> Self {
-        Self::default()
+        let mut ui = Self::default();
+        ui.folded_groups.insert("Function".to_owned());
+        ui
     }
 
     /// What the last frame built.
@@ -889,6 +946,66 @@ impl BrowserUi {
         response
     }
 
+    /// The reference token of a similarity search, at the left of the search
+    /// field (spec: sound-similarity R12, R18); returns where it is.
+    fn similar_token(
+        ui: &mut Ui,
+        theme: &Theme,
+        field: Rect,
+        reference: &Path,
+        events: &mut Vec<UiEvent>,
+    ) -> Rect {
+        let name = file_name(&reference.to_string_lossy());
+        let text = format!("Similar to {name}");
+        let galley =
+            ui.painter()
+                .layout_no_wrap(text.clone(), theme.small_font(), theme.colors.text.0);
+        let width = (galley.size().x + 22.0).min(field.width() * 0.6);
+        let rect = Rect::from_min_size(
+            field.left_top() + vec2(2.0, 2.0),
+            vec2(width, field.height() - 4.0),
+        );
+        let id = similar_token_id();
+        let response = ui.interact(rect, id, Sense::click());
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(
+            rect,
+            theme.sizes.corner,
+            if response.hovered() {
+                theme.colors.control_hover.0
+            } else {
+                theme.colors.control.0
+            },
+        );
+        painter
+            .with_clip_rect(Rect::from_min_max(
+                rect.min,
+                pos2(rect.right() - 14.0, rect.bottom()),
+            ))
+            .galley(
+                pos2(rect.left() + 5.0, rect.center().y - galley.size().y / 2.0),
+                galley,
+                theme.colors.text.0,
+            );
+        glyph(
+            &painter,
+            Rect::from_center_size(pos2(rect.right() - 8.0, rect.center().y), vec2(10.0, 10.0)),
+            Glyph::Cross,
+            theme.colors.text_dim.0,
+        );
+        if response.clicked() {
+            invoke(events, ids::SHOW_SIMILAR, json!({ "end": true }));
+        }
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &text));
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(Role::Button);
+            node.set_label(text);
+            node.set_description("Ends the similarity search".to_owned());
+            node.set_bounds(bounds(rect));
+        });
+        rect
+    }
+
     fn top_row(
         &mut self,
         ui: &mut Ui,
@@ -939,12 +1056,21 @@ impl BrowserUi {
                 i.key_pressed(Key::Escape),
             )
         });
+        // Spec: sound-similarity R12, R14, R18. The reference of a similarity
+        // search is a token at the field's left: clicking it, or Backspace
+        // in an empty field, ends the search.
+        let mut field = layout.search;
+        let reference = view.similar_reference();
+        if let Some(reference) = reference {
+            let token = Self::similar_token(ui, theme, layout.search, reference, events);
+            field.min.x = token.right() + 2.0;
+        }
         let edit = egui::TextEdit::singleline(&mut self.search)
             .id(search_id())
-            .hint_text("Search")
+            .hint_text(if reference.is_some() { "" } else { "Search" })
             .font(theme.small_font())
             .margin(vec2(4.0, 2.0));
-        let response = ui.put(layout.search, edit);
+        let response = ui.put(field, edit);
         // Tab's order in the browser (the accessibility spec, R3;
         // I-FOCUS-007): the search field, the Filter View toggle and menu,
         // the sidebar, the Filter View, then the list.
@@ -960,6 +1086,14 @@ impl BrowserUi {
         if response.changed() {
             invoke(events, ids::SEARCH, json!({ "query": self.search }));
             self.search_seen.clone_from(&self.search);
+        }
+        if reference.is_some()
+            && response.has_focus()
+            && !response.changed()
+            && self.search.is_empty()
+            && ui.input(|i| i.key_pressed(Key::Backspace))
+        {
+            invoke(events, ids::SHOW_SIMILAR, json!({ "end": true }));
         }
         // The Filter View toggle and its menu (spec: browser-tags R18,
         // R21).
@@ -996,10 +1130,7 @@ impl BrowserUi {
             if !suggestions.is_empty() {
                 let rect = Rect::from_min_size(
                     pos2(layout.search.left(), layout.search.bottom() + 2.0),
-                    vec2(
-                        layout.search.width(),
-                        suggestions.len() as f32 * BROWSER_ROW,
-                    ),
+                    vec2(layout.search.width(), suggestions.len() as f32 * list_row()),
                 );
                 let painter = ui.painter_at(rect);
                 painter.rect_filled(rect, 0.0, theme.colors.panel.0);
@@ -1009,8 +1140,8 @@ impl BrowserUi {
                 );
                 for (index, suggestion) in suggestions.iter().enumerate() {
                     let row = Rect::from_min_size(
-                        pos2(rect.left(), rect.top() + index as f32 * BROWSER_ROW),
-                        vec2(rect.width(), BROWSER_ROW),
+                        pos2(rect.left(), rect.top() + index as f32 * list_row()),
+                        vec2(rect.width(), list_row()),
                     );
                     let id = Id::new(("browser-search-suggestion", suggestion.clone()));
                     let response = ui.interact(row, id, Sense::click());
@@ -1037,7 +1168,7 @@ impl BrowserUi {
             self.go_to_results(shell, events);
         } else if response.lost_focus()
             && escape
-            && (!self.search.is_empty() || view.filter_count() > 0)
+            && (!self.search.is_empty() || view.filter_count() > 0 || reference.is_some())
         {
             // Spec: browser-tags R22. Esc clears the search words and the
             // selected tags.
@@ -1094,24 +1225,24 @@ impl BrowserUi {
         if view.cursor() != self.seen_cursor {
             self.seen_cursor = view.cursor();
             if let Some(cursor) = view.cursor() {
-                let top = cursor as f32 * BROWSER_ROW;
+                let top = cursor as f32 * list_row();
                 if top < self.list_scroll {
                     self.list_scroll = top;
-                } else if top + BROWSER_ROW > self.list_scroll + list.height() {
-                    self.list_scroll = top + BROWSER_ROW - list.height();
+                } else if top + list_row() > self.list_scroll + list.height() {
+                    self.list_scroll = top + list_row() - list.height();
                 }
             }
         }
-        self.list_scroll = scrolled(ui, list, self.list_scroll, total as f32 * BROWSER_ROW);
+        self.list_scroll = scrolled(ui, list, self.list_scroll, total as f32 * list_row());
         // Spec: view-options R1. A middle-button drag pans the list, the
         // content following the pointer.
         if let Some(delta) = crate::middle::pan(ui, list) {
             self.list_scroll = (self.list_scroll - delta.y)
-                .clamp(0.0, (total as f32 * BROWSER_ROW - list.height()).max(0.0));
+                .clamp(0.0, (total as f32 * list_row() - list.height()).max(0.0));
         }
-        let first = (self.list_scroll / BROWSER_ROW).floor() as usize;
+        let first = (self.list_scroll / list_row()).floor() as usize;
         let shown =
-            ((list.height() / BROWSER_ROW).ceil() as usize + 1).min(total.saturating_sub(first));
+            ((list.height() / list_row()).ceil() as usize + 1).min(total.saturating_sub(first));
         let mut list_ui = ui.new_child(egui::UiBuilder::new().max_rect(list));
         list_ui.set_clip_rect(list);
         let modifiers = ui.input(|i| i.modifiers);
@@ -1119,8 +1250,8 @@ impl BrowserUi {
             let Some(item) = view.row(index) else {
                 break;
             };
-            let top = list.top() + index as f32 * BROWSER_ROW - self.list_scroll;
-            let rect = Rect::from_min_size(pos2(list.left(), top), vec2(list.width(), BROWSER_ROW));
+            let top = list.top() + index as f32 * list_row() - self.list_scroll;
+            let rect = Rect::from_min_size(pos2(list.left(), top), vec2(list.width(), list_row()));
             self.item_row(
                 &mut list_ui,
                 shell,
@@ -1149,6 +1280,16 @@ impl BrowserUi {
                 pos2(list.left() + 8.0, list.top() + 8.0),
                 galley,
                 theme.colors.pending.0,
+            );
+        }
+        // L-BRW-008: a search or a filter that matches nothing says so.
+        if total == 0 && view.note().is_none() && view.results_bar() {
+            painter.text(
+                list.center(),
+                Align2::CENTER_CENTER,
+                "No Results",
+                theme.small_font(),
+                theme.colors.text_dim.0,
             );
         }
         // Spec: accessibility R7: outlined only with Outline View in Focus.
@@ -1222,22 +1363,17 @@ impl BrowserUi {
         if list_response.clicked() {
             ui.memory_mut(|m| m.request_focus(tag_editor_list_id()));
         }
-        self.tag_scroll = scrolled(
-            ui,
-            list,
-            self.tag_scroll,
-            visible.len() as f32 * BROWSER_ROW,
-        );
+        self.tag_scroll = scrolled(ui, list, self.tag_scroll, visible.len() as f32 * list_row());
         // Spec: view-options R1. A middle-button drag pans the list, the
         // content following the pointer.
         if let Some(delta) = crate::middle::pan(ui, list) {
             self.tag_scroll = (self.tag_scroll - delta.y).clamp(
                 0.0,
-                (visible.len() as f32 * BROWSER_ROW - list.height()).max(0.0),
+                (visible.len() as f32 * list_row() - list.height()).max(0.0),
             );
         }
-        let first = (self.tag_scroll / BROWSER_ROW).floor() as usize;
-        let shown = ((list.height() / BROWSER_ROW).ceil() as usize + 1)
+        let first = (self.tag_scroll / list_row()).floor() as usize;
+        let shown = ((list.height() / list_row()).ceil() as usize + 1)
             .min(visible.len().saturating_sub(first));
         // The keys the Tag Editor reads itself (spec: browser-tags R17):
         // Up and Down move through its rows, and Left and Right fold and
@@ -1301,9 +1437,9 @@ impl BrowserUi {
             let row_rect = Rect::from_min_size(
                 pos2(
                     list.left(),
-                    list.top() + (index - first) as f32 * BROWSER_ROW - self.tag_scroll,
+                    list.top() + (index - first) as f32 * list_row() - self.tag_scroll,
                 ),
-                vec2(list.width(), BROWSER_ROW),
+                vec2(list.width(), list_row()),
             );
             let over = dragging.is_some() && row_rect.contains(pointer);
             if over {
@@ -1557,6 +1693,17 @@ impl BrowserUi {
                     theme.small_font(),
                     colour,
                 );
+                // Spec: browser-tags R51. A tag some selected item carries
+                // automatically is marked.
+                if row.auto {
+                    painter.text(
+                        pos2(rect.right() - 6.0, rect.center().y),
+                        Align2::RIGHT_CENTER,
+                        "auto",
+                        theme.small_font(),
+                        theme.colors.text_dim.0,
+                    );
+                }
                 if row.kind == TagEditorRowKind::Group {
                     // The group folds and unfolds on a click.
                     if response.clicked() {
@@ -1617,7 +1764,18 @@ impl BrowserUi {
                                 invoke(events, ids::DELETE_TAG, args);
                             } else {
                                 ui.ctx().data_mut(|data| {
-                                    data.insert_temp(ask_delete_id(), AskDelete { args, labels });
+                                    data.insert_temp(
+                                        ask_delete_id(),
+                                        AskDelete {
+                                            command: ids::DELETE_TAG,
+                                            title: "Delete Tag",
+                                            message: format!(
+                                                "The saved labels {} use it. They will leave it out.",
+                                                labels.join(", ")
+                                            ),
+                                            args,
+                                        },
+                                    );
                                 });
                             }
                             ui.close();
@@ -1641,7 +1799,9 @@ impl BrowserUi {
                         TagState::Fixed => "fixed",
                         TagState::None => "empty",
                     });
-                    node.set_description(if row.marked {
+                    node.set_description(if row.auto {
+                        "automatic tag".to_owned()
+                    } else if row.marked {
                         "the selection carries one of its tags".to_owned()
                     } else {
                         String::new()
@@ -1778,12 +1938,12 @@ impl BrowserUi {
         let add_height = 20.0;
         let tags = view.quick_tags();
         let rows = rect.height() - add_height;
-        let shown = ((rows / BROWSER_ROW).floor() as usize).min(tags.len());
+        let shown = ((rows / list_row()).floor() as usize).min(tags.len());
         let mut hint: Option<String> = None;
         for (index, tag) in tags.iter().take(shown).enumerate() {
             let row = Rect::from_min_size(
-                pos2(rect.left(), rect.top() + index as f32 * BROWSER_ROW),
-                vec2(rect.width(), BROWSER_ROW),
+                pos2(rect.left(), rect.top() + index as f32 * list_row()),
+                vec2(rect.width(), list_row()),
             );
             let id = quick_tag_id(&tag.full_name);
             let response = ui.interact(row, id, Sense::click());
@@ -1805,7 +1965,18 @@ impl BrowserUi {
                 theme.small_font(),
                 theme.colors.text.0,
             );
-            // A person's own tag shows an X that takes it off.
+            // Spec: browser-tags R51. An automatic tag is marked.
+            if tag.auto {
+                painter.text(
+                    pos2(row.right() - 24.0, row.center().y),
+                    Align2::RIGHT_CENTER,
+                    "auto",
+                    theme.small_font(),
+                    theme.colors.text_dim.0,
+                );
+            }
+            // A person's own tag or an automatic one shows an X that takes
+            // it off.
             if tag.removable {
                 let cross = Rect::from_center_size(
                     pos2(row.right() - 10.0, row.center().y),
@@ -1839,9 +2010,9 @@ impl BrowserUi {
                     json!({ "query": format!("#{}", tag.full_name) }),
                 );
             }
-            // The context menu: Show Tag in Tag Editor (C-QTAG-001).
+            // The context menu: Show "<tag>" tag in Editor (C-QTAG-001).
             let menu = |ui: &mut Ui, events: &mut Vec<UiEvent>| {
-                let response = ui.button("Show Tag in Tag Editor");
+                let response = ui.button(format!("Show \"{}\" tag in Editor", tag.name));
                 crate::menus::register_item(ui.ctx(), &response);
                 crate::menus::take_focus_first(ui, &response);
                 if response.clicked() {
@@ -2001,16 +2172,13 @@ impl BrowserUi {
             return;
         };
         let mut answer = None;
-        egui::Window::new("Delete Tag")
+        egui::Window::new(ask.title)
             .id(Id::new("browser-ask-delete-window"))
             .collapsible(false)
             .resizable(false)
             .anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0))
             .show(ctx, |ui| {
-                ui.label(format!(
-                    "The saved labels {} use it. They will leave it out.",
-                    ask.labels.join(", ")
-                ));
+                ui.label(&ask.message);
                 ui.horizontal(|ui| {
                     for (label, delete) in [("Delete", true), ("Cancel", false)] {
                         if ui.button(label).clicked() {
@@ -2024,7 +2192,7 @@ impl BrowserUi {
             if delete {
                 let mut args = ask.args;
                 args["confirm"] = json!(true);
-                invoke(events, ids::DELETE_TAG, args);
+                invoke(events, ask.command, args);
             }
         }
     }
@@ -2170,6 +2338,14 @@ impl BrowserUi {
             | ItemKind::DawProject => {
                 glyph(&painter, mark, Glyph::Preset, ink);
             }
+            // Spec: plugin-scanning R15. A plug-in with presets has a fold
+            // triangle in place of its icon.
+            ItemKind::Plugin if item.presets => glyph(
+                &painter,
+                mark,
+                if item.open { Glyph::Down } else { Glyph::Right },
+                ink,
+            ),
             ItemKind::Plugin | ItemKind::Device | ItemKind::Devices => {
                 glyph(&painter, mark, Glyph::Plugin, ink);
             }
@@ -2179,6 +2355,12 @@ impl BrowserUi {
             theme.colors.text.0
         } else {
             theme.colors.text.0.gamma_multiply(0.92)
+        };
+        // Spec: browser-tags R43. A hidden plug-in's row is dimmed.
+        let text_colour = if item.hidden {
+            text_colour.gamma_multiply(0.5)
+        } else {
+            text_colour
         };
         // Spec: plugin-scanning R11. A plug-in's row shows its format as a
         // badge before its name, as Live's does.
@@ -2285,6 +2467,34 @@ impl BrowserUi {
             }
         }
 
+        // Spec: sound-similarity R11, R18, browser R32. With one compatible
+        // item selected, an icon at the right end of its row shows similar
+        // files.
+        if selected
+            && view
+                .selected_reference()
+                .is_ok_and(|p| p == Path::new(&item.path))
+        {
+            let icon = Rect::from_center_size(
+                pos2(rect.right() - 12.0, rect.center().y),
+                vec2(16.0, 16.0),
+            );
+            let id = control_id("Show Similar Files");
+            let hit = ui.interact(icon, id, Sense::click());
+            if hit.hovered() {
+                painter.rect_filled(icon, theme.sizes.corner, theme.colors.control_hover.0);
+            }
+            glyph(&painter, icon, Glyph::Similar, theme.colors.text.0);
+            if hit.clicked() {
+                invoke(events, ids::SHOW_SIMILAR, json!({ "path": item.path }));
+            }
+            hit.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, "Show Similar Files"));
+            ui.ctx().accesskit_node_builder(id, |node| {
+                node.set_role(Role::Button);
+                node.set_label("Show Similar Files".to_owned());
+                node.set_bounds(bounds(icon));
+            });
+        }
         if item.kind == ItemKind::Folder {
             drop_chains(ui, theme, rect, &item.path, events);
             drop_tracks(ui, shell, theme, rect, &item.path, events);
@@ -2292,7 +2502,7 @@ impl BrowserUi {
         }
         // Spec: browser R25, C-BROWSER-001 to 011. The item's context menu,
         // from a right-click or the keyboard's context-menu key.
-        if item_menu::has_menu(item.kind) {
+        if item_menu::has_menu(item.kind) && !is_plugin_preset(item) {
             if response.secondary_clicked() && !selected {
                 invoke(events, ids::SELECT, json!({ "paths": [item.path] }));
             }
@@ -2391,7 +2601,7 @@ impl BrowserUi {
                 ItemKind::Notice => {}
             }
         } else if response.clicked()
-            && openable(item.kind)
+            && openable(item)
             && item.kind != ItemKind::Folder
             && ui
                 .input(|i| i.pointer.interact_pos())
@@ -2437,7 +2647,7 @@ impl BrowserUi {
                         path: item.path.clone(),
                     },
                 );
-            } else if item.kind == ItemKind::Plugin {
+            } else if item.kind == ItemKind::Plugin || is_plugin_preset(item) {
                 DragAndDrop::set_payload(
                     ui.ctx(),
                     BrowserDrag {
@@ -2460,6 +2670,7 @@ impl BrowserUi {
                 // Devices row.
                 DragAndDrop::set_payload(ui.ctx(), drag);
             } else {
+                let paths_all = paths.clone();
                 let (loadable, mut audio): (Vec<String>, Vec<String>) =
                     paths.into_iter().partition(|p| is_loadable(p));
                 audio.retain(|p| is_audio(p) || is_sfz(p) || is_clip(p));
@@ -2477,6 +2688,8 @@ impl BrowserUi {
                     );
                 } else if !loadable.is_empty() {
                     DragAndDrop::set_payload(ui.ctx(), DevicesDrag { paths: loadable });
+                } else if item.kind == ItemKind::Folder {
+                    DragAndDrop::set_payload(ui.ctx(), ItemsDrag { keys: paths_all });
                 }
             }
         }
@@ -2575,7 +2788,11 @@ impl BrowserUi {
                     .labels()
                     .into_iter()
                     .filter_map(|l| match l.label {
-                        Label::Collection(n) if item.collections.contains(&n) => Some(l.name),
+                        Label::Collection(n)
+                            if u8::try_from(n).is_ok_and(|n| item.collections.contains(&n)) =>
+                        {
+                            Some(l.name)
+                        }
                         _ => None,
                     })
                     .collect();
@@ -2987,12 +3204,12 @@ impl BrowserUi {
         };
         if right {
             match item.kind {
-                kind if openable(kind) && !item.open => invoke(
+                _ if openable(&item) && !item.open => invoke(
                     events,
                     ids::OPEN_FOLDER,
                     json!({ "path": item.path, "open": true, "keep_others": cmd }),
                 ),
-                kind if openable(kind) => {
+                _ if openable(&item) => {
                     if let Some(child) = view.row(cursor + 1).filter(|c| c.depth > item.depth) {
                         self.anchor = Some(cursor + 1);
                         invoke(events, ids::SELECT, json!({ "paths": [child.path] }));
@@ -3005,7 +3222,7 @@ impl BrowserUi {
             }
         }
         if left {
-            if openable(item.kind) && item.open {
+            if openable(&item) && item.open {
                 invoke(
                     events,
                     ids::OPEN_FOLDER,
@@ -3079,8 +3296,13 @@ impl BrowserUi {
         let doc = shell.editor().document();
         let pinned = view.pinned_tracks(doc).count();
         let layout = ArrangementLayout::compute(main_view, view.overview(), pinned);
-        let lanes = if doc.settings().time_signatures.has_changes() {
-            layout.with_signature_lane().lanes
+        let layout = if doc.settings().time_signatures.has_changes() {
+            layout.with_signature_lane()
+        } else {
+            layout
+        };
+        let lanes = if doc.settings().arranger_track {
+            layout.with_arranger_lane().lanes
         } else {
             layout.lanes
         };
@@ -3216,7 +3438,7 @@ impl BrowserUi {
             if released {
                 DragAndDrop::clear_payload(&ctx);
                 if let Some(track) = track
-                    && shell.browser_view().plugin(Path::new(&key)).is_some()
+                    && shell.browser_view().plugin_of_row(&key).is_some()
                 {
                     invoke(events, ids::SELECT, json!({ "paths": [key] }));
                     invoke(
@@ -3406,17 +3628,25 @@ fn drop_chains(ui: &Ui, theme: &Theme, rect: Rect, folder: &str, events: &mut Ve
     }
 }
 
+/// Whether `item` is a plug-in's preset, which a drag carries as its plug-in
+/// (the plug-in scanning spec, R17).
+fn is_plugin_preset(item: &Item) -> bool {
+    item.kind == ItemKind::Preset && bl_shell::browser::plugin_presets::is_preset_key(&item.path)
+}
+
 /// Whether rows of this kind open to list what is inside them.
-fn openable(kind: ItemKind) -> bool {
-    matches!(
-        kind,
-        ItemKind::Folder
-            | ItemKind::Set
-            | ItemKind::Track
-            | ItemKind::Group
-            | ItemKind::Return
-            | ItemKind::Main
-    )
+fn openable(item: &Item) -> bool {
+    // Spec: plugin-scanning R15. A plug-in with presets opens to list them.
+    item.presets
+        || matches!(
+            item.kind,
+            ItemKind::Folder
+                | ItemKind::Set
+                | ItemKind::Track
+                | ItemKind::Group
+                | ItemKind::Return
+                | ItemKind::Main
+        )
 }
 
 /// What dragging `item` carries when it is a set or a row of one: the set,
@@ -3532,13 +3762,13 @@ fn scrolled(ui: &Ui, area: Rect, offset: f32, content: f32) -> f32 {
 
 /// Beatlayer's own small marks for the browser.
 #[derive(Clone, Copy)]
-enum Glyph {
+pub(crate) enum Glyph {
     Left,
     Right,
     Down,
     Up,
     Filter,
-    Bookmark,
+    AddLabel,
     Cross,
     Menu,
     Wave,
@@ -3546,9 +3776,10 @@ enum Glyph {
     Plugin,
     Clip,
     Speaker,
+    Similar,
 }
 
-fn glyph(painter: &egui::Painter, rect: Rect, glyph: Glyph, colour: Color32) {
+pub(crate) fn glyph(painter: &egui::Painter, rect: Rect, glyph: Glyph, colour: Color32) {
     let c = rect.center();
     let s = rect.width().min(rect.height()) * 0.3;
     let triangle = |points: [Pos2; 3]| {
@@ -3571,19 +3802,22 @@ fn glyph(painter: &egui::Painter, rect: Rect, glyph: Glyph, colour: Color32) {
             c + vec2(s, s * 0.7),
             c + vec2(0.0, -s),
         ]),
-        Glyph::Bookmark => {
-            let w = s * 0.8;
-            painter.add(Shape::convex_polygon(
-                vec![
-                    c + vec2(-w, -s),
-                    c + vec2(w, -s),
-                    c + vec2(w, s),
-                    c + vec2(0.0, s * 0.4),
-                    c + vec2(-w, s),
-                ],
-                colour,
-                Stroke::NONE,
-            ));
+        Glyph::AddLabel => {
+            // Three lines and a plus: Live's Add Label mark.
+            for dy in [-s, 0.0, s] {
+                painter.line_segment(
+                    [c + vec2(-s * 1.4, dy), c + vec2(s * 0.2, dy)],
+                    Stroke::new(1.0, colour),
+                );
+            }
+            painter.line_segment(
+                [c + vec2(s * 0.9, -s * 0.6), c + vec2(s * 0.9, s * 0.6)],
+                Stroke::new(1.0, colour),
+            );
+            painter.line_segment(
+                [c + vec2(s * 0.3, 0.0), c + vec2(s * 1.5, 0.0)],
+                Stroke::new(1.0, colour),
+            );
         }
         Glyph::Cross => {
             painter.line_segment([c + vec2(-s, -s), c + vec2(s, s)], Stroke::new(1.5, colour));
@@ -3634,6 +3868,12 @@ fn glyph(painter: &egui::Painter, rect: Rect, glyph: Glyph, colour: Color32) {
                 1.0,
                 colour,
             );
+        }
+        Glyph::Similar => {
+            // Beatlayer's own mark for Show Similar Files: two overlapping
+            // rings, two sounds that are alike.
+            painter.circle_stroke(c + vec2(-s * 0.45, 0.0), s * 0.85, Stroke::new(1.0, colour));
+            painter.circle_stroke(c + vec2(s * 0.45, 0.0), s * 0.85, Stroke::new(1.0, colour));
         }
         Glyph::Speaker => {
             let w = rect.width();

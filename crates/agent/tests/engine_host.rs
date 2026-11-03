@@ -830,13 +830,24 @@ fn a_transport_refusal_reaches_the_agent_that_asked() {
     wait(&control, &mut client, "the engine to record", |c| {
         c.transport().shell.poll_engine().recording
     });
-    call(
-        &control,
-        &mut client,
-        "transport",
-        json!({ "action": "stop" }),
-    );
-    // The take's writer is still being finished: the shell hasn't polled.
+    client
+        .call("transport", json!({ "action": "stop" }))
+        .unwrap()
+        .ok()
+        .unwrap();
+    // Run blocks until the engine has stopped recording, without polling the
+    // shell: whether the take's writer has finished by then is a thread's
+    // timing, so the shell must not get to see it.
+    let host = client.transport();
+    host.agent.sync_engine(&mut host.shell);
+    for _ in 0..2_000 {
+        if !host.shell.audio_mut().transport_state().recording {
+            break;
+        }
+        control.run_frames(256);
+    }
+    assert!(!host.shell.audio_mut().transport_state().recording);
+    // The shell hasn't polled, so it still holds the take.
     let refused = client
         .call(
             "run",

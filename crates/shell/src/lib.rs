@@ -87,6 +87,7 @@ pub mod export;
 pub mod export_dialog;
 pub mod files;
 pub mod link;
+pub mod link_audio;
 pub mod midi;
 pub mod midi_files;
 pub mod midi_tools;
@@ -95,6 +96,7 @@ pub mod mixer_view;
 mod modulation;
 pub mod multi_clip;
 pub mod note_filters;
+pub mod packages;
 pub mod perception;
 pub mod permission;
 pub mod placeholders;
@@ -117,6 +119,7 @@ pub mod settings;
 mod shell;
 pub mod stems;
 pub mod tap_tempo;
+pub mod tempo_follower;
 #[doc(hidden)]
 pub mod testing;
 pub mod tracks;
@@ -158,7 +161,18 @@ pub use bl_shell_spec::editing as editing_commands;
 /// The Link commands' IDs and their argument and result types (WP-7.14,
 /// WP-7.15).
 pub use bl_shell_spec::link as link_commands;
+/// The Tempo Follower commands' IDs and their argument and result types
+/// (WP-9.13).
+pub use bl_shell_spec::tempo_follower as tempo_follower_commands;
+/// The view options' command IDs and their argument and result types
+/// (WP-6.49).
+pub use bl_shell_spec::view_options as view_option_commands;
 
+/// The arranger track's command IDs and their argument and result types
+/// (WP-6.45).
+pub use bl_shell_spec::arranger as arranger_commands;
+/// The chord lane's view command IDs and their argument types (WP-6.48).
+pub use bl_shell_spec::chord_lane as chord_lane_commands;
 /// The envelope keys' command IDs and their argument and result types
 /// (WP-6.26).
 pub use bl_shell_spec::envelope_keys as envelope_commands;
@@ -170,6 +184,7 @@ pub use bl_shell_spec::file_manager as file_manager_commands;
 /// The grooves' commands that need the shell, and the Groove Pool's view
 /// (WP-6.19, WP-6.20), for the UI to run by ID.
 pub use bl_shell_spec::groove as groove_commands;
+pub use bl_shell_spec::linked_clips as linked_clip_commands;
 /// The Arrangement's locator command IDs and their argument and result
 /// types (WP-6.24).
 pub use bl_shell_spec::locator as locator_commands;
@@ -193,6 +208,9 @@ pub use bl_shell_spec::note_filters as note_filter_commands;
 /// The Clip View's note-editing command IDs and their argument and result
 /// types (WP-2.3).
 pub use bl_shell_spec::notes as note_commands;
+/// The Packages manager's command IDs and their argument and result types
+/// (WP-9.1).
+pub use bl_shell_spec::packages as package_commands;
 /// A drum rack's pad view and the commands on pads (WP-5.6).
 pub use bl_shell_spec::pads as pad_commands;
 /// The perception commands' IDs and their argument and result types

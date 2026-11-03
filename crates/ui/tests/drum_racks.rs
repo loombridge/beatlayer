@@ -558,3 +558,48 @@ fn dragged_drum_chains_stay_before_the_return_chains() {
         h.shell.message()
     );
 }
+
+// Spec: drum-racks R12, R30 (C-PAD). A pad that holds a device opens a menu
+// of Live's rows in Live's order, the similar-sample items dim for a pad that
+// holds no sampler; an empty pad opens none.
+#[test]
+fn a_pads_menu_lists_lives_rows_and_an_empty_pad_opens_none() {
+    let mut h = harness();
+    let (rack, _) = kit(&mut h, &[36, 38]);
+    let layout = pad_layout_of(&mut h, rack);
+    let right_click = |h: &mut Harness, at: Pos2| {
+        h.frame(vec![Event::PointerMoved(at)]);
+        for pressed in [true, false] {
+            h.frame(vec![Event::PointerButton {
+                pos: at,
+                button: PointerButton::Secondary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            }]);
+        }
+        Harness::nodes(&h.settle())
+    };
+    let nodes = right_click(&mut h, layout.pads[1].pad.center());
+    assert!(
+        !nodes
+            .iter()
+            .any(|n| n.label.starts_with("Save as Default Pad")),
+        "an empty pad opens no menu"
+    );
+    let nodes = right_click(&mut h, layout.pads[2].pad.center());
+    use common::MenuRow::{Dim, Item, Sep};
+    common::assert_menu(
+        &nodes,
+        &[
+            Item("Rename"),
+            Item("Delete"),
+            Sep,
+            Item("Save as Default Pad"),
+            Sep,
+            Dim("Next Similar"),
+            Dim("Previous Similar"),
+            Dim("Save as Similarity Reference"),
+            Dim("Return to Reference"),
+        ],
+    );
+}

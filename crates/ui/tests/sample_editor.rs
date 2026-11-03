@@ -1391,3 +1391,53 @@ fn an_audio_clip_has_no_mpe_tab() {
         bl_shell::note_commands::ClipTab::Notes
     );
 }
+
+// Spec: video R12.
+#[test]
+fn a_video_clips_movie_markers_are_cues_in_the_marker_strip() {
+    let scratch = Scratch::new("cues");
+    let path = scratch.0.join("Chapters.mov");
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/video/mjpeg-chapters.mov"),
+        &path,
+    )
+    .unwrap();
+    let mut h = Harness::manual_with_title_bar(Window::Main);
+    let track = h
+        .shell
+        .editor()
+        .document()
+        .top_level()
+        .find(|t| {
+            h.shell
+                .editor()
+                .document()
+                .track(*t)
+                .is_some_and(|t| t.kind() == bl_model::TrackKind::Audio)
+        })
+        .unwrap();
+    h.shell
+        .run(
+            "browser.add_to_arrangement",
+            json!({ "paths": [path.display().to_string()], "track": track, "at": 0 }),
+        )
+        .unwrap();
+    let clip = h
+        .shell
+        .editor()
+        .document()
+        .track(track)
+        .unwrap()
+        .clips()
+        .next()
+        .unwrap()
+        .id;
+    h.shell
+        .run("arrangement.select_clips", json!({ "clips": [clip] }))
+        .unwrap();
+    h.shell.run("view.toggle_clip_view", json!({})).unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    let intro = Harness::node(&nodes, "Cue Intro").bounds.expect("drawn");
+    let drop = Harness::node(&nodes, "Cue Drop").bounds.expect("drawn");
+    assert!(intro.x0 < drop.x0, "the later cue is further along");
+}

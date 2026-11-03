@@ -267,6 +267,19 @@ impl Scale {
         bl_core::scale::holds(self.root, self.steps(), key)
     }
 
+    /// The place of `key` among the scale's degrees, from 0 for the root, or
+    /// none while Scale Mode is off or the scale doesn't hold it (the view
+    /// options spec, R3).
+    #[must_use]
+    pub fn degree(&self, key: u8) -> Option<usize> {
+        let above = (i16::from(key) - i16::from(self.root)).rem_euclid(12);
+        self.enabled.then(|| {
+            self.steps()
+                .iter()
+                .position(|&step| i16::from(step) == above)
+        })?
+    }
+
     /// The key `degrees` degrees from `key` (the scales spec, R2): a key in
     /// the scale lands on the scale note that many degrees above or below
     /// it, and a key outside it moves by as many semitones as the scale
@@ -455,6 +468,21 @@ mod tests {
         assert!(
             Scale::new(2, ScaleName::Dorian).holds(62),
             "D3 is in D Dorian"
+        );
+    }
+
+    #[test]
+    fn a_key_has_its_place_among_the_scales_degrees() {
+        // Spec: view-options R3
+        let d_minor = Scale::new(2, ScaleName::Minor);
+        assert_eq!(d_minor.degree(62), Some(0), "D is the root");
+        assert_eq!(d_minor.degree(74), Some(0), "in any octave");
+        assert_eq!(d_minor.degree(69), Some(4), "A is the fifth");
+        assert_eq!(d_minor.degree(63), None, "D# isn't in D minor");
+        assert_eq!(
+            Scale::default().degree(60),
+            None,
+            "none while Scale Mode is off"
         );
     }
 

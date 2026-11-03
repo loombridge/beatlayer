@@ -1107,3 +1107,49 @@ fn a_time_selection_drag_survives_the_track_under_it_going() {
     }]);
     h.settle();
 }
+
+#[test]
+fn a_video_clip_draws_sprocket_holes_along_its_title_bar() {
+    // Spec: video R6. A clip that names a movie draws a row of holes along
+    // its title bar that an audio clip doesn't.
+    let mut scene = benchmark::scene(1, 1, 1);
+    // At the start, where the view is.
+    let first = scene
+        .editor
+        .document()
+        .track(scene.tracks[0])
+        .unwrap()
+        .clips()
+        .next()
+        .unwrap()
+        .id;
+    scene
+        .editor
+        .apply(bl_model::Command::MoveClip {
+            clip: first,
+            track: scene.tracks[0],
+            start: Ticks::ZERO,
+        })
+        .unwrap();
+    let (clip, mut data) = {
+        let doc = scene.editor.document();
+        let clip = doc
+            .track(scene.tracks[0])
+            .unwrap()
+            .clips()
+            .next()
+            .unwrap()
+            .clone();
+        (clip.id, serde_json::to_value(&clip.data).unwrap())
+    };
+    let mut h = with_scene(scene);
+    let plain = h.main.arrangement().stats().rects;
+    data["audio"]["video"] = json!(true);
+    h.shell
+        .run("clip.set_data", json!({ "clip": clip, "data": data }))
+        .unwrap();
+    h.settle();
+    let video = h.main.arrangement().stats().rects;
+    assert_eq!(h.main.arrangement().stats().clips, 1);
+    assert!(video >= plain + 5, "{plain} rectangles became {video}");
+}

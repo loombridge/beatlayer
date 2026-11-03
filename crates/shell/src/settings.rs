@@ -177,6 +177,9 @@ pub struct Preferences {
     /// The plug-ins the browser hides, as `format/plugin_id` keys
     /// (WP-2.9, IMP-07). A set that uses a hidden plug-in still loads it.
     pub hidden_plugins: BTreeSet<String>,
+    /// The installed extensions that are switched off, by ID (extensions
+    /// R6). A new install is on.
+    pub disabled_extensions: BTreeSet<String>,
     /// Whether the browser shows hidden plug-ins (WP-2.9, IMP-07).
     pub show_hidden_plugins: bool,
     /// The format to prefer when a plug-in exists in several formats

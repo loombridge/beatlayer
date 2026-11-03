@@ -50,6 +50,7 @@ The commands, by the part of their ID before its first dot:
 - [`edit`](edit.md)
 - [`envelope`](envelope.md)
 - [`export`](export.md)
+- [`extension`](extension.md)
 - [`file_manager`](file_manager.md)
 - [`focus`](focus.md)
 - [`groove`](groove.md)
@@ -7700,6 +7701,63 @@ Changes to Complex Pro's controls.
 
 </details>
 
+### `ComponentRow`
+
+A component of an extension, as its manifest gives it (R1).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `file` | string | yes | Its file in the extension's folder. |
+| `kind` | string | yes | What it does. |
+| `world` | string | yes | The version of the `beatlayer:ext` world it targets. |
+| `imports` | array of string | yes | The imports it asks for. |
+| `memory_mib` | integer, at least 0 | yes | The memory its instances reserve up front, in MiB. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A component of an extension, as its manifest gives it (R1).",
+  "properties": {
+    "file": {
+      "description": "Its file in the extension's folder.",
+      "type": "string"
+    },
+    "imports": {
+      "description": "The imports it asks for.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "kind": {
+      "description": "What it does.",
+      "type": "string"
+    },
+    "memory_mib": {
+      "description": "The memory its instances reserve up front, in MiB.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "world": {
+      "description": "The version of the `beatlayer:ext` world it targets.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "file",
+    "kind",
+    "world",
+    "imports",
+    "memory_mib"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ConditionArgs`
 
 The Condition filter's controls in `clip_view.note_filters`.
@@ -13140,6 +13198,196 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `ExtensionDescription`
+
+What `extension.describe` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | Its ID. |
+| `name` | string | yes | Its name. |
+| `version` | string | yes | Its version. |
+| `author` | string | yes | Who made it. |
+| `licence` | string | yes | The licence it's under. |
+| `description` | string | yes | What it does. |
+| `enabled` | boolean | yes | Whether it is on. |
+| `components` | array of [`ComponentRow`](#componentrow) | yes | Its components. |
+| `calls` | array of string | yes | The registered commands it may call, each with its permission class (R44). None until extensions reach the set (R38). |
+| `last_failure` | string or null | no | Why a component of it was stopped, if one was. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `extension.describe` returns.",
+  "properties": {
+    "author": {
+      "description": "Who made it.",
+      "type": "string"
+    },
+    "calls": {
+      "description": "The registered commands it may call, each with its permission class (R44). None until extensions reach the set (R38).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "components": {
+      "description": "Its components.",
+      "items": {
+        "$ref": "#/$defs/ComponentRow"
+      },
+      "type": "array"
+    },
+    "description": {
+      "description": "What it does.",
+      "type": "string"
+    },
+    "enabled": {
+      "description": "Whether it is on.",
+      "type": "boolean"
+    },
+    "id": {
+      "description": "Its ID.",
+      "type": "string"
+    },
+    "last_failure": {
+      "description": "Why a component of it was stopped, if one was.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "licence": {
+      "description": "The licence it's under.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "version": {
+      "description": "Its version.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "version",
+    "author",
+    "licence",
+    "description",
+    "enabled",
+    "components",
+    "calls"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ExtensionList`
+
+What `extension.list` and the commands that change the list return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `folder` | string | yes | The User Library folder the extensions are installed in. |
+| `extensions` | array of [`ExtensionRow`](#extensionrow) | yes | The installed extensions, by ID. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `extension.list` and the commands that change the list return.",
+  "properties": {
+    "extensions": {
+      "description": "The installed extensions, by ID.",
+      "items": {
+        "$ref": "#/$defs/ExtensionRow"
+      },
+      "type": "array"
+    },
+    "folder": {
+      "description": "The User Library folder the extensions are installed in.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "folder",
+    "extensions"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ExtensionRow`
+
+An installed extension, as `extension.list` gives it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | Its ID, which the other commands take. |
+| `name` | string | yes | Its name. |
+| `version` | string | yes | Its version. |
+| `kinds` | array of string | yes | What its components do, once each: `midi-tool`, `control-surface`, `audio-effect`, `instrument` or `midi-effect`. |
+| `enabled` | boolean | yes | Whether it is on. |
+| `last_failure` | string or null | no | Why a component of it was stopped, if one was (R10 to R12): kept until the extension is switched on again or Beatlayer restarts. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An installed extension, as `extension.list` gives it.",
+  "properties": {
+    "enabled": {
+      "description": "Whether it is on.",
+      "type": "boolean"
+    },
+    "id": {
+      "description": "Its ID, which the other commands take.",
+      "type": "string"
+    },
+    "kinds": {
+      "description": "What its components do, once each: `midi-tool`, `control-surface`, `audio-effect`, `instrument` or `midi-effect`.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "last_failure": {
+      "description": "Why a component of it was stopped, if one was (R10 to R12): kept until the extension is switched on again or Beatlayer restarts.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "version": {
+      "description": "Its version.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "version",
+    "kinds",
+    "enabled"
+  ],
+  "type": "object"
 }
 ```
 

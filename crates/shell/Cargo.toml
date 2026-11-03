@@ -39,6 +39,8 @@ bl-link.workspace = true
 # The browser decodes previews and registers the files it adds to the set
 # in the media store (WP-1.10).
 bl-media.workspace = true
+# Installed extensions and the components they run (WP-9.29).
+bl-ext.workspace = true
 # MIDI ports and the computer MIDI keyboard (WP-2.2), and the queue they send
 # the engine's processor.
 bl-midi-io.workspace = true
@@ -104,6 +106,8 @@ bl-test-lv2 = { path = "../test-lv2" }
 bl-test-vst3 = { path = "../test-vst3" }
 # Standard MIDI Files the import tests generate (WP-2.21).
 midly = "0.5.3"
+# The extension tests' components, written as WebAssembly text (WP-9.29).
+wat = "1"
 # The allocation trap, so tests can show the audio callback stays off the
 # heap (the real-time rules).
 bl-rt.workspace = true

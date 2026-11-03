@@ -130,6 +130,7 @@ pub mod devices;
 pub mod editing;
 pub mod envelope_keys;
 pub mod export;
+pub mod extensions;
 pub mod file_manager;
 pub mod freeze;
 pub mod groove;
@@ -223,6 +224,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     perception::register(registry)?;
     stems::register(registry)?;
     packages::register(registry)?;
+    extensions::register(registry)?;
     sample_editor::register(registry)?;
     audio_editing::register(registry)?;
     audio_panel::register(registry)?;

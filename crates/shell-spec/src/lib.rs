@@ -133,6 +133,7 @@ pub mod export;
 pub mod extensions;
 pub mod file_manager;
 pub mod freeze;
+pub mod granulator;
 pub mod groove;
 pub mod keymap;
 pub mod link;
@@ -211,6 +212,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     multisampler::register(registry)?;
     autosampler::register(registry)?;
     cv::register(registry)?;
+    granulator::register(registry)?;
     tracks::register(registry)?;
     linked_clips::register(registry)?;
     session_view::register(registry)?;

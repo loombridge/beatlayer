@@ -543,6 +543,12 @@ impl View<'_> {
                 };
             }
         }
+        // Spec: granulator iii R23. A Granulator III's capture: its source,
+        // Length, whether it is capturing, the frames captured and the file
+        // of the last capture, which `granulator.capture` changes.
+        if let Some(capture) = self.shell.capture_of(device) {
+            value["capture"] = capture;
+        }
         // A multisampler's layers and the options of its layer list
         // (WP-5.13, R30).
         if !device.layers.is_default() {
@@ -560,6 +566,11 @@ impl View<'_> {
         let wavetables = self.shell.wavetables_of(device);
         if !wavetables.is_empty() {
             value["wavetables"] = json!(wavetables);
+        }
+        // Spec: operator R27. The partials of the user waves an Operator's
+        // oscillators play, which `device.set_partials` changes.
+        if !device.partials.is_empty() {
+            value["partials"] = json!(device.partials);
         }
         // Spec: modulation R18. A modulator's mappings, which
         // `modulator.map` and `modulator.unmap` change.

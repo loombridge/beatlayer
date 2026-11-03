@@ -226,6 +226,7 @@ impl Shell {
         // A drag ends the edit a selected breakpoint opened, keeping it.
         self.end_key_edit();
         if phase == GesturePhase::Cancel {
+            self.follow_warp_marker(phase, None);
             if let Some(gesture) = self.edit_gesture.take() {
                 self.editor.cancel().ok();
                 self.arrangement.restore_selection(&gesture.view);
@@ -257,6 +258,7 @@ impl Shell {
             }
             outcome = self.gesture_step(invocation);
         }
+        self.follow_warp_marker(phase, invocation);
         if phase == GesturePhase::Commit
             && self.edit_gesture.take().is_some()
             && self.editor.commit().unwrap_or(false)

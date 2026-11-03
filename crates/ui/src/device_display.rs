@@ -36,6 +36,10 @@ const ACTIVITY: &str = "Activity";
 const TUNNEL: &str = "Tunnel";
 /// The series whose markers draw as bars, a band's level each (Vocoder).
 const BANDS: &str = "Bands";
+/// Operator's user wave: its series draws as bars a drag across them sets
+/// (operator R27), and the view whose readings are drawn as lines of text.
+const PARTIALS: &str = "Partials";
+const ALGORITHM: &str = "Algorithm";
 /// A handle's drawn radius, and the half side of what takes a press.
 const HANDLE_RADIUS: f32 = 4.5;
 const HANDLE_HIT: f32 = 8.0;
@@ -47,6 +51,14 @@ const METER_RANGE_DB: f32 = 24.0;
 const HISTORY: usize = 240;
 /// The view buttons' size, in points.
 const VIEW_BUTTON: egui::Vec2 = vec2(26.0, 12.0);
+/// Granulator III's Capture button's size, in points.
+const CAPTURE_BUTTON: egui::Vec2 = vec2(46.0, 14.0);
+
+/// The ID of Granulator III's Capture button.
+#[must_use]
+pub fn capture_button_id(device: DeviceId) -> Id {
+    Id::new(("granulator-capture", device))
+}
 
 /// The ID of a view button in a device's panel.
 #[must_use]
@@ -60,7 +72,28 @@ fn view_label(view: &str) -> &str {
         "Transfer Curve" => "Curve",
         ACTIVITY => "Act",
         COLLAPSED => "Min",
+        "Perspective" => "Persp",
+        other if other.ends_with(" Envelope") => "Env",
+        other if other.ends_with(" Oscillator") => "Osc",
+        other if other.ends_with(" Response") => "Resp",
         other => other.strip_prefix("Stage ").unwrap_or(other),
+    }
+}
+
+/// The views whose buttons show with `shown`: where some views share a
+/// name but for their last word (Operator's `Osc A Envelope` and `Osc A
+/// Oscillator`), those that share `shown`'s; otherwise all of them.
+fn peers<'a>(views: &'a [String], shown: Option<&str>) -> Vec<&'a String> {
+    let group = |view: &str| view.rsplit_once(' ').map(|(group, _)| group.to_owned());
+    let shared = views
+        .iter()
+        .any(|a| group(a).is_some() && views.iter().filter(|b| group(b) == group(a)).count() > 1);
+    match shown {
+        Some(shown) if shared => views
+            .iter()
+            .filter(|view| group(view) == group(shown))
+            .collect(),
+        _ => views.iter().collect(),
     }
 }
 
@@ -105,6 +138,29 @@ pub fn draw(
     panel: &DevicePanel,
     events: &mut Vec<UiEvent>,
 ) {
+    draw_cell(
+        ui,
+        theme,
+        cell,
+        (id, enabled),
+        display,
+        (panel, true),
+        events,
+    );
+}
+
+/// As [`draw`], for a device whose display has several cells and views that
+/// only some of them offer: `buttons` says whether this cell draws the view
+/// buttons.
+pub fn draw_cell(
+    ui: &mut Ui,
+    theme: &Theme,
+    cell: Rect,
+    (id, enabled): (Id, bool),
+    display: &DeviceDisplay,
+    (panel, buttons): (&DevicePanel, bool),
+    events: &mut Vec<UiEvent>,
+) {
     let views = &panel.description.views;
     let c = &theme.colors;
     let painter = ui.painter_at(cell);
@@ -128,6 +184,8 @@ pub fn draw(
         step_row(&painter, area, ink, display);
     } else if !collapsed {
         plot(&painter, theme, area, ink, display);
+        partials(ui, area, id, display, panel, events);
+        algorithm(&painter, theme, area, ink, display);
         crate::particles::draw(ui, theme, area, (id, enabled), display, panel, events);
         handles(ui, theme, area, (id, enabled), display, panel, events);
     }
@@ -142,9 +200,71 @@ pub fn draw(
         painter.rect_filled(fill, 0.0, ink);
     }
     modulator_readings(&painter, theme, cell, ink, display);
-    if views.len() > 1 {
-        view_buttons(ui, theme, cell, display, views, enabled, events);
+    let shown: Vec<String> = peers(views, display.view.as_deref())
+        .into_iter()
+        .cloned()
+        .collect();
+    if buttons && shown.len() > 1 {
+        view_buttons(ui, theme, cell, display, &shown, enabled, events);
     }
+    if let Some(capturing) = display.reading("Capturing") {
+        capture_button(
+            ui,
+            theme,
+            cell,
+            display.device,
+            capturing.value > 0.0,
+            enabled,
+            events,
+        );
+    }
+}
+
+/// Spec: granulator iii R19, R25. The Capture button along the cell's
+/// bottom-left corner: it starts a capture, and while one runs it stops it.
+fn capture_button(
+    ui: &mut Ui,
+    theme: &Theme,
+    cell: Rect,
+    device: DeviceId,
+    capturing: bool,
+    enabled: bool,
+    events: &mut Vec<UiEvent>,
+) {
+    let c = &theme.colors;
+    let rect = Rect::from_min_size(
+        pos2(cell.left() + 3.0, cell.bottom() - CAPTURE_BUTTON.y - 3.0),
+        CAPTURE_BUTTON,
+    );
+    let button = capture_button_id(device);
+    let response = ui.interact(rect, button, Sense::click());
+    crate::focus::register(ui.ctx(), button, bl_shell::Area::Detail, None);
+    if response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+    {
+        events.push(UiEvent::Invoke(Invocation::new(
+            "granulator.capture",
+            json!({ "device": device, "action": if capturing { "stop" } else { "start" } }),
+        )));
+    }
+    let face = match (capturing, enabled) {
+        (true, true) => c.accent.0,
+        (true, false) => c.inactive.0,
+        _ => c.control.0,
+    };
+    let ink = if capturing { c.accent_text.0 } else { c.text.0 };
+    ui.painter().rect_filled(rect, theme.sizes.corner, face);
+    ui.painter().text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        if capturing { "Stop" } else { "Capture" },
+        theme.small_font(),
+        ink,
+    );
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(Role::Button);
+        node.set_label("Capture");
+        node.set_selected(capturing);
+    });
 }
 
 /// Gated Delay's step row (the gated-delay spec, R9): the switches are the
@@ -235,6 +355,21 @@ fn plot(painter: &Painter, theme: &Theme, area: Rect, ink: Color32, display: &De
     }
     for series in display.series.iter().filter(|s| !s.values.is_empty()) {
         let at = |i: usize, v: f32| point(area, series, series.x_at(i), v);
+        if series.name == PARTIALS {
+            // Each bar fills its own slot of the width, where a drag picks
+            // it (`partials`).
+            let wide = area.width() / series.values.len().max(1) as f32;
+            for (i, &v) in series.values.iter().enumerate() {
+                let x = area.left() + wide * (i as f32 + 0.5);
+                let top = at(i, v).y;
+                let bar = Rect::from_min_max(
+                    pos2(x - wide * 0.4, top),
+                    pos2(x + wide * 0.4, area.bottom()),
+                );
+                painter.rect_filled(bar, 0.0, ink);
+            }
+            continue;
+        }
         if series.name == SPECTRUM {
             let wide = area.width() / series.values.len().max(1) as f32;
             for (i, &v) in series.values.iter().enumerate() {
@@ -286,6 +421,146 @@ fn plot(painter: &Painter, theme: &Theme, area: Rect, ink: Color32, display: &De
         let at = point(area, series, marker.x, marker.y);
         painter.circle(at, 3.0, ink, Stroke::new(1.0, c.text.0));
     }
+}
+
+/// Operator's algorithm graph as lines of text, one reading each (operator
+/// R29): the readings say which operators modulate which.
+fn algorithm(painter: &Painter, theme: &Theme, area: Rect, ink: Color32, display: &DeviceDisplay) {
+    if display.view.as_deref() != Some(ALGORITHM) {
+        return;
+    }
+    let line = theme.small_font().size + 2.0;
+    for (i, reading) in display.readings.iter().enumerate() {
+        let text = if i == 0 {
+            format!("Algorithm {}", reading.text)
+        } else {
+            format!("{}: {}", reading.name, reading.text)
+        };
+        painter.text(
+            pos2(area.left() + 4.0, area.top() + 4.0 + line * i as f32),
+            Align2::LEFT_TOP,
+            text,
+            theme.small_font(),
+            ink,
+        );
+    }
+}
+
+/// An Operator oscillator's user wave in its Oscillator view (operator
+/// R27): dragging across the bars sets each partial the pointer crosses to
+/// its height, as one undo step named Change Partials, with the harmonics
+/// editor's Even Only, Odd Only and Normalize applied.
+fn partials(
+    ui: &mut Ui,
+    area: Rect,
+    id: Id,
+    display: &DeviceDisplay,
+    panel: &DevicePanel,
+    events: &mut Vec<UiEvent>,
+) {
+    let Some(series) = display.series(PARTIALS) else {
+        return;
+    };
+    let Some(osc) = display
+        .view
+        .as_deref()
+        .and_then(|view| view.strip_prefix("Osc "))
+        .and_then(|rest| rest.bytes().next())
+        .map(|letter| letter - b'A')
+    else {
+        return;
+    };
+    let count = series.values.len();
+    let pid = id.with(("partials", osc));
+    let response = ui.interact(area, pid, Sense::click_and_drag());
+    crate::focus::register(ui.ctx(), pid, bl_shell::Area::Detail, None);
+    let name = "Change Partials".to_owned();
+    let options = panel.harmonics.unwrap_or_default();
+    let drag_id = pid.with("drag");
+    let started = response.drag_started() || response.clicked();
+    // Where a bar is and how high the pointer is, at `pos`.
+    let sample = |pos: Pos2| {
+        let index = (((pos.x - area.left()) / area.width() * count as f32).floor())
+            .clamp(0.0, count as f32 - 1.0) as usize;
+        (
+            index,
+            ((area.bottom() - pos.y) / area.height()).clamp(0.0, 1.0),
+        )
+    };
+    if started {
+        // A drag starts a few points from where the pointer went down: the
+        // partial under it then is the first the pointer crossed.
+        let origin = ui.input(|i| i.pointer.press_origin()).map(sample);
+        ui.data_mut(|data| {
+            data.insert_temp(
+                drag_id,
+                PartialsDrag {
+                    levels: series.values.clone(),
+                    last: origin.filter(|_| response.drag_started()),
+                },
+            );
+        });
+        events.push(UiEvent::BeginNamedGesture(name));
+    }
+    if (response.dragged() || started)
+        && let Some(pos) = response.interact_pointer_pos()
+    {
+        let (index, level) = sample(pos);
+        let drag = ui.data_mut(|data| {
+            let drag = data.get_temp_mut_or_default::<PartialsDrag>(drag_id);
+            // Each partial the pointer crossed since the last frame, at the
+            // height it had there.
+            let (from, from_level) = drag.last.unwrap_or((index, level));
+            let (lo, hi) = (from.min(index), from.max(index));
+            for k in lo..=hi {
+                // The partial's number is its place plus 1: the even ones
+                // are the odd places.
+                let allowed =
+                    (!options.even_only || k % 2 == 1) && (!options.odd_only || k % 2 == 0);
+                if allowed {
+                    let t = if hi == lo {
+                        1.0
+                    } else {
+                        (k as f32 - from as f32) / (index as f32 - from as f32)
+                    };
+                    drag.levels[k] = (from_level + (level - from_level) * t).clamp(0.0, 1.0);
+                }
+            }
+            drag.last = Some((index, level));
+            if options.normalize {
+                let loudest = drag.levels.iter().copied().fold(0.0f32, f32::max);
+                if loudest > 0.0 {
+                    for level in &mut drag.levels {
+                        *level /= loudest;
+                    }
+                }
+            }
+            drag.clone()
+        });
+        if drag.levels != series.values {
+            events.push(UiEvent::Invoke(Invocation::new(
+                "device.set_partials",
+                json!({ "device": display.device, "osc": osc, "levels": drag.levels }),
+            )));
+        }
+    }
+    if response.drag_stopped() || response.clicked() {
+        ui.data_mut(|data| data.remove::<PartialsDrag>(drag_id));
+        events.push(UiEvent::EndGesture);
+    }
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(Role::Group);
+        node.set_label(format!("Partials of oscillator {}", char::from(b'A' + osc)));
+        node.set_value(display.text());
+    });
+}
+
+/// A drag across Operator's partials: the levels so far and where the
+/// pointer last was.
+#[derive(Clone, Default)]
+struct PartialsDrag {
+    levels: Vec<f32>,
+    last: Option<(usize, f32)>,
 }
 
 /// How far apart, across `area`, the first two bands of a band display sit:
@@ -385,7 +660,8 @@ pub fn handle_center(
         .iter()
         .position(|p| p.id == handle.x)?;
     let travel = panel.description.params[index].normalize(panel.value(index)) as f32;
-    let x = area.left() + area.width() * travel;
+    let span = handle.span.unwrap_or([0.0, 1.0]);
+    let x = area.left() + area.width() * (span[0] + (span[1] - span[0]) * travel);
     let y = point(area, display.series(&marker.series)?, marker.x, marker.y).y;
     Some(pos2(x, y))
 }
@@ -457,9 +733,14 @@ fn handles(
         }
         if response.dragged() {
             let delta = response.drag_delta();
+            // A handle whose parameter's travel covers a part of the cell
+            // moves by that part of the cell's width.
+            let share = handle
+                .span
+                .map_or(1.0, |span| (span[1] - span[0]).max(0.01));
             let drag = ui.data_mut(|data| {
                 let drag = data.get_temp_mut_or_default::<HandleDrag>(drag_id);
-                drag.moved[0] += f64::from(delta.x / area.width());
+                drag.moved[0] += f64::from(delta.x / (area.width() * share));
                 drag.moved[1] -= f64::from(delta.y / area.height());
                 *drag
             });
@@ -602,7 +883,7 @@ fn activity(
 
 /// The buttons that choose the display's view, along the cell's top-right
 /// corner.
-fn view_buttons(
+pub(crate) fn view_buttons(
     ui: &mut Ui,
     theme: &Theme,
     cell: Rect,

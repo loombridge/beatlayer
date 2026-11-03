@@ -169,6 +169,7 @@ impl Shell {
     pub fn poll_engine(&mut self) -> EngineTransport {
         let engine = self.audio.transport_state();
         self.poll_capture();
+        self.poll_granulator_captures();
         // Spec: automation-editing R23. A recording edits the set as it
         // runs, so it ends the edit a selected breakpoint opened.
         if self.recording.is_some() || self.session_run.is_some() {

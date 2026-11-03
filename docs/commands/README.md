@@ -53,6 +53,7 @@ The commands, by the part of their ID before its first dot:
 - [`extension`](extension.md)
 - [`file_manager`](file_manager.md)
 - [`focus`](focus.md)
+- [`granulator`](granulator.md)
 - [`groove`](groove.md)
 - [`keymap`](keymap.md)
 - [`link`](link.md)
@@ -64,6 +65,7 @@ The commands, by the part of their ID before its first dot:
 - [`modulation`](modulation.md)
 - [`modulator`](modulator.md)
 - [`note`](note.md)
+- [`operator`](operator.md)
 - [`packages`](packages.md)
 - [`pad`](pad.md)
 - [`perception`](perception.md)
@@ -9220,6 +9222,52 @@ What `file_manager.delete_unused` returns.
 
 </details>
 
+### `DestinationRemoved`
+
+What `device.remove_destination` returns: the slots it emptied.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `destination` | string | yes | The destination's name. |
+| `cleared` | array of integer from 0 to 255 | yes | The numbers of the slots whose routes it cleared. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.remove_destination` returns: the slots it emptied.",
+  "properties": {
+    "cleared": {
+      "description": "The numbers of the slots whose routes it cleared.",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "destination": {
+      "description": "The destination's name.",
+      "type": "string"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    }
+  },
+  "required": [
+    "device",
+    "destination",
+    "cleared"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `DetailState`
 
 What the detail area's commands return, and `view.state` reports under `detail` (detail-views R17): which views show, where the focus is and how tall the Clip View is.
@@ -9345,6 +9393,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `mpe` | [`PluginMpe`](#pluginmpe) | no | A plug-in's MPE Mode and the MPE/Multi-channel Settings its MPE MIDI goes out on (the MPE spec, R14, R18). Off in a new device, and left out of the saved set until changed. Native devices never set it. |
 | `other_params` | array or null | no | The values of the state that isn't active, in the same form as [`params`](Self::params) (device compare R1, R10). `None` while the two states are equal, as a new device's are, and left out of the saved set then. Use [`other_params`](Self::other_params) to read it. |
 | `own_name` | string | no | The device's own name, such as `Auto Filter`, which the title bar shows while Show Preset Name is off. Empty while it's the same as [`name`](Self::name), and left out of the saved set then. |
+| `partials` | array of [`Partials`](#partials) | no | The partials of the user waves an Operator's oscillators play (the Operator spec, R27), by oscillator; one that isn't listed has the first partial alone. Empty for a device without drawn waves, and left out of the saved set then. |
 | `plugin` | [`PluginState`](#pluginstate) or null | no | A plug-in's own state and where it was loaded from (WP-2.6), as last saved with the set. Left out of the saved set for a native device, and for a plug-in until the set is first saved with it. |
 | `preset_name` | string or null | no | The name of the preset the device holds (the plug-in list spec, R5): the Beatlayer device preset last loaded into it or saved from it, or else the program name the plug-in's format reported. Left out of the saved set while there is none, so a device saved before this package loads with none. |
 | `region` | [`SampleRegion`](#sampleregion) or null | no | The part of slot 0's sample a Simpler plays, between its Start and End flags (the sampler spec, R22): `None` for the whole sample. Loading another sample clears it; an edit that changes the sample's length moves it. Left out of the saved set while it is the whole sample. |
@@ -9512,6 +9561,13 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
           }
         ],
         "type": "array"
+      },
+      "type": "array"
+    },
+    "partials": {
+      "description": "The partials of the user waves an Operator's oscillators play (the Operator spec, R27), by oscillator; one that isn't listed has the first partial alone. Empty for a device without drawn waves, and left out of the saved set then.",
+      "items": {
+        "$ref": "#/$defs/Partials"
       },
       "type": "array"
     },
@@ -9699,6 +9755,7 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
 | `alternates` | array of [`Alternate`](#alternate) | no | The controls that show one of two parameters, as a switch says. Both parameters keep their values and their lanes whichever is shown. |
 | `banks` | array of [`Bank`](#bank) | no | The banks the type declares for control surfaces, its main controls first; empty for a type that leaves them to [`DeviceDescription::banks`]' generic ones. They hold neither the menu options nor the title switch. |
 | `display_drag` | array of [`ParamId`](#paramid) | no | The parameter a vertical drag on the display changes, one for each of `views`, in their order (Roar's shaper display drags the shown stage's Shaper Amount); empty for a display that isn't dragged. |
+| `grid_params` | array of [`ParamId`](#paramid) | no | The parameters a display cell sets by its own gestures, which the layout places no control for: a matrix grid's route amounts. |
 | `menu_options` | array of [`ParamId`](#paramid) | no | The switches the device lists as its own items in its Show Options menu, after Save as Default Preset (C-DEVICE-015), in this order. They are parameters like any other, but the layout places no control for them. |
 | `relabels` | array of [`Relabel`](#relabel) | no | The parameters whose names follow another parameter's value. |
 | `spectrogram` | [`SpectrogramGrid`](#spectrogramgrid) or null | no | The grid of the spectrogram its display holds, if it holds one (the device framework spec, R46). |
@@ -9727,6 +9784,13 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
     },
     "display_drag": {
       "description": "The parameter a vertical drag on the display changes, one for each of `views`, in their order (Roar's shaper display drags the shown stage's Shaper Amount); empty for a display that isn't dragged.",
+      "items": {
+        "$ref": "#/$defs/ParamId"
+      },
+      "type": "array"
+    },
+    "grid_params": {
+      "description": "The parameters a display cell sets by its own gestures, which the layout places no control for: a matrix grid's route amounts.",
       "items": {
         "$ref": "#/$defs/ParamId"
       },
@@ -10615,10 +10679,12 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
 | `selected_slot` | integer, at least 0 | yes | For a device with sample slots (WP-5.17): the slot whose controls the panel shows, a view setting that isn't saved with the set. |
 | `articulations` | array of [`Articulation`](#articulation) | no | An Articulation Map's articulations, in order: the list its panel shows. Empty for every other device. |
 | `configured` | array of [`ConfiguredParam`](#configuredparam) | no | The parameters a plug-in device's panel can show, in configured order (clap-hosting R5, configure mode): a knob's context menu offers them, each over the knob it is right-clicked on. Empty for a native device. |
+| `harmonics` | [`HarmonicsOptions`](#harmonicsoptions) or null | no | An Operator's harmonics editor options, which a drag across its partials follows (operator R27): view state. |
 | `knobs` | array of integer, at least 0 | no | The knob each of the panel's parameters is drawn on, 0 to 7, parallel to `description`'s parameters (clap-hosting R5, WP-5.40): a knob's context menu remaps the knob it is right-clicked on. Empty for a device that isn't a plug-in. |
 | `learning` | integer or null | no | The articulation whose Learn button is lit, counted from 0: the panel's state, not the set's. |
 | `loaded_slots` | array of boolean | no | For a device with sample slots: whether each slot holds a sample. |
 | `locked` | array of [`ParamId`](#paramid) | no | The parameters drawn disabled because the device takes them from its current scale: Scale's Base and Scale Name and Arpeggiator's Root and Scale, while Use Current Scale is on (the scales spec, R16). |
+| `matrix_grid` | [`MatrixGrid`](#matrixgrid) or null | no | For an instrument whose Matrix tab draws its routes as a grid (the wavetable spec, R39): the grid's columns, its rows and what can still be added. None for any other device. |
 | `matrix_routes` | array of [`MatrixRoutes`](#matrixroutes) | no | For each parameter an instrument's modulation matrix moves, the sources routed into it, in slot order (the instrument modulation spec, R12): what assistive technology reads beside the control's value. Empty for a device without a matrix or with no route. |
 | `pages` | array of [`PagesFrame`](#pagesframe) | no | Each pages node of the device's layout with its pages and the one shown (device framework R43): view state, saved with the set but no undo step. Empty for a device with none. |
 | `slot_keys` | array of string | no | For a device with sample slots: the key each slot plays, as Live names notes (`C3`). |
@@ -10646,6 +10712,17 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
     "description": {
       "$ref": "#/$defs/DeviceDescription",
       "description": "Its parameters' descriptors and its layout."
+    },
+    "harmonics": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HarmonicsOptions"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "An Operator's harmonics editor options, which a drag across its partials follows (operator R27): view state."
     },
     "knobs": {
       "description": "The knob each of the panel's parameters is drawn on, 0 to 7, parallel to `description`'s parameters (clap-hosting R5, WP-5.40): a knob's context menu remaps the knob it is right-clicked on. Empty for a device that isn't a plug-in.",
@@ -10679,6 +10756,17 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
         "$ref": "#/$defs/ParamId"
       },
       "type": "array"
+    },
+    "matrix_grid": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MatrixGrid"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "For an instrument whose Matrix tab draws its routes as a grid (the wavetable spec, R39): the grid's columns, its rows and what can still be added. None for any other device."
     },
     "matrix_routes": {
       "description": "For each parameter an instrument's modulation matrix moves, the sources routed into it, in slot order (the instrument modulation spec, R12): what assistive technology reads beside the control's value. Empty for a device without a matrix or with no route.",
@@ -11363,6 +11451,7 @@ What dragging a marker sets: where the marker sits across the cell is the horizo
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `x` | [`ParamId`](#paramid) | yes | The parameter its horizontal place is. |
+| `span` | array or null | no | The part of the cell's width, from 0 to 1 across it, that the horizontal parameter's travel covers (the whole width without one): an envelope's stages each take a share of the cell. |
 | `y` | [`ParamId`](#paramid) or null | no | The parameter its vertical place is, if it has one. |
 
 <details><summary>JSON Schema</summary>
@@ -11371,6 +11460,19 @@ What dragging a marker sets: where the marker sits across the cell is the horizo
 {
   "description": "What dragging a marker sets: where the marker sits across the cell is the horizontal parameter's travel, and up the cell is the marker's place on its series (with a vertical parameter, a drag moves that too), so a drag is the parameters' own control at another place.",
   "properties": {
+    "span": {
+      "description": "The part of the cell's width, from 0 to 1 across it, that the horizontal parameter's travel covers (the whole width without one): an envelope's stages each take a share of the cell.",
+      "items": {
+        "format": "float",
+        "type": "number"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": [
+        "array",
+        "null"
+      ]
+    },
     "x": {
       "$ref": "#/$defs/ParamId",
       "description": "The parameter its horizontal place is."
@@ -12645,6 +12747,28 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `EnvelopeLevel`
+
+The level `operator.set_envelope_levels` sets.
+
+Type: one of `"maximum"`, `"minimum"`, `"middle"`.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The level `operator.set_envelope_levels` sets.",
+  "enum": [
+    "maximum",
+    "minimum",
+    "middle"
+  ],
+  "type": "string"
 }
 ```
 
@@ -15349,6 +15473,71 @@ One of:
 
 </details>
 
+### `GranulatorCaptureAction`
+
+What `granulator.capture` does.
+
+One of:
+
+- `"start"`: Starts a capture.
+- `"stop"`: Ends the capture running now.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `granulator.capture` does.",
+  "oneOf": [
+    {
+      "const": "start",
+      "description": "Starts a capture.",
+      "type": "string"
+    },
+    {
+      "const": "stop",
+      "description": "Ends the capture running now.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `GranulatorCaptureResult`
+
+What `granulator.capture` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `capturing` | boolean | yes | Whether a capture runs now. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `granulator.capture` returns.",
+  "properties": {
+    "capturing": {
+      "description": "Whether a capture runs now.",
+      "type": "boolean"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    }
+  },
+  "required": [
+    "device",
+    "capturing"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `GreyWhen`
 
 A condition that greys a control: while parameter `param`'s value, rounded, is `value`. The control stays visible and usable, as one of a device that is off does (L-DEV-011).
@@ -15377,6 +15566,94 @@ A condition that greys a control: while parameter `param`'s value, rounded, is `
   "required": [
     "param",
     "value"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `GridCell`
+
+A route a grid cell shows.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `slot` | integer from 0 to 255 | yes | The slot's number. |
+| `amount_param` | [`ParamId`](#paramid) | yes | Its amount's parameter. |
+| `amount` | number | yes | Its amount, in per cent from -100 to 100. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A route a grid cell shows.",
+  "properties": {
+    "amount": {
+      "description": "Its amount, in per cent from -100 to 100.",
+      "format": "double",
+      "type": "number"
+    },
+    "amount_param": {
+      "$ref": "#/$defs/ParamId",
+      "description": "Its amount's parameter."
+    },
+    "slot": {
+      "description": "The slot's number.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "slot",
+    "amount_param",
+    "amount"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `GridRow`
+
+One destination's row of a matrix grid.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `destination` | string | yes | The destination's name. |
+| `cells` | array of [`GridCell`](#gridcell) or null | yes | One cell for each of the grid's sources: the free slot that routes it here, or none while no slot does. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One destination's row of a matrix grid.",
+  "properties": {
+    "cells": {
+      "description": "One cell for each of the grid's sources: the free slot that routes it here, or none while no slot does.",
+      "items": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/GridCell"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "type": "array"
+    },
+    "destination": {
+      "description": "The destination's name.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "destination",
+    "cells"
   ],
   "type": "object"
 }
@@ -16207,6 +16484,86 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `HarmonicsOptions`
+
+The harmonics editor's options in a device's panel (operator R27).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `even_only` | boolean | yes |  |
+| `odd_only` | boolean | yes |  |
+| `normalize` | boolean | yes |  |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The harmonics editor's options in a device's panel (operator R27).",
+  "properties": {
+    "even_only": {
+      "type": "boolean"
+    },
+    "normalize": {
+      "type": "boolean"
+    },
+    "odd_only": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "even_only",
+    "odd_only",
+    "normalize"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `HarmonicsView`
+
+The harmonics editor's options, which `operator.set_harmonics` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `even_only` | boolean | yes |  |
+| `odd_only` | boolean | yes |  |
+| `normalize` | boolean | yes |  |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The harmonics editor's options, which `operator.set_harmonics` returns.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "even_only": {
+      "type": "boolean"
+    },
+    "normalize": {
+      "type": "boolean"
+    },
+    "odd_only": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "device",
+    "even_only",
+    "odd_only",
+    "normalize"
+  ],
+  "type": "object"
 }
 ```
 
@@ -21213,6 +21570,55 @@ One of:
 
 </details>
 
+### `MatrixGrid`
+
+An instrument's matrix as its grid draws it (the wavetable spec, R39): the sources as columns, the destinations shown as rows.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `sources` | array of string | yes | The sources, one for each column. |
+| `rows` | array of [`GridRow`](#gridrow) | yes | The destinations shown: those with a route and those added, in the matrix's order. |
+| `addable` | array of string | yes | The destinations not shown, in the matrix's order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An instrument's matrix as its grid draws it (the wavetable spec, R39): the sources as columns, the destinations shown as rows.",
+  "properties": {
+    "addable": {
+      "description": "The destinations not shown, in the matrix's order.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "rows": {
+      "description": "The destinations shown: those with a route and those added, in the matrix's order.",
+      "items": {
+        "$ref": "#/$defs/GridRow"
+      },
+      "type": "array"
+    },
+    "sources": {
+      "description": "The sources, one for each column.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "sources",
+    "rows",
+    "addable"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `MatrixRoutes`
 
 The sources routed into one parameter of an instrument's matrix.
@@ -24141,6 +24547,60 @@ One of:
 
 </details>
 
+### `OperatorChanged`
+
+What `operator.set_envelope_levels` and `operator.play_by_key` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `operator.set_envelope_levels` and `operator.play_by_key` return.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    }
+  },
+  "required": [
+    "device"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `OperatorEnvelope`
+
+The Operator envelope `operator.set_envelope_levels` sets.
+
+Type: one of `"A"`, `"B"`, `"C"`, `"D"`, `"Filter"`, `"Pitch"`, `"LFO"`.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Operator envelope `operator.set_envelope_levels` sets.",
+  "enum": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "Filter",
+    "Pitch",
+    "LFO"
+  ],
+  "type": "string"
+}
+```
+
+</details>
+
 ### `Origin`
 
 Where a shortcut's keys come from.
@@ -24173,6 +24633,52 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `OscillatorCopied`
+
+What `operator.copy_oscillator` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `from` | integer from 0 to 255 | yes | The oscillator copied from. |
+| `into` | integer from 0 to 255 | yes | The oscillator copied to. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `operator.copy_oscillator` returns.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "from": {
+      "description": "The oscillator copied from.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "into": {
+      "description": "The oscillator copied to.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "from",
+    "into"
+  ],
+  "type": "object"
 }
 ```
 
@@ -25843,6 +26349,92 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `Partials`
+
+One oscillator's drawn partials.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `osc` | integer from 0 to 255 | yes | The oscillator, from 0 for A. |
+| `levels` | array of number | yes | The levels of the first partials, each from 0 to 1; there are 16, 32 or 64 of them. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One oscillator's drawn partials.",
+  "properties": {
+    "levels": {
+      "description": "The levels of the first partials, each from 0 to 1; there are 16, 32 or 64 of them.",
+      "items": {
+        "format": "float",
+        "type": "number"
+      },
+      "type": "array"
+    },
+    "osc": {
+      "description": "The oscillator, from 0 for A.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "osc",
+    "levels"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PartialsChanged`
+
+What `device.set_partials` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `osc` | integer from 0 to 255 | yes | The oscillator, from 0. |
+| `count` | integer, at least 0 | yes | Its partials' count. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.set_partials` returns.",
+  "properties": {
+    "count": {
+      "description": "Its partials' count.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "osc": {
+      "description": "The oscillator, from 0.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "osc",
+    "count"
+  ],
+  "type": "object"
 }
 ```
 
@@ -37220,7 +37812,7 @@ What `stems.status` returns.
 | `created_clips` | array of [`ClipId`](#clipid) | no | The clips the last separation made, in the order of their tracks. |
 | `created_tracks` | array of [`TrackId`](#trackid) | no | The tracks the last separation made, the group first if it made one. |
 | `dialog` | [`DialogStatus`](#dialogstatus) or null | no | The dialog, if it's open. |
-| `provider` | string | no | What the current or last separation ran on, such as `Core ML`, or `CPU (not the GPU: ...)` with the reason a GPU wasn't used. |
+| `provider` | string | no | What the current or last separation ran on, such as `Core ML`, `DirectML` or `CUDA`, or `CPU (not the GPU: ...)` with the reason a GPU wasn't used. |
 
 <details><summary>JSON Schema</summary>
 
@@ -37273,7 +37865,7 @@ What `stems.status` returns.
       "type": "array"
     },
     "provider": {
-      "description": "What the current or last separation ran on, such as `Core ML`, or `CPU (not the GPU: ...)` with the reason a GPU wasn't used.",
+      "description": "What the current or last separation ran on, such as `Core ML`, `DirectML` or `CUDA`, or `CPU (not the GPU: ...)` with the reason a GPU wasn't used.",
       "type": "string"
     },
     "separation": {
@@ -43579,6 +44171,65 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `WindowState`
+
+What `video.window_state` and `video.set_window` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `shown` | boolean | yes | Whether the window shows. |
+| `enabled` | boolean | yes | Whether the set has a video clip in the Arrangement, which the window needs to show. |
+| `frame` | [`WindowFrame`](#windowframe) or null | yes | Where the window is and how big, once it has been placed; the same in every set. |
+| `full_screen` | boolean | yes | Whether the window is in full screen. |
+| `showing` | [`FrameAt`](#frameat) | yes | The frame the window shows now: `clip` is `null` where it is black for want of a video clip at the playhead. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `video.window_state` and `video.set_window` return.",
+  "properties": {
+    "enabled": {
+      "description": "Whether the set has a video clip in the Arrangement, which the window needs to show.",
+      "type": "boolean"
+    },
+    "frame": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WindowFrame"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Where the window is and how big, once it has been placed; the same in every set."
+    },
+    "full_screen": {
+      "description": "Whether the window is in full screen.",
+      "type": "boolean"
+    },
+    "showing": {
+      "$ref": "#/$defs/FrameAt",
+      "description": "The frame the window shows now: `clip` is `null` where it is black for want of a video clip at the playhead."
+    },
+    "shown": {
+      "description": "Whether the window shows.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "shown",
+    "enabled",
+    "frame",
+    "full_screen",
+    "showing"
+  ],
+  "type": "object"
 }
 ```
 

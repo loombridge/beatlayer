@@ -1754,7 +1754,16 @@ fn the_instruments_label_lists_the_drum_synths() {
         json!({ "label": "instruments" }),
     );
     let names = names(&state);
-    for name in ["DS Clap", "DS Kick", "DS Snare", "DS Tom"] {
+    for name in [
+        "DS Clang",
+        "DS Clap",
+        "DS Cymbal",
+        "DS FM",
+        "DS HH",
+        "DS Kick",
+        "DS Snare",
+        "DS Tom",
+    ] {
         assert!(names.iter().any(|n| n == name), "{name} in {names:?}");
     }
 }

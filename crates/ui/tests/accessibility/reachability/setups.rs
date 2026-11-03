@@ -433,6 +433,27 @@ pub(crate) fn a_drum_synth(h: &mut Harness) {
         .unwrap();
 }
 
+/// A Granulator III on audio track 3, the selected track, no device
+/// selected (WP-8.27).
+pub(crate) fn a_granulator(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let t = bl_devices::granulator_iii::granulator_iii_type();
+    h.shell
+        .run(
+            "device.add",
+            json!({ "device": {
+                "kind": t.kind, "name": t.name, "role": t.role, "sidechain": true,
+            } }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
 /// The Test Sidechain on audio track 3, the selected track, its sidechain
 /// section shown, no device selected (WP-2.19b).
 pub(crate) fn a_sidechained_device(h: &mut Harness) {
@@ -618,6 +639,64 @@ pub(crate) fn a_curve_mod(h: &mut Harness) {
     h.shell
         .run("device.select", json!({ "device": null }))
         .unwrap();
+}
+
+/// A Wavetable on the first MIDI track, its Matrix tab shown with a row for
+/// Osc 1 Position and, if `routed`, an LFO 1 route into it.
+fn wavetable_grid(h: &mut Harness, routed: bool) {
+    h.shell.set_device_types(bl_devices::device_types());
+    let track = h
+        .shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|t| t.kind() == bl_model::TrackKind::Midi)
+        .map(bl_model::Track::id)
+        .unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let t = bl_devices::wavetable_type();
+    let device = h
+        .shell
+        .run(
+            "device.add",
+            json!({ "device": { "kind": t.kind, "name": t.name, "role": t.role } }),
+        )
+        .unwrap()["device"]
+        .clone();
+    h.shell
+        .run(
+            "device.set_page",
+            json!({ "device": device, "node": "Tabs", "page": "Matrix" }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            "device.add_destination",
+            json!({ "device": device, "destination": "Osc 1 Position" }),
+        )
+        .unwrap();
+    if routed {
+        h.shell
+            .run(
+                "device.set_route",
+                json!({ "device": device, "source": "LFO 1",
+                        "destination": "Osc 1 Position", "amount": 25.0 }),
+            )
+            .unwrap();
+    }
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
+pub(crate) fn a_wavetable_grid(h: &mut Harness) {
+    wavetable_grid(h, false);
+}
+
+pub(crate) fn a_wavetable_route(h: &mut Harness) {
+    wavetable_grid(h, true);
 }
 
 /// A Compressor, whose display has views, on the selected audio track.

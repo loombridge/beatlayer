@@ -2146,10 +2146,11 @@ fn track_order(shell: &Shell) -> Vec<bl_model::TrackId> {
 /// (second-window R16).
 #[must_use]
 pub fn window_title(shell: &Shell, window: WindowKind) -> String {
-    if window == WindowKind::Second {
-        format!("{}, Second Window", shell.set_name())
-    } else {
-        shell.set_name()
+    match window {
+        WindowKind::Second => format!("{}, Second Window", shell.set_name()),
+        // Spec: video R22. A window named Video.
+        WindowKind::Video => "Video".to_owned(),
+        _ => shell.set_name(),
     }
 }
 

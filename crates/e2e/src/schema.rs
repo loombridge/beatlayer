@@ -667,6 +667,10 @@ impl Walk<'_> {
     }
 
     fn array(&mut self, schema: &Value, name: &str, hint: &str) -> Option<Value> {
+        // A user wave's partials are 16, 32 or 64 levels.
+        if name == "levels" && hint.contains("partials") {
+            return Some(json!(vec![0.5; 16]));
+        }
         let min = schema
             .get("minItems")
             .and_then(Value::as_u64)
@@ -830,6 +834,8 @@ impl Walk<'_> {
             "note" | "notes" | "place" if hint.contains("place") => Some(0),
             "row" | "column" => Some(1),
             "index" | "offset" | "from" | "slot" | "step" | "lane_index" => Some(0),
+            // An Operator's oscillators are 0 to 3.
+            "osc" | "into" => Some(1),
             "key" | "note" | "pitch" | "root_key" | "lowest" => Some(60),
             "highest" | "high" => Some(72),
             "low" => Some(48),
@@ -1063,6 +1069,7 @@ impl Walk<'_> {
         let refs = self.refs;
         let text = format!("{name} {hint} {}", self.about);
         let order: &[(&[&str], &str)] = &[
+            (&["operator"], bl_devices::operator::OPERATOR),
             (
                 &["multisampler", "layer", "zone", "sfz"],
                 bl_devices::multisampler::MULTISAMPLER,

@@ -11,6 +11,7 @@ mod articulation_map;
 mod assistant_panel;
 mod assistant_settings;
 mod audio_panel;
+mod audio_to_midi;
 mod auto_filter;
 mod automation;
 mod autosampler;

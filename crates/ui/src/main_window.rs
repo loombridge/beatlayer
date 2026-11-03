@@ -791,6 +791,9 @@ impl MainWindowUi {
             // Spec: stem-separation R1. Separate Stems' dialog sits over the
             // window while it's open.
             crate::stems_dialog::show(ctx, shell, theme, &mut events);
+            // Spec: audio-to-midi R2, R3. The package page and the progress
+            // window of Convert … to New MIDI Track sit over the window.
+            crate::audio_to_midi_dialog::show(ctx, shell, theme, &mut events);
             // Spec: dawproject R87. The report of a person's import or export
             // sits over the window while it is open.
             crate::dawproject_window::show(ctx, shell, theme, &mut events);
@@ -834,6 +837,7 @@ impl MainWindowUi {
             || crate::palette::picker_is_open(ctx)
             || (!second
                 && (shell.stems_dialog().is_some()
+                    || shell.audio_to_midi_dialog().is_some()
                     || shell.dawproject_report_window().is_some()
                     || shell.export_dialog().is_some()
                     || shell.export_running()

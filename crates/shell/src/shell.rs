@@ -98,6 +98,7 @@ use bl_shell_spec::tunings as tuning_ids;
 mod ara;
 pub(crate) mod audio_editing;
 mod audio_panel;
+mod audio_to_midi;
 pub mod autosample;
 mod bounce;
 mod capture;
@@ -784,6 +785,8 @@ pub struct Shell {
     processed: Vec<processed_files::Pending>,
     /// Stem separation's download, separation, and dialog (IMP-11).
     stems: stems::StemsState,
+    /// Convert Harmony, Melody and Drums to New MIDI Track's state.
+    audio_to_midi: audio_to_midi::AudioToMidiState,
     /// The Packages manager: the installer thread and its queue (WP-9.1).
     packages: packages::PackagesState,
     /// The Export Audio/Video dialog and the export under way (WP-6.71).
@@ -1340,6 +1343,7 @@ impl Shell {
             movies: video::Movies::default(),
             processed: Vec::new(),
             stems: stems::StemsState::default(),
+            audio_to_midi: audio_to_midi::AudioToMidiState::default(),
             packages: packages::PackagesState::default(),
             export: export_dialog::ExportState::default(),
             packs: packs::PackState::default(),
@@ -2301,6 +2305,9 @@ impl Shell {
         }
         if stems_ids::handles(id) {
             return self.run_stems(id, args);
+        }
+        if bl_shell_spec::audio_to_midi::handles(id) {
+            return self.run_audio_to_midi(id, args);
         }
         if packages_ids::handles(id) {
             return self.run_packages(id, args);

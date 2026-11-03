@@ -43,6 +43,7 @@ pub mod arrangement;
 pub mod articulation_map;
 pub mod assistant_panel;
 pub mod audio_panel;
+pub mod audio_to_midi_dialog;
 pub mod autosampler;
 pub mod browser;
 pub mod browser_edge;

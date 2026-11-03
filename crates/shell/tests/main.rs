@@ -18,6 +18,7 @@ mod assistant_panel;
 mod audio_editing;
 mod audio_panel;
 mod audio_settings;
+mod audio_to_midi;
 mod auto_filter;
 mod auto_tags;
 mod auto_warp;

@@ -36,6 +36,7 @@ The commands, by the part of their ID before its first dot:
 - [`articulation`](articulation.md)
 - [`assistant`](assistant.md)
 - [`audio`](audio.md)
+- [`audio_to_midi`](audio_to_midi.md)
 - [`automation`](automation.md)
 - [`browser`](browser.md)
 - [`chain`](chain.md)
@@ -2522,6 +2523,131 @@ What `audio.status` returns.
     "tone",
     "interrupted",
     "error"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `AudioToMidiStatus`
+
+What `audio_to_midi.status` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `installed` | boolean | yes | Whether every package Harmony and Melody need is installed. Drums needs none. |
+| `folder` | string | yes | Where the packages are installed. |
+| `packages` | array of [`PackageStatus`](#packagestatus) | yes | The packages Harmony and Melody need. |
+| `install` | [`JobStatus`](#jobstatus) | yes | The download. |
+| `conversion` | [`JobStatus`](#jobstatus) | yes | The conversion, the last one when none is running. |
+| `clip` | [`ClipId`](#clipid) or null | no | The clip being converted, or the last one's. |
+| `created_clip` | [`ClipId`](#clipid) or null | no | The clip the last conversion made. |
+| `created_track` | [`TrackId`](#trackid) or null | no | The track the last conversion made. |
+| `dialog` | [`ConvertDialogStatus`](#convertdialogstatus) or null | no | The window, if it's open. |
+| `kind` | [`ConvertKind`](#convertkind) or null | no | The kind of the conversion running, or the last one's. |
+| `notes` | integer or null | no | How many notes the last conversion put in its clip; a conversion that found none made an empty clip. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `audio_to_midi.status` returns.",
+  "properties": {
+    "clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip being converted, or the last one's."
+    },
+    "conversion": {
+      "$ref": "#/$defs/JobStatus",
+      "description": "The conversion, the last one when none is running."
+    },
+    "created_clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip the last conversion made."
+    },
+    "created_track": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrackId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The track the last conversion made."
+    },
+    "dialog": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ConvertDialogStatus"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The window, if it's open."
+    },
+    "folder": {
+      "description": "Where the packages are installed.",
+      "type": "string"
+    },
+    "install": {
+      "$ref": "#/$defs/JobStatus",
+      "description": "The download."
+    },
+    "installed": {
+      "description": "Whether every package Harmony and Melody need is installed. Drums needs none.",
+      "type": "boolean"
+    },
+    "kind": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ConvertKind"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The kind of the conversion running, or the last one's."
+    },
+    "notes": {
+      "description": "How many notes the last conversion put in its clip; a conversion that found none made an empty clip.",
+      "format": "uint",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "packages": {
+      "description": "The packages Harmony and Melody need.",
+      "items": {
+        "$ref": "#/$defs/PackageStatus"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "installed",
+    "folder",
+    "packages",
+    "install",
+    "conversion"
   ],
   "type": "object"
 }
@@ -8253,6 +8379,120 @@ One of:
         "type"
       ],
       "type": "object"
+    }
+  ]
+}
+```
+
+</details>
+
+### `ConvertDialogStatus`
+
+The open window.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `step` | [`ConvertDialogStep`](#convertdialogstep) | yes | What it shows. |
+| `kind` | [`ConvertKind`](#convertkind) | yes | The conversion it is for. |
+| `clip` | [`ClipId`](#clipid) | yes | The clip it converts. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The open window.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip it converts."
+    },
+    "kind": {
+      "$ref": "#/$defs/ConvertKind",
+      "description": "The conversion it is for."
+    },
+    "step": {
+      "$ref": "#/$defs/ConvertDialogStep",
+      "description": "What it shows."
+    }
+  },
+  "required": [
+    "step",
+    "kind",
+    "clip"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ConvertDialogStep`
+
+The window a person sees.
+
+One of:
+
+- `"packages"`: The packages to download, the first time.
+- `"installing"`: The download's progress.
+- `"converting"`: The conversion's progress.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The window a person sees.",
+  "oneOf": [
+    {
+      "const": "packages",
+      "description": "The packages to download, the first time.",
+      "type": "string"
+    },
+    {
+      "const": "installing",
+      "description": "The download's progress.",
+      "type": "string"
+    },
+    {
+      "const": "converting",
+      "description": "The conversion's progress.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `ConvertKind`
+
+What a conversion finds in the audio.
+
+One of:
+
+- `"harmony"`: Pitches of polyphonic audio, chords included.
+- `"melody"`: Pitches of monophonic audio, one at a time.
+- `"drums"`: Hits of unpitched, percussive audio: kick, snare and hi-hat.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a conversion finds in the audio.",
+  "oneOf": [
+    {
+      "const": "harmony",
+      "description": "Pitches of polyphonic audio, chords included.",
+      "type": "string"
+    },
+    {
+      "const": "melody",
+      "description": "Pitches of monophonic audio, one at a time.",
+      "type": "string"
+    },
+    {
+      "const": "drums",
+      "description": "Hits of unpitched, percussive audio: kick, snare and hi-hat.",
+      "type": "string"
     }
   ]
 }

@@ -835,6 +835,9 @@ impl Shell {
         if stems_ids::handles(id) {
             return self.can_stems(id, args);
         }
+        if bl_shell_spec::audio_to_midi::handles(id) {
+            return self.can_audio_to_midi(id, args);
+        }
         if export_ids::handles(id) {
             return self.can_export(id);
         }

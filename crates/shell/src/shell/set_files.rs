@@ -124,6 +124,7 @@ impl Shell {
         // that's gone: its clip, track or device would name something else
         // in this one.
         self.drop_separation();
+        self.drop_conversion();
         self.stop_autosample();
         self.autosample_dialog = None;
         self.autosample_result_value = None;

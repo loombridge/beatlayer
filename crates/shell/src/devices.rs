@@ -591,6 +591,7 @@ impl DeviceView {
                 spectrogram: None,
                 alternates: Vec::new(),
                 relabels: Vec::new(),
+                impulse_responses: Vec::new(),
             },
             plugin: true,
             configured: knob_params,
@@ -1636,10 +1637,14 @@ impl DeviceView {
             kind: d.kind.clone(),
             role: d.role,
             enabled: d.enabled,
+            // Spec: device-framework R47. A device with an impulse-response
+            // slot takes a dropped file too.
             takes_sample: matches!(
                 &d.kind,
                 DeviceKind::Native { device_type } if bl_devices::plays_samples(device_type)
-            ),
+            ) || self
+                .description(&d.kind)
+                .is_some_and(|d| !d.impulse_responses.is_empty()),
             swaps_to_snapshot: matches!(
                 &d.kind,
                 DeviceKind::Native { device_type } if device_type == bl_devices::DRUM_SAMPLER

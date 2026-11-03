@@ -78,6 +78,7 @@ mod floating_windows;
 mod freeze;
 mod gain_reduction;
 mod grooves;
+mod impulse_responses;
 mod info_text;
 mod instant_mappings;
 mod instrument_matrix;

@@ -110,6 +110,7 @@ pub use info_text::InfoTarget;
 mod file_manager;
 mod freeze;
 mod grooves;
+mod impulse;
 mod keymap;
 mod link;
 mod multisampler;
@@ -777,6 +778,9 @@ pub struct Shell {
     /// The media the set's clips play, which the browser fills and the
     /// Arrangement's waveforms read.
     media: Arc<MediaStore>,
+    /// The bundled impulse-response folder a test chose, instead of the
+    /// app's (the impulse responses spec, R10).
+    bundled_impulses: Option<PathBuf>,
     /// The movies the set's video clips name (WP-9.25).
     movies: video::Movies,
     /// Processed files being written, with the edits that land when each is
@@ -1337,6 +1341,7 @@ impl Shell {
         let mut shell = Self {
             browser_view,
             media,
+            bundled_impulses: None,
             movies: video::Movies::default(),
             processed: Vec::new(),
             stems: stems::StemsState::default(),
@@ -1823,6 +1828,12 @@ impl Shell {
             // Spec: crash-recovery R26. The recovery commands run against
             // the app's own recovery.
             return self.run_recovery(id, args);
+        }
+        if id == "device.set_sample"
+            && let Some(result) = self.set_impulse_sample(id, &args)
+        {
+            // Spec: impulse-responses R2.
+            return result;
         }
         if let Some(track) = self.frozen_blocks(id, &args) {
             return Err(ShellError::Unavailable {

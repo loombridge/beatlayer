@@ -74,6 +74,7 @@ pub mod granulator_iii;
 pub mod hardware;
 pub mod hardware_effect;
 pub mod hold;
+pub mod impulse;
 pub mod instrument;
 pub mod instrument_filter;
 pub mod kit;

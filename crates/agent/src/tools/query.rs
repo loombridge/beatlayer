@@ -561,6 +561,12 @@ impl View<'_> {
         if !wavetables.is_empty() {
             value["wavetables"] = json!(wavetables);
         }
+        // Spec: impulse-responses R12. What each impulse-response slot holds,
+        // which `device.load_sample` and `device.set_sample` change.
+        let impulse_responses = self.shell.impulse_slots(device.id);
+        if !impulse_responses.is_empty() {
+            value["impulse_responses"] = json!(impulse_responses);
+        }
         // Spec: modulation R18. A modulator's mappings, which
         // `modulator.map` and `modulator.unmap` change.
         if bl_model::modulator::is_modulator_kind(&device.kind) {

@@ -134,6 +134,11 @@ pub struct DeviceDescription {
     /// The parameters whose names follow another parameter's value.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub relabels: Vec<Relabel>,
+    /// The names of the impulse-response slots every device of the type
+    /// has, in their order (the impulse responses spec, R1). A slot is
+    /// media, not a parameter: slot `k` is the device's media slot `k`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub impulse_responses: Vec<String>,
 }
 
 // Every value in a description is a finite number (`check`), so equality is
@@ -157,7 +162,15 @@ impl DeviceDescription {
             spectrogram: None,
             alternates: Vec::new(),
             relabels: Vec::new(),
+            impulse_responses: Vec::new(),
         }
+    }
+
+    /// The same, with impulse-response slots named `slots`.
+    #[must_use]
+    pub fn with_impulse_responses(mut self, slots: &[&str]) -> Self {
+        self.impulse_responses = slots.iter().map(|s| (*s).to_owned()).collect();
+        self
     }
 
     /// The same, with a display that holds a spectrogram of `grid`.

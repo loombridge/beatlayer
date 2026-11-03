@@ -11,6 +11,7 @@
 //! | [`INSTRUMENT`] | Framework Test Instrument | the instruments' shared parts: sine voices with every part of the voice section, or a source as the output; a menu option | generic |
 //! | [`FM`] | Framework Test FM | the FM core's four operators on the voice section, each operator's controls as parameters | generic |
 //! | [`PAGES`] | Framework Test Pages | passes audio through; tabs of three pages in the body beside a shell of three sections and its display | its own |
+//! | [`CONVOLUTION`] | Framework Test Convolution | convolves its input with the response in its one impulse-response slot, which a display cell stands for | its own |
 //! | [`PARTS`] | Framework Test Parts | passes audio through; one of each part a panel is made of: both knobs, the boxes, the buttons, a unit pair, a side strip, headings, title-bar parts and a greyed control | its own |
 //!
 //! Between them they have a parameter of every kind: gains, continuous
@@ -63,6 +64,10 @@ pub const FM: &str = "test.framework.fm";
 pub const PAGES: &str = "test.framework.pages";
 /// The test parts' device type.
 pub const PARTS: &str = "test.framework.parts";
+/// The test convolution's type ID.
+pub const CONVOLUTION: &str = "test.framework.convolution";
+/// The test convolution's output level.
+pub const CONVOLUTION_LEVEL: ParamId = ParamId(0);
 
 /// The utility's gain: −∞ to +12 dB, 0 dB by default.
 pub const UTILITY_GAIN: ParamId = ParamId(0);
@@ -259,6 +264,33 @@ pub fn utility_type() -> DeviceType {
             ParamDescriptor::choice(UTILITY_POLARITY, "Polarity", &["Normal", "Inverted"], 0)
                 .describe("Inverts the signal's phase, or leaves it."),
         ]),
+    )
+}
+
+/// The test convolution's type: one impulse-response slot (the impulse
+/// responses spec, R15), shown by a display cell beside a level knob.
+#[must_use]
+pub fn convolution_type() -> DeviceType {
+    let params = vec![
+        ParamDescriptor::gain(CONVOLUTION_LEVEL, "Level", 12.0, 0.0)
+            .describe("Scales the convolved signal."),
+    ];
+    let layout = DeviceLayout::new(LayoutNode::Row(vec![
+        LayoutNode::Cell(DisplayCell::new("Response", 160.0, BODY_HEIGHT, 1.0).for_slot(0)),
+        LayoutNode::Band(ControlBand::stacked(
+            BODY_HEIGHT,
+            &[(CONVOLUTION_LEVEL, Widget::Knob)],
+        )),
+    ]));
+    DeviceType::native(
+        CONVOLUTION,
+        "Framework Test Convolution",
+        DeviceRole::AudioEffect,
+    )
+    .with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout)
+            .with_impulse_responses(&["Response"]),
     )
 }
 
@@ -1076,6 +1108,14 @@ pub fn register(registry: &mut Registry) {
     add(registry, fm_type(), |_, config| FmInstrument::new(config));
     add(registry, pages_type(), |_, _| Scope);
     add(registry, parts_type(), |_, _| Scope);
+    let slots = convolution_type().description.impulse_responses.len();
+    crate::framework::add_with_data(
+        registry,
+        convolution_type(),
+        |_, config| Convolution(crate::impulse::Convolving::new(config.sample_rate.hz())),
+        Some(crate::impulse::data(slots)),
+    );
+    registry.media_as_data(CONVOLUTION);
 }
 
 /// The engine's own devices and the test devices.
@@ -1106,6 +1146,27 @@ impl NativeDevice for Utility {
                 *sample *= if mute { 0.0 } else { sign * gain[i] * side };
             }
         }
+    }
+}
+
+/// Convolves a stereo signal with its slot's response, then scales it.
+struct Convolution(crate::impulse::Convolving);
+
+impl NativeDevice for Convolution {
+    fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank) {
+        let level = params.ramp(0);
+        let mut channels = audio.channels_mut();
+        if let (Some(left), Some(right)) = (channels.next(), channels.next()) {
+            self.0.process(left, right);
+            for (i, gain) in level.iter().enumerate() {
+                left[i] *= gain;
+                right[i] *= gain;
+            }
+        }
+    }
+
+    fn receive_data(&mut self, data: NodeData) {
+        self.0.receive(0, data);
     }
 }
 

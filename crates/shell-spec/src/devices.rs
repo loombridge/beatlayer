@@ -84,6 +84,9 @@ pub const PARAMETERS: &str = "device.parameters";
 /// `device.show_sidechain`: show or hide a device's sidechain section
 /// (WP-2.19b).
 pub const SHOW_SIDECHAIN: &str = "device.show_sidechain";
+/// `device.impulse_responses`: the chooser of a device with impulse-response
+/// slots and what each slot holds (the impulse responses spec, R10).
+pub const IMPULSE_RESPONSES: &str = "device.impulse_responses";
 /// `device.display`: what a device's display shows now (WP-5.43).
 pub const DISPLAY: &str = "device.display";
 /// `device.preview_hit`: play a Drum Synth's hit through its track (the drum
@@ -217,6 +220,7 @@ pub const IDS: &[&str] = &[
     PARAMETERS,
     SHOW_SIDECHAIN,
     DISPLAY,
+    IMPULSE_RESPONSES,
     PREVIEW_HIT,
     SET_DISPLAY_VIEW,
     SET_PAGE,
@@ -2041,7 +2045,7 @@ pub struct LoadSampleArgs {
     pub path: String,
     /// The sample slot to load it into, counted from 0; the slot the
     /// panel has selected for a device with several, and 0 for one with
-    /// one.
+    /// one. For a device with impulse-response slots, the slot's number.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slot: Option<u8>,
 }
@@ -2203,8 +2207,91 @@ pub struct SelectSlotArgs {
     pub slot: u32,
 }
 
-/// What `device.load_sample` returns.
+/// Where a response is in being made ready to play (the impulse responses
+/// spec, R12).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ImpulseState {
+    /// The slot holds no response.
+    Empty,
+    /// The response is named and is being decoded and prepared.
+    Preparing,
+    /// The response is prepared and plays.
+    Ready,
+    /// The response's file can't be found; the slot plays silence.
+    Missing,
+}
+
+/// What an impulse-response slot holds (the impulse responses spec, R12).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ImpulseSlot {
+    /// The slot's name.
+    pub name: String,
+    /// The slot's number, counted from 0.
+    pub slot: u8,
+    /// Where the response is.
+    pub state: ImpulseState,
+    /// The response's file name; left out for an empty slot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    /// The file's path, if the set knows it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// The file's content hash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media: Option<ContentHash>,
+    /// The chooser's category for it: `User` for a file from elsewhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// Its name in that category.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response: Option<String>,
+    /// `mono`, `stereo` or `true_stereo`, once it is prepared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<String>,
+    /// The file's length in frames at its own rate, once prepared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_frames: Option<u64>,
+    /// The length in frames at the engine's rate after trimming, once
+    /// prepared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frames: Option<u64>,
+    /// The gain normalising applied, in dB, once prepared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gain_db: Option<f32>,
+}
+
+/// One response in a chooser's category.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ImpulseChoice {
+    /// Its name: its file's name without the extension.
+    pub name: String,
+    /// Its file's path.
+    pub file: String,
+}
+
+/// One category of a device's chooser.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ImpulseCategory {
+    /// The category's name.
+    pub name: String,
+    /// Its responses, in order.
+    pub responses: Vec<ImpulseChoice>,
+}
+
+/// What `device.impulse_responses` returns.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ImpulseResponses {
+    /// The device.
+    pub device: DeviceId,
+    /// What each slot holds.
+    pub slots: Vec<ImpulseSlot>,
+    /// The chooser's categories in order, the bundled ones then `User`.
+    pub categories: Vec<ImpulseCategory>,
+}
+
+/// What `device.load_sample` returns.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct LoadSampleResult {
     /// The device that took the sample.
     pub device: DeviceId,
@@ -2216,6 +2303,10 @@ pub struct LoadSampleResult {
     pub slot: u8,
     /// The file's name, for messages.
     pub name: String,
+    /// For an impulse-response slot, what it now holds (the impulse
+    /// responses spec, R4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub impulse_response: Option<ImpulseSlot>,
 }
 
 /// Arguments of `device.hot_swap`.
@@ -2531,7 +2622,13 @@ fn specs() -> Vec<CommandSpec> {
                  selected in the panel, or the only one. One undo step, named Load Sample. \
                  Reads a file outside the project. A device whose type doesn't play a sample, \
                  or a slot it doesn't have, is refused. `device.set_sample` with a null `media` \
-                 clears a slot.",
+                 clears a slot. A device with impulse-response slots (a convolution effect) \
+                 takes the file as a response instead: it must have 1, 2 or 4 channels and be \
+                 at most 30 seconds long, or it is refused with its reason and the slot stays \
+                 as it was; it is decoded, resampled, trimmed, normalised and prepared off \
+                 the main thread, and the command returns when it is ready, with its readings \
+                 in `impulse_response`. One undo step, named Load Impulse Response (Clear \
+                 Impulse Response for `device.set_sample`). `slot` counts the slots from 0.",
             )
             .permission(Permission::External)
             .context(DeviceView)
@@ -2993,6 +3090,22 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .args::<DeviceArgs>()
             .result::<DeviceDisplay>(),
+        CommandSpec::new(IMPULSE_RESPONSES, "Impulse Responses")
+            .description(
+                "Lists, for a device with impulse-response slots, what each slot holds (its \
+                 file, content hash, chooser category and name, channel layout, lengths, the \
+                 gain normalising applied in dB, and its state: empty, preparing, ready or \
+                 missing) and the chooser's categories in order: the bundled ones, each with \
+                 the responses in the app's bundled folder for it, then User, which lists the \
+                 audio files in the User Library's Impulse Responses folder and every \
+                 response loaded in the open set from elsewhere. Changes nothing. A response \
+                 is chosen with `device.load_sample` and its `slot`; `device.set_sample` \
+                 with no file clears a slot. A device with no such slot is refused.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<DeviceArgs>()
+            .result::<ImpulseResponses>(),
         CommandSpec::new(PREVIEW_HIT, "Preview Hit")
             .description(
                 "Plays a hit of a Drum Synth (DS Kick, DS Snare, DS Tom or DS Clap) at \

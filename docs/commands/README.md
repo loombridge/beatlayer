@@ -52,6 +52,7 @@ The commands, by the part of their ID before its first dot:
 - [`export`](export.md)
 - [`file_manager`](file_manager.md)
 - [`focus`](focus.md)
+- [`granulator`](granulator.md)
 - [`groove`](groove.md)
 - [`keymap`](keymap.md)
 - [`link`](link.md)
@@ -15219,6 +15220,71 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `GranulatorCaptureAction`
+
+What `granulator.capture` does.
+
+One of:
+
+- `"start"`: Starts a capture.
+- `"stop"`: Ends the capture running now.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `granulator.capture` does.",
+  "oneOf": [
+    {
+      "const": "start",
+      "description": "Starts a capture.",
+      "type": "string"
+    },
+    {
+      "const": "stop",
+      "description": "Ends the capture running now.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `GranulatorCaptureResult`
+
+What `granulator.capture` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `capturing` | boolean | yes | Whether a capture runs now. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `granulator.capture` returns.",
+  "properties": {
+    "capturing": {
+      "description": "Whether a capture runs now.",
+      "type": "boolean"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    }
+  },
+  "required": [
+    "device",
+    "capturing"
+  ],
+  "type": "object"
 }
 ```
 
@@ -37498,7 +37564,7 @@ What `stems.status` returns.
 | `created_clips` | array of [`ClipId`](#clipid) | no | The clips the last separation made, in the order of their tracks. |
 | `created_tracks` | array of [`TrackId`](#trackid) | no | The tracks the last separation made, the group first if it made one. |
 | `dialog` | [`DialogStatus`](#dialogstatus) or null | no | The dialog, if it's open. |
-| `provider` | string | no | What the current or last separation ran on, such as `Core ML`, or `CPU (not the GPU: ...)` with the reason a GPU wasn't used. |
+| `provider` | string | no | What the current or last separation ran on, such as `Core ML`, `DirectML` or `CUDA`, or `CPU (not the GPU: ...)` with the reason a GPU wasn't used. |
 
 <details><summary>JSON Schema</summary>
 
@@ -37551,7 +37617,7 @@ What `stems.status` returns.
       "type": "array"
     },
     "provider": {
-      "description": "What the current or last separation ran on, such as `Core ML`, or `CPU (not the GPU: ...)` with the reason a GPU wasn't used.",
+      "description": "What the current or last separation ran on, such as `Core ML`, `DirectML` or `CUDA`, or `CPU (not the GPU: ...)` with the reason a GPU wasn't used.",
       "type": "string"
     },
     "separation": {

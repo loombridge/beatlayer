@@ -77,6 +77,7 @@ mod file_manager;
 mod floating_windows;
 mod freeze;
 mod gain_reduction;
+mod granulator_capture;
 mod grooves;
 mod info_text;
 mod instant_mappings;

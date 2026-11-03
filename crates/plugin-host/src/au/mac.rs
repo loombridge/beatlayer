@@ -481,6 +481,7 @@ impl AuHost {
                 external: false,
                 midi_sidechain: false,
                 midi_tap: false,
+                sidechain_on: false,
                 note_output: has_note_output(&unit, role),
                 outputs: Vec::new(),
                 matrix: None,

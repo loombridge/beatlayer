@@ -16,8 +16,8 @@ fn fixtures() -> PathBuf {
 }
 
 /// A harness whose manifest lists the library's test package, built from the
-/// test manifest, in a folder of its own.
-fn harness(name: &str) -> (Harness, PathBuf) {
+/// test manifest, in a folder of its own, and the package's ID.
+fn harness(name: &str) -> (Harness, String, PathBuf) {
     let dir = std::env::temp_dir().join(format!("bl-ui-library-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -26,11 +26,14 @@ fn harness(name: &str) -> (Harness, PathBuf) {
         Err(format!("nothing is fetched here: {url}"))
     })
     .unwrap();
-    let folder = format!("library-core-ui-{name}-{}", std::process::id());
+    // Tests run in parallel and share the system's temporary folder: each
+    // package has an ID, a role and a folder of its own.
+    let id = format!("library-core-{name}-{}", std::process::id());
+    let folder = format!("{id}-1");
     let entry = json!({ "packages": [{
-        "id": "library-core", "name": "Test Library", "version": "1",
+        "id": id, "name": "Test Library", "version": "1",
         "project": "https://example.com/", "purpose": "Two generated tones",
-        "platform": "any", "role": "library-core",
+        "platform": "any", "role": id,
         "url": format!("file://{}", built.archive.display()),
         "size": built.size, "sha256": built.sha256, "unpack": "tar_gz", "keep_all": true,
         "folder": folder, "items": 2,
@@ -40,14 +43,12 @@ fn harness(name: &str) -> (Harness, PathBuf) {
     h.shell
         .use_manifest(Manifest::parse(&entry.to_string()).unwrap());
     let installed = h.shell.library_folder().join(folder);
-    (h, installed)
+    (h, id, installed)
 }
 
 /// Removes what a test installed, so the next run starts clean.
-fn clean(h: &mut Harness) {
-    let _ = h
-        .shell
-        .run("packages.remove", json!({ "ids": ["library-core"] }));
+fn clean(h: &mut Harness, id: &str) {
+    let _ = h.shell.run("packages.remove", json!({ "ids": [id] }));
 }
 
 fn press(h: &mut Harness, label: &str) {
@@ -68,7 +69,7 @@ fn press(h: &mut Harness, label: &str) {
 // Download installs, and the items list in its place.
 #[test]
 fn the_label_shows_the_download_page_until_the_library_is_installed() {
-    let (mut h, _) = harness("page");
+    let (mut h, id, _) = harness("page");
     h.shell
         .run("browser.open_place", json!({ "label": "core_library" }))
         .unwrap();
@@ -93,14 +94,14 @@ fn the_label_shows_the_download_page_until_the_library_is_installed() {
         .collect();
     assert!(!labels.contains(&"Download Required Packages Now".to_owned()));
     assert!(labels.iter().any(|l| l == "Tone A3"), "{labels:?}");
-    clean(&mut h);
+    clean(&mut h, &id);
 }
 
 // Spec: core-library R12. Help ▸ Library Credits... opens the window, which
 // lists each package's credits as a list; Close and Esc close it.
 #[test]
 fn the_credits_window_lists_each_items_credit() {
-    let (mut h, _) = harness("credits");
+    let (mut h, id, _) = harness("credits");
     h.shell.run("library.install", Value::Null).unwrap();
     h.shell.wait_packages();
     h.shell.run("library.show_credits", Value::Null).unwrap();
@@ -125,14 +126,14 @@ fn the_credits_window_lists_each_items_credit() {
     press(&mut h, "Close");
     h.settle();
     assert!(!h.shell.library_credits_open());
-    clean(&mut h);
+    clean(&mut h, &id);
 }
 
 // Spec: info-view R13, core-library R11. A library item selected in the
 // browser shows its credit in the Info View.
 #[test]
 fn a_selected_library_item_shows_its_credit_in_the_info_view() {
-    let (mut h, folder) = harness("info");
+    let (mut h, id, folder) = harness("info");
     h.shell.run("library.install", Value::Null).unwrap();
     h.shell.wait_packages();
     let file = folder.join("tone-a3/tone-a3.wav");
@@ -150,5 +151,5 @@ fn a_selected_library_item_shows_its_credit_in_the_info_view() {
     let content = h.main.info_view_content();
     assert_eq!(content.title, "Tone A3");
     assert!(content.body.contains("by Beatlayer"), "{}", content.body);
-    clean(&mut h);
+    clean(&mut h, &id);
 }

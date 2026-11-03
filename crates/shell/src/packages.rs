@@ -141,6 +141,20 @@ impl Manifest {
         if let Some(p) = manifest.packages.iter().find(|p| p.files.is_empty()) {
             return Err(format!("package {} keeps no files", p.id));
         }
+        // A package is removed by deleting its folder, so the folder is one
+        // plain name inside `Packages` (or `Library`), never the folder
+        // itself or a way out of it.
+        if let Some(p) = manifest.packages.iter().find(|p| {
+            !matches!(
+                Path::new(&p.folder)
+                    .components()
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+                [std::path::Component::Normal(_)]
+            )
+        }) {
+            return Err(format!("package {} has no plain folder name", p.id));
+        }
         let ours = manifest.for_platform();
         if let Some(p) = ours
             .iter()
@@ -669,6 +683,33 @@ mod tests {
                 return ended;
             }
             std::thread::yield_now();
+        }
+    }
+
+    // Spec: core-library R7. A package that keeps all installs every file
+    // of its archive under its own path, and nothing outside its folder.
+    #[test]
+    fn a_package_that_keeps_all_names_files_by_their_paths_inside_its_folder() {
+        let mut package = package_of("keep-all", b"x").0;
+        package.keep_all = true;
+        let name = |path: &str| kept_name(&package, Path::new(path));
+        assert_eq!(name("a/b/c.wav").as_deref(), Some("a/b/c.wav"));
+        assert_eq!(name("../c.wav"), None);
+        assert_eq!(name("/etc/passwd"), None);
+        assert_eq!(name("a/../../c.wav"), None);
+    }
+
+    // A package is removed by deleting its folder, so the folder must be a
+    // plain name.
+    #[test]
+    fn a_manifest_whose_package_folder_is_not_a_plain_name_is_refused() {
+        for folder in ["", ".", "..", "../x", "/x", "a/b"] {
+            let text = format!(
+                r#"{{"packages":[{{"id":"p","name":"P","version":"1","project":"","purpose":"",
+                "platform":"any","role":"r","url":"","size":1,"sha256":"","unpack":"file",
+                "folder":{folder:?},"files":[{{"name":"f"}}]}}]}}"#
+            );
+            assert!(Manifest::parse(&text).is_err(), "{folder:?}");
         }
     }
 

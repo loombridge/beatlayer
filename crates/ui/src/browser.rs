@@ -1201,6 +1201,10 @@ impl BrowserUi {
         let state = shell.library_state();
         let mut page = ui.new_child(egui::UiBuilder::new().max_rect(list.shrink(8.0)));
         egui::ScrollArea::vertical().show(&mut page, |ui| {
+            if state.packages.is_empty() {
+                ui.label("Beatlayer's library hasn't been published for this platform yet.");
+                return;
+            }
             if state.install.state == bl_shell::stems_commands::JobState::Running {
                 ui.label(if state.install.stage.is_empty() {
                     "Downloading Beatlayer's library"

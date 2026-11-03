@@ -2465,7 +2465,8 @@ mod tests {
 
     #[test]
     fn labels_read_as_live_names_them_and_serialise_simply() {
-        assert_eq!(Label::LIBRARY.map(|l| l.name())[7], "Plug-Ins");
+        assert_eq!(Label::LIBRARY.map(|l| l.name())[8], "Plug-Ins");
+        assert_eq!(Label::LIBRARY[1].name(), "Core Library");
         assert!(!Label::LIBRARY.iter().any(|l| l.name() == "Max for Live"));
         assert_eq!(
             serde_json::to_value(Label::AudioEffects).unwrap(),

@@ -651,7 +651,8 @@ fn the_library_sections_edit_mode_hides_labels_and_dragging_moves_them() {
         .filter(|l| l.section == ids::Section::Library)
         .map(|l| l.name.clone())
         .collect();
-    assert_eq!(&order[..3], ["All", "Samples", "Sounds"]);
+    // Core Library sits first after All, so Sounds is third.
+    assert_eq!(&order[..4], ["All", "Core Library", "Samples", "Sounds"]);
     // Done ends the mode; a hidden label leaves the sidebar.
     let nodes = look(&mut h);
     h.click(centre_of(&nodes, Role::Button, "Done"));
@@ -680,7 +681,7 @@ fn the_library_sections_edit_mode_hides_labels_and_dragging_moves_them() {
         .filter(|l| l.section == ids::Section::Library)
         .map(|l| l.name.clone())
         .collect();
-    assert_eq!(&order[..3], ["All", "Sounds", "Drums"]);
+    assert_eq!(&order[..4], ["All", "Core Library", "Sounds", "Drums"]);
 }
 
 // Spec: browser-tags R25.

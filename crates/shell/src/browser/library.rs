@@ -60,11 +60,13 @@ impl BrowserView {
     /// person can take off, and the folder is indexed with the places.
     pub fn set_library(&mut self, dir: Option<PathBuf>, items: Vec<LibraryItem>) {
         let moved = self.library.dir != dir;
+        let kept: std::collections::HashSet<&Path> =
+            items.iter().map(|item| item.path.as_path()).collect();
         let gone: Vec<String> = self
             .library
             .items
             .iter()
-            .filter(|old| !items.iter().any(|new| new.path == old.path))
+            .filter(|old| !kept.contains(old.path.as_path()))
             .map(|old| old.path.to_string_lossy().into_owned())
             .collect();
         self.library.dir = dir;

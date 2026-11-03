@@ -800,29 +800,29 @@ impl DeviceViewUi {
                         }
                     }
                 }
+                // What the device adds to its title bar takes the room it needs;
+                // the name and the tabs share the rest (L-DEV-045).
+                let title = if strip {
+                    controls.title
+                } else {
+                    crate::device_panel::title_parts(ui, theme, frame, controls.title, events)
+                };
                 self.title(
                     ui,
                     shell,
                     theme,
                     frame,
-                    (controls.title, strip, window),
+                    (title, strip, window),
                     text_colour,
                     events,
                 );
                 if let (Some(state), false) = (&frame.multisampler, strip) {
                     self.multisampler
-                        .tabs(ui, theme, frame, state, controls.title, events);
+                        .tabs(ui, theme, frame, state, title, events);
                 }
                 if !strip {
                     // Spec: device-framework R41. Title-bar tabs.
-                    crate::device_panel::title_tabs(
-                        ui,
-                        theme,
-                        frame,
-                        controls.title,
-                        &played,
-                        events,
-                    );
+                    crate::device_panel::title_tabs(ui, theme, frame, title, &played, events);
                 }
                 self.activator(ui, theme, frame, controls.activator, events);
                 if let Some(expand) = controls.expand {
@@ -935,10 +935,20 @@ impl DeviceViewUi {
             );
             painter.add(egui::epaint::TextShape::new(at, galley, colour).with_angle(-FRAC_PI_2));
         } else {
+            // A name wider than the room the tabs leave is cut short with an
+            // ellipsis (observed on Note Length).
+            let room = rect.width() - crate::device_panel::title_tabs_width(frame);
+            let name = crate::device_panel::truncated(&frame.title_text(), |text| {
+                painter
+                    .layout_no_wrap(text.to_owned(), theme.small_font(), colour)
+                    .size()
+                    .x
+                    <= room
+            });
             painter.text(
                 pos2(rect.left(), rect.center().y),
                 Align2::LEFT_CENTER,
-                frame.title_text(),
+                name,
                 theme.small_font(),
                 colour,
             );
@@ -1176,8 +1186,6 @@ impl DeviceViewUi {
         }
         let c = &theme.colors;
         let painter = ui.painter_at(rect.expand(2.0));
-        let centre = rect.center();
-        let r = rect.width() / 2.0;
         let face = if switch.on {
             c.accent.0
         } else if response.hovered() && enabled {
@@ -1185,9 +1193,10 @@ impl DeviceViewUi {
         } else {
             c.window.0
         };
-        painter.circle_filled(
-            centre,
-            r,
+        // A small square with a flat and a sharp (observed in Live 12.4.16).
+        painter.rect_filled(
+            rect,
+            crate::device_panel::BOX_CORNER,
             if enabled {
                 face
             } else {
@@ -1201,18 +1210,12 @@ impl DeviceViewUi {
         } else {
             c.text_dim.0
         };
-        let stroke = Stroke::new(1.0, ink);
-        // Three rising steps, standing for the notes of a scale.
-        for step in 0..3 {
-            let x = centre.x - r * 0.5 + step as f32 * r * 0.5;
-            painter.line_segment(
-                [
-                    pos2(x, centre.y + r * 0.45),
-                    pos2(x, centre.y + r * 0.45 - (step + 1) as f32 * r * 0.35),
-                ],
-                stroke,
-            );
-        }
+        crate::device_panel::paint_glyph(
+            &painter,
+            rect.shrink(2.0),
+            bl_model::device_layout::Glyph::FlatSharp,
+            ink,
+        );
         focus_ring(ui, theme, rect, &response);
         let name = switch.name.to_owned();
         let on = switch.on;
@@ -1427,7 +1430,7 @@ impl DeviceViewUi {
         };
         for item in shown(menu) {
             if item.is_separator() {
-                ui.separator();
+                crate::menus::separator(ui);
                 continue;
             }
             let response = crate::menus::item(ui, item, shell, &keymap, self.platform, events);
@@ -1468,7 +1471,7 @@ impl DeviceViewUi {
         // Default Preset and before the device's own items: one item per
         // running surface that can lock, ticked while it is locked to this
         // device.
-        ui.separator();
+        crate::menus::separator(ui);
         let surfaces = shell.lockable_surfaces();
         if surfaces.is_empty() {
             let text = "No control surface that can lock to a device is running.";
@@ -1499,7 +1502,7 @@ impl DeviceViewUi {
         // Spec: multisampler R29. The multisampler's own options follow the
         // device's (C-DEVICE-015).
         if frame.multisampler.is_some() {
-            ui.separator();
+            crate::menus::separator(ui);
             let linear = shell
                 .multisampler_device(frame.id)
                 .is_some_and(|d| d.layers.linear_loop_fades);
@@ -1529,7 +1532,7 @@ impl DeviceViewUi {
             bl_model::DeviceKind::Native { device_type }
                 if device_type == bl_devices::sampler::SAMPLER
         ) {
-            ui.separator();
+            crate::menus::separator(ui);
             if ui.button("Convert to Multisampler").clicked() {
                 invoke(
                     events,
@@ -1560,7 +1563,7 @@ impl DeviceViewUi {
         // Spec: multisampler R64. Autosample… is in an instrument's title
         // bar menu, among its device-specific options.
         if frame.role == bl_model::DeviceRole::Instrument {
-            ui.separator();
+            crate::menus::separator(ui);
             let response = ui.button("Autosample…");
             crate::menus::register_item(ui.ctx(), &response);
             if response.clicked() {
@@ -1578,7 +1581,7 @@ impl DeviceViewUi {
         // turns it over, one undo step like any parameter change.
         let options = frame.menu_options();
         if !options.is_empty() {
-            ui.separator();
+            crate::menus::separator(ui);
         }
         for option in options {
             let text = if option.on {
@@ -1602,7 +1605,7 @@ impl DeviceViewUi {
         // Spec: mpe R14, R18 (C-DEVICE-015). A plug-in's MPE Mode, ticked
         // while it's on, and the MPE/Multi-channel Settings.
         if let Some(mpe) = frame.mpe {
-            ui.separator();
+            crate::menus::separator(ui);
             let response = ui.button(if mpe.on { "✔ MPE Mode" } else { "MPE Mode" });
             crate::menus::register_item(ui.ctx(), &response);
             if response.clicked() {
@@ -1984,7 +1987,7 @@ struct Controls {
 }
 
 /// The size of a title bar's round buttons.
-const BUTTON: f32 = 11.0;
+const BUTTON: f32 = bl_model::device_layout::BOX_HEIGHT;
 
 /// An unfolded frame's title bar along its top: the activator, the expand
 /// toggle where the device has an expanded part, a plug-in's window button,

@@ -626,7 +626,7 @@ impl DeviceViewUi {
         let similar = shell.pad_similar_state(frame.id, pad.note);
         for item in bl_shell::menus::shown(&context_menus::drum_pad()) {
             if item.is_separator() {
-                ui.separator();
+                crate::menus::separator(ui);
                 continue;
             }
             let chord = match item.action {

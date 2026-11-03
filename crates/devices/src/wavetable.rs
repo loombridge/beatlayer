@@ -10,12 +10,15 @@
 //! instruments' filter, one lane per voice. Wavetables come from the
 //! compiler as node data ([`OscTable`]), built off the audio thread.
 //!
-//! The tabs Matrix and Mod Sources, the MIDI sources, unison's modes and
-//! Hi-Quality belong to the later parts: their parameter ids are reserved
-//! below and nothing here uses them.
+//! Part 2 (WP-8.10) adds the matrix on the instruments' modulation matrix
+//! (64 free slots), Envelopes 2 and 3 and loop modes on every envelope, two
+//! LFOs, the MIDI sources, unison's modes and Hi-Quality
+//! ([`crate::wavetable_mod`] has the sources' laws). Every destination is
+//! worked out per voice and frame where a route reaches it.
 
 use core::f32::consts::{FRAC_1_PI, PI};
 use core::ops::Range;
+use std::sync::{Arc, OnceLock};
 
 use bl_engine::{DeviceType, NodeConfig, NodeData, NodeEvent, Registry};
 use bl_model::device_layout::{
@@ -31,9 +34,17 @@ use lspk_wavetable::shaper::{Mode, ShapedOscillator, ShaperInputs, Slot};
 use lspk_wavetable::sub::{Inputs as SubInputs, Shape, Sub};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add_with_data};
-use crate::instrument::{self, Instrument, Parts, Section, State};
+use crate::instrument::matrix::{
+    DestDef, Kind as MatrixKind, Matrix, MatrixLayout, Pick, Range as MatrixRange, Rate, Read,
+    Scope, SlotDef, SourceDef, time_factor,
+};
+use crate::instrument::{self, Instrument, Parts, Section, Sources, State};
 use crate::instrument_filter::{CIRCUITS, InstrumentFilter, Per, PerFrame, Setup};
 use crate::sampler::FILTER_TYPE_CHOICES;
+use crate::wavetable_mod::{
+    self as m, DIVISIONS, EnvParams, Envelope, LFO_WAVES, LOOP_MODES, Lfo, LfoParams, Loop,
+    UNISON_MODES,
+};
 use crate::wavetables::OscTable;
 
 /// Wavetable's device type.
@@ -107,6 +118,252 @@ pub const UNISON_VOICES: ParamId = ParamId(125);
 pub const UNISON_AMOUNT: ParamId = ParamId(126);
 /// The pitch wheel's range, in semitones.
 pub const PB_RANGE: ParamId = ParamId(127);
+/// Unison's mode (R30) and Hi-Quality (R31).
+pub const UNISON_MODE: ParamId = ParamId(128);
+pub const HI_QUALITY: ParamId = ParamId(129);
+
+/// The offsets of an envelope's parameters from [`envelope`]'s base: Attack,
+/// Decay, Sustain and Release, their slopes, Loop Mode and, on Envelopes 2
+/// and 3 only, Initial, Peak and Final.
+pub const ENV_ATTACK: u32 = 0;
+pub const ENV_DECAY: u32 = 1;
+pub const ENV_SUSTAIN: u32 = 2;
+pub const ENV_RELEASE: u32 = 3;
+pub const ENV_ATTACK_SLOPE: u32 = 4;
+pub const ENV_DECAY_SLOPE: u32 = 5;
+pub const ENV_RELEASE_SLOPE: u32 = 6;
+pub const ENV_INITIAL: u32 = 7;
+pub const ENV_PEAK: u32 = 8;
+pub const ENV_FINAL: u32 = 9;
+pub const ENV_MODE: u32 = 10;
+
+/// Envelope `e`'s (0 the Amp envelope, 1 and 2 Envelopes 2 and 3) parameter at
+/// offset `what`.
+#[must_use]
+pub const fn envelope(e: usize, what: u32) -> ParamId {
+    ParamId(
+        if e == 0 {
+            100
+        } else {
+            200 + (e as u32 - 1) * 20
+        } + what,
+    )
+}
+
+/// The offsets of an LFO's parameters from [`lfo`]'s base.
+pub const LFO_WAVE: u32 = 0;
+pub const LFO_SHAPE: u32 = 1;
+pub const LFO_SYNC: u32 = 2;
+pub const LFO_RATE: u32 = 3;
+pub const LFO_DIVISION: u32 = 4;
+pub const LFO_AMOUNT: u32 = 5;
+pub const LFO_OFFSET: u32 = 6;
+pub const LFO_ATTACK: u32 = 7;
+pub const LFO_RETRIGGER: u32 = 8;
+
+/// LFO `n`'s (1 or 2) parameter at offset `what`.
+#[must_use]
+pub const fn lfo(n: usize, what: u32) -> ParamId {
+    ParamId(300 + (n as u32 - 1) * 20 + what)
+}
+
+/// The matrix's Time and Amount (R26).
+pub const MATRIX_TIME: ParamId = ParamId(1000);
+pub const MATRIX_AMOUNT: ParamId = ParamId(1001);
+/// The matrix's free slots (R25).
+pub const SLOTS: usize = 64;
+
+/// Slot `slot`'s amount.
+#[must_use]
+pub const fn slot_amount(slot: usize) -> ParamId {
+    ParamId(1010 + slot as u32)
+}
+
+/// The matrix's sources by place in its list (R25).
+const SRC_LFO: usize = 3;
+const SRC_VELOCITY: usize = 5;
+const SRC_NOTE: usize = 6;
+const SRC_PITCH_BEND: usize = 7;
+const SRC_AFTERTOUCH: usize = 8;
+const SRC_MOD_WHEEL: usize = 9;
+const SRC_RANDOM: usize = 10;
+const SRC_PRESSURE: usize = 11;
+const SRC_SLIDE: usize = 12;
+/// The sources worked out per voice and frame: the three envelopes and two
+/// LFOs.
+const MODULATORS: usize = 5;
+/// How many destinations each envelope has.
+const ENV_DESTS: [usize; 3] = [7, 10, 10];
+const SOURCES: [(&str, bool, bool); 13] = [
+    // (name, bipolar, global)
+    ("Amp", false, false),
+    ("Env 2", true, false),
+    ("Env 3", true, false),
+    ("LFO 1", true, false),
+    ("LFO 2", true, false),
+    ("Velocity", false, false),
+    ("Note", true, false),
+    ("Pitch Bend", true, true),
+    ("Aftertouch", false, true),
+    ("Mod Wheel", false, true),
+    ("Random", false, false),
+    ("Pressure", false, false),
+    ("Slide", false, false),
+];
+/// Spec: wavetable R26. The Note source's span in semitones, 1,000 to 1
+/// being the travel of a filter's Frequency: at 100 % a filter follows the
+/// note exactly.
+const NOTE_SPAN: f64 = 119.589;
+
+/// The destinations by place in the matrix's list (R25).
+const D_SUB_GAIN: usize = 22;
+const D_SUB_TONE: usize = 23;
+const D_UNISON: usize = 65;
+const D_VOLUME: usize = 66;
+const D_TIME: usize = 67;
+const D_AMOUNT: usize = 68;
+const DESTS: usize = 69;
+const D_OSC_SEMI: usize = 9;
+const D_OSC_DETUNE: usize = 10;
+
+/// Oscillator `n`'s (1 or 2) destination at offset `k`: Position, the six
+/// effect controls, Gain, Pan, Semi, Detune.
+const fn d_osc(n: usize, k: usize) -> usize {
+    (n - 1) * 11 + k
+}
+
+/// Filter `n`'s destination at `k`: Frequency, Resonance, Drive, Morph.
+const fn d_filter(n: usize, k: usize) -> usize {
+    24 + (n - 1) * 4 + k
+}
+
+/// Envelope `e`'s destination at the offset of its parameter.
+const fn d_env(e: usize, k: usize) -> usize {
+    [32, 39, 49][e] + k
+}
+
+/// LFO `n`'s destination at `k`: Rate, Shape, Amount.
+const fn d_lfo(n: usize, k: usize) -> usize {
+    59 + (n - 1) * 3 + k
+}
+
+/// The parameter each destination moves, in order.
+fn dest_params() -> Vec<ParamId> {
+    let mut ids = Vec::with_capacity(DESTS);
+    for n in 1..=2 {
+        ids.extend(
+            [
+                POSITION, FM_AMOUNT, FM_TUNE, PW, SYNC, WARP, FOLD, GAIN, PAN, SEMI, DETUNE,
+            ]
+            .map(|what| osc(n, what)),
+        );
+    }
+    ids.extend([SUB_GAIN, SUB_TONE]);
+    for n in 1..=2 {
+        ids.extend([FILTER_FREQ, FILTER_RES, FILTER_DRIVE, FILTER_MORPH].map(|w| filter(n, w)));
+    }
+    for (e, last) in [(0, ENV_RELEASE_SLOPE), (1, ENV_FINAL), (2, ENV_FINAL)] {
+        ids.extend((ENV_ATTACK..=last).map(|what| envelope(e, what)));
+    }
+    for n in 1..=2 {
+        ids.extend([LFO_RATE, LFO_SHAPE, LFO_AMOUNT].map(|what| lfo(n, what)));
+    }
+    ids.extend([UNISON_AMOUNT, VOLUME, MATRIX_TIME, MATRIX_AMOUNT]);
+    debug_assert_eq!(ids.len(), DESTS);
+    ids
+}
+
+/// Whether a destination is multiplicative (R25): Volume, the Amp envelope's
+/// Sustain, Envelopes 2 and 3's Initial, each LFO's Amount, Unison Amount and
+/// the matrix's Amount.
+fn multiplicative(dest: usize) -> bool {
+    dest == D_VOLUME
+        || dest == D_UNISON
+        || dest == D_AMOUNT
+        || dest == d_env(0, ENV_SUSTAIN as usize)
+        || dest == d_env(1, ENV_INITIAL as usize)
+        || dest == d_env(2, ENV_INITIAL as usize)
+        || dest == d_lfo(1, 2)
+        || dest == d_lfo(2, 2)
+}
+
+/// Whether a destination is worked out every frame (instrument modulation
+/// R1): pitch, position, the effects, amplitude and pan.
+fn audio_rate(dest: usize) -> bool {
+    dest < D_SUB_GAIN || dest == D_VOLUME
+}
+
+/// The matrix's layout, made once: names are the parameters', held for as long
+/// as the program runs.
+fn layout() -> &'static Arc<MatrixLayout> {
+    static LAYOUT: OnceLock<Arc<MatrixLayout>> = OnceLock::new();
+    LAYOUT.get_or_init(|| {
+        let description = wavetable_description();
+        let dests = dest_params()
+            .into_iter()
+            .enumerate()
+            .map(|(dest, id)| {
+                let name = description.param(id).expect("a destination is a parameter");
+                DestDef {
+                    name: Box::leak(name.name.clone().into_boxed_str()),
+                    param: Some(id),
+                    scope: if matches!(dest, D_VOLUME | D_TIME | D_AMOUNT) {
+                        Scope::Global
+                    } else {
+                        Scope::Voice
+                    },
+                    rate: if audio_rate(dest) {
+                        Rate::Audio
+                    } else {
+                        Rate::Control
+                    },
+                    kind: if multiplicative(dest) {
+                        MatrixKind::Multiplicative
+                    } else {
+                        MatrixKind::Additive
+                    },
+                }
+            })
+            .collect();
+        Arc::new(MatrixLayout {
+            sources: SOURCES
+                .iter()
+                .map(|&(name, bipolar, global)| SourceDef {
+                    name,
+                    range: if bipolar {
+                        MatrixRange::Bipolar
+                    } else {
+                        MatrixRange::Unipolar
+                    },
+                    scope: if global { Scope::Global } else { Scope::Voice },
+                })
+                .collect(),
+            dests,
+            slots: (0..SLOTS)
+                .map(|slot| SlotDef {
+                    source: Pick::Free,
+                    dest: Pick::Free,
+                    amount: slot_amount(slot),
+                })
+                .collect(),
+            forbidden: Vec::new(),
+        })
+    })
+}
+
+/// Every destination's descriptor, in the matrix's order.
+fn dest_descriptors() -> &'static Arc<Vec<bl_model::ParamDescriptor>> {
+    static DESCRIPTORS: OnceLock<Arc<Vec<bl_model::ParamDescriptor>>> = OnceLock::new();
+    DESCRIPTORS.get_or_init(|| {
+        let description = wavetable_description();
+        Arc::new(
+            dest_params()
+                .into_iter()
+                .map(|id| description.param(id).expect("a parameter").clone())
+                .collect(),
+        )
+    })
+}
 
 /// The effects an oscillator offers (R23): exactly these.
 pub const EFFECTS: [&str; 4] = ["None", "FM", "Classic", "Modern"];
@@ -128,6 +385,9 @@ const COPIES: usize = 8;
 /// The frames a stretch is rendered in: the oscillators' scratch is this
 /// long.
 const CHUNK: usize = 128;
+/// The factor the effects render oversampled at with Hi-Quality on and off.
+const HI_OVERSAMPLING: usize = 8;
+const LIGHT_OVERSAMPLING: usize = 2;
 /// How many frames the FM modulator's pitch holds between updates.
 const GRID: usize = 32;
 /// The longest envelope time, in milliseconds.
@@ -143,8 +403,6 @@ const PW_SCALE: f32 = 0.9 / lspk_wavetable::shaper::PULSE_MAX;
 /// Classic's Sync reaches 8 times the note at 100 %; the kit's reaches 16,
 /// so its amount is scaled by log₁₆ 8.
 const SYNC_SCALE: f32 = 0.75;
-/// Unison's detune at an amount of 100 %, in cents (R30's Classic).
-const UNISON_CENTS: f32 = 25.0;
 
 /// The ramps a stretch copies from the parameters, by index: per oscillator
 /// nine (Position, Gain, Pan, then the six effect controls), per filter four
@@ -186,6 +444,13 @@ fn ramp_ids() -> [ParamId; RAMPS] {
 /// The Wavetable device type.
 #[must_use]
 pub fn wavetable_type() -> DeviceType {
+    DeviceType::native(WAVETABLE, "Wavetable", DeviceRole::Instrument)
+        .with_description(wavetable_description())
+        .with_matrix(layout().as_ref().clone())
+}
+
+/// Wavetable's parameters, panel and banks.
+fn wavetable_description() -> DeviceDescription {
     let mut params = Vec::new();
     for n in 1..=2 {
         let name = |what: &str| format!("Osc {n} {what}");
@@ -421,7 +686,203 @@ pub fn wavetable_type() -> DeviceType {
         )
         .describe("How far the copies detune and pan apart; at 0 % one copy plays."),
         instrument::pb_range(PB_RANGE, 24, 2),
+        ParamDescriptor::choice(UNISON_MODE, "Unison Mode", &UNISON_MODES, m::CLASSIC).describe(
+            "How the copies of each oscillator spread: None plays one copy; Classic detunes them \
+             evenly and pans them alternately; Shimmer and Noise jitter their pitch and position at \
+             a slow and a fast rate; Phase Sync is Classic with every copy starting in phase; \
+             Position Spread spreads their positions in the table; Random Note draws each copy's \
+             position and detune again for every note.",
+        ),
+        instrument::hi_quality(HI_QUALITY),
     ]);
+
+    // The three envelopes (R27): the Amp envelope's and Envelopes 2 and 3's
+    // times, Sustain, slopes and Loop Mode; Envelopes 2 and 3's levels.
+    for e in 0..3 {
+        let name = |what: &str| {
+            if e == 0 {
+                format!("Amp {what}")
+            } else {
+                format!("Env {} {what}", e + 1)
+            }
+        };
+        if e > 0 {
+            params.extend([
+                time(
+                    envelope(e, ENV_ATTACK),
+                    &name("Attack"),
+                    1.0,
+                    "How long the envelope takes to rise from Initial to Peak.",
+                ),
+                time(
+                    envelope(e, ENV_DECAY),
+                    &name("Decay"),
+                    600.0,
+                    "How long the envelope takes to fall from Peak to Sustain.",
+                ),
+                ParamDescriptor::continuous(
+                    envelope(e, ENV_SUSTAIN),
+                    &name("Sustain"),
+                    (0.0, 100.0),
+                    100.0,
+                    ParamUnit::Percent,
+                )
+                .describe("The share of Peak the envelope holds while the note lasts."),
+                time(
+                    envelope(e, ENV_RELEASE),
+                    &name("Release"),
+                    100.0,
+                    "How long the envelope takes to fall to Final after the note ends.",
+                ),
+                slope(
+                    envelope(e, ENV_ATTACK_SLOPE),
+                    &name("Attack Slope"),
+                    "Bends the attack: positive starts fast and ends slow, negative the reverse.",
+                ),
+                slope(
+                    envelope(e, ENV_DECAY_SLOPE),
+                    &name("Decay Slope"),
+                    "Bends the decay: positive starts fast and ends slow, negative the reverse.",
+                ),
+                slope(
+                    envelope(e, ENV_RELEASE_SLOPE),
+                    &name("Release Slope"),
+                    "Bends the release: positive starts fast and ends slow, negative the reverse.",
+                ),
+            ]);
+            let level = |what, label: &str, default: f64, text: &str| {
+                ParamDescriptor::continuous(
+                    envelope(e, what),
+                    &name(label),
+                    (-100.0, 100.0),
+                    default,
+                    ParamUnit::Percent,
+                )
+                .describe(text)
+            };
+            params.extend([
+                level(
+                    ENV_INITIAL,
+                    "Initial",
+                    0.0,
+                    "The level the envelope starts from when a note begins.",
+                ),
+                level(ENV_PEAK, "Peak", 100.0, "The level the attack rises to."),
+                level(
+                    ENV_FINAL,
+                    "Final",
+                    0.0,
+                    "The level the release falls to, and a looping envelope starts again from.",
+                ),
+            ]);
+        }
+        params.push(
+            ParamDescriptor::choice(
+                envelope(e, ENV_MODE),
+                &name("Loop Mode"),
+                &LOOP_MODES,
+                0,
+            )
+            .describe(
+                "None holds Sustain until the note ends; Trigger runs the attack, decay and release \
+                 once from the note's start; Loop cycles them until the note ends.",
+            ),
+        );
+    }
+
+    // The two LFOs (R28).
+    for n in 1..=2 {
+        let name = |what: &str| format!("LFO {n} {what}");
+        params.extend([
+            ParamDescriptor::choice(lfo(n, LFO_WAVE), &name("Wave"), &LFO_WAVES, 0)
+                .describe("The LFO's wave: Sine, Saw, Triangle, Square or Random."),
+            ParamDescriptor::continuous(
+                lfo(n, LFO_SHAPE),
+                &name("Shape"),
+                (-100.0, 100.0),
+                0.0,
+                ParamUnit::Percent,
+            )
+            .describe("Bends the wave: its slope, its peak, its pulse width or how often its random values reach the extremes."),
+            ParamDescriptor::toggle(lfo(n, LFO_SYNC), &name("Sync"), false)
+                .describe("Sets the rate in divisions of the song's tempo instead of hertz."),
+            ParamDescriptor::continuous(
+                lfo(n, LFO_RATE),
+                &name("Rate"),
+                (0.01, 40.0),
+                1.0,
+                ParamUnit::Hertz,
+            )
+            .logarithmic()
+            .describe("How fast the LFO cycles, in hertz."),
+            ParamDescriptor::choice(
+                lfo(n, LFO_DIVISION),
+                &name("Division"),
+                &DIVISIONS.map(|(name, _)| name),
+                4,
+            )
+            .describe("The length of one cycle with Sync on, from 1/64 to 8 bars."),
+            ParamDescriptor::continuous(
+                lfo(n, LFO_AMOUNT),
+                &name("Amount"),
+                (0.0, 100.0),
+                100.0,
+                ParamUnit::Percent,
+            )
+            .describe("Scales the LFO's output."),
+            ParamDescriptor::continuous(
+                lfo(n, LFO_OFFSET),
+                &name("Offset"),
+                (0.0, 360.0),
+                0.0,
+                ParamUnit::None,
+            )
+            .decimals(0)
+            .describe("Where in its cycle the LFO starts, in degrees, and the phase it keeps against the song."),
+            time(
+                lfo(n, LFO_ATTACK),
+                &name("Attack"),
+                0.0,
+                "How long the LFO takes to fade in from the start of a note.",
+            ),
+            ParamDescriptor::toggle(lfo(n, LFO_RETRIGGER), &name("Retrigger"), false).describe(
+                "Starts the LFO again at Offset with each note; off, it follows the song position \
+                 while the song plays.",
+            ),
+        ]);
+    }
+
+    // The matrix: Time and Amount (R26) and its free slots' amounts (R25).
+    params.extend([
+        ParamDescriptor::continuous(
+            MATRIX_TIME,
+            "Matrix Time",
+            (-100.0, 100.0),
+            0.0,
+            ParamUnit::Percent,
+        )
+        .describe(
+            "Scales the speed of every envelope and LFO the matrix reads; negative is faster.",
+        ),
+        ParamDescriptor::continuous(
+            MATRIX_AMOUNT,
+            "Matrix Amount",
+            (0.0, 100.0),
+            100.0,
+            ParamUnit::Percent,
+        )
+        .describe("Scales every route's amount."),
+    ]);
+    params.extend((0..SLOTS).map(|slot| {
+        ParamDescriptor::continuous(
+            slot_amount(slot),
+            &format!("Route {} Amount", slot + 1),
+            (-100.0, 100.0),
+            0.0,
+            ParamUnit::Percent,
+        )
+        .describe("How far the slot's source moves its destination, in per cent of its travel.")
+    }));
 
     let tab = BODY_HEIGHT - TAB_HEIGHT;
     let band =
@@ -454,6 +915,39 @@ pub fn wavetable_type() -> DeviceType {
             (filter(n, FILTER_MORPH), Widget::Knob),
         ])
     };
+    let envelopes = |e: usize| {
+        let mut controls = vec![
+            (envelope(e, ENV_ATTACK), Widget::Knob),
+            (envelope(e, ENV_DECAY), Widget::Knob),
+            (envelope(e, ENV_SUSTAIN), Widget::Knob),
+            (envelope(e, ENV_RELEASE), Widget::Knob),
+            (envelope(e, ENV_ATTACK_SLOPE), Widget::Knob),
+            (envelope(e, ENV_DECAY_SLOPE), Widget::Knob),
+            (envelope(e, ENV_RELEASE_SLOPE), Widget::Knob),
+            (envelope(e, ENV_MODE), Widget::Chooser),
+        ];
+        if e > 0 {
+            controls.extend([
+                (envelope(e, ENV_INITIAL), Widget::Knob),
+                (envelope(e, ENV_PEAK), Widget::Knob),
+                (envelope(e, ENV_FINAL), Widget::Knob),
+            ]);
+        }
+        band(&controls)
+    };
+    let lfos = |n: usize| {
+        band(&[
+            (lfo(n, LFO_WAVE), Widget::Chooser),
+            (lfo(n, LFO_SHAPE), Widget::Knob),
+            (lfo(n, LFO_SYNC), Widget::Toggle),
+            (lfo(n, LFO_RATE), Widget::Knob),
+            (lfo(n, LFO_DIVISION), Widget::Chooser),
+            (lfo(n, LFO_AMOUNT), Widget::Knob),
+            (lfo(n, LFO_OFFSET), Widget::Knob),
+            (lfo(n, LFO_ATTACK), Widget::Knob),
+            (lfo(n, LFO_RETRIGGER), Widget::Toggle),
+        ])
+    };
     let pages = PagesNode::new(
         TABS,
         PageStyle::Tabs,
@@ -480,21 +974,33 @@ pub fn wavetable_type() -> DeviceType {
                         (VOLUME, Widget::Knob),
                         (UNISON_VOICES, Widget::Number),
                         (UNISON_AMOUNT, Widget::Knob),
+                        (UNISON_MODE, Widget::Chooser),
                     ]),
                 ]),
             ),
-            Page::new(PAGES[1], LayoutNode::Row(Vec::new())),
+            Page::new(PAGES[1], {
+                // The slots' amounts, eight to a band, until part 3's grid.
+                let mut bands = vec![band(&[
+                    (MATRIX_TIME, Widget::Knob),
+                    (MATRIX_AMOUNT, Widget::Knob),
+                ])];
+                bands.extend((0..SLOTS / 8).map(|bank| {
+                    let slots: Vec<_> = (0..8)
+                        .map(|i| (slot_amount(bank * 8 + i), Widget::Knob))
+                        .collect();
+                    band(&slots)
+                }));
+                LayoutNode::Row(bands)
+            }),
             Page::new(
                 PAGES[2],
-                LayoutNode::Row(vec![band(&[
-                    (AMP_ATTACK, Widget::Knob),
-                    (AMP_DECAY, Widget::Knob),
-                    (AMP_SUSTAIN, Widget::Knob),
-                    (AMP_RELEASE, Widget::Knob),
-                    (AMP_ATTACK_SLOPE, Widget::Knob),
-                    (AMP_DECAY_SLOPE, Widget::Knob),
-                    (AMP_RELEASE_SLOPE, Widget::Knob),
-                ])]),
+                LayoutNode::Row(vec![
+                    envelopes(0),
+                    envelopes(1),
+                    envelopes(2),
+                    lfos(1),
+                    lfos(2),
+                ]),
             ),
             Page::new(
                 PAGES[3],
@@ -503,109 +1009,134 @@ pub fn wavetable_type() -> DeviceType {
         ],
     );
     let layout = DeviceLayout::new(LayoutNode::Pages(pages));
-    DeviceType::native(WAVETABLE, "Wavetable", DeviceRole::Instrument).with_description(
-        DeviceDescription::new(params)
-            .with_layout(layout)
-            .with_banks(&[
-                (
-                    "Oscillator 1",
-                    &[
-                        "Osc 1 On",
-                        "Osc 1 Position",
-                        "Osc 1 Gain",
-                        "Osc 1 Pan",
-                        "Osc 1 Semi",
-                        "Osc 1 Detune",
-                        "Osc 1 Effect",
-                    ],
-                ),
-                (
-                    "Oscillator 1 Effect",
-                    &[
-                        "Osc 1 FM Amount",
-                        "Osc 1 FM Tune",
-                        "Osc 1 PW",
-                        "Osc 1 Sync",
-                        "Osc 1 Warp",
-                        "Osc 1 Fold",
-                    ],
-                ),
-                (
-                    "Oscillator 2",
-                    &[
-                        "Osc 2 On",
-                        "Osc 2 Position",
-                        "Osc 2 Gain",
-                        "Osc 2 Pan",
-                        "Osc 2 Semi",
-                        "Osc 2 Detune",
-                        "Osc 2 Effect",
-                    ],
-                ),
-                (
-                    "Oscillator 2 Effect",
-                    &[
-                        "Osc 2 FM Amount",
-                        "Osc 2 FM Tune",
-                        "Osc 2 PW",
-                        "Osc 2 Sync",
-                        "Osc 2 Warp",
-                        "Osc 2 Fold",
-                    ],
-                ),
-                ("Sub", &["Sub On", "Sub Gain", "Sub Tone", "Sub Octave"]),
-                (
-                    "Filter 1",
-                    &[
-                        "Filter 1 On",
-                        "Filter 1 Type",
-                        "Filter 1 Circuit",
-                        "Filter 1 Freq",
-                        "Filter 1 Res",
-                        "Filter 1 Drive",
-                        "Filter 1 Morph",
-                    ],
-                ),
-                (
-                    "Filter 2",
-                    &[
-                        "Filter 2 On",
-                        "Filter 2 Type",
-                        "Filter 2 Circuit",
-                        "Filter 2 Freq",
-                        "Filter 2 Res",
-                        "Filter 2 Drive",
-                        "Filter 2 Morph",
-                    ],
-                ),
-                (
-                    "Amp Envelope",
-                    &[
-                        "Amp Attack",
-                        "Amp Decay",
-                        "Amp Sustain",
-                        "Amp Release",
-                        "Amp Attack Slope",
-                        "Amp Decay Slope",
-                        "Amp Release Slope",
-                    ],
-                ),
-                (
-                    "Global",
-                    &[
-                        "Routing",
-                        "Voice Mode",
-                        "Poly Voices",
-                        "Glide",
-                        "Transpose",
-                        "Volume",
-                        "Unison Voices",
-                        "Unison Amount",
-                    ],
-                ),
-                ("MIDI", &["PB Range"]),
-            ]),
-    )
+    let named = |names: &[&str]| names.iter().map(|n| (*n).to_owned()).collect::<Vec<_>>();
+    let mut banks: Vec<(String, Vec<String>)> = Vec::new();
+    for n in 1..=2 {
+        banks.push((
+            format!("Oscillator {n}"),
+            ["On", "Position", "Gain", "Pan", "Semi", "Detune", "Effect"]
+                .iter()
+                .map(|what| format!("Osc {n} {what}"))
+                .collect(),
+        ));
+        banks.push((
+            format!("Oscillator {n} Effect"),
+            ["FM Amount", "FM Tune", "PW", "Sync", "Warp", "Fold"]
+                .iter()
+                .map(|what| format!("Osc {n} {what}"))
+                .collect(),
+        ));
+    }
+    banks.push((
+        "Sub".to_owned(),
+        named(&["Sub On", "Sub Gain", "Sub Tone", "Sub Octave"]),
+    ));
+    for n in 1..=2 {
+        banks.push((
+            format!("Filter {n}"),
+            ["On", "Type", "Circuit", "Freq", "Res", "Drive", "Morph"]
+                .iter()
+                .map(|what| format!("Filter {n} {what}"))
+                .collect(),
+        ));
+    }
+    banks.push((
+        "Amp Envelope".to_owned(),
+        [
+            "Attack",
+            "Decay",
+            "Sustain",
+            "Release",
+            "Attack Slope",
+            "Decay Slope",
+            "Release Slope",
+            "Loop Mode",
+        ]
+        .iter()
+        .map(|what| format!("Amp {what}"))
+        .collect(),
+    ));
+    for n in 2..=3 {
+        banks.push((
+            format!("Env {n}"),
+            [
+                "Attack",
+                "Decay",
+                "Sustain",
+                "Release",
+                "Attack Slope",
+                "Decay Slope",
+                "Release Slope",
+                "Loop Mode",
+            ]
+            .iter()
+            .map(|what| format!("Env {n} {what}"))
+            .collect(),
+        ));
+        banks.push((
+            format!("Env {n} Levels"),
+            ["Initial", "Peak", "Final"]
+                .iter()
+                .map(|what| format!("Env {n} {what}"))
+                .collect(),
+        ));
+    }
+    for n in 1..=2 {
+        banks.push((
+            format!("LFO {n}"),
+            [
+                "Wave", "Shape", "Sync", "Rate", "Division", "Amount", "Offset", "Attack",
+            ]
+            .iter()
+            .map(|what| format!("LFO {n} {what}"))
+            .collect(),
+        ));
+    }
+    banks.push((
+        "Global".to_owned(),
+        named(&[
+            "Routing",
+            "Voice Mode",
+            "Poly Voices",
+            "Glide",
+            "Transpose",
+            "Volume",
+            "Unison Voices",
+            "Unison Amount",
+        ]),
+    ));
+    banks.push((
+        "Unison and Matrix".to_owned(),
+        named(&[
+            "Unison Mode",
+            "Matrix Time",
+            "Matrix Amount",
+            "LFO 1 Retrigger",
+            "LFO 2 Retrigger",
+        ]),
+    ));
+    banks.push(("MIDI".to_owned(), named(&["PB Range"])));
+    for bank in 0..SLOTS / 8 {
+        banks.push((
+            format!("Routes {} to {}", bank * 8 + 1, bank * 8 + 8),
+            (0..8)
+                .map(|i| format!("#{}", slot_amount(bank * 8 + i).0))
+                .collect(),
+        ));
+    }
+    let refs: Vec<Vec<&str>> = banks
+        .iter()
+        .map(|(_, names)| names.iter().map(String::as_str).collect())
+        .collect();
+    let banks: Vec<(&str, &[&str])> = banks
+        .iter()
+        .zip(&refs)
+        .map(|((name, _), names)| (name.as_str(), names.as_slice()))
+        .collect();
+    DeviceDescription::new(params)
+        .with_layout(layout)
+        .with_banks(&banks)
+        .with_menu_options(&[HI_QUALITY])
 }
 
 /// Adds Wavetable to `registry`.
@@ -613,16 +1144,9 @@ pub fn register(registry: &mut Registry) {
     add_with_data(
         registry,
         wavetable_type(),
-        |_, config| make(config),
+        Wavetable::new,
         Some(std::sync::Arc::new(crate::wavetables::device_data)),
     );
-}
-
-/// Makes a Wavetable for `config`'s rate and block size. Every buffer and the
-/// default tables are made here, off the audio thread.
-#[must_use]
-pub fn make(config: &NodeConfig) -> Wavetable {
-    Wavetable::new(config)
 }
 
 /// Wavetable's audio-thread half.
@@ -632,7 +1156,11 @@ pub struct Wavetable {
 }
 
 impl Wavetable {
-    fn new(config: &NodeConfig) -> Self {
+    /// Makes a Wavetable for `config`'s rate and block size, holding
+    /// `device`'s routes. Every buffer and the default tables are made here,
+    /// off the audio thread.
+    #[must_use]
+    pub fn new(device: &bl_model::Device, config: &NodeConfig) -> Self {
         let rate = config.sample_rate.as_f64();
         Self {
             section: Section::new(
@@ -644,6 +1172,7 @@ impl Wavetable {
                     transpose: Some(TRANSPOSE),
                     pb_range: Some(PB_RANGE),
                     unison_voices: Some(UNISON_VOICES),
+                    hi_quality: Some(HI_QUALITY),
                     ..Parts::default()
                 },
                 VOICES,
@@ -651,7 +1180,7 @@ impl Wavetable {
                 rate,
                 0x57A7_E7AB,
             ),
-            synth: Synth::new(rate, config.max_frames),
+            synth: Synth::new(device, rate, config.max_frames),
         }
     }
 }
@@ -664,6 +1193,7 @@ impl NativeDevice for Wavetable {
             return;
         }
         self.synth.snapshot(frames, params);
+        self.synth.follow_song(audio);
         self.section.process(audio, params, &mut self.synth);
         let (left, right) = (&self.synth.out[0][..frames], &self.synth.out[1][..frames]);
         if channels == 1 {
@@ -684,101 +1214,38 @@ impl NativeDevice for Wavetable {
         self.synth.silence();
     }
 
+    fn matrix_played(&self, report: &mut dyn FnMut(ParamId, f64)) {
+        let synth = &self.synth;
+        for (dest, descriptor) in synth.descs.iter().enumerate() {
+            if let Some(position) = synth.matrix.shown(dest) {
+                report(descriptor.id, descriptor.denormalize(position));
+            }
+        }
+    }
+
     fn receive_data(&mut self, data: NodeData) {
         self.section.receive_data(&data);
         if let Some(table) = data.downcast_ref::<OscTable>() {
             self.synth.set_table(table);
         }
-    }
-}
-
-/// The stages of the amplitude envelope.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Stage {
-    Idle,
-    Attack,
-    Decay,
-    Sustain,
-    Release,
-}
-
-/// What the envelope reads for a stretch: each segment's progress per frame
-/// and its shape's exponent (R17, R27).
-#[derive(Clone, Copy)]
-struct Env {
-    step: [f32; 3],
-    power: [f32; 3],
-    sustain: f32,
-}
-
-/// One voice's amplitude envelope. Spec: wavetable R27: a segment's shape is
-/// x^(2^(−2s)) of its share of the way for slope s.
-#[derive(Clone, Copy)]
-struct Amp {
-    stage: Stage,
-    level: f32,
-    /// How far through the segment, 0 to 1, and the level it started from.
-    x: f32,
-    from: f32,
-}
-
-impl Amp {
-    const IDLE: Self = Self {
-        stage: Stage::Idle,
-        level: 0.0,
-        x: 0.0,
-        from: 0.0,
-    };
-
-    /// A note starts: from silence, or from the level a stolen voice had
-    /// reached (instrument voices R4).
-    fn start(&mut self, from_silence: bool) {
-        self.from = if from_silence { 0.0 } else { self.level };
-        self.level = self.from;
-        self.x = 0.0;
-        self.stage = Stage::Attack;
-    }
-
-    fn release(&mut self) {
-        if self.stage != Stage::Idle {
-            self.from = self.level;
-            self.x = 0.0;
-            self.stage = Stage::Release;
+        if let Some(routes) = data.downcast_ref::<bl_engine::ModRoutes>() {
+            self.synth.matrix.set_free(routes.0);
         }
     }
+}
 
-    /// The level of the next frame.
-    fn next(&mut self, env: &Env) -> f32 {
-        match self.stage {
-            Stage::Idle => {}
-            Stage::Attack => {
-                self.x += env.step[0];
-                if self.x >= 1.0 {
-                    (self.level, self.x, self.stage) = (1.0, 0.0, Stage::Decay);
-                } else {
-                    self.level = self.from + (1.0 - self.from) * self.x.powf(env.power[0]);
-                }
-            }
-            Stage::Decay => {
-                self.x += env.step[1];
-                if self.x >= 1.0 {
-                    (self.level, self.stage) = (env.sustain, Stage::Sustain);
-                } else {
-                    self.level = 1.0 + (env.sustain - 1.0) * self.x.powf(env.power[1]);
-                }
-            }
-            Stage::Sustain => self.level = env.sustain,
-            Stage::Release => {
-                self.x += env.step[2];
-                if self.x >= 1.0 {
-                    (self.level, self.stage) = (0.0, Stage::Idle);
-                } else {
-                    self.level = self.from * (1.0 - self.x.powf(env.power[2]));
-                }
-            }
-        }
-        self.level
-    }
+/// An LFO's settings for a stretch (R28).
+#[derive(Clone, Copy)]
+struct LfoSet {
+    wave: usize,
+    sync: bool,
+    /// Its rate in hertz and its division's length in quarter notes.
+    hz: f64,
+    beats: f64,
+    /// Its Offset in cycles, its Attack in milliseconds, and Retrigger.
+    offset: f64,
+    attack_ms: f64,
+    retrigger: bool,
 }
 
 /// What a stretch's switches and choices say, read once.
@@ -796,9 +1263,16 @@ struct Settings {
     filter_on: [bool; 2],
     setup: [Setup; 2],
     routing: usize,
-    env: Env,
-    /// Unison's Amount, 0 to 1.
+    /// The three envelopes as their parameters play, with no route.
+    env: [EnvParams; 3],
+    lfo: [LfoSet; 2],
+    /// Unison's Amount, 0 to 1, and its mode.
     amount: f32,
+    mode: usize,
+    /// The matrix's Time factor on the rate of envelopes and LFOs, and the
+    /// song's tempo.
+    speed: f64,
+    bpm: f64,
 }
 
 /// One oscillator's engine and its scratch for a chunk of frames.
@@ -810,6 +1284,8 @@ struct Osc {
     frame_mod: Vec<f32>,
     fm_source: Vec<f32>,
     amount_mod: [Vec<f32>; 2],
+    /// Pitch modulation in semitones, for a Semi or Detune a route reaches.
+    pitch_mod: Vec<f32>,
 }
 
 impl Osc {
@@ -835,6 +1311,7 @@ impl Osc {
             // frames, so the last frame looks one ahead.
             fm_source: vec![0.0; (CHUNK + 1) * lanes],
             amount_mod: [buffer(), buffer()],
+            pitch_mod: buffer(),
         }
     }
 }
@@ -858,14 +1335,53 @@ struct Synth {
     sub_pitch: [f32; VOICES],
     sub_step: [f32; VOICES],
     filters: [InstrumentFilter; 2],
-    amp: [Amp; VOICES],
     ramps: Vec<Vec<f32>>,
     set: Settings,
-    /// Per chunk: each lane's pitch and Unison's detune per lane.
+    /// The matrix, its destinations' descriptors, and which of them a route
+    /// reaches this stretch.
+    matrix: Matrix,
+    descs: Arc<Vec<bl_model::ParamDescriptor>>,
+    has: [bool; DESTS],
+    /// Whether a route reads each of the five modulators this stretch.
+    used: [bool; MODULATORS],
+    /// Every destination's parameter value, as of the stretch.
+    base: [f64; DESTS],
+    /// Each voice's three envelopes and two LFOs.
+    env: [[Envelope; VOICES]; 3],
+    lfo: [[Lfo; VOICES]; 2],
+    /// The five modulators' values for each voice and frame of the chunk
+    /// (`(source × VOICES + voice) × CHUNK + frame`) and each voice's last
+    /// frame's, which the modulators' own parameters read.
+    src: Vec<f32>,
+    prev: [[f32; MODULATORS]; VOICES],
+    /// Each LFO's cycles at each frame of the stretch while it follows the
+    /// song, and whether it does.
+    follow: [Vec<f64>; 2],
+    following: [bool; 2],
+    /// The matrix's Time factor and Amount at each frame of the chunk.
+    speed_at: Vec<f64>,
+    amount_at: Vec<f64>,
+    /// The voice a global destination reads from at each frame of the chunk:
+    /// the oldest whose Amp envelope still runs.
+    oldest_at: Vec<Option<usize>>,
+    amount_ready: bool,
+    /// Each voice's Unison Amount for the chunk, and the gains of its copies.
+    amount_of: [f32; VOICES],
+    copy_gains: [[(f32, f32); COPIES]; VOICES],
+    /// What each lane's note drew for Random Note (R30), the count of notes
+    /// started and the device's seed.
+    note_draw: Vec<[f32; 2]>,
+    serial: u64,
+    seed: u64,
+    /// Whether a route reaches any of oscillator `o`'s controls, and the
+    /// controls each voice plays: nine per voice and frame, in
+    /// [`RAMP_OSC`]'s order.
+    osc_routed: [bool; 2],
+    played: [Vec<f32>; 2],
+    /// Per chunk: each lane's pitch, unison's detune and position per lane.
     lane_pitch: Vec<f32>,
     unison: Vec<f32>,
-    /// Each oscillator's level and pan gains per frame, left and right.
-    osc_gain: [[Vec<f32>; 2]; 2],
+    unison_at: Vec<f32>,
     /// The filters' inputs, the envelope, the cutoffs and the controls, for
     /// a chunk.
     sig: [Vec<f32>; 2],
@@ -876,8 +1392,59 @@ struct Synth {
     out: [Vec<f32>; 2],
 }
 
+/// What a route reads of everything but the modulators.
+fn other(voices: &VoiceBlock, state: &State, source: usize, voice: usize) -> f64 {
+    let sources = Sources::of(voices);
+    match source {
+        SRC_VELOCITY => sources.velocity(voice),
+        SRC_NOTE => ((f64::from(voices.info(voice).key) - 60.0) / NOTE_SPAN).clamp(-1.0, 1.0),
+        SRC_PITCH_BEND => sources.pitch_bend(),
+        SRC_AFTERTOUCH => sources.aftertouch(),
+        SRC_MOD_WHEEL => sources.mod_wheel(),
+        SRC_RANDOM => state.random(voice),
+        SRC_PRESSURE => sources.pressure(voice),
+        SRC_SLIDE => sources.slide(voice),
+        _ => 0.0,
+    }
+}
+
+/// What a route reads at a frame of the chunk: the modulators' values there.
+struct Now<'a> {
+    src: &'a [f32],
+    voices: &'a VoiceBlock,
+    state: &'a State,
+}
+
+impl Read for Now<'_> {
+    fn read(&self, source: usize, voice: usize, frame: usize) -> f64 {
+        if source < MODULATORS {
+            f64::from(self.src[(source * VOICES + voice) * CHUNK + frame])
+        } else {
+            other(self.voices, self.state, source, voice)
+        }
+    }
+}
+
+/// What a modulator's own parameters read: the modulators' values a frame
+/// earlier, so no route waits on itself.
+struct Before<'a> {
+    prev: &'a [[f32; MODULATORS]; VOICES],
+    voices: &'a VoiceBlock,
+    state: &'a State,
+}
+
+impl Read for Before<'_> {
+    fn read(&self, source: usize, voice: usize, _frame: usize) -> f64 {
+        if source < MODULATORS {
+            f64::from(self.prev[voice][source])
+        } else {
+            other(self.voices, self.state, source, voice)
+        }
+    }
+}
+
 impl Synth {
-    fn new(rate: f64, max_frames: usize) -> Self {
+    fn new(device: &bl_model::Device, rate: f64, max_frames: usize) -> Self {
         let rate = rate as f32;
         let max_frames = max_frames.max(1);
         let filters = [
@@ -898,9 +1465,17 @@ impl Synth {
             p.phase = 0.0;
             sub
         };
-        let frames = || vec![0.0; CHUNK];
         let signal = || vec![0.0; CHUNK * 2 * stride];
         let mono = || vec![0.0; CHUNK * stride];
+        let lfo = LfoSet {
+            wave: 0,
+            sync: false,
+            hz: 1.0,
+            beats: 1.0,
+            offset: 0.0,
+            attack_ms: 0.0,
+            retrigger: false,
+        };
         let set = Settings {
             on: [true, false],
             effect: [FX_NONE; 2],
@@ -912,12 +1487,12 @@ impl Synth {
             filter_on: [true, false],
             setup: [Setup::new(0, true, 0); 2],
             routing: 0,
-            env: Env {
-                step: [1.0; 3],
-                power: [1.0; 3],
-                sustain: 1.0,
-            },
+            env: [EnvParams::AMP; 3],
+            lfo: [lfo; 2],
             amount: 0.0,
+            mode: m::CLASSIC,
+            speed: 1.0,
+            bpm: 120.0,
         };
         Self {
             rate,
@@ -929,19 +1504,40 @@ impl Synth {
             sub_pitch: [0.0; VOICES],
             sub_step: [0.0; VOICES],
             filters,
-            amp: [Amp::IDLE; VOICES],
             ramps: (0..RAMPS).map(|_| vec![0.0; max_frames]).collect(),
             set,
+            matrix: Matrix::of(layout().clone(), device),
+            descs: dest_descriptors().clone(),
+            has: [false; DESTS],
+            used: [false; MODULATORS],
+            base: [0.0; DESTS],
+            env: [[Envelope::IDLE; VOICES]; 3],
+            lfo: [[Lfo::IDLE; VOICES]; 2],
+            src: vec![0.0; MODULATORS * VOICES * CHUNK],
+            prev: [[0.0; MODULATORS]; VOICES],
+            follow: [vec![0.0; max_frames], vec![0.0; max_frames]],
+            following: [false; 2],
+            speed_at: vec![1.0; CHUNK],
+            amount_at: vec![1.0; CHUNK],
+            oldest_at: vec![None; CHUNK],
+            amount_ready: false,
+            amount_of: [0.0; VOICES],
+            copy_gains: [[(1.0, 1.0); COPIES]; VOICES],
+            note_draw: vec![[0.0; 2]; lanes],
+            serial: 0,
+            seed: 0x57A7_E7AB_C0DE,
+            osc_routed: [false; 2],
+            played: [
+                vec![0.0; VOICES * RAMP_OSC * CHUNK],
+                vec![0.0; VOICES * RAMP_OSC * CHUNK],
+            ],
             lane_pitch: vec![0.0; lanes],
             unison: vec![0.0; lanes],
-            osc_gain: [[frames(), frames()], [frames(), frames()]],
+            unison_at: vec![0.0; lanes],
             sig: [signal(), signal()],
             env_out: mono(),
             cutoff: [mono(), mono()],
-            controls: [
-                [frames(), frames(), frames()],
-                [frames(), frames(), frames()],
-            ],
+            controls: [[mono(), mono(), mono()], [mono(), mono(), mono()]],
             out: [vec![0.0; max_frames], vec![0.0; max_frames]],
         }
     }
@@ -958,13 +1554,16 @@ impl Synth {
     }
 
     /// Reads the stretch's parameters: the ramps into buffers, the switches
-    /// and choices into [`Settings`].
+    /// and choices into [`Settings`], and the matrix's slots.
     fn snapshot(&mut self, frames: usize, params: &ParamBank) {
         let at = |id: ParamId| params.index(id).expect("the description holds it");
         for (to, id) in self.ramps.iter_mut().zip(ramp_ids()) {
             to[..frames].copy_from_slice(&params.ramp(at(id))[..frames]);
         }
         let value = |id: ParamId| params.value(at(id));
+        for (to, d) in self.base.iter_mut().zip(self.descs.iter()) {
+            *to = value(d.id);
+        }
         let transpose = value(TRANSPOSE) as f32;
         let n = |i: usize| i + 1;
         let setup = |i: usize| {
@@ -976,10 +1575,17 @@ impl Synth {
                 value(filter(n(i), FILTER_CIRCUIT)) as usize,
             )
         };
-        let rate = f64::from(self.rate);
-        let step = |ms: f64| (1.0 / (ms * 1e-3 * rate).max(1.0)) as f32;
-        let power = |id| 2f32.powf(-2.0 * value(id) as f32);
-        self.set = Settings {
+        let speed = time_factor(value(MATRIX_TIME) / 100.0);
+        let lfo_set = |i: usize| LfoSet {
+            wave: (value(lfo(n(i), LFO_WAVE)) as usize).min(LFO_WAVES.len() - 1),
+            sync: value(lfo(n(i), LFO_SYNC)) >= 0.5,
+            hz: value(lfo(n(i), LFO_RATE)),
+            beats: DIVISIONS[(value(lfo(n(i), LFO_DIVISION)) as usize).min(DIVISIONS.len() - 1)].1,
+            offset: value(lfo(n(i), LFO_OFFSET)) / 360.0,
+            attack_ms: value(lfo(n(i), LFO_ATTACK)),
+            retrigger: value(lfo(n(i), LFO_RETRIGGER)) >= 0.5,
+        };
+        let mut set = Settings {
             on: [0, 1].map(|i| value(osc(n(i), OSC_ON)) >= 0.5),
             effect: [0, 1].map(|i| (value(osc(n(i), EFFECT)) as usize).min(EFFECTS.len() - 1)),
             semitones: [0, 1].map(|i| value(osc(n(i), SEMI)) as f32 + transpose),
@@ -990,28 +1596,92 @@ impl Synth {
             filter_on: [0, 1].map(|i| value(filter(n(i), FILTER_ON)) >= 0.5),
             setup: [setup(0), setup(1)],
             routing: (value(ROUTING) as usize).min(ROUTINGS.len() - 1),
-            env: Env {
-                step: [
-                    step(value(AMP_ATTACK)),
-                    step(value(AMP_DECAY)),
-                    step(value(AMP_RELEASE)),
-                ],
-                power: [
-                    power(AMP_ATTACK_SLOPE),
-                    power(AMP_DECAY_SLOPE),
-                    power(AMP_RELEASE_SLOPE),
-                ],
-                sustain: (value(AMP_SUSTAIN) / 100.0) as f32,
-            },
+            env: self.set.env,
+            lfo: [lfo_set(0), lfo_set(1)],
             amount: (value(UNISON_AMOUNT) / 100.0) as f32,
+            mode: (value(UNISON_MODE) as usize).min(UNISON_MODES.len() - 1),
+            speed,
+            bpm: self.set.bpm,
         };
+        for e in 0..3 {
+            set.env[e] = self.env_params(e, speed, |k| self.base[d_env(e, k)]);
+            set.env[e].mode = Loop::of(value(envelope(e, ENV_MODE)) as usize);
+        }
+        self.set = set;
+        self.matrix.set_amount(value(MATRIX_AMOUNT) / 100.0);
+        self.matrix.begin(params);
+        for (dest, has) in self.has.iter_mut().enumerate() {
+            *has = self.matrix.has(dest);
+        }
+        for (source, used) in self.used.iter_mut().enumerate() {
+            *used = self.matrix.uses(source);
+        }
+        self.osc_routed = [1, 2].map(|n| (0..11).any(|k| self.has[d_osc(n, k)]));
         self.out[0][..frames].fill(0.0);
         self.out[1][..frames].fill(0.0);
     }
 
+    /// The envelope `e`'s parameters as `get` gives them (by offset), Time
+    /// scaling its speed by `speed`.
+    fn env_params(&self, e: usize, speed: f64, get: impl Fn(usize) -> f64) -> EnvParams {
+        let rate = f64::from(self.rate);
+        let at = |what: u32| get(what as usize);
+        let slope = |what: u32| m::shape_power(at(what) as f32);
+        let level = |what: u32, default: f32| {
+            if e == 0 {
+                default
+            } else {
+                (at(what) / 100.0) as f32
+            }
+        };
+        EnvParams {
+            step: [ENV_ATTACK, ENV_DECAY, ENV_RELEASE]
+                .map(|what| m::segment_step(at(what), rate, speed)),
+            power: [ENV_ATTACK_SLOPE, ENV_DECAY_SLOPE, ENV_RELEASE_SLOPE].map(slope),
+            sustain: (at(ENV_SUSTAIN) / 100.0) as f32,
+            initial: level(ENV_INITIAL, 0.0),
+            peak: level(ENV_PEAK, 1.0),
+            fin: level(ENV_FINAL, 0.0),
+            mode: Loop::None,
+        }
+    }
+
+    /// Works out where each LFO that follows the song is at each frame of the
+    /// stretch (R28): its cycles from the song's start, a function of the song
+    /// position alone, so it sounds the same after the transport restarts and
+    /// across a tempo change.
+    fn follow_song(&mut self, audio: &Audio<'_, '_>) {
+        self.set.bpm = audio.bpm();
+        let frames = audio.frames();
+        let rate = f64::from(self.rate);
+        for l in 0..2 {
+            let set = self.set.lfo[l];
+            self.following[l] = audio.playing()
+                && self.used[SRC_LFO + l]
+                && !set.retrigger
+                && !self.has[d_lfo(l + 1, 0)]
+                && !self.has[D_TIME];
+            if !self.following[l] {
+                continue;
+            }
+            for k in 0..frames {
+                let frame = audio.song_frame(k);
+                self.follow[l][k] = if set.sync {
+                    let at = bl_core::time::Frames(frame);
+                    let ticks = audio.tempo().frames_to_ticks(at, audio.sample_rate());
+                    ticks.as_quarters() / set.beats * self.set.speed
+                } else {
+                    frame as f64 / rate * set.hz * self.set.speed
+                };
+            }
+        }
+    }
+
     /// Drops everything the synth holds, for a device switched off.
     fn silence(&mut self) {
-        self.amp = [Amp::IDLE; VOICES];
+        self.env = [[Envelope::IDLE; VOICES]; 3];
+        self.lfo = [[Lfo::IDLE; VOICES]; 2];
+        self.prev = [[0.0; MODULATORS]; VOICES];
         for sub in &mut self.sub {
             sub.reset();
         }
@@ -1020,6 +1690,67 @@ impl Synth {
         }
         self.out.iter_mut().for_each(|out| out.fill(0.0));
     }
+
+    /// `dest` as `voice` plays it at frame `k` of the chunk (`at` frames into
+    /// the stretch), given the parameter's own `base` value: its routes'
+    /// movement, if any reaches it (R5).
+    fn val(&self, c: &Ctx<'_>, dest: usize, base: f64, voice: usize, k: usize) -> f64 {
+        if !self.has[dest] {
+            return base;
+        }
+        self.scale_to(dest, k);
+        let d = &self.descs[dest];
+        let now = Now {
+            src: &self.src,
+            voices: c.voices,
+            state: c.state,
+        };
+        let due = c.state.control_due(c.at + k);
+        d.denormalize(
+            self.matrix
+                .position(dest, d.normalize(base), voice, k, due, &now),
+        )
+    }
+
+    /// Sets the matrix's Amount to what it is at frame `k` of the chunk, once
+    /// that frame's has been worked out, and a global destination's voice to
+    /// the oldest still sounding then.
+    fn scale_to(&self, dest: usize, k: usize) {
+        if self.amount_ready {
+            self.matrix.set_amount(self.amount_at[k]);
+        }
+        if matches!(dest, D_VOLUME | D_TIME | D_AMOUNT) {
+            self.matrix.set_oldest(self.oldest_at[k]);
+        }
+    }
+
+    /// [`val`](Self::val) for a modulator's own parameters, which read the
+    /// modulators a frame earlier.
+    fn val_before(&self, c: &Ctx<'_>, dest: usize, base: f64, voice: usize, k: usize) -> f64 {
+        if !self.has[dest] {
+            return base;
+        }
+        self.scale_to(dest, k);
+        let d = &self.descs[dest];
+        let before = Before {
+            prev: &self.prev,
+            voices: c.voices,
+            state: c.state,
+        };
+        let due = c.state.control_due(c.at + k);
+        d.denormalize(
+            self.matrix
+                .position(dest, d.normalize(base), voice, k, due, &before),
+        )
+    }
+}
+
+/// Where in the stretch a chunk is, and what its routes read.
+struct Ctx<'a> {
+    voices: &'a VoiceBlock,
+    state: &'a State,
+    /// The stretch frame the chunk starts at.
+    at: usize,
 }
 
 /// A sine of `phase` cycles, to better than 10⁻⁵: a polynomial on the
@@ -1051,7 +1782,17 @@ impl Instrument for Synth {
                     Start::Legato => Onset::Legato,
                     Start::Join { .. } => Onset::Join,
                 };
+                // One copy, or Phase Sync's, starts at phase 0; the others at
+                // random phases (R19, R30).
+                let random = if self.set.amount > 0.0
+                    && !matches!(self.set.mode, m::PHASE_SYNC | m::NO_UNISON)
+                {
+                    100.0
+                } else {
+                    0.0
+                };
                 for osc in &mut self.osc {
+                    osc.shaped.osc_mut().params_mut().phase_random = random;
                     osc.shaped.start(voice, key, onset);
                 }
                 for sub in &mut self.sub {
@@ -1059,7 +1800,9 @@ impl Instrument for Synth {
                 }
                 match start {
                     Start::Fresh | Start::Join { .. } => {
-                        self.amp[voice].start(true);
+                        for e in 0..3 {
+                            self.env[e][voice].start(self.set.env[e].initial);
+                        }
                         for osc in &mut self.osc {
                             osc.fm_phase[lanes.clone()].fill(0.0);
                         }
@@ -1069,12 +1812,29 @@ impl Instrument for Synth {
                             }
                         }
                     }
-                    Start::Steal | Start::Retrigger => self.amp[voice].start(false),
+                    Start::Steal | Start::Retrigger => {
+                        for e in 0..3 {
+                            let from = self.env[e][voice].level();
+                            self.env[e][voice].start(from);
+                        }
+                    }
                     Start::Legato => {}
                 }
+                if !matches!(start, Start::Legato) {
+                    self.start_note(voice, lanes);
+                }
             }
-            VoiceEventKind::Release => self.amp[voice].release(),
-            VoiceEventKind::End { .. } => self.amp[voice] = Amp::IDLE,
+            VoiceEventKind::Release => {
+                for e in 0..3 {
+                    self.env[e][voice].release(self.set.env[e].mode);
+                }
+            }
+            VoiceEventKind::End { .. } => {
+                for e in 0..3 {
+                    self.env[e][voice] = Envelope::IDLE;
+                }
+                self.lfo.iter_mut().for_each(|lfo| lfo[voice] = Lfo::IDLE);
+            }
         }
     }
 
@@ -1083,53 +1843,222 @@ impl Instrument for Synth {
         if span == 0 || frames.is_empty() {
             return;
         }
+        self.matrix.set_newest(state.newest(voices));
         let mut at = frames.start;
         while at < frames.end {
-            let n = CHUNK.min(frames.end - at);
+            let mut n = CHUNK.min(frames.end - at);
+            // Shimmer and Noise move on a grid of 32 frames counted from the
+            // device's first frame, and so does a route into Unison Amount,
+            // so a chunk never crosses a line of it.
+            if matches!(self.set.mode, m::SHIMMER | m::NOISE) || self.has[D_UNISON] {
+                let grid = u64::from(lspk_voice::CONTROL_INTERVAL);
+                n = n.min((grid - state.clock(at) % grid) as usize);
+            }
             self.chunk(voices, state, frames.start, at, n, span);
             at += n;
         }
-        // A voice whose envelope has run out is silent.
+        // A voice whose Amp envelope has run out is silent.
         let mut mask = voices.active_mask();
         while mask != 0 {
             let voice = mask.trailing_zeros() as usize;
             mask &= mask - 1;
-            if self.amp[voice].stage == Stage::Idle {
+            if self.env[0][voice].is_idle() {
                 voices.end(voice);
             }
         }
     }
 }
 
+impl Synth {
+    /// A note starts on `voice`: its LFOs restart at Offset, its routes' held
+    /// values go, and Random Note draws its copies' offsets (R28, R30).
+    fn start_note(&mut self, voice: usize, lanes: Range<usize>) {
+        self.serial += 1;
+        for l in 0..2 {
+            let set = self.set.lfo[l];
+            let salt = if set.retrigger {
+                self.seed ^ (l as u64) << 56 ^ self.serial
+            } else {
+                self.seed ^ (l as u64) << 56
+            };
+            self.lfo[l][voice].start(set.offset, salt);
+            if set.attack_ms <= 0.0 {
+                self.lfo[l][voice].attack = 1.0;
+            }
+        }
+        self.matrix.start(voice);
+        for lane in lanes {
+            let draw = |n: u64| {
+                m::unit(self.seed ^ self.serial.wrapping_mul(0x9E37) ^ (lane as u64) << 32 ^ n)
+            };
+            self.note_draw[lane] = [draw(1), draw(2)];
+        }
+    }
+
+    /// Runs the envelopes and LFOs of the chunk's `n` frames from stretch
+    /// frame `c.at` for the active voices, and fills `src` and the Amp
+    /// envelope's level (R27, R28). Each modulator's own parameters read the
+    /// modulators of the frame before.
+    fn modulate(&mut self, c: &Ctx<'_>, n: usize, mask: u32) {
+        let (rate, stride) = (f64::from(self.rate), self.stride);
+        for k in 0..n {
+            // The oldest voice still sounding, by the Amp envelopes as the
+            // frame before left them, so it is the same at any block size.
+            let mut alive = 0;
+            for voice in 0..VOICES {
+                if mask >> voice & 1 == 1 && !self.env[0][voice].is_idle() {
+                    alive |= 1 << voice;
+                }
+            }
+            let oldest = c.state.oldest_of(alive);
+            self.oldest_at[k] = oldest;
+            self.matrix.set_oldest(oldest);
+            self.amount_ready = false;
+            self.matrix.set_amount(self.base[D_AMOUNT] / 100.0);
+            let from = oldest.unwrap_or(0);
+            self.speed_at[k] = if self.has[D_TIME] {
+                time_factor(self.val_before(c, D_TIME, self.base[D_TIME], from, k) / 100.0)
+            } else {
+                self.set.speed
+            };
+            self.amount_at[k] = if self.has[D_AMOUNT] {
+                (self.val_before(c, D_AMOUNT, self.base[D_AMOUNT], from, k) / 100.0).clamp(0.0, 1.0)
+            } else {
+                self.base[D_AMOUNT] / 100.0
+            };
+            self.amount_ready = true;
+            let mut m = mask;
+            while m != 0 {
+                let voice = m.trailing_zeros() as usize;
+                m &= m - 1;
+                let frame = c.at + k;
+                let speed = self.speed_at[k];
+                // The LFOs, and Envelopes 2 and 3, only while a route reads
+                // them; a route added mid-note finds them where the note
+                // left them.
+                // shortcut: an unread modulator stands still, upgrade to run it
+                // when a cheaper law makes that worth the frames.
+                for l in (0..2).filter(|&l| self.used[SRC_LFO + l]) {
+                    let set = self.set.lfo[l];
+                    let get =
+                        |kk: usize, base: f64| self.val_before(c, d_lfo(l + 1, kk), base, voice, k);
+                    let lp = LfoParams {
+                        wave: set.wave,
+                        shape: (get(1, self.base[d_lfo(l + 1, 1)]) / 100.0) as f32,
+                        amount: (get(2, self.base[d_lfo(l + 1, 2)]) / 100.0) as f32,
+                    };
+                    let value = if self.following[l] {
+                        self.lfo[l][voice].follow(self.follow[l][frame] + set.offset);
+                        self.lfo[l][voice].value(&lp)
+                    } else {
+                        let value = self.lfo[l][voice].value(&lp);
+                        let hz = if set.sync {
+                            self.set.bpm / 60.0 / set.beats
+                        } else {
+                            1.0
+                        };
+                        // Rate's route moves the hertz rate or, synced, the
+                        // division's by the same share.
+                        let played = get(0, self.base[d_lfo(l + 1, 0)]);
+                        let ratio = played / self.base[d_lfo(l + 1, 0)].max(1e-9);
+                        let hz = if set.sync { hz * ratio } else { played };
+                        self.lfo[l][voice].run(hz * speed / rate);
+                        value
+                    };
+                    let lfo = &mut self.lfo[l][voice];
+                    if lfo.attack < 1.0 {
+                        lfo.attack =
+                            (lfo.attack + m::segment_step(set.attack_ms, rate, 1.0)).min(1.0);
+                    }
+                    self.src[((SRC_LFO + l) * VOICES + voice) * CHUNK + k] = value;
+                    self.prev[voice][SRC_LFO + l] = value;
+                }
+                // The envelopes.
+                for e in (0..3).filter(|&e| e == 0 || self.used[e]) {
+                    let params = if (0..ENV_DESTS[e]).any(|kk| self.has[d_env(e, kk)]) {
+                        let mut p = self.env_params(e, speed, |kk| {
+                            self.val_before(c, d_env(e, kk), self.base[d_env(e, kk)], voice, k)
+                        });
+                        p.mode = self.set.env[e].mode;
+                        p
+                    } else {
+                        let mut p = self.set.env[e];
+                        for s in &mut p.step {
+                            *s = (f64::from(*s) * speed / self.set.speed) as f32;
+                        }
+                        p
+                    };
+                    let level = self.env[e][voice].next(&params);
+                    self.src[(e * VOICES + voice) * CHUNK + k] = level;
+                    self.prev[voice][e] = level;
+                }
+                self.env_out[k * stride + voice] = self.env[0][voice].level();
+            }
+        }
+    }
+}
+
+/// What an oscillator's switches and choices say for a chunk.
+#[derive(Clone, Copy)]
+struct OscSet {
+    effect: usize,
+    semitones: f32,
+    cents: f32,
+    /// Whether a route reaches its Semi or Detune.
+    pitch_moved: bool,
+    /// Unison's mode.
+    mode: usize,
+}
+
 /// What one oscillator's render of a chunk reads.
 struct Chunk<'a> {
     voices: &'a VoiceBlock,
     mask: u32,
-    /// The stretch frame the chunk starts at, its length, the lanes to
-    /// render and the lanes per voice's worth of them.
-    at: usize,
+    /// The chunk's length, the lanes to render and the lanes per voice's
+    /// worth of them.
     n: usize,
     span: usize,
     lanes: usize,
     rate: f32,
-    /// The copies each voice plays.
+    /// The copies each voice plays, and whether Hi-Quality is on.
     copies: usize,
-    /// Each lane's pitch at the chunk's first frame, and its unison detune,
-    /// in semitones.
+    hi_quality: bool,
+    /// Each lane's pitch at the chunk's first frame, its unison detune in
+    /// semitones and its unison position as a share of the table.
     pitch: &'a [f32],
     unison: &'a [f32],
+    unison_at: &'a [f32],
+}
+
+/// The oscillator's nine controls for each voice and frame: the voice's
+/// played values where a route reaches the oscillator, else the parameters'
+/// ramps.
+struct Vals<'a> {
+    played: Option<&'a [f32]>,
+    ramps: &'a [Vec<f32>],
+    at: usize,
+}
+
+impl Vals<'_> {
+    #[inline]
+    fn get(&self, which: usize, voice: usize, k: usize) -> f32 {
+        match self.played {
+            Some(played) => played[(voice * RAMP_OSC + which) * CHUNK + k],
+            None => self.ramps[which][self.at + k],
+        }
+    }
 }
 
 /// Renders one oscillator's chunk into `o.out`: its table at Position, its
-/// effect, every lane (R12 to R14, R23, R24). `ramps` are its nine ramps.
-fn render_osc(
-    o: &mut Osc,
-    c: &Chunk<'_>,
-    ramps: &[Vec<f32>],
-    effect: usize,
-    semitones: f32,
-    cents: f32,
-) {
+/// effect, every lane (R12 to R14, R23, R24). `v` holds its nine controls.
+fn render_osc(o: &mut Osc, c: &Chunk<'_>, v: &Vals<'_>, set: OscSet) {
+    let OscSet {
+        effect,
+        semitones,
+        cents,
+        pitch_moved,
+        mode,
+    } = set;
     let Osc {
         shaped,
         fm_phase,
@@ -1137,8 +2066,16 @@ fn render_osc(
         frame_mod,
         fm_source,
         amount_mod,
+        pitch_mod,
     } = o;
-    let (n, at, lanes, span) = (c.n, c.at, c.lanes, c.span);
+    let (n, lanes, span) = (c.n, c.lanes, c.span);
+    // Spec: wavetable R31. The effects render oversampled at a lighter factor
+    // with Hi-Quality off and at the finest with it on.
+    shaped.shapers_mut().set_oversampling(if c.hi_quality {
+        HI_OVERSAMPLING
+    } else {
+        LIGHT_OVERSAMPLING
+    });
     let osc = shaped.osc_mut();
     let p = osc.params_mut();
     p.octave = 0;
@@ -1150,20 +2087,43 @@ fn render_osc(
     // ones; the read between frames is continuous (R9, R13).
     p.smooth = true;
     p.phase = 0.0;
-    p.phase_random = if c.copies > 1 { 100.0 } else { 0.0 };
+    p.phase_random = if c.copies > 1 && mode != m::PHASE_SYNC {
+        100.0
+    } else {
+        0.0
+    };
     p.key_track = true;
     p.level = 100.0;
     p.reference = 440.0;
     osc.pitch_offsets_mut().copy_from_slice(c.unison);
-    // Position, per frame, as the kit's frame input (R13).
-    let scale = (osc.table().frame_count().max(1) - 1) as f32 / 100.0;
-    for (k, &position) in ramps[0][at..at + n].iter().enumerate() {
-        frame_mod[k * lanes..k * lanes + span].fill(position * scale);
+    // Position, per frame, as the kit's frame input (R13), with unison's
+    // position spread of each copy.
+    let frames = osc.table().frame_count().max(1) as f32 - 1.0;
+    let scale = frames / 100.0;
+    let mut mask = c.mask;
+    while mask != 0 {
+        let voice = mask.trailing_zeros() as usize;
+        mask &= mask - 1;
+        let lane0 = voice * COPIES;
+        for k in 0..n {
+            let position = v.get(0, voice, k) * scale;
+            for lane in lane0..lane0 + COPIES {
+                frame_mod[k * lanes + lane] =
+                    (position + c.unison_at[lane] * frames).clamp(0.0, frames);
+            }
+        }
     }
-    // The effect's controls, per frame (R14, R24).
-    let mut fill = |slot: usize, ramp: &[f32], scale: f32| {
-        for (k, &value) in ramp[at..at + n].iter().enumerate() {
-            amount_mod[slot][k * lanes..k * lanes + span].fill(value * scale);
+    // The effect's controls, per voice and frame (R14, R24).
+    let mut fill = |slot: usize, which: usize, scale: f32| {
+        let mut mask = c.mask;
+        while mask != 0 {
+            let voice = mask.trailing_zeros() as usize;
+            mask &= mask - 1;
+            for k in 0..n {
+                let value = v.get(which, voice, k) * scale;
+                amount_mod[slot][k * lanes + voice * COPIES..k * lanes + (voice + 1) * COPIES]
+                    .fill(value);
+            }
         }
     };
     let slots = &mut shaped.shapers_mut().slots;
@@ -1181,25 +2141,32 @@ fn render_osc(
         FX_CLASSIC => {
             slots[0].mode = Mode::PulseWidth;
             slots[1].mode = Mode::Sync;
-            fill(0, &ramps[5], PW_SCALE);
-            fill(1, &ramps[6], SYNC_SCALE);
+            fill(0, 5, PW_SCALE);
+            fill(1, 6, SYNC_SCALE);
         }
         3 => {
             slots[0].mode = Mode::LeanRight;
             slots[1].mode = Mode::Fold;
-            fill(0, &ramps[7], 1.0);
-            fill(1, &ramps[8], 1.0);
+            fill(0, 7, 1.0);
+            fill(1, 8, 1.0);
         }
         _ => {}
     }
     if sources[0].is_some() {
-        render_fm(fm_phase, fm_source, c, ramps, semitones + cents / 100.0);
+        render_fm(
+            fm_phase,
+            fm_source,
+            c,
+            v,
+            semitones + cents / 100.0,
+            pitch_moved.then_some(&pitch_mod[..]),
+        );
     }
     let inputs = Inputs {
         lanes: span,
         pitch: c.pitch,
         pitch_step: Some(c.voices.pitch_step()),
-        pitch_mod: None,
+        pitch_mod: pitch_moved.then(|| &pitch_mod[..n * lanes]),
         frame_mod: Some(&frame_mod[..n * lanes]),
     };
     let mods = ShaperInputs {
@@ -1214,13 +2181,15 @@ fn render_osc(
 
 /// The FM modulator, a sine at the note's frequency times 2^(2 Tune), for
 /// every sounding lane, scaled to phase-modulate by 4 × Amount radians
-/// (R14). Its frequency is worked out every [`GRID`] frames.
+/// (R14). Its frequency is worked out every [`GRID`] frames, from the pitch
+/// the oscillator's Semi and Detune route move it to.
 fn render_fm(
     phase: &mut [f32],
     source: &mut [f32],
     c: &Chunk<'_>,
-    ramps: &[Vec<f32>],
+    v: &Vals<'_>,
     semitones: f32,
+    pitch_mod: Option<&[f32]>,
 ) {
     let steps = c.voices.pitch_step();
     let mut mask = c.mask;
@@ -1233,13 +2202,14 @@ fn render_fm(
             let mut from = 0;
             let mut last_inc = 0.0;
             while from < c.n {
-                let tune = ramps[4][c.at + from] / 100.0;
-                let pitch = base + steps[lane] * from as f32 + 24.0 * tune;
+                let tune = v.get(4, voice, from) / 100.0;
+                let moved = pitch_mod.map_or(0.0, |moved| moved[from * c.lanes + lane]);
+                let pitch = base + moved + steps[lane] * from as f32 + 24.0 * tune;
                 let inc = 440.0 * ((pitch - 69.0) / 12.0).exp2() / c.rate;
                 last_inc = inc;
                 for k in from..(from + GRID).min(c.n) {
                     now = (now + inc).fract();
-                    let index = FM_INDEX * FRAC_1_PI * ramps[3][c.at + k] / 100.0;
+                    let index = FM_INDEX * FRAC_1_PI * v.get(3, voice, k) / 100.0;
                     source[k * c.lanes + lane] = sine(now) * index;
                 }
                 from += GRID;
@@ -1247,13 +2217,48 @@ fn render_fm(
             phase[lane] = now;
             // The frame after the chunk's last, for the kit's read between
             // frames, so the chunk's end doesn't depend on where it falls.
-            let index = FM_INDEX * FRAC_1_PI * ramps[3][c.at + c.n - 1] / 100.0;
+            let index = FM_INDEX * FRAC_1_PI * v.get(3, voice, c.n - 1) / 100.0;
             source[c.n * c.lanes + lane] = sine((now + last_inc).fract()) * index;
         }
     }
 }
 
+/// The oscillator's controls in the order [`Vals`] holds them, as the
+/// matrix's destinations: Position, Gain, Pan, then the six effect controls.
+const OSC_DEST: [usize; RAMP_OSC] = [0, 7, 8, 1, 2, 3, 4, 5, 6];
+
 impl Synth {
+    /// Works out oscillator `o`'s nine controls for each active voice and
+    /// frame of the chunk, and the pitch its Semi and Detune routes add (R25).
+    fn play_osc(&mut self, c: &Ctx<'_>, o: usize, n: usize, mask: u32) {
+        let moved = self.has[d_osc(o + 1, D_OSC_SEMI)] || self.has[d_osc(o + 1, D_OSC_DETUNE)];
+        let (semi, detune) = (
+            self.base[d_osc(o + 1, D_OSC_SEMI)],
+            self.base[d_osc(o + 1, D_OSC_DETUNE)],
+        );
+        let mut m = mask;
+        while m != 0 {
+            let voice = m.trailing_zeros() as usize;
+            m &= m - 1;
+            for k in 0..n {
+                for (which, &dest) in OSC_DEST.iter().enumerate() {
+                    let base = f64::from(self.ramps[o * RAMP_OSC + which][c.at + k]);
+                    let played = self.val(c, d_osc(o + 1, dest), base, voice, k) as f32;
+                    self.played[o][(voice * RAMP_OSC + which) * CHUNK + k] = played;
+                }
+                if moved {
+                    let by = (self.val(c, d_osc(o + 1, D_OSC_SEMI), semi, voice, k) - semi)
+                        + (self.val(c, d_osc(o + 1, D_OSC_DETUNE), detune, voice, k) - detune)
+                            / 100.0;
+                    let lane = voice * COPIES;
+                    for lane in lane..lane + COPIES {
+                        self.osc[o].pitch_mod[k * self.lanes + lane] = by as f32;
+                    }
+                }
+            }
+        }
+    }
+
     /// Renders `n` frames of the stretch from frame `at`, of a render call
     /// that began at `call_from`, for the first `span` lanes.
     fn chunk(
@@ -1267,8 +2272,9 @@ impl Synth {
     ) {
         let set = self.set;
         let (lanes, stride) = (self.lanes, self.stride);
-        // Spec: wavetable R19. At an amount of 0 one copy plays.
-        let copies = if set.amount > 0.0 {
+        // Spec: wavetable R19, R30. At an amount of 0, or with no mode, one
+        // copy plays.
+        let copies = if set.amount > 0.0 && set.mode != m::NO_UNISON {
             state.config().copies.clamp(1, COPIES)
         } else {
             1
@@ -1276,51 +2282,86 @@ impl Synth {
         let mask = voices.active_mask();
         let hi = span.div_ceil(COPIES).min(VOICES);
         let ahead = (at - call_from) as f32;
+        let ctx = Ctx { voices, state, at };
 
-        // 1. Each lane's pitch at the chunk's start, with the tuned
-        //    offset, and unison's detune (Classic's law, R30).
+        // 1. The envelopes and LFOs, frame by frame (R27, R28).
+        self.env_out[..n * stride].fill(0.0);
+        self.modulate(&ctx, n, mask);
+
+        // 2. Each lane's pitch at the chunk's start with the tuned offset,
+        //    and its unison law's detune, position and gains (R30). Shimmer
+        //    and Noise read their walk at the grid line the chunk is in.
+        let line = state.clock(at) & !(u64::from(lspk_voice::CONTROL_INTERVAL) - 1);
         for voice in 0..hi {
             let tuned = state.tuned_by(voice);
+            let amount = if mask >> voice & 1 == 1 {
+                (self.val(&ctx, D_UNISON, f64::from(set.amount) * 100.0, voice, 0) / 100.0) as f32
+            } else {
+                set.amount
+            };
+            self.amount_of[voice] = amount;
+            let spread = if copies > 1 { amount } else { 0.0 };
             for i in 0..COPIES {
                 let lane = voice * COPIES + i;
                 self.lane_pitch[lane] =
                     voices.pitch()[lane] + voices.pitch_step()[lane] * ahead + tuned;
-                self.unison[lane] = if i < copies {
-                    instrument::copy_cents(i, copies, UNISON_CENTS * set.amount) / 100.0
+                let (cents, position) = if i < copies {
+                    let walk = if matches!(set.mode, m::SHIMMER | m::NOISE) {
+                        m::walk(self.seed, lane, line, f64::from(self.rate), set.mode)
+                    } else {
+                        [0.0; 2]
+                    };
+                    let copy = m::copy(set.mode, i, copies, amount, walk, self.note_draw[lane]);
+                    (copy.cents / 100.0, copy.position)
                 } else {
-                    0.0
+                    (0.0, 0.0)
                 };
+                self.unison[lane] = cents;
+                self.unison_at[lane] = position;
+                self.copy_gains[voice][i] = instrument::copy_gains(i, copies, spread);
             }
         }
 
-        // 2. The oscillators.
-        let view = Chunk {
-            voices,
-            mask,
-            at,
-            n,
-            span,
-            lanes,
-            rate: self.rate,
-            copies,
-            pitch: &self.lane_pitch,
-            unison: &self.unison,
-        };
+        // 3. The oscillators.
         for o in 0..2 {
-            if set.on[o] {
-                let ramps = &self.ramps[o * RAMP_OSC..(o + 1) * RAMP_OSC];
-                render_osc(
-                    &mut self.osc[o],
-                    &view,
-                    ramps,
-                    set.effect[o],
-                    set.semitones[o],
-                    set.cents[o],
-                );
+            if !set.on[o] {
+                continue;
             }
+            let routed = self.osc_routed[o];
+            if routed {
+                self.play_osc(&ctx, o, n, mask);
+            }
+            let view = Chunk {
+                voices,
+                mask,
+                n,
+                span,
+                lanes,
+                rate: self.rate,
+                copies,
+                hi_quality: state.config().hi_quality,
+                pitch: &self.lane_pitch,
+                unison: &self.unison,
+                unison_at: &self.unison_at,
+            };
+            let vals = Vals {
+                played: routed.then(|| &self.played[o][..]),
+                ramps: &self.ramps[o * RAMP_OSC..(o + 1) * RAMP_OSC],
+                at,
+            };
+            let pitch_moved =
+                self.has[d_osc(o + 1, D_OSC_SEMI)] || self.has[d_osc(o + 1, D_OSC_DETUNE)];
+            let osc_set = OscSet {
+                effect: set.effect[o],
+                semitones: set.semitones[o],
+                cents: set.cents[o],
+                pitch_moved,
+                mode: set.mode,
+            };
+            render_osc(&mut self.osc[o], &view, &vals, osc_set);
         }
 
-        // 3. The sub: one wave per voice, a sine and a square that Tone
+        // 4. The sub: one wave per voice, a sine and a square that Tone
         //    crossfades (R15).
         if set.sub_on {
             for voice in 0..VOICES {
@@ -1344,33 +2385,12 @@ impl Synth {
             }
         }
 
-        // 4. The envelope, and each oscillator's gain and pan per frame.
-        let used = n * 2 * stride;
-        self.env_out[..n * stride].fill(0.0);
-        let mut m = mask;
-        while m != 0 {
-            let voice = m.trailing_zeros() as usize;
-            m &= m - 1;
-            for k in 0..n {
-                self.env_out[k * stride + voice] = self.amp[voice].next(&set.env);
-            }
-        }
-        for o in 0..2 {
-            let base = o * RAMP_OSC;
-            for k in 0..n {
-                let gain = self.ramps[base + 1][at + k];
-                let (left, right) = pan_gains(self.ramps[base + 2][at + k] / 50.0);
-                self.osc_gain[o][0][k] = gain * left;
-                self.osc_gain[o][1][k] = gain * right;
-            }
-        }
-
         // 5. Each voice's oscillators and sub into the filters' inputs, as
-        //    the routing says (R16).
+        //    the routing says (R16), each with its gain, pan and Tone as that
+        //    voice plays them.
+        let used = n * 2 * stride;
         self.sig[0][..used].fill(0.0);
         self.sig[1][..used].fill(0.0);
-        let copy_gains: [(f32, f32); COPIES] =
-            core::array::from_fn(|i| instrument::copy_gains(i, copies, set.amount));
         let mut m = mask;
         while m != 0 {
             let voice = m.trailing_zeros() as usize;
@@ -1380,19 +2400,41 @@ impl Synth {
                 for o in (0..2).filter(|&o| set.on[o]) {
                     let from = k * lanes + voice * COPIES;
                     let (mut left, mut right) = (0.0, 0.0);
-                    for (i, (l, r)) in copy_gains.iter().enumerate().take(copies) {
+                    for (i, (l, r)) in self.copy_gains[voice].iter().enumerate().take(copies) {
                         let x = self.osc[o].out[from + i];
                         left += x * l;
                         right += x * r;
                     }
-                    sides[0][o] = left * self.osc_gain[o][0][k];
-                    sides[1][o] = right * self.osc_gain[o][1][k];
+                    let gain = |which: usize| {
+                        if self.osc_routed[o] {
+                            self.played[o][(voice * RAMP_OSC + which) * CHUNK + k]
+                        } else {
+                            self.ramps[o * RAMP_OSC + which][at + k]
+                        }
+                    };
+                    let (pan_left, pan_right) = pan_gains(gain(2) / 50.0);
+                    sides[0][o] = left * gain(1) * pan_left;
+                    sides[1][o] = right * gain(1) * pan_right;
                 }
                 let sub = if set.sub_on {
-                    let tone = self.ramps[RAMP_SUB_TONE][at + k] / 100.0;
+                    let tone = self.val(
+                        &ctx,
+                        D_SUB_TONE,
+                        f64::from(self.ramps[RAMP_SUB_TONE][at + k]),
+                        voice,
+                        k,
+                    ) as f32
+                        / 100.0;
+                    let level = self.val(
+                        &ctx,
+                        D_SUB_GAIN,
+                        f64::from(self.ramps[RAMP_SUB_GAIN][at + k]),
+                        voice,
+                        k,
+                    ) as f32;
                     let from = k * VOICES + voice;
                     let wave = (1.0 - tone) * self.sub_out[0][from] + tone * self.sub_out[1][from];
-                    wave * self.ramps[RAMP_SUB_GAIN][at + k]
+                    wave * level
                 } else {
                     0.0
                 };
@@ -1412,16 +2454,31 @@ impl Synth {
             }
         }
 
-        // 6. The filters, each with its controls per frame; an off filter
-        //    passes its signal through.
+        // 6. The filters, each with its controls as every voice plays them; an
+        //    off filter passes its signal through.
         for f in 0..2 {
             let base = RAMP_FILTER + f * 4;
-            for k in 0..n {
-                let pitch = pitch_of(self.ramps[base][at + k], 440.0);
-                self.cutoff[f][k * stride..k * stride + hi].fill(pitch);
-                self.controls[f][0][k] = self.ramps[base + 1][at + k] / 100.0;
-                self.controls[f][1][k] = self.ramps[base + 3][at + k] / 100.0;
-                self.controls[f][2][k] = self.ramps[base + 2][at + k] / 24.0;
+            let mut m = mask;
+            while m != 0 {
+                let voice = m.trailing_zeros() as usize;
+                m &= m - 1;
+                for k in 0..n {
+                    let play = |what: usize| {
+                        self.val(
+                            &ctx,
+                            d_filter(f + 1, what),
+                            f64::from(self.ramps[base + what][at + k]),
+                            voice,
+                            k,
+                        ) as f32
+                    };
+                    let (freq, res, drive, morph) = (play(0), play(1), play(2), play(3));
+                    let i = k * stride + voice;
+                    self.cutoff[f][i] = pitch_of(freq, 440.0);
+                    self.controls[f][0][i] = res / 100.0;
+                    self.controls[f][1][i] = morph / 100.0;
+                    self.controls[f][2][i] = drive / 24.0;
+                }
             }
         }
         let run = |synth: &mut Self, f: usize, into: usize| {
@@ -1431,9 +2488,9 @@ impl Synth {
             let [res, morph, drive] = &synth.controls[f];
             let controls = PerFrame {
                 cutoff: &synth.cutoff[f][..n * stride],
-                res: Per::Shared(&res[..n]),
-                morph: Per::Shared(&morph[..n]),
-                drive: Per::Shared(&drive[..n]),
+                res: Per::Voice(&res[..n * stride]),
+                morph: Per::Voice(&morph[..n * stride]),
+                drive: Per::Voice(&drive[..n * stride]),
             };
             synth.filters[f].set_setup(set.setup[f]);
             synth.filters[f].process(hi, n, &controls, &mut synth.sig[into][..used]);
@@ -1452,15 +2509,21 @@ impl Synth {
 
         // 7. The voices under their envelopes and the Volume, into the
         //    stretch's output.
-        let sig = &self.sig[0];
         let mut m = mask;
         while m != 0 {
             let voice = m.trailing_zeros() as usize;
             m &= m - 1;
             for k in 0..n {
-                let level = self.env_out[k * stride + voice] * self.ramps[RAMP_VOLUME][at + k];
+                let volume = self.val(
+                    &ctx,
+                    D_VOLUME,
+                    f64::from(self.ramps[RAMP_VOLUME][at + k]),
+                    voice,
+                    k,
+                ) as f32;
+                let level = self.env_out[k * stride + voice] * volume;
                 for ch in 0..2 {
-                    self.out[ch][at + k] += sig[(k * 2 + ch) * stride + voice] * level;
+                    self.out[ch][at + k] += self.sig[0][(k * 2 + ch) * stride + voice] * level;
                 }
             }
         }

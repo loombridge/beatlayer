@@ -12,32 +12,37 @@
 //! where it sits in its range; a display cell is black with a thin border.
 //! Switched off, a device's knob arcs, lit buttons, number boxes' fill, and
 //! display curves turn grey while its names and values stay as they were.
-//! What isn't observed yet (each in the spec's "To observe"): the knob's
-//! size and arc, Shift's factor (3, as pan's), the Status Bar's text while
-//! dragging (the mixer's `<Name>: <value>`), and the spacing.
+//! The parts' sizes, text and spacing were measured in Live 12.4.16 on 2
+//! November 2026 (layout L-DEV-042 to L-DEV-046; [`parts`] draws them). What
+//! isn't observed yet (each in the spec's "To observe"): Shift's factor (3,
+//! as pan's) and the Status Bar's text while dragging (the mixer's
+//! `<Name>: <value>`).
 //!
 //! Every change runs `device.set_param`, which an agent runs too.
 
-use std::f32::consts::PI;
-
-use bl_model::device_layout::{PlacedPages, Size, Widget};
+use bl_model::device_layout::{
+    BUTTON_GAP, PADDING, PageStyle, PlacedPages, Size, UNIT_PAIR_WIDTH, Widget,
+};
 use bl_model::modulator::ModTarget;
-use bl_model::{DeviceDisplay, DeviceId, ParamDescriptor, ParamId, ParamKind};
+use bl_model::{DeviceDisplay, DeviceId, ParamDescriptor, ParamId};
 use bl_shell::Invocation;
 use bl_shell::device_commands as ids;
 use bl_shell::device_commands::{ConfiguredParam, DeviceFrame, DevicePanel};
 use bl_shell::plugin_commands;
 use egui::accesskit::{Action, Role};
 use egui::{
-    Align2, Color32, Event, Id, Key, Rect, Response, Sense, Shape, Stroke, StrokeKind, Ui,
-    WidgetInfo, WidgetType, pos2, vec2,
+    Align2, Color32, Event, Id, Key, Rect, Response, Sense, Stroke, StrokeKind, Ui, WidgetInfo,
+    WidgetType, pos2, vec2,
 };
 use serde_json::json;
 
 use crate::main_window::UiEvent;
 use crate::param_menu::ParamMenu;
 use crate::theme::Theme;
-use crate::widgets::{modulated_text, paint_ring_segment, ring_segment};
+use crate::widgets::modulated_text;
+
+mod parts;
+pub use parts::{BOX_CORNER, DEVICE_TEXT, glyph_for, paint_glyph, title_parts, truncated};
 
 /// What the panel asks of the device view for each parameter: its base and
 /// played value while a clip modulates it, and its context menu's automation
@@ -284,6 +289,29 @@ fn page_row(
     crate::clip_panels::selector_keys(ui, &ids);
 }
 
+/// The width of a title-bar tab reading `name`.
+fn tab_width(name: &str) -> f32 {
+    name.chars().count() as f32 * 6.0 + 16.0
+}
+
+/// The width the title-bar tabs of a device take, which its name doesn't use.
+#[must_use]
+pub fn title_tabs_width(frame: &DeviceFrame) -> f32 {
+    frame
+        .panel
+        .as_ref()
+        .filter(|_| frame.multisampler.is_none())
+        .map_or(0.0, |panel| {
+            panel
+                .pages
+                .iter()
+                .filter(|p| p.style == PageStyle::TitleBar)
+                .flat_map(|node| &node.pages)
+                .map(|page| tab_width(page) + 2.0)
+                .sum()
+        })
+}
+
 /// The tabs of the pages nodes in the title-bar style, in a run at the right
 /// of the title (L-DEV-017), except a multisampler's, which its own title-bar
 /// tabs draw (device framework R41; multisampler R75).
@@ -307,18 +335,20 @@ pub fn title_tabs(
         .iter()
         .filter(|p| p.style == bl_model::device_layout::PageStyle::TitleBar)
     {
-        let width = |name: &str| name.chars().count() as f32 * 6.0 + 16.0;
-        let total: f32 = node.pages.iter().map(|p| width(p) + 2.0).sum();
+        let total: f32 = node.pages.iter().map(|p| tab_width(p) + 2.0).sum();
         let mut x = (title.right() - total).max(title.left() + 70.0);
         let rects: Vec<Rect> = node
             .pages
             .iter()
             .map(|page| {
                 let rect = Rect::from_min_size(
-                    pos2(x, title.top() + 1.0),
-                    vec2(width(page), title.height() - 2.0),
+                    pos2(
+                        x,
+                        title.center().y - bl_model::device_layout::BOX_HEIGHT / 2.0,
+                    ),
+                    vec2(tab_width(page), bl_model::device_layout::BOX_HEIGHT),
                 );
-                x += width(page) + 2.0;
+                x += tab_width(page) + 2.0;
                 rect
             })
             .collect();
@@ -362,12 +392,23 @@ pub fn show(
     };
     let c = &theme.colors;
     let (controls, cells, pages) = place_with_pages(panel, frame.expanded, body);
+    // The layout again, for what a control carries beyond its place.
+    let laid = panel
+        .layout(frame.expanded)
+        .place_for(Size::new(body.width(), body.height()), panel.selected_slot);
+    for heading in &laid.headings {
+        parts::heading(ui, theme, heading, body.min);
+    }
     for placed in pages.iter().filter(|p| !p.buttons.is_empty()) {
         let rects: Vec<Rect> = placed
             .buttons
             .iter()
             .map(|r| Rect::from_min_size(pos2(r.x, r.y), vec2(r.width, r.height)))
             .collect();
+        if placed.style == PageStyle::Strip {
+            parts::side_strip(ui, theme, frame, (placed, rects[0], body.min), events);
+            continue;
+        }
         page_row(
             ui,
             theme,
@@ -511,7 +552,17 @@ pub fn show(
             }
         });
     }
-    for (at, (param, widget, rect)) in controls.into_iter().enumerate() {
+    for (at, (param, widget, whole)) in controls.into_iter().enumerate() {
+        let extra = laid.controls.get(at);
+        // A knob with a unit pair beside it keeps the rest of its place.
+        let rect = if extra.is_some_and(|e| e.unit.is_some()) {
+            Rect::from_min_max(
+                pos2(whole.left() + UNIT_PAIR_WIDTH + PADDING, whole.top()),
+                whole.max,
+            )
+        } else {
+            whole
+        };
         // A plug-in panel's controls are its knobs, in the panel's own order
         // (WP-5.40), so a control's place is its knob; any other device's
         // controls are found by their parameter.
@@ -586,11 +637,34 @@ pub fn show(
         // Spec: scales R16. A parameter the device takes from its current
         // scale is drawn disabled.
         let locked = panel.locked.contains(&param);
+        let glyph = extra.and_then(|e| e.glyph);
         let mut draw = |ui: &mut Ui| match widget {
-            Widget::Knob => control.knob(ui, theme, events),
-            Widget::Number => control.number(ui, theme, events),
-            Widget::Toggle => control.toggle(ui, theme, events),
+            Widget::Knob => control.knob(ui, theme, events, false),
+            Widget::SmallKnob => control.knob(ui, theme, events, true),
+            Widget::Number => control.number(ui, theme, events, (false, false)),
+            Widget::Slider => control.number(ui, theme, events, (true, false)),
+            Widget::Marked => control.number(ui, theme, events, (false, true)),
+            Widget::Toggle => control.toggle(ui, theme, events, false),
+            Widget::Outlined => control.toggle(ui, theme, events, true),
+            Widget::IconToggle => control.icon_toggle(ui, theme, events, (glyph, false)),
+            Widget::Round => control.icon_toggle(ui, theme, events, (glyph, true)),
             Widget::Chooser => control.chooser(ui, theme, events),
+            Widget::Segments(n) => {
+                let cells = button_cells(rect, usize::from(n), 1);
+                control.choice_buttons(ui, theme, events, (&cells, false));
+            }
+            Widget::IconSegments(n) => {
+                let cells = button_cells(rect, usize::from(n), 1);
+                control.choice_buttons(ui, theme, events, (&cells, true));
+            }
+            Widget::Stack(n) => {
+                let cells = button_cells(rect, 1, usize::from(n));
+                control.choice_buttons(ui, theme, events, (&cells, false));
+            }
+            Widget::Grid { columns, rows } => {
+                let cells = button_cells(rect, usize::from(columns), usize::from(rows));
+                control.choice_buttons(ui, theme, events, (&cells, false));
+            }
         };
         if locked {
             ui.add_enabled_ui(false, draw);
@@ -601,6 +675,33 @@ pub fn show(
             );
         } else {
             draw(ui);
+        }
+        // The unit pair beside a knob sets the switch between its two
+        // parameters (L-DEV-043).
+        if let Some(pair) = extra.and_then(|e| e.unit)
+            && let Some(mode_at) = panel
+                .description
+                .params
+                .iter()
+                .position(|p| p.id == pair.mode)
+        {
+            let pair_rect = Rect::from_min_max(
+                whole.min,
+                pos2(whole.left() + UNIT_PAIR_WIDTH, whole.bottom()),
+            );
+            let mode = parts::plain_control(frame, panel, mode_at, pair_rect);
+            control.unit_pair(ui, theme, events, &pair, &mode);
+        }
+        // Greyed while another control's value says it doesn't apply: still
+        // drawn and usable (L-DEV-011, L-DEV-044).
+        if let Some(grey) = extra.and_then(|e| e.grey)
+            && panel.read(grey.param).round() as i32 == grey.value
+        {
+            ui.painter().rect_filled(
+                rect,
+                theme.sizes.corner,
+                theme.colors.window.0.gamma_multiply(0.5),
+            );
         }
         // Spec: automation R29. A click shows the parameter's envelope while
         // Automation Mode is on, and its context menu holds the automation
@@ -642,7 +743,14 @@ pub fn show(
                     device: frame.id,
                     param,
                 },
-                matches!(widget, Widget::Knob | Widget::Number),
+                matches!(
+                    widget,
+                    Widget::Knob
+                        | Widget::SmallKnob
+                        | Widget::Number
+                        | Widget::Slider
+                        | Widget::Marked
+                ),
                 events,
             );
         }
@@ -972,20 +1080,6 @@ impl Control<'_> {
         events.push(UiEvent::EndGesture);
     }
 
-    /// The name above the control; it stays as it is when the device is
-    /// switched off (observed).
-    fn label(&self, ui: &Ui, theme: &Theme) -> Rect {
-        let top = Rect::from_min_size(self.rect.min, vec2(self.rect.width(), 12.0));
-        ui.painter().text(
-            top.center(),
-            Align2::CENTER_CENTER,
-            short_name(&self.descriptor.name),
-            theme.small_font(),
-            theme.colors.text.0,
-        );
-        Rect::from_min_max(pos2(self.rect.left(), top.bottom()), self.rect.max)
-    }
-
     /// The colour of a lit highlight: the accent, or grey while the device
     /// is switched off (observed).
     fn lit(&self, theme: &Theme) -> Color32 {
@@ -1136,59 +1230,9 @@ impl Control<'_> {
         });
     }
 
-    /// A knob: its name above, an arc showing the value, the value below.
-    fn knob(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
-        let below = self.label(ui, theme);
-        let value_row = Rect::from_min_max(pos2(below.left(), below.bottom() - 12.0), below.max);
-        let face = Rect::from_min_max(below.min, pos2(below.right(), value_row.top()));
-        let response = ui.interact(self.rect, self.id(), Sense::click_and_drag());
-        crate::focus::register(ui.ctx(), self.id(), bl_shell::Area::Detail, None);
-        self.value_input(ui, &response, events);
-        let c = &theme.colors;
-        let painter = ui.painter();
-        let centre = face.center();
-        let radius = (face.height().min(face.width()) / 2.0 - 2.0).max(4.0);
-        // The arc sweeps 300 degrees, from lower left to lower right.
-        let (from, sweep) = (PI * 0.5 + PI / 6.0, PI * 5.0 / 3.0);
-        let arc = |to: f32| -> Vec<egui::Pos2> {
-            let steps = 32;
-            (0..=steps)
-                .map(|i| {
-                    let a = from + sweep * to * i as f32 / steps as f32;
-                    centre + vec2(a.cos(), a.sin()) * radius
-                })
-                .collect()
-        };
-        painter.add(Shape::line(arc(1.0), Stroke::new(2.0, c.control.0)));
-        let n = self.descriptor.normalize(self.shown()) as f32;
-        if n > 0.0 {
-            painter.add(Shape::line(arc(n), Stroke::new(2.0, self.lit(theme))));
-        }
-        // Spec: modulation R7: the pointer stays at the base, and the ring
-        // shows the way to the value it plays.
-        if let Some(segment) = self
-            .modulated
-            .and_then(|(_, played)| ring_segment(n, self.descriptor.normalize(played) as f32))
-        {
-            paint_ring_segment(painter, theme, segment, |to| {
-                let a = from + sweep * to;
-                centre + vec2(a.cos(), a.sin()) * radius
-            });
-        }
-        let a = from + sweep * n;
-        painter.line_segment(
-            [centre, centre + vec2(a.cos(), a.sin()) * radius],
-            Stroke::new(1.5, c.text.0),
-        );
-        painter.text(
-            value_row.center(),
-            Align2::CENTER_CENTER,
-            self.descriptor.format(self.shown()),
-            theme.small_font(),
-            c.text.0,
-        );
-        focus_ring(ui, theme, self.rect, &response);
-        self.describe(ui, &response, Role::Slider);
+    /// The context menus of a knob: its stops, if it has any, and a
+    /// plug-in panel's remapping.
+    fn knob_menus(&self, response: &Response, events: &mut Vec<UiEvent>) {
         if !self.stops.is_empty() {
             response.context_menu(|ui| {
                 for (name, value) in self.stops {
@@ -1219,7 +1263,7 @@ impl Control<'_> {
                     ui.close();
                 }
                 if remapped {
-                    ui.separator();
+                    crate::menus::separator(ui);
                 }
                 for entry in self.configured {
                     if ui.button(&entry.name).clicked() {
@@ -1236,115 +1280,29 @@ impl Control<'_> {
             });
         }
     }
+}
 
-    /// A number box: a dark box with the value centred and a fill showing
-    /// where it sits in its range.
-    fn number(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
-        let below = self.label(ui, theme);
-        let field = Rect::from_center_size(below.center(), vec2(below.width() - 4.0, 16.0));
-        let response = ui.interact(field, self.id(), Sense::click_and_drag());
-        crate::focus::register(ui.ctx(), self.id(), bl_shell::Area::Detail, None);
-        self.value_input(ui, &response, events);
-        let c = &theme.colors;
-        let painter = ui.painter();
-        painter.rect_filled(field, theme.sizes.corner, c.window.0);
-        let n = self.descriptor.normalize(self.value) as f32;
-        let fill_colour = if self.enabled {
-            c.value_fill.0
-        } else {
-            highlight(theme, false)
-        };
-        let fill = Rect::from_min_size(field.min, vec2(field.width() * n, field.height()));
-        painter.rect_filled(fill, theme.sizes.corner, fill_colour);
-        painter.text(
-            field.center(),
-            Align2::CENTER_CENTER,
-            self.text
-                .clone()
-                .unwrap_or_else(|| self.descriptor.format(self.value)),
-            theme.small_font(),
-            c.text.0,
-        );
-        focus_ring(ui, theme, field, &response);
-        self.describe(ui, &response, Role::SpinButton);
-    }
-
-    /// A switch: a rectangular text button, lit while on.
-    fn toggle(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
-        let below = self.label(ui, theme);
-        let button = Rect::from_center_size(below.center(), vec2(below.width() - 4.0, 16.0));
-        let response = ui.interact(button, self.id(), Sense::click());
-        crate::focus::register(ui.ctx(), self.id(), bl_shell::Area::Detail, None);
-        let on = self.value >= 0.5;
-        if response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))) {
-            self.change(if on { 0.0 } else { 1.0 }, events);
-        }
-        let c = &theme.colors;
-        let (face, ink) = if on {
-            (self.lit(theme), c.accent_text.0)
-        } else {
-            (c.control.0, c.text.0)
-        };
-        ui.painter().rect_filled(button, theme.sizes.corner, face);
-        ui.painter().text(
-            button.center(),
-            Align2::CENTER_CENTER,
-            short_name(&self.descriptor.name),
-            theme.small_font(),
-            ink,
-        );
-        focus_ring(ui, theme, button, &response);
-        let name = self.descriptor.name.clone();
-        response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, on, &name));
-        ui.ctx().accesskit_node_builder(response.id, |node| {
-            node.set_role(Role::Switch);
-            node.set_label(self.descriptor.name.clone());
-            node.set_value(self.descriptor.format(self.value));
-        });
-    }
-
-    /// A chooser: a dark box with the value and a ▼, opening a menu of the
-    /// choices.
-    fn chooser(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
-        let below = self.label(ui, theme);
-        let field = Rect::from_center_size(below.center(), vec2(below.width() - 4.0, 16.0));
-        let response = ui.interact(field, self.id(), Sense::click());
-        crate::focus::register(ui.ctx(), self.id(), bl_shell::Area::Detail, None);
-        let c = &theme.colors;
-        ui.painter()
-            .rect_filled(field, theme.sizes.corner, c.window.0);
-        ui.painter().text(
-            pos2(field.left() + 3.0, field.center().y),
-            Align2::LEFT_CENTER,
-            self.descriptor.format(self.value),
-            theme.small_font(),
-            c.text.0,
-        );
-        ui.painter().text(
-            pos2(field.right() - 3.0, field.center().y),
-            Align2::RIGHT_CENTER,
-            "▼",
-            theme.small_font(),
-            c.text_dim.0,
-        );
-        focus_ring(ui, theme, field, &response);
-        if let ParamKind::Choice { choices } = &self.descriptor.kind {
-            egui::Popup::menu(&response).show(|ui| {
-                for (index, choice) in choices.iter().enumerate() {
-                    let chosen = index as f64 == self.value;
-                    if ui.selectable_label(chosen, choice).clicked() {
-                        self.change(index as f64, events);
-                        ui.close();
-                    }
-                }
-            });
-        }
-        ui.ctx().accesskit_node_builder(response.id, |node| {
-            node.set_role(Role::ComboBox);
-            node.set_label(self.descriptor.name.clone());
-            node.set_value(self.descriptor.format(self.value));
-        });
-    }
+/// The cells of `columns` by `rows` buttons filling `rect`, by rows, with
+/// [`BUTTON_GAP`] between them.
+fn button_cells(rect: Rect, columns: usize, rows: usize) -> Vec<Rect> {
+    let gaps = |n: usize| n.saturating_sub(1) as f32 * BUTTON_GAP;
+    let size = vec2(
+        (rect.width() - gaps(columns)) / columns.max(1) as f32,
+        (rect.height() - gaps(rows)) / rows.max(1) as f32,
+    );
+    (0..rows)
+        .flat_map(|row| (0..columns).map(move |column| (row, column)))
+        .map(|(row, column)| {
+            Rect::from_min_size(
+                rect.min
+                    + vec2(
+                        column as f32 * (size.x + BUTTON_GAP),
+                        row as f32 * (size.y + BUTTON_GAP),
+                    ),
+                size,
+            )
+        })
+        .collect()
 }
 
 /// The value `steps` key presses from `value`: one step of a stepped

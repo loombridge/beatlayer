@@ -143,7 +143,7 @@ fn the_lfos_vibrato_unison_glide_voices_and_mpe_routings_pass_under_rtsan() {
                 1.0 + ((step * 3) % DESTINATIONS.len()) as f64,
             )),
             16 => Some(set(MPE[step % 4].1, (step % 5) as f64 * 40.0 - 80.0)),
-            17 => Some(set(analog::MPE_ON, (step % 3 != 0) as u8 as f64)),
+            17 => Some(set(analog::MPE_ON, !step.is_multiple_of(3) as u8 as f64)),
             18 => Some(set(analog::NOTE_PB, (step % 5) as f64 * 12.0)),
             19 => Some(set(
                 osc::id(step % 2, osc::BALANCE),
@@ -152,7 +152,7 @@ fn the_lfos_vibrato_unison_glide_voices_and_mpe_routings_pass_under_rtsan() {
             20 => Some(set(noise::id(noise::ON), (step % 2) as f64)),
             21 => Some(set(
                 amp::id(step % 2, amp::ON),
-                (step % 3 != 0) as u8 as f64,
+                !step.is_multiple_of(3) as u8 as f64,
             )),
             22 => Some(set(filter::id(1, filter::ON), (step % 2) as f64)),
             _ => None,

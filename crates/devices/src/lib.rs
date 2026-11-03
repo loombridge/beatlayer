@@ -31,6 +31,7 @@ pub mod arpeggiator;
 pub mod articulation_map;
 pub mod auto_filter;
 pub mod auto_pan_tremolo;
+pub mod auto_shift;
 pub mod bass;
 pub mod beat_repeat;
 pub mod bus_compressor;
@@ -90,8 +91,11 @@ pub mod lift;
 pub mod limiter;
 pub mod looper;
 pub mod meld;
+pub mod meld_display;
 pub mod meld_filter;
 mod meld_gen;
+mod meld_matrix;
+mod meld_mod;
 mod meld_osc;
 pub mod midi_cc;
 mod midi_fx;
@@ -154,6 +158,7 @@ pub use analog::{ANALOG, Analog, analog_type};
 pub use arpeggiator::{ARPEGGIATOR, arpeggiator_type};
 pub use auto_filter::{AUTO_FILTER, AutoFilter, auto_filter_type};
 pub use auto_pan_tremolo::{AUTO_PAN_TREMOLO, auto_pan_tremolo_type};
+pub use auto_shift::{AUTO_SHIFT, auto_shift_type};
 pub use bass::{BASS, bass_type};
 pub use beat_repeat::{BEAT_REPEAT, beat_repeat_type};
 pub use bus_compressor::{BUS_COMPRESSOR, Bond, bus_compressor_type};
@@ -278,6 +283,7 @@ pub fn display_in(
         ECHO => Some(echo::display(device, description, values, data, view)),
         COMPRESSOR => Some(compressor::display(device, description, values, data)),
         corpus::CORPUS => Some(corpus::display(device, data)),
+        meld::MELD => Some(meld_display::display(device, description, values)),
         CHANNEL_EQ => Some(channel_eq::display(device, description, values, data)),
         BUS_COMPRESSOR => Some(bus_compressor::display(device, description, values, data)),
         GATE => Some(gate::display(device, description, values, data)),
@@ -303,6 +309,7 @@ pub fn display_in(
         TUBE => Some(tube::display(device, description, values, data)),
         ROAR => Some(roar::display(device, description, values, data, view)),
         SPECTRAL_RESONATOR => Some(spectral_resonator::display(device, description, data)),
+        AUTO_SHIFT => Some(auto_shift::display(device, description, values, data)),
         bl_model::modulator::WAVE_MOD => Some(modulator::wave_display(device, description, values)),
         bl_model::modulator::PLAY_MOD => Some(play_mod::display(device, description, values, data)),
         bl_model::modulator::STRIKE_MOD => {
@@ -451,6 +458,7 @@ pub fn register(registry: &mut Registry) {
     pedal::register(registry);
     resonators::register(registry);
     spectral_resonator::register(registry);
+    auto_shift::register(registry);
     beat_repeat::register(registry);
     multiband_dynamics::register(registry);
     color_limiter::register(registry);

@@ -1552,7 +1552,7 @@ impl Waves {
 }
 
 /// The shaper's curve (R39) for `x`, driven by `amount` (0 to 1) up to 24 dB.
-fn shape(kind: usize, amount: f32, x: f32) -> f32 {
+pub(crate) fn shape(kind: usize, amount: f32, x: f32) -> f32 {
     let driven = x * 10f32.powf(amount * 24.0 / 20.0);
     match kind {
         0 => driven.tanh(),

@@ -69,7 +69,7 @@ impl Object {
                 "checkpoints",
                 "tracks",
             ],
-            Self::Device => &["capture", "compare", "cv", "matrix", "wavetables"],
+            Self::Device => &["capture", "compare", "cv", "matrix", "partials", "wavetables"],
             Self::Track => &["linked"],
             Self::Clip => &["link"],
             _ => &[],

@@ -87,6 +87,7 @@ pub fn show(ctx: &Context, shell: &Shell, theme: &Theme, events: &mut Vec<UiEven
                     folder: &status.folder,
                     install: &status.install,
                     install_command: ids::INSTALL,
+                    install_args: &json!({}),
                     close_command: ids::CLOSE,
                 },
                 events,
@@ -144,7 +145,7 @@ fn progress(ui: &mut Ui, theme: &Theme, job: &JobStatus, what: &str, events: &mu
 
 /// A progress bar, painted, read by a screen reader as a progress
 /// indicator.
-fn bar(ui: &mut Ui, theme: &Theme, fraction: f32, name: &str) {
+pub(crate) fn bar(ui: &mut Ui, theme: &Theme, fraction: f32, name: &str) {
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 10.0), Sense::hover());
     let painter = ui.painter_at(rect);

@@ -178,7 +178,12 @@ fn sweep_publishes_its_cutoffs_and_clip_light_after_every_block() {
         let sweep_id = editor.new_id();
         let sweep = native(
             AUTO_FILTER,
-            &[(CLIP, 1.0), (LFO_AMOUNT, 100.0), (LFO_HZ, 10.0)],
+            &[
+                (CLIP, 1.0),
+                (FREQ, 1_000.0),
+                (LFO_AMOUNT, 100.0),
+                (LFO_HZ, 10.0),
+            ],
             sweep_id,
         );
         for (index, device) in [tone, sweep].into_iter().enumerate() {

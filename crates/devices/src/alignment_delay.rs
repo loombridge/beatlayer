@@ -3,7 +3,10 @@
 //! the distance sound travels, with no latency reported.
 
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, LayoutNode, Widget};
+use bl_model::device_layout::{
+    BODY_HEIGHT, BOX_HEIGHT, Caption, Control, ControlBand, DisplayCell, Glyph, LayoutNode,
+    PADDING, Widget,
+};
 use bl_model::{
     Device, DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit,
 };
@@ -161,36 +164,63 @@ pub fn alignment_delay_type() -> DeviceType {
     )
 }
 
+/// Align Delay as Live draws it: a display cell for the two sides' readings,
+/// the Delay Mode chooser under it, and a box for each side's delay with the
+/// link between them. The boxes read the delay in the mode's own unit; each
+/// mode's boxes take the same place.
 fn layout() -> DeviceLayout {
-    let side = |side| {
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (side_param(side, TIME), Widget::Knob),
-                (side_param(side, SAMPLES), Widget::Number),
-                (side_param(side, METRES), Widget::Knob),
-                (side_param(side, FEET), Widget::Knob),
-            ],
-        ))
+    const CELL_HEIGHT: f32 = 67.0;
+    let at = Control::new;
+    let boxes = |side: usize, y: f32| {
+        let (time, samples) = (side_param(side, TIME), side_param(side, SAMPLES));
+        let (metres, feet) = (side_param(side, METRES), side_param(side, FEET));
+        let number = |param, mode| {
+            at(param, Widget::Number, 36.0, y)
+                .unnamed()
+                .sized(46.0, BOX_HEIGHT)
+                .shown_only_while(MODE, mode)
+        };
+        [
+            number(time, 0),
+            number(samples, 1),
+            number(metres, 2).hidden_while(DISTANCE_UNIT, 1),
+            number(feet, 2).hidden_while(DISTANCE_UNIT, 0),
+        ]
     };
-    DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (MODE, Widget::Chooser),
-                (LINK, Widget::Toggle),
-                (DISTANCE_UNIT, Widget::Chooser),
-                (TEMPERATURE_UNIT, Widget::Chooser),
-                (TEMPERATURE_C, Widget::Knob),
-                (TEMPERATURE_F, Widget::Knob),
-            ],
-        )),
-        side(0),
-        side(1),
+    let mut controls = vec![at(MODE, Widget::Chooser, PADDING, 9.0).sized(94.0, 21.0)];
+    controls.extend(boxes(0, 35.0));
+    controls.extend(boxes(1, 51.0));
+    controls.push(
+        at(LINK, Widget::IconToggle, 17.0, 44.0)
+            .sized(14.0, BOX_HEIGHT)
+            .with_glyph(Glyph::Link),
+    );
+    // Distance mode's units and the temperature that sets the speed of sound.
+    let distance = |control: Control| control.shown_only_while(MODE, 2).unnamed();
+    controls.extend([
+        distance(at(DISTANCE_UNIT, Widget::Chooser, PADDING, 69.0).sized(30.0, BOX_HEIGHT)),
+        distance(at(TEMPERATURE_C, Widget::Number, 36.0, 69.0).sized(36.0, BOX_HEIGHT))
+            .hidden_while(TEMPERATURE_UNIT, 1),
+        distance(at(TEMPERATURE_F, Widget::Number, 36.0, 69.0).sized(36.0, BOX_HEIGHT))
+            .hidden_while(TEMPERATURE_UNIT, 0),
+        distance(at(TEMPERATURE_UNIT, Widget::Chooser, 74.0, 69.0).sized(24.0, BOX_HEIGHT)),
+    ]);
+    let band = ControlBand::free(
+        PADDING + 94.0 + PADDING,
+        BODY_HEIGHT - PADDING - CELL_HEIGHT,
+        controls,
+    )
+    .with_captions(vec![
+        Caption::new("L", 7.0, 35.0, 12.0),
+        Caption::new("R", 7.0, 51.0, 12.0),
+    ]);
+    let cell = DisplayCell::new("Align Delay", 94.0, CELL_HEIGHT, 1.0);
+    DeviceLayout::new(LayoutNode::Column(vec![
+        LayoutNode::Cell(cell).inset(PADDING, PADDING, PADDING, 0.0),
+        LayoutNode::Band(band),
     ]))
 }
 
-/// Adds Align Delay to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, alignment_delay_type(), Plumb::new);
 }

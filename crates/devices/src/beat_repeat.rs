@@ -8,7 +8,9 @@ use std::f64::consts::{SQRT_2, TAU};
 use bl_core::time::{Frames, SampleRate, TICKS_PER_QUARTER, TempoMap, Ticks};
 use bl_dsp::Random;
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, LayoutNode, Widget};
+use bl_model::device_layout::{
+    BODY_HEIGHT, BOX_HEIGHT, Control, ControlBand, DisplayCell, LayoutNode, PADDING, Widget,
+};
 use bl_model::{
     Device, DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit,
 };
@@ -113,7 +115,7 @@ pub fn beat_repeat_type() -> DeviceType {
             .describe("Moves the points of the interval later, in sixteenth notes."),
         ParamDescriptor::continuous(CHANCE, "Chance", (0.0, 100.0), 100.0, ParamUnit::Percent)
             .describe("The probability that a capture starts at a point of the interval."),
-        ParamDescriptor::integer(GATE, "Gate", (1, 32), 4, ParamUnit::None)
+        ParamDescriptor::integer(GATE, "Gate", (1, 32), 7, ParamUnit::None)
             .describe("The total length of the repeats, in sixteenth notes."),
         ParamDescriptor::toggle(REPEAT, "Repeat", false)
             .describe("Captures and repeats at once, ignoring the interval, until it is off."),
@@ -158,7 +160,7 @@ pub fn beat_repeat_type() -> DeviceType {
             .describe("The filter's centre frequency."),
         ParamDescriptor::continuous(WIDTH, "Width", (0.1, 8.0), 4.0, ParamUnit::None)
             .describe("The filter's width in octaves."),
-        ParamDescriptor::choice(MODE, "Mode", &["Mix", "Insert", "Gate"], 0).describe(
+        ParamDescriptor::choice(MODE, "Mode", &["Mix", "Ins", "Gate"], 0).describe(
             "Mix adds the repeats to the input, Insert replaces it, Gate plays only them.",
         ),
         ParamDescriptor::gain(VOLUME, "Volume", 6.0, 0.0)
@@ -192,37 +194,59 @@ pub fn beat_repeat_type() -> DeviceType {
     )
 }
 
+/// Beat Repeat as Live draws it: the grid display over four knobs, Repeat,
+/// No Trpl and the variation's trigger and four more knobs; at the right the
+/// filter's display with its frequency and width, Filter, the mix mode and the
+/// Volume and Decay knobs.
 fn layout() -> DeviceLayout {
-    use Widget::{Chooser, Knob, Number, Toggle};
-    let band = |controls: &[(ParamId, Widget)]| {
-        LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, controls))
+    use Widget::{Chooser, Number, Segments, SmallKnob, Toggle};
+    const LEFT: f32 = 208.0;
+    const RIGHT: f32 = 104.0;
+    let at = Control::new;
+    // The four columns of knobs, 32 points wide, from the band's left edge.
+    let columns = [4.0, 56.0, 111.0, 163.0];
+    let knobs = |y: f32, params: [ParamId; 4]| {
+        params
+            .into_iter()
+            .zip(columns)
+            .map(|(param, x)| at(param, SmallKnob, x, y))
+            .collect::<Vec<_>>()
     };
+    let mut left = knobs(22.0, [INTERVAL, OFFSET, GRID, VARIATION]);
+    left.extend([
+        at(REPEAT, Toggle, 4.0, 68.0).sized(36.0, BOX_HEIGHT),
+        at(NO_TRIPLETS, Toggle, 108.0, 68.0)
+            .sized(40.0, BOX_HEIGHT)
+            .captioned("No Trpl"),
+        at(VARIATION_MODE, Chooser, 157.0, 68.0)
+            .unnamed()
+            .sized(43.0, BOX_HEIGHT),
+    ]);
+    left.extend(knobs(85.0, [CHANCE, GATE, PITCH, PITCH_DECAY]));
+    let right = vec![
+        at(FREQ, Number, 4.0, 2.0).unnamed().sized(39.0, BOX_HEIGHT),
+        at(WIDTH, Number, 47.0, 2.0)
+            .unnamed()
+            .sized(53.0, BOX_HEIGHT),
+        at(FILTER, Toggle, 4.0, 16.0).sized(96.0, BOX_HEIGHT),
+        at(MODE, Segments(3), 4.0, 49.0).sized(96.0, BOX_HEIGHT),
+        at(VOLUME, SmallKnob, 15.0, 66.0),
+        at(DECAY, SmallKnob, 66.0, 66.0),
+    ];
+    let grid = DisplayCell::new("Beat Repeat Grid", 200.0, 25.0, 1.0);
+    let filter = DisplayCell::new("Beat Repeat Filter", 96.0, 44.0, 1.0);
     DeviceLayout::new(LayoutNode::Row(vec![
-        band(&[
-            (INTERVAL, Chooser),
-            (OFFSET, Number),
-            (CHANCE, Knob),
-            (GATE, Number),
-            (REPEAT, Toggle),
+        LayoutNode::Column(vec![
+            LayoutNode::Cell(grid).inset(PADDING, PADDING, PADDING, 0.0),
+            LayoutNode::Band(ControlBand::free(LEFT, BODY_HEIGHT - 29.0, left)),
         ]),
-        band(&[
-            (GRID, Chooser),
-            (NO_TRIPLETS, Toggle),
-            (VARIATION, Knob),
-            (VARIATION_MODE, Chooser),
+        LayoutNode::Column(vec![
+            LayoutNode::Cell(filter).inset(PADDING, PADDING, PADDING, 0.0),
+            LayoutNode::Band(ControlBand::free(RIGHT, BODY_HEIGHT - 48.0, right)),
         ]),
-        band(&[
-            (PITCH, Knob),
-            (PITCH_DECAY, Knob),
-            (FILTER, Toggle),
-            (FREQ, Knob),
-            (WIDTH, Knob),
-        ]),
-        band(&[(MODE, Chooser), (VOLUME, Knob), (DECAY, Knob)]),
     ]))
 }
 
-/// Adds Beat Repeat to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, beat_repeat_type(), Stutter::new);
 }

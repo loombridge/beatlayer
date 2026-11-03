@@ -107,9 +107,20 @@ impl Shell {
             rate,
             self.arrangement.selected_tracks().len(),
             dialog.length,
+            self.editor
+                .document()
+                .has_video_between(dialog.start, dialog.start + dialog.length),
         );
         let mut choices = dialog.choices.clone();
         choices.sample_rate = Some(choices.rate(rate));
+        // R47: a choice of an encoder this computer lacks shows the default.
+        let video_encoders = crate::export_video::listed_encoders();
+        choices.video_encoder = Some(
+            choices
+                .video_encoder
+                .filter(|encoder| video_encoders.contains(encoder))
+                .unwrap_or_else(crate::export_video::default_encoder),
+        );
         ExportDialogStatus {
             choices,
             start: dialog.start,
@@ -122,6 +133,7 @@ impl Shell {
                     .then(|| "An export is under way.".to_owned())
             }),
             disabled: problems.disabled,
+            video_encoders,
         }
     }
 
@@ -130,6 +142,19 @@ impl Shell {
     /// length for a set with nothing to export.
     #[must_use]
     pub fn export_default_range(&self) -> (Ticks, Ticks) {
+        // Spec: export R50. With a video clip selected, the whole of its
+        // movie, the part before the clip as pre-roll.
+        let document = self.editor.document();
+        let movies =
+            |hash: bl_model::ContentHash| self.movie_of(bl_media::ContentHash::from_bytes(hash.0));
+        if let Some(found) = self
+            .arrangement
+            .selected_clips()
+            .iter()
+            .find_map(|&clip| crate::export_video::clip_range(document, clip, &movies).ok())
+        {
+            return found;
+        }
         match range(
             self.editor.document(),
             None,
@@ -275,6 +300,9 @@ impl Shell {
                     bit_depth,
                     dither,
                     encode_mp3,
+                    create_video,
+                    video_encoder,
+                    video_settings,
                     start,
                     length,
                 } = patch;
@@ -327,6 +355,21 @@ impl Shell {
                 choices.encode_pcm = encode_pcm.unwrap_or(choices.encode_pcm);
                 choices.dither = dither.unwrap_or(choices.dither);
                 choices.encode_mp3 = encode_mp3.unwrap_or(choices.encode_mp3);
+                choices.create_video = create_video.unwrap_or(choices.create_video);
+                if let Some(encoder) = video_encoder {
+                    // R47: the chooser lists the encoders the computer has.
+                    if !crate::export_video::listed_encoders().contains(&encoder) {
+                        return Err(invalid(format!(
+                            "this computer has no {} encoder",
+                            encoder.name()
+                        )));
+                    }
+                    choices.video_encoder = Some(encoder);
+                }
+                if let Some(settings) = video_settings {
+                    crate::export_video::check_settings(&settings).map_err(invalid)?;
+                    choices.video_settings = settings;
+                }
                 // R36: choosing FLAC with 32 chosen sets 24.
                 choices.settle();
                 dialog.choices = choices;
@@ -449,6 +492,17 @@ impl Shell {
         let document = self.editor.document().clone();
         let media = self.engine_media();
         let store = Arc::clone(&self.media);
+        // Spec: export R49. The movies of the set's video clips, opened as
+        // the export asks for them.
+        let movies: Arc<
+            dyn Fn(bl_model::ContentHash) -> Option<Arc<bl_video::Movie>> + Send + Sync,
+        > = {
+            let store = Arc::clone(&self.media);
+            Arc::new(move |hash: bl_model::ContentHash| {
+                let entry = store.entry(bl_media::ContentHash::from_bytes(hash.0))?;
+                bl_video::Movie::open(&entry.path).ok().map(Arc::new)
+            })
+        };
         let session = self.realtime.clone();
         // A render that ran before leaves nothing behind: the session
         // forgets its cancel, its skip and its restart.
@@ -496,6 +550,7 @@ impl Shell {
                 hosts,
                 selection,
                 &selected,
+                &*movies,
                 engine_rate,
                 &args,
                 Some(&mut self.audio),
@@ -513,6 +568,7 @@ impl Shell {
                         bl_plugin_host::Hosts::default(),
                         selection,
                         &selected,
+                        &*movies,
                         engine_rate,
                         &args,
                         None,

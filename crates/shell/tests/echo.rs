@@ -54,6 +54,7 @@ fn the_lines_times_are_published_after_every_block_at_the_tempo() {
         );
         // A quarter note on the left and 100 ms free on the right.
         for (param, value) in [
+            (line_param(0, echo::SYNC_MODE), 0.0),
             (line_param(0, echo::NOTES), 4.0),
             (line_param(1, echo::SYNC), 0.0),
             (line_param(1, echo::TIME), 100.0),

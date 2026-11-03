@@ -495,6 +495,21 @@ impl Document {
             .rfind(|clip| matches!(&clip.data, ClipData::Audio(audio) if audio.video))
     }
 
+    /// Whether an active video clip plays anywhere in `from..to` (the export
+    /// spec, R38).
+    #[must_use]
+    pub fn has_video_between(&self, from: Ticks, to: Ticks) -> bool {
+        self.tracks
+            .values()
+            .flat_map(|track| track.clips())
+            .any(|clip| {
+                !clip.mute
+                    && clip.start < to
+                    && from < clip.end()
+                    && matches!(&clip.data, ClipData::Audio(audio) if audio.video)
+            })
+    }
+
     /// Whether the Arrangement holds a video clip, which the Video Window
     /// needs to show (the video spec, R16).
     #[must_use]

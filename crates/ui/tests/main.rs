@@ -5,6 +5,7 @@
 
 mod accessibility;
 mod agent_settings;
+mod analog;
 mod arrangement;
 mod arranger;
 mod articulation_map;

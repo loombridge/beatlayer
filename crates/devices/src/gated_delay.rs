@@ -169,6 +169,7 @@ fn layout() -> DeviceLayout {
         height: PADDING + 2.0 * (size.height + PADDING),
         controls,
         slots: None,
+        captions: Vec::new(),
         labels: Vec::new(),
         rules: Vec::new(),
     };

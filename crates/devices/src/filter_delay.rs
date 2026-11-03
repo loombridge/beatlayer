@@ -5,7 +5,10 @@
 use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_4};
 
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{
+    BODY_HEIGHT, BOX_HEIGHT, CELL_WIDTH, Caption, Control, ControlBand, DisplayCell, LayoutNode,
+    Widget,
+};
 use bl_model::{
     Device, DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit,
 };
@@ -43,12 +46,15 @@ pub const VOLUME: u32 = 9;
 const FIELDS: u32 = 10;
 /// Lines.
 const LINES: usize = 3;
-/// How much of the output feeds back into every line.
+/// How much of the first line's output feeds back into its input: the one
+/// feedback of all three lines before each had its own.
 pub const FEEDBACK: ParamId = ParamId(FIELDS * LINES as u32);
 /// The unprocessed signal's level.
 pub const DRY: ParamId = ParamId(FIELDS * LINES as u32 + 1);
+/// The number of the second line's Feedback; the third's follows it.
+const MORE_FEEDBACK: u32 = FIELDS * LINES as u32 + 2;
 /// How many parameters the device has.
-const PARAMS: usize = FIELDS as usize * LINES + 2;
+const PARAMS: usize = FIELDS as usize * LINES + 2 + (LINES - 1);
 
 /// The lowest a band's edge goes, in hertz.
 const LOWEST_EDGE: f64 = 20.0;
@@ -61,9 +67,29 @@ pub const fn line_param(line: usize, field: u32) -> ParamId {
     ParamId(line as u32 * FIELDS + field)
 }
 
+/// Line `line`'s Feedback: how much of its output feeds back into its own
+/// input.
+#[must_use]
+pub const fn feedback_param(line: usize) -> ParamId {
+    if line == 0 {
+        FEEDBACK
+    } else {
+        ParamId(MORE_FEEDBACK + line as u32 - 1)
+    }
+}
+
 /// A line's descriptors, named for the line.
+/// Each line's defaults as Live's panel reads them: its band's centre, its
+/// time in sixteenths, its pan in per cent, its volume in dB and its feedback.
+const DEFAULTS: [(f64, i64, f64, f64, f64); LINES] = [
+    (704.0, 3, -50.0, 4.0, 21.0),
+    (449.0, 1, 0.0, -4.0, 46.0),
+    (918.0, 5, 50.0, 6.0, 24.0),
+];
+
 fn line_descriptors(line: usize) -> Vec<ParamDescriptor> {
     let n = line + 1;
+    let (centre, sixteenths, pan, volume, _) = DEFAULTS[line];
     let id = |field| line_param(line, field);
     vec![
         ParamDescriptor::toggle(id(ON), &format!("{n} On"), true)
@@ -74,7 +100,7 @@ fn line_descriptors(line: usize) -> Vec<ParamDescriptor> {
             id(FREQ),
             &format!("{n} Freq"),
             (20.0, 20_000.0),
-            1_000.0,
+            centre,
             ParamUnit::Hertz,
         )
         .logarithmic()
@@ -93,7 +119,7 @@ fn line_descriptors(line: usize) -> Vec<ParamDescriptor> {
             id(DIVISION),
             &format!("{n} Division"),
             (1, 16),
-            4 * n as i64,
+            sixteenths,
             ParamUnit::None,
         )
         .describe("The line's time in sixteenth notes while Sync is on."),
@@ -118,11 +144,11 @@ fn line_descriptors(line: usize) -> Vec<ParamDescriptor> {
             id(PAN),
             &format!("{n} Pan"),
             (-100.0, 100.0),
-            (line as f64 - 1.0) * 100.0,
+            pan,
             ParamUnit::Percent,
         )
         .describe("Where the line leaves: by default the side it hears."),
-        ParamDescriptor::gain(id(VOLUME), &format!("{n} Volume"), 6.0, 0.0)
+        ParamDescriptor::gain(id(VOLUME), &format!("{n} Volume"), 6.0, volume)
             .describe("The line's output level, up to 6 dB."),
     ]
 }
@@ -132,12 +158,20 @@ fn line_descriptors(line: usize) -> Vec<ParamDescriptor> {
 #[must_use]
 pub fn filter_delay_type() -> DeviceType {
     let mut params: Vec<ParamDescriptor> = (0..LINES).flat_map(line_descriptors).collect();
+    for (line, defaults) in DEFAULTS.iter().enumerate() {
+        params.push(
+            ParamDescriptor::continuous(
+                feedback_param(line),
+                &format!("{} Feedback", line + 1),
+                (0.0, 100.0),
+                defaults.4,
+                ParamUnit::Percent,
+            )
+            .describe("How much of the line's output feeds back into its own input."),
+        );
+    }
     params.push(
-        ParamDescriptor::continuous(FEEDBACK, "Feedback", (0.0, 100.0), 50.0, ParamUnit::Percent)
-            .describe("How much of each line's output feeds back into its own input."),
-    );
-    params.push(
-        ParamDescriptor::gain(DRY, "Dry", 0.0, 0.0)
+        ParamDescriptor::gain(DRY, "Dry", 0.0, -5.0)
             .describe("The level of the unprocessed signal."),
     );
     DeviceType::native(FILTER_DELAY, "Filter Delay", DeviceRole::AudioEffect).with_description(
@@ -146,7 +180,15 @@ pub fn filter_delay_type() -> DeviceType {
             .with_banks(&[
                 (
                     "Output",
-                    &["Feedback", "Dry", "1 Volume", "2 Volume", "3 Volume"],
+                    &[
+                        "1 Feedback",
+                        "2 Feedback",
+                        "3 Feedback",
+                        "Dry",
+                        "1 Volume",
+                        "2 Volume",
+                        "3 Volume",
+                    ],
                 ),
                 (
                     "Delay 1",
@@ -191,42 +233,108 @@ pub fn filter_delay_type() -> DeviceType {
     )
 }
 
-/// Per line, a band of switches and times, an X–Y cell whose two controls
-/// are the band's frequency and width, and a band of Pan and Volume; then
-/// Feedback and Dry.
+/// The first row's top and the pitch of the three rows, in points: Live's
+/// rows are L, L+R and R.
+const ROW_TOP: f32 = 16.0;
+const ROW_PITCH: f32 = 48.0;
+
+/// The sixteenths a line's grid of buttons sets, as Live's 1 2 3 4 over 5 6 8 16.
+const STEPS: [i32; 8] = [1, 2, 3, 4, 5, 6, 8, 16];
+
+/// Filter Delay as Live draws it: three rows, one for each line (L, L+R and
+/// R), each with its input button, Filter switch with its frequency and width
+/// over a display of the band, its grid of sixteenths over Sync and the time's
+/// per cent, and its Feedback, Pan and Volume; at the right the output's
+/// meter over Dry.
 fn layout() -> DeviceLayout {
-    let mut parts = Vec::new();
-    for line in 0..LINES {
+    let at = Control::new;
+    let row = |line: usize| ROW_TOP + ROW_PITCH * line as f32;
+    let (mut inputs, mut times) = (Vec::new(), Vec::new());
+    for (line, name) in ["L", "L+R", "R"].into_iter().enumerate() {
         let id = |field| line_param(line, field);
-        parts.push(LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (id(ON), Widget::Toggle),
-                (id(FILTER), Widget::Toggle),
-                (id(SYNC), Widget::Toggle),
-                (id(DIVISION), Widget::Number),
-                (id(PERCENT), Widget::Knob),
-                (id(TIME), Widget::Knob),
-            ],
-        )));
-        parts.push(LayoutNode::Cell(
-            DisplayCell::new(&format!("Filter {}", line + 1), 120.0, BODY_HEIGHT, 1.0).with_bottom(
-                ControlBand::stacked(60.0, &[(id(FREQ), Widget::Knob), (id(WIDTH), Widget::Knob)]),
-            ),
-        ));
-        parts.push(LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[(id(PAN), Widget::Knob), (id(VOLUME), Widget::Knob)],
-        )));
+        let y = row(line);
+        inputs.extend([
+            at(id(ON), Widget::Toggle, 4.0, y)
+                .sized(CELL_WIDTH, BOX_HEIGHT)
+                .captioned(name),
+            at(id(FILTER), Widget::Toggle, 29.0, y)
+                .sized(44.0, BOX_HEIGHT)
+                .captioned("On"),
+            at(id(FREQ), Widget::Slider, 29.0, y + 15.0)
+                .unnamed()
+                .sized(44.0, BOX_HEIGHT),
+            at(id(WIDTH), Widget::Slider, 29.0, y + 29.0)
+                .unnamed()
+                .sized(44.0, BOX_HEIGHT),
+        ]);
+        times.extend([
+            at(
+                id(DIVISION),
+                Widget::Grid {
+                    columns: 4,
+                    rows: 2,
+                },
+                4.0,
+                y + 1.0,
+            )
+            .with_steps(&STEPS)
+            .hidden_while(id(SYNC), 0),
+            at(id(TIME), Widget::Number, 4.0, y + 1.0)
+                .unnamed()
+                .sized(97.0, BOX_HEIGHT)
+                .shown_only_while(id(SYNC), 0),
+            at(id(SYNC), Widget::Toggle, 4.0, y + 31.0)
+                .sized(CELL_WIDTH, BOX_HEIGHT)
+                .captioned("Sync"),
+            at(id(PERCENT), Widget::Number, 51.0, y + 31.0)
+                .unnamed()
+                .sized(47.0, BOX_HEIGHT),
+            at(feedback_param(line), Widget::SmallKnob, 108.0, y + 9.0).unnamed(),
+            at(id(PAN), Widget::SmallKnob, 144.0, y + 9.0).unnamed(),
+            at(id(VOLUME), Widget::SmallKnob, 181.0, y + 9.0).unnamed(),
+        ]);
     }
-    parts.push(LayoutNode::Band(ControlBand::stacked(
-        BODY_HEIGHT,
-        &[(FEEDBACK, Widget::Knob), (DRY, Widget::Knob)],
-    )));
-    DeviceLayout::new(LayoutNode::Row(parts))
+    let inputs = ControlBand::free(77.0, BODY_HEIGHT, inputs).with_captions(vec![
+        Caption::new("Input", 2.0, 4.0, 30.0),
+        Caption::new("Filter", 29.0, 4.0, 44.0),
+    ]);
+    let times = ControlBand::free(218.0, BODY_HEIGHT, times).with_captions(vec![
+        Caption::new("Delay Time", 4.0, 4.0, 60.0),
+        Caption::new("Feedback", 100.0, 4.0, 46.0),
+        Caption::new("Pan", 150.0, 4.0, 20.0),
+        Caption::new("Volume", 178.0, 4.0, 36.0),
+    ]);
+    let space = |height| LayoutNode::Band(ControlBand::free(91.0, height, Vec::new()));
+    let mut displays = vec![space(ROW_TOP)];
+    for line in 0..LINES {
+        displays.push(LayoutNode::Cell(DisplayCell::new(
+            &format!("Filter {}", line + 1),
+            91.0,
+            40.0,
+            1.0,
+        )));
+        displays.push(space(if line + 1 < LINES { 8.0 } else { 6.0 }));
+    }
+    let out = ControlBand::free(
+        51.0,
+        BODY_HEIGHT - ROW_TOP - 88.0,
+        vec![at(DRY, Widget::SmallKnob, 9.0, 8.0)],
+    );
+    DeviceLayout::new(LayoutNode::Row(vec![
+        LayoutNode::Band(inputs),
+        LayoutNode::Column(displays),
+        LayoutNode::Band(times),
+        LayoutNode::Column(vec![
+            LayoutNode::Band(
+                ControlBand::free(51.0, ROW_TOP, Vec::new())
+                    .with_captions(vec![Caption::new("Out", 16.0, 4.0, 24.0)]),
+            ),
+            LayoutNode::Cell(DisplayCell::new("Out", 20.0, 88.0, 1.0)).inset(16.0, 0.0, 15.0, 0.0),
+            LayoutNode::Band(out),
+        ]),
+    ]))
 }
 
-/// Adds Filter Delay to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, filter_delay_type(), Trident::new);
 }
@@ -307,7 +415,8 @@ impl NativeDevice for Trident {
         let width: [&[f32]; LINES] = core::array::from_fn(|l| ramp(l, WIDTH));
         let pan: [&[f32]; LINES] = core::array::from_fn(|l| ramp(l, PAN));
         let volume: [&[f32]; LINES] = core::array::from_fn(|l| ramp(l, VOLUME));
-        let feedback = params.ramp(ix[FEEDBACK.0 as usize]);
+        let feedback: [&[f32]; LINES] =
+            core::array::from_fn(|l| params.ramp(ix[feedback_param(l).0 as usize]));
         let dry = params.ramp(ix[DRY.0 as usize]);
 
         let mut channels = audio.channels_mut();
@@ -321,7 +430,6 @@ impl NativeDevice for Trident {
             // The first line hears the left, the third the right, the second
             // both, at the level of one.
             let heard = [l, (l + r) / 2.0, r];
-            let feedback = f64::from(feedback[i]) / 100.0;
             let (mut wet_left, mut wet_right) = (0.0, 0.0);
             for k in 0..LINES {
                 let tap = self.lines[k].tap(base[k], 0.0, Mode::Repitch, self.glide);
@@ -329,7 +437,7 @@ impl NativeDevice for Trident {
                     self.lines[k].write(0.0);
                     continue;
                 }
-                let input = (heard[k] + feedback * tap) as f32;
+                let input = (heard[k] + f64::from(feedback[k][i]) / 100.0 * tap) as f32;
                 let input = if filtered[k] {
                     self.bands[k].process(input, freq[k][i], width[k][i], self.rate)
                 } else {

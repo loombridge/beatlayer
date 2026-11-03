@@ -10,7 +10,10 @@
 use core::f64::consts::{FRAC_PI_4, PI, SQRT_2};
 
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{
+    BODY_HEIGHT, BOX_HEIGHT, Caption, Control, ControlBand, DisplayCell, Glyph, LayoutNode,
+    PADDING, Widget,
+};
 use bl_model::{
     Device, DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayReading,
     OrdMap, ParamDescriptor, ParamId, ParamUnit,
@@ -521,7 +524,7 @@ pub fn auto_pan_tremolo_type() -> DeviceType {
         ),
         ParamDescriptor::toggle(VINTAGE, "Vintage", false)
             .describe("Applies warm non-linear shaping to tremolo modulation."),
-        ParamDescriptor::continuous(AMOUNT, "Amount", (0.0, 100.0), 100.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(AMOUNT, "Amount", (0.0, 100.0), 50.0, ParamUnit::Percent)
             .describe("Modulation depth applied to the signal."),
         ParamDescriptor::continuous(SHAPE, "Shape", (-100.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("Reshapes the modulation waveform per mode."),
@@ -577,41 +580,88 @@ pub fn auto_pan_tremolo_type() -> DeviceType {
     )
 }
 
+/// Auto Pan-Tremolo as Live draws it: the two modes as tabs across the top,
+/// the display, a row under it (the waveform, the rate's kind, the phase or
+/// spin, Invert and the phase offset), and Amount, Rate (one knob that reads
+/// the rate in the kind chosen) and Morph with the attack and modulation
+/// boxes at the right.
 fn layout() -> DeviceLayout {
-    use Widget::{Chooser, Knob, Number, Toggle};
-    let band = |controls: &[(ParamId, Widget)]| {
-        LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, controls))
+    use Widget::{Chooser, Inline, Number, SmallKnob, Tabs};
+    const WIDTH: f32 = 227.0;
+    const CELL_TOP: f32 = 24.0;
+    const CELL_HEIGHT: f32 = 64.0;
+    let at = Control::new;
+    let tabs = ControlBand::free(
+        WIDTH + 2.0 * PADDING,
+        CELL_TOP,
+        vec![at(MODE, Tabs(2), PADDING, 8.0).sized(WIDTH, BOX_HEIGHT)],
+    );
+    let tremolo = |control: Control| control.shown_only_while(MODE, 1);
+    // Tremolo's two characters sit at the foot of the display.
+    let foot = ControlBand::free(
+        WIDTH,
+        BOX_HEIGHT + 2.0 * PADDING,
+        vec![
+            tremolo(at(HARMONIC, Widget::Toggle, 4.0, PADDING).sized(48.0, BOX_HEIGHT)),
+            tremolo(at(VINTAGE, Widget::Toggle, 56.0, PADDING).sized(48.0, BOX_HEIGHT)),
+        ],
+    );
+    let cell = DisplayCell::new("Pan", WIDTH, CELL_HEIGHT, 1.0).with_bottom(foot);
+    let rate_knob = |param, only: i32| {
+        at(param, SmallKnob, 73.0, 23.0)
+            .captioned("Rate")
+            .shown_only_while(TIME_MODE, only)
     };
-    DeviceLayout::new(LayoutNode::Row(vec![
-        band(&[(MODE, Chooser), (WAVE, Chooser), (TIME_MODE, Chooser)]),
-        LayoutNode::Cell(DisplayCell::new("Pan", 150.0, BODY_HEIGHT, 1.0)),
-        band(&[
-            (RATE_HZ, Knob),
-            (TIME_SECS, Knob),
-            (SYNCED_DIVISION, Chooser),
-            (DOTTED_DIVISION, Chooser),
-            (TRIPLET_DIVISION, Chooser),
-            (SIXTEENTHS, Number),
-        ]),
-        band(&[
-            (STEREO_MODE, Chooser),
-            (PHASE, Knob),
-            (SPIN, Knob),
-            (PHASE_OFFSET, Knob),
-            (INVERT, Toggle),
-            (HARMONIC, Toggle),
-            (VINTAGE, Toggle),
-        ]),
-        band(&[
-            (AMOUNT, Knob),
-            (SHAPE, Knob),
-            (ATTACK_TIME, Knob),
-            (DYNAMIC_FM, Knob),
-        ]),
+    let row = BOX_HEIGHT;
+    let controls = ControlBand::free(
+        WIDTH + 2.0 * PADDING,
+        BODY_HEIGHT - CELL_TOP - CELL_HEIGHT,
+        vec![
+            at(WAVE, Chooser, 4.0, 2.0).unnamed().sized(38.0, row),
+            at(TIME_MODE, Chooser, 45.0, 2.0).unnamed().sized(40.0, row),
+            at(STEREO_MODE, Chooser, 88.0, 2.0)
+                .unnamed()
+                .sized(34.0, row),
+            at(PHASE, Inline, 125.0, 2.0)
+                .sized(30.0, row)
+                .captioned("")
+                .shown_only_while(STEREO_MODE, 0),
+            at(SPIN, Inline, 125.0, 2.0)
+                .sized(30.0, row)
+                .captioned("")
+                .shown_only_while(STEREO_MODE, 1),
+            at(INVERT, Widget::IconToggle, 158.0, 2.0)
+                .sized(20.0, row)
+                .with_glyph(Glyph::PhaseInvert),
+            at(PHASE_OFFSET, Inline, 181.0, 2.0)
+                .sized(36.0, row)
+                .captioned(""),
+            at(AMOUNT, SmallKnob, 13.0, 23.0),
+            rate_knob(RATE_HZ, 0),
+            rate_knob(TIME_SECS, 1),
+            rate_knob(SYNCED_DIVISION, 2),
+            rate_knob(DOTTED_DIVISION, 3),
+            rate_knob(TRIPLET_DIVISION, 4),
+            rate_knob(SIXTEENTHS, 5),
+            at(SHAPE, SmallKnob, 132.5, 23.0).captioned("Morph"),
+            at(ATTACK_TIME, Number, 183.0, 36.0)
+                .unnamed()
+                .sized(43.0, row),
+            at(DYNAMIC_FM, Number, 183.0, 52.0)
+                .unnamed()
+                .sized(43.0, row),
+        ],
+    )
+    .with_captions(vec![
+        Caption::new("Att | Mod", 183.0, 23.0, 43.0).centered(),
+    ]);
+    DeviceLayout::new(LayoutNode::Column(vec![
+        LayoutNode::Band(tabs),
+        LayoutNode::Cell(cell).inset(PADDING, 0.0, PADDING, 0.0),
+        LayoutNode::Band(controls),
     ]))
 }
 
-/// Registers the Auto Pan-Tremolo device in `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, auto_pan_tremolo_type(), AutoPanTremolo::new);
 }

@@ -2,3 +2,5 @@
 channel = "1.99.0"
 components = ["rustfmt", "clippy"]
 profile = "minimal"
+# For building test components for bl-ext (WP-9.29); nothing else downloads.
+targets = ["wasm32-unknown-unknown"]

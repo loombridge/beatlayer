@@ -19,7 +19,10 @@ use core::f64::consts::TAU;
 
 use bl_dsp::{EnvelopeFollower, Oversampler};
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{
+    BODY_HEIGHT, BOX_HEIGHT, Caption, Control, ControlBand, DisplayCell, LayoutNode, PADDING,
+    Widget,
+};
 use bl_model::{
     Device, DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayMarker,
     DisplayReading, DisplaySeries, OrdMap, ParamDescriptor, ParamId, ParamUnit,
@@ -169,7 +172,7 @@ const WAVE_OF: [Wave; 8] = [
 ];
 
 /// How the LFO's rate is given.
-pub const RATE_MODES: [&str; 4] = ["Hz", "Time", "Beats", "16ths"];
+pub const RATE_MODES: [&str; 4] = ["Rate", "Time", "Beats", "16ths"];
 
 /// The synced divisions: their names and their lengths in quarter notes.
 pub const DIVISIONS: [(&str, f64); 17] = [
@@ -230,7 +233,7 @@ pub fn auto_filter_type() -> DeviceType {
     let params = vec![
         ParamDescriptor::choice(TYPE, "Type", &TYPES, 0)
             .describe("The filter's response: how it shapes the signal around its cutoff."),
-        ParamDescriptor::choice(SLOPE, "Slope", &SLOPES, 1).describe(
+        ParamDescriptor::choice(SLOPE, "Slope", &SLOPES, 2).describe(
             "How steeply the filter cuts, in dB per octave. Types that offer fewer slopes use the \
              nearest.",
         ),
@@ -238,7 +241,7 @@ pub fn auto_filter_type() -> DeviceType {
             "The filter's character at high levels, for low-pass, high-pass, band-pass, notch \
              and morph.",
         ),
-        ParamDescriptor::continuous(FREQ, "Freq", (MIN_HZ, MAX_HZ), 1_000.0, ParamUnit::Hertz)
+        ParamDescriptor::continuous(FREQ, "Freq", (MIN_HZ, MAX_HZ), 10_000.0, ParamUnit::Hertz)
             .logarithmic()
             .describe("The filter's cutoff, the comb's fundamental, or the resampling rate."),
         ParamDescriptor::continuous(RES, "Res", (0.0, 100.0), 0.0, ParamUnit::Percent)
@@ -299,7 +302,7 @@ pub fn auto_filter_type() -> DeviceType {
             .describe("The LFO's cycle in sixteenth notes, synced to the tempo."),
         ParamDescriptor::choice(LFO_STEREO, "LFO Stereo", &["Phase", "Spin"], 0)
             .describe("Whether the two channels' LFOs differ in phase or in rate."),
-        ParamDescriptor::continuous(LFO_PHASE, "LFO Phase", (0.0, 360.0), 0.0, ParamUnit::None)
+        ParamDescriptor::continuous(LFO_PHASE, "LFO Phase", (0.0, 360.0), 4.0, ParamUnit::None)
             .decimals(0)
             .describe("How many degrees the right channel's LFO is ahead; 180 is opposite."),
         ParamDescriptor::continuous(LFO_SPIN, "LFO Spin", (-50.0, 50.0), 0.0, ParamUnit::Percent)
@@ -313,7 +316,7 @@ pub fn auto_filter_type() -> DeviceType {
         )
         .decimals(0)
         .describe("Moves both LFOs against the beat grid, in degrees, in the synced modes."),
-        ParamDescriptor::choice(LFO_QUANTIZE, "LFO Quantize", &["Off", "Steps", "S&H"], 0)
+        ParamDescriptor::choice(LFO_QUANTIZE, "LFO Quantize", &["None", "Steps", "S&H"], 0)
             .describe("Holds the LFO in steps within each cycle, or on a beat-time interval."),
         ParamDescriptor::integer(LFO_STEPS, "LFO Steps", (2, 64), 8, ParamUnit::None)
             .describe("How many intervals each cycle is divided into with Steps."),
@@ -454,68 +457,152 @@ pub fn auto_filter_type() -> DeviceType {
         )
 }
 
-/// The device's layout: the filter's controls, the display of its curves,
-/// the LFO's and the envelope's, and the sidechain filter's with the
-/// globals. The sidechain strip down the left edge is the framework's.
+/// Auto Filter as Live draws it: Freq, the
+/// filter's type, its slope and Res; the response display with the LFO's
+/// stereo mode, phase, offset and quantize along its foot; under it the LFO's
+/// Amount, Rate (one knob that reads the rate in the mode chosen), Wave, Morph
+/// and Mode, and the envelope's Amount; at the right Drive, the circuit, Clip,
+/// Output and Dry/Wet. What the other filter types, the envelope and the
+/// sidechain filter add is in a band of its own at the far right (the Sidechain
+/// strip at the left is the framework's).
 fn layout() -> DeviceLayout {
-    use Widget::{Chooser, Knob, Number, Toggle};
-    let band = |controls: &[(ParamId, Widget)]| {
-        LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, controls))
+    use Widget::{Chooser, Inline, Knob, Segments, Slider, SmallKnob, Toggle};
+    const LEFT: f32 = 58.0;
+    const CELL: f32 = 280.0;
+    const CELL_HEIGHT: f32 = 102.0;
+    const FOOT: f32 = 19.0;
+    let at = Control::new;
+    let left = ControlBand::free(
+        LEFT,
+        BODY_HEIGHT,
+        vec![
+            at(FREQ, Knob, 5.0, 4.0),
+            at(TYPE, Chooser, 1.0, 72.0)
+                .unnamed()
+                .sized(48.0, BOX_HEIGHT),
+            at(SLOPE, Segments(2), 1.0, 87.0)
+                .with_steps(&[1, 2])
+                .sized(48.0, BOX_HEIGHT),
+            at(RES, SmallKnob, 8.0, 110.5),
+        ],
+    );
+    // The row along the display's foot: the LFO's stereo mode, phase or spin,
+    // offset and quantize.
+    let foot = ControlBand::free(
+        CELL,
+        FOOT,
+        vec![
+            at(LFO_STEREO, Chooser, 37.0, 0.0)
+                .unnamed()
+                .sized(34.0, BOX_HEIGHT),
+            at(LFO_PHASE, Inline, 84.0, 0.0)
+                .sized(44.0, BOX_HEIGHT)
+                .captioned("Ø")
+                .shown_only_while(LFO_STEREO, 0),
+            at(LFO_SPIN, Inline, 84.0, 0.0)
+                .sized(44.0, BOX_HEIGHT)
+                .captioned("Spin")
+                .shown_only_while(LFO_STEREO, 1),
+            at(LFO_OFFSET, Inline, 138.0, 0.0)
+                .sized(44.0, BOX_HEIGHT)
+                .captioned(""),
+            at(LFO_QUANTIZE, Chooser, 204.0, 0.0)
+                .unnamed()
+                .sized(38.0, BOX_HEIGHT),
+            at(LFO_STEPS, Inline, 245.0, 0.0)
+                .sized(24.0, BOX_HEIGHT)
+                .captioned("")
+                .greyed_while(LFO_QUANTIZE, 0)
+                .hidden_while(LFO_QUANTIZE, 2),
+            at(LFO_SH, Chooser, 245.0, 0.0)
+                .unnamed()
+                .sized(30.0, BOX_HEIGHT)
+                .shown_only_while(LFO_QUANTIZE, 2),
+        ],
+    )
+    .with_captions(vec![Caption::new("LFO", 7.0, 0.0, 28.0)]);
+    let cell = DisplayCell::new("Filter", CELL, CELL_HEIGHT, 1.0).with_bottom(foot);
+    // The rate knob is one place for the four rates.
+    let rate = |param, mode: i32| {
+        at(param, SmallKnob, 63.0, 4.5)
+            .captioned("Rate")
+            .shown_only_while(LFO_MODE, mode)
     };
-    DeviceLayout::new(LayoutNode::Row(vec![
-        band(&[
-            (TYPE, Chooser),
-            (SLOPE, Chooser),
-            (CIRCUIT, Chooser),
-            (FREQ, Knob),
-            (RES, Knob),
+    let under = ControlBand::free(
+        CELL,
+        BODY_HEIGHT - CELL_HEIGHT - PADDING,
+        vec![
+            at(LFO_AMOUNT, SmallKnob, 10.7, 4.5).captioned("Amount"),
+            rate(LFO_HZ, 0),
+            rate(LFO_TIME, 1),
+            rate(LFO_DIVISION, 2),
+            rate(LFO_SIXTEENTHS, 3),
+            at(LFO_WAVE, Chooser, 145.0, 3.0)
+                .unnamed()
+                .sized(48.0, BOX_HEIGHT),
+            at(LFO_MORPH, Slider, 145.0, 20.0)
+                .unnamed()
+                .sized(48.0, BOX_HEIGHT),
+            at(LFO_MODE, Chooser, 145.0, 36.5)
+                .unnamed()
+                .sized(48.0, BOX_HEIGHT),
+            at(ENV_AMOUNT, SmallKnob, 221.0, 4.5).captioned("Envelope"),
+        ],
+    )
+    .with_captions(vec![
+        Caption::new("Wave", 108.0, 3.0, 36.0),
+        Caption::new("Morph", 108.0, 20.0, 36.0),
+        Caption::new("Mode", 108.0, 36.5, 36.0),
+    ]);
+    let right = ControlBand::free(
+        56.0,
+        BODY_HEIGHT,
+        vec![
+            at(DRIVE, SmallKnob, 10.0, 4.5),
+            at(CIRCUIT, Chooser, 4.0, 52.0)
+                .unnamed()
+                .sized(46.0, BOX_HEIGHT),
+            at(CLIP, Toggle, 4.0, 72.0).sized(30.0, BOX_HEIGHT),
+            at(OUTPUT, Slider, 4.0, 87.0)
+                .unnamed()
+                .sized(46.0, BOX_HEIGHT),
+            at(DRY_WET, SmallKnob, 10.0, 110.5),
+        ],
+    );
+    // What the other filter types, the envelope and the sidechain filter add,
+    // in a band of Beatlayer's own at the right: Live's places for them are not
+    // observed.
+    let more = LayoutNode::Band(ControlBand::stacked(
+        BODY_HEIGHT,
+        &[
             (MORPH, Knob),
             (CONTROL, Knob),
             (PITCH, Knob),
             (FORMANT, Knob),
-            (DRIVE, Knob),
-        ]),
-        LayoutNode::Cell(DisplayCell::new("Filter", 150.0, BODY_HEIGHT, 1.0)),
-        band(&[
-            (LFO_WAVE, Chooser),
-            (LFO_MODE, Chooser),
-            (LFO_STEREO, Chooser),
-            (LFO_QUANTIZE, Chooser),
-            (LFO_AMOUNT, Knob),
-            (LFO_MORPH, Knob),
-            (LFO_HZ, Knob),
-            (LFO_TIME, Knob),
-            (LFO_DIVISION, Chooser),
-            (LFO_SIXTEENTHS, Number),
-            (LFO_STEPS, Number),
-            (LFO_SH, Chooser),
-            (LFO_PHASE, Knob),
-            (LFO_SPIN, Knob),
-            (LFO_OFFSET, Knob),
-        ]),
-        band(&[
-            (ENV_AMOUNT, Knob),
             (ENV_ATTACK, Knob),
             (ENV_RELEASE, Knob),
             (ENV_HOLD, Toggle),
             (ENV_SH, Toggle),
             (ENV_SH_RATE, Chooser),
-        ]),
-        band(&[
             (SC_FILTER, Toggle),
             (SC_TYPE, Chooser),
             (SC_FREQ, Knob),
             (SC_Q, Knob),
             (SC_SHELF, Knob),
             (SC_PEAK, Knob),
-            (CLIP, Toggle),
-            (OUTPUT, Knob),
-            (DRY_WET, Knob),
+        ],
+    ));
+    DeviceLayout::new(LayoutNode::Row(vec![
+        LayoutNode::Band(left),
+        LayoutNode::Column(vec![
+            LayoutNode::Cell(cell).inset(0.0, PADDING, 0.0, 0.0),
+            LayoutNode::Band(under),
         ]),
+        LayoutNode::Band(right),
+        more,
     ]))
 }
 
-/// Adds the Auto Filter device to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, auto_filter_type(), AutoFilter::new);
 }

@@ -22,17 +22,17 @@ use crate::decoder::{Codec, CodedSample, Frame, VideoDecoder};
 use crate::error::VideoError;
 use crate::movie::{MAX_DIMENSION, MAX_PIXELS, VideoTrack};
 
-type OSStatus = i32;
-type Ptr = *mut c_void;
+pub(crate) type OSStatus = i32;
+pub(crate) type Ptr = *mut c_void;
 
 /// `CMTime`, packed to four bytes as CoreMedia's headers pack it.
 #[repr(C, packed(4))]
 #[derive(Clone, Copy)]
-struct CMTime {
-    value: i64,
-    timescale: i32,
-    flags: u32,
-    epoch: i64,
+pub(crate) struct CMTime {
+    pub(crate) value: i64,
+    pub(crate) timescale: i32,
+    pub(crate) flags: u32,
+    pub(crate) epoch: i64,
 }
 
 impl CMTime {

@@ -1428,7 +1428,7 @@ impl MainWindowUi {
         if ui.button(ticked(audio, "Link Audio")).clicked() {
             run(ui, link_ids::SET_AUDIO, json!({ "on": !audio }));
         }
-        ui.separator();
+        crate::menus::separator(ui);
         let peers = shell.link_audio_peers();
         if peers.is_empty() {
             crate::menus::heading(ui, "No Link Audio peers available.");
@@ -1436,7 +1436,7 @@ impl MainWindowUi {
         for peer in peers {
             ui.add_enabled(false, egui::Button::new(peer.name));
         }
-        ui.separator();
+        crate::menus::separator(ui);
         if ui.button("Configure Link…").clicked() {
             run(ui, ids::APP_SETTINGS, json!({ "page": "link" }));
         }
@@ -1461,19 +1461,19 @@ impl MainWindowUi {
             crate::menus::register_item(ui.ctx(), &response);
         };
         dim(ui, "✔ Enable CPU Meter", None);
-        ui.separator();
+        crate::menus::separator(ui);
         dim(ui, "✔ Average", Some("---"));
         dim(ui, "Current", Some(&current));
-        ui.separator();
+        crate::menus::separator(ui);
         crate::menus::heading(ui, "Meter Text Shows:");
         ui.horizontal(|ui| {
             for text in ["✔ Average", "Current"] {
                 ui.add_enabled(false, egui::Button::new(text));
             }
         });
-        ui.separator();
+        crate::menus::separator(ui);
         dim(ui, "Warn on Current CPU Overload", None);
-        ui.separator();
+        crate::menus::separator(ui);
         let keymap = crate::keymap::Keymap::from_data(shell.keymap().clone());
         let engine = bl_shell::menus::MenuItem {
             row: "C-CPU-007",
@@ -1567,7 +1567,7 @@ impl MainWindowUi {
             }
         }
 
-        ui.separator();
+        crate::menus::separator(ui);
 
         // Sound
         ui.label(egui::RichText::new("Sound").strong());
@@ -1590,7 +1590,7 @@ impl MainWindowUi {
             }
         }
 
-        ui.separator();
+        crate::menus::separator(ui);
 
         // Rhythm
         ui.label(egui::RichText::new("Rhythm").strong());
@@ -1621,7 +1621,7 @@ impl MainWindowUi {
             }
         }
 
-        ui.separator();
+        crate::menus::separator(ui);
 
         // Enable Only While Recording
         let checked = settings.only_while_recording;
@@ -1992,21 +1992,28 @@ impl MainWindowUi {
             egui::FontId::proportional(theme.sizes.heading),
             theme.colors.text.0,
         );
-        y += 20.0;
+        // Lines are `info_line` apart: the title, the wrapped body, and the
+        // shortcut on a line of its own.
+        let line = theme.sizes.info_line;
+        y += line;
         if !self.info.body.is_empty() {
-            let galley = painter.layout(
+            let mut job = egui::text::LayoutJob::simple(
                 self.info.body.clone(),
                 theme.small_font(),
                 theme.colors.text_dim.0,
                 rect.width() - 16.0,
             );
+            for section in &mut job.sections {
+                section.format.line_height = Some(line);
+            }
+            let galley = painter.layout_job(job);
             let height = galley.size().y;
             painter.galley(
                 egui::pos2(rect.left() + 8.0, y),
                 galley,
                 theme.colors.text_dim.0,
             );
-            y += height + 4.0;
+            y += height;
         }
         if let Some(shortcut) = &self.info.shortcut {
             painter.text(

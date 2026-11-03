@@ -13136,7 +13136,7 @@ Type: one of `"maximum"`, `"minimum"`, `"middle"`.
 
 ### `ExportChoices`
 
-The Export Audio/Video dialog's controls, as the export spec's R29 to R37 list them, with a new install's values as their defaults. Render Start and Render Length aren't here: they're the dialog's alone (R39). The Video section has no choices, since it is drawn disabled (R38).
+The Export Audio/Video dialog's controls, as the export spec's R29 to R37 list them, with a new install's values as their defaults. Render Start and Render Length aren't here: they're the dialog's alone (R39).
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -13152,12 +13152,15 @@ The Export Audio/Video dialog's controls, as the export spec's R29 to R37 list t
 | `bit_depth` | integer from 0 to 255 | yes | Bit Depth. |
 | `dither` | [`Dither`](#dither) | yes | Dither Options. |
 | `encode_mp3` | boolean | yes | Encode MP3. |
+| `create_video` | boolean | yes | Create Video (R46). |
+| `video_encoder` | [`VideoEncoder`](#videoencoder) or null | yes | Video Encoder; none in a new install, when it shows H.264 where the computer has it and Motion JPEG otherwise (R47). |
+| `video_settings` | [`VideoSettings`](#videosettings) | yes | Encoder Settings (R48). |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "The Export Audio/Video dialog's controls, as the export spec's R29 to R37 list them, with a new install's values as their defaults. Render Start and Render Length aren't here: they're the dialog's alone (R39). The Video section has no choices, since it is drawn disabled (R38).",
+  "description": "The Export Audio/Video dialog's controls, as the export spec's R29 to R37 list them, with a new install's values as their defaults. Render Start and Render Length aren't here: they're the dialog's alone (R39).",
   "properties": {
     "bit_depth": {
       "default": 24,
@@ -13175,6 +13178,11 @@ The Export Audio/Video dialog's controls, as the export spec's R29 to R37 list t
     "create_analysis_file": {
       "default": false,
       "description": "Create Analysis File.",
+      "type": "boolean"
+    },
+    "create_video": {
+      "default": false,
+      "description": "Create Video (R46).",
       "type": "boolean"
     },
     "dither": {
@@ -13226,6 +13234,23 @@ The Export Audio/Video dialog's controls, as the export spec's R29 to R37 list t
         "integer",
         "null"
       ]
+    },
+    "video_encoder": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/VideoEncoder"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Video Encoder; none in a new install, when it shows H.264 where the computer has it and Motion JPEG otherwise (R47)."
+    },
+    "video_settings": {
+      "$ref": "#/$defs/VideoSettings",
+      "default": {},
+      "description": "Encoder Settings (R48)."
     }
   },
   "required": [
@@ -13240,7 +13265,10 @@ The Export Audio/Video dialog's controls, as the export spec's R29 to R37 list t
     "file_type",
     "bit_depth",
     "dither",
-    "encode_mp3"
+    "encode_mp3",
+    "create_video",
+    "video_encoder",
+    "video_settings"
   ],
   "type": "object"
 }
@@ -13293,6 +13321,7 @@ The open dialog, as `export.status` reports it (R44).
 | `length` | [`Ticks`](#ticks) | yes | Render Length, in ticks. |
 | `can_export` | boolean | yes | Whether Export is enabled. |
 | `disabled` | array of [`Disabled`](#disabled) | yes | The controls drawn disabled, with their reasons. |
+| `video_encoders` | array of [`VideoEncoder`](#videoencoder) | yes | The encoders the Video Encoder chooser lists on this computer, in its order (R47). |
 | `reason` | string or null | no | Why Export is disabled. |
 
 <details><summary>JSON Schema</summary>
@@ -13330,6 +13359,14 @@ The open dialog, as `export.status` reports it (R44).
     "start": {
       "$ref": "#/$defs/Ticks",
       "description": "Render Start, in ticks from 1.1.1."
+    },
+    "video_encoders": {
+      "default": [],
+      "description": "The encoders the Video Encoder chooser lists on this computer, in its order (R47).",
+      "items": {
+        "$ref": "#/$defs/VideoEncoder"
+      },
+      "type": "array"
     }
   },
   "required": [
@@ -13337,7 +13374,8 @@ The open dialog, as `export.status` reports it (R44).
     "start",
     "length",
     "can_export",
-    "disabled"
+    "disabled",
+    "video_encoders"
   ],
   "type": "object"
 }
@@ -13372,6 +13410,7 @@ What `export.audio` returns.
 | `attempts` | integer, at least 0 | yes | How many times the render started: more than one when a dropout spoiled it and it started again. |
 | `dropouts` | array of [`Dropout`](#dropout) | no | The dropouts the render found, each with the song position it happened at. |
 | `files` | array of string | no | Every file written by the export: one for Main or a single track, or one per track for all-tracks or selected-tracks exports. |
+| `movie` | string or null | no | The movie written beside the first file, if `video` was given (the movies of a multi-file export are in `files`). |
 | `silenced_external_devices` | array of string | no | The devices that work with hardware (an external instrument or an external effect), by the name their title bar shows and their ID: they send nothing to hardware in an offline render and bring back silence. |
 
 <details><summary>JSON Schema</summary>
@@ -13444,6 +13483,13 @@ What `export.audio` returns.
         "type": "string"
       },
       "type": "array"
+    },
+    "movie": {
+      "description": "The movie written beside the first file, if `video` was given (the movies of a multi-file export are in `files`).",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "path": {
       "description": "The file written (or the base path if multiple files were written).",
@@ -43768,6 +43814,190 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `VideoEncoder`
+
+The encoders the Video Encoder chooser lists (the export spec, R47). A computer lists the ones it has: Motion JPEG is on every one.
+
+One of:
+
+- `"h264"`: H.264.
+- `"hevc"`: HEVC.
+- `"prores_422"`: Apple ProRes 422.
+- `"motion_jpeg"`: Motion JPEG, Beatlayer's own.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The encoders the Video Encoder chooser lists (the export spec, R47). A computer lists the ones it has: Motion JPEG is on every one.",
+  "oneOf": [
+    {
+      "const": "h264",
+      "description": "H.264.",
+      "type": "string"
+    },
+    {
+      "const": "hevc",
+      "description": "HEVC.",
+      "type": "string"
+    },
+    {
+      "const": "prores_422",
+      "description": "Apple ProRes 422.",
+      "type": "string"
+    },
+    {
+      "const": "motion_jpeg",
+      "description": "Motion JPEG, Beatlayer's own.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `VideoOptions`
+
+The `video` argument of `export.audio` (the export spec, R52): write a QuickTime movie beside each audio file, named as it is with `.mov`, of the Arrangement's picture over the range with the rendered audio as its sound. It needs a PCM file type and a video clip in the range.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | A video clip: with it, and `start` and `length` left out, the range is the whole of the clip's movie, the part of it before the clip's start as pre-roll (R50). |
+| `encoder` | [`VideoEncoder`](#videoencoder) or null | no | The encoder. Left out, H.264 where this computer has it, else Motion JPEG. |
+| `settings` | [`VideoSettings`](#videosettings) | no | The encoder's settings. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The `video` argument of `export.audio` (the export spec, R52): write a QuickTime movie beside each audio file, named as it is with `.mov`, of the Arrangement's picture over the range with the rendered audio as its sound. It needs a PCM file type and a video clip in the range.",
+  "properties": {
+    "clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A video clip: with it, and `start` and `length` left out, the range is the whole of the clip's movie, the part of it before the clip's start as pre-roll (R50)."
+    },
+    "encoder": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/VideoEncoder"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The encoder. Left out, H.264 where this computer has it, else Motion JPEG."
+    },
+    "settings": {
+      "$ref": "#/$defs/VideoSettings",
+      "default": {},
+      "description": "The encoder's settings."
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `VideoSettings`
+
+The settings Encoder Settings' Edit opens (the export spec, R48). A setting left out is the source movie's own, or for the quality 85.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `frame_rate` | number or null | no | Frames a second, such as 24, 25 or 29.97. The source movie's rate when left out. |
+| `quality` | integer or null | no | From 1 to 100: how much of the picture the encoder keeps. 85 unless given. ProRes 422 has no quality and ignores it. |
+| `size` | [`VideoSize`](#videosize) or null | no | The picture's size. The source movie's when left out; an odd width or height is rounded down to even. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The settings Encoder Settings' Edit opens (the export spec, R48). A setting left out is the source movie's own, or for the quality 85.",
+  "properties": {
+    "frame_rate": {
+      "description": "Frames a second, such as 24, 25 or 29.97. The source movie's rate when left out.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "quality": {
+      "description": "From 1 to 100: how much of the picture the encoder keeps. 85 unless given. ProRes 422 has no quality and ignores it.",
+      "format": "uint8",
+      "maximum": 100,
+      "minimum": 1,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "size": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/VideoSize"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The picture's size. The source movie's when left out; an odd width or height is rounded down to even."
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `VideoSize`
+
+A picture size in pixels.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `width` | integer, at least 0 | yes | Width. |
+| `height` | integer, at least 0 | yes | Height. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A picture size in pixels.",
+  "properties": {
+    "height": {
+      "description": "Height.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "width": {
+      "description": "Width.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "width",
+    "height"
+  ],
+  "type": "object"
 }
 ```
 

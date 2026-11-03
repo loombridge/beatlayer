@@ -1361,3 +1361,26 @@ fn the_grid_reads_the_custom_row_and_custom_color_as_its_last_rows() {
     let own = Harness::node(&nodes, "Row 6, colour 1, #010203");
     assert_eq!(own.role, Role::Button);
 }
+
+// Spec: session-context-menus R18 (C-MAIN). The Main track's header opens a
+// menu of Live's rows: no rename, delete, freeze, group or colour-
+// automatically items.
+#[test]
+fn the_main_tracks_header_opens_its_own_menu() {
+    let mut h = arrangement();
+    let at = header_title(&mut h, "Main");
+    let nodes = Harness::nodes(&right_click(&mut h, at));
+    use common::MenuRow::{Dim, Item, Sep};
+    common::assert_menu(
+        &nodes,
+        &[
+            Item("Edit Info Text"),
+            Sep,
+            Item("Insert Audio Track"),
+            Item("Insert MIDI Track"),
+            Item("Insert Return Track"),
+            Sep,
+            Dim("Select Track Content"),
+        ],
+    );
+}

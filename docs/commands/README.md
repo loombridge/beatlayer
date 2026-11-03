@@ -14093,6 +14093,7 @@ The Filter View (spec: browser-tags R18 to R22).
 | `menu` | array of [`FilterGroupChoice`](#filtergroupchoice) | yes | Every group the chosen label can show, with whether it shows. |
 | `selected` | array of string | yes | The selected tags' full names. |
 | `include_auto_tags` | boolean | yes | Whether the Filter View Menu's Include Auto Tags is on: automatic tags show in the Filter View, filter and answer `#` search (spec: browser-tags R55). |
+| `customized` | boolean | yes | Whether the chosen label's groups differ from its default ones, which Reset Filter Groups to Default would undo. |
 
 <details><summary>JSON Schema</summary>
 
@@ -14100,6 +14101,10 @@ The Filter View (spec: browser-tags R18 to R22).
 {
   "description": "The Filter View (spec: browser-tags R18 to R22).",
   "properties": {
+    "customized": {
+      "description": "Whether the chosen label's groups differ from its default ones, which Reset Filter Groups to Default would undo.",
+      "type": "boolean"
+    },
     "groups": {
       "description": "The groups it shows under the chosen label that have tags to show.",
       "items": {
@@ -14135,7 +14140,8 @@ The Filter View (spec: browser-tags R18 to R22).
     "groups",
     "menu",
     "selected",
-    "include_auto_tags"
+    "include_auto_tags",
+    "customized"
   ],
   "type": "object"
 }

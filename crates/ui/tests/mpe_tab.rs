@@ -684,7 +684,7 @@ fn edit_value_types_a_breakpoints_value() {
     assert_eq!(e.steps(), steps + 1);
 }
 
-// Spec: mpe R31. Clear All Envelopes, in the note area's context menu.
+// Spec: mpe R31. Clear All MPE Envelopes, in the note area's context menu.
 #[test]
 fn clear_all_envelopes_is_in_the_context_menu() {
     let mut e = set(vec![shaped(60, 0), shaped(64, 2 * BAR)]);
@@ -700,12 +700,96 @@ fn clear_all_envelopes_is_in_the_context_menu() {
         }]);
     }
     e.h.settle();
-    let item = e.node_centre("Clear All Envelopes");
+    let item = e.node_centre("Clear All MPE Envelopes");
     let steps = e.steps();
     e.click(item, Modifiers::NONE);
     let notes = e.notes();
     assert!(!notes[0].has_expression() && notes[1].has_expression());
     assert_eq!(e.steps(), steps + 1);
+}
+
+// Spec: mpe R26, R31 (C-MPE). The MPE tab's menu is the note editor's with
+// the envelopes' clearing after Duplicate and the pitch bend range before
+// Highlight Scales.
+#[test]
+fn the_mpe_tabs_menu_adds_the_envelope_and_range_groups() {
+    let mut e = set(vec![shaped(60, 0), shaped(64, 2 * BAR)]);
+    e.select(&[0]);
+    let at = e.pitch_at(70, BAR / 3, 0.0);
+    e.h.frame(vec![Event::PointerMoved(at)]);
+    for pressed in [true, false] {
+        e.h.frame(vec![Event::PointerButton {
+            pos: at,
+            button: PointerButton::Secondary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        }]);
+    }
+    let nodes = Harness::nodes(&e.h.settle());
+    use common::MenuRow::{Dim, Item, Sep, Tick};
+    common::assert_menu(
+        &nodes,
+        &[
+            Item("Invert Selection"),
+            Item("Duplicate"),
+            Sep,
+            Item("Clear Envelope (Pitch Bend)"),
+            Item("Clear All MPE Envelopes"),
+            Sep,
+            Item("Quantize"),
+            Item("Quantize Settings..."),
+            Item("Deactivate Note"),
+            Item("Extract Groove(s)"),
+            Sep,
+            Item("Chop Note(s) on Grid"),
+            Dim("Join Notes"),
+            Item("Fit to Time Range"),
+            Sep,
+            Dim("Crop Clip to Time Selection"),
+            Sep,
+            Dim("Set 1.1.1 Here"),
+            Sep,
+            Dim("Loop Selection"),
+            Item("Set Start Marker"),
+            Item("Set Loop Start"),
+            Item("Set Loop End"),
+            Item("Set End Marker"),
+            Sep,
+            Item("Zoom to Clip Selection"),
+            Item("Zoom Out Clip Completely"),
+            Item("Fit Content To View Width"),
+            Item("Fit Content To View Height"),
+            Sep,
+            Item("Snap to Grid"),
+            Dim("Adaptive Grid:"),
+            Item("Widest"),
+            Item("Wide"),
+            Item("Medium"),
+            Tick("Narrow"),
+            Item("Narrowest"),
+            Dim("Fixed Grid:"),
+            Item("8 Bars"),
+            Item("4 Bars"),
+            Item("2 Bars"),
+            Item("1 Bar"),
+            Item("1/2"),
+            Item("1/4"),
+            Item("1/8"),
+            Item("1/16"),
+            Item("1/32"),
+            Sep,
+            Dim("Narrow Grid"),
+            Dim("Widen Grid"),
+            Sep,
+            Dim("Triplet Grid"),
+            Sep,
+            Item("Draw Mode (Pitch Lock Off)"),
+            Sep,
+            Dim("Pitch Bend Range Settings..."),
+            Sep,
+            Item("Highlight Scales"),
+        ],
+    );
 }
 
 // Spec: mpe R34. The lanes, the toggles and the selected notes'

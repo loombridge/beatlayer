@@ -291,6 +291,21 @@ fn the_groups_a_label_shows_are_chosen_and_kept_between_launches() {
         json!({ "show_all": true }),
     );
     assert_eq!(shown(&mut relaunched, "Devices"), Some(true));
+    // Hide All hides every group, and the view says it differs from the
+    // default, which Reset undoes.
+    let hidden: FilterViewState = run(
+        &mut relaunched,
+        ids::SET_FILTER_GROUPS,
+        json!({ "hide_all": true }),
+    );
+    assert!(hidden.menu.iter().all(|group| !group.shown));
+    assert!(hidden.customized);
+    let reset: FilterViewState = run(
+        &mut relaunched,
+        ids::SET_FILTER_GROUPS,
+        json!({ "reset": true }),
+    );
+    assert!(!reset.customized);
     // The command wants one thing at a time.
     assert!(
         relaunched

@@ -172,8 +172,8 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ),
         (
             "mixer.set_pan_mode",
-            Exception(Unobserved(
-                "a choice from the pan control's context menu (C-PAN-001, C-PAN-002)",
+            Exception(Equivalent(
+                "the pan control's context menu, which offers the mode to switch to (C-PAN-001)",
             )),
         ),
         (

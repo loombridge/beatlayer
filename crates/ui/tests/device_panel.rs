@@ -727,17 +727,23 @@ fn a_parameters_menu_has_the_automation_items_and_a_click_shows_its_envelope() {
         modifiers: Modifiers::NONE,
     }]);
     let nodes = Harness::nodes(&h.settle());
-    for label in [
-        "Delete Automation",
-        "Re-Enable Automation",
-        "Show Automation",
-        "Show Automation In New Lane",
-    ] {
-        assert!(nodes.iter().any(|n| n.label == label), "no {label:?}");
-    }
-    assert!(
-        Harness::node(&nodes, "Delete Automation").disabled,
-        "the parameter has no envelope"
+    // C-PARAM, in Live's order: the parameter has no envelope, so no Delete
+    // Automation, and it isn't overridden, so no Re-Enable Automation.
+    use common::MenuRow::{Dim, Item, Sep};
+    common::assert_menu(
+        &nodes,
+        &[
+            Item("Show Automation"),
+            Item("Show Automation In New Lane"),
+            Sep,
+            Dim("Show Modulation Source 1: Clip Envelope"),
+            Sep,
+            Item("Edit MIDI Map"),
+            Item("Edit Key Map"),
+            Sep,
+            Dim("Copy Max for Live Path"),
+            Dim("Copy Parameter Name"),
+        ],
     );
     let item = Harness::node(&nodes, "Show Automation In New Lane")
         .bounds

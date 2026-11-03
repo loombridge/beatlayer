@@ -423,3 +423,56 @@ fn a_macros_menu_edit_info_text_types_the_text_in_the_info_view() {
         "Opens the filter"
     );
 }
+
+// Spec: macros R21 (C-MACRO). A macro knob's menu lists Live's rows in Live's
+// order; the items Beatlayer has no feature for are dim.
+#[test]
+fn a_macro_knobs_menu_lists_lives_rows_in_order() {
+    use egui::{Event, PointerButton};
+    let mut h = Harness::with_title_bar(Window::Main);
+    h.settle();
+    let (rack, _) = set(&mut h);
+    h.shell
+        .invoke(
+            "rack.rename_macro",
+            json!({ "rack": rack, "macro_number": 1, "name": "Brightness" }),
+        )
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    let b = Harness::node(&nodes, "Brightness").bounds.unwrap();
+    let at = pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32);
+    h.frame(vec![Event::PointerMoved(at)]);
+    for pressed in [true, false] {
+        h.frame(vec![Event::PointerButton {
+            pos: at,
+            button: PointerButton::Secondary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        }]);
+    }
+    let nodes = Harness::nodes(&h.settle());
+    use common::MenuRow::{Dim, Item, Sep};
+    common::assert_menu(
+        &nodes,
+        &[
+            Item("Show Automation"),
+            Item("Show Automation In New Lane"),
+            Sep,
+            Dim("Show Modulation Source 1: Clip Envelope"),
+            Sep,
+            Item("Edit MIDI Map"),
+            Item("Edit Key Map"),
+            Sep,
+            Dim("Copy Max for Live Path"),
+            Dim("Copy Parameter Name"),
+            Sep,
+            Dim("Show Generic 0-127 Value"),
+            Item("Rename"),
+            Item("Edit Info Text"),
+            Item("Exclude Macro from Randomization"),
+            Item("Exclude Macro From Variations"),
+            Sep,
+            Item("No Color"),
+        ],
+    );
+}

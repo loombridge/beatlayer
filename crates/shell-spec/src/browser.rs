@@ -725,7 +725,7 @@ impl Column {
             Self::Name => "Name",
             Self::DateModified => "Date Modified",
             Self::Size => "Size",
-            Self::Kind => "Kind",
+            Self::Kind => "Type",
             Self::Length => "Length",
             Self::SampleRate => "Sample Rate",
             Self::Channels => "Channels",
@@ -882,6 +882,9 @@ pub struct FilterViewState {
     /// tags show in the Filter View, filter and answer `#` search (spec:
     /// browser-tags R55).
     pub include_auto_tags: bool,
+    /// Whether the chosen label's groups differ from its default ones, which
+    /// Reset Filter Groups to Default would undo.
+    pub customized: bool,
 }
 
 /// A saved label (spec: browser-tags R24).
@@ -1264,8 +1267,8 @@ pub struct SetIncludeAutoTagsArgs {
     pub include: Option<bool>,
 }
 
-/// Arguments of `browser.set_filter_groups`. Give `group`, `show_all` or
-/// `reset`.
+/// Arguments of `browser.set_filter_groups`. Give `group`, `show_all`,
+/// `hide_all` or `reset`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SetFilterGroupsArgs {
@@ -1281,6 +1284,9 @@ pub struct SetFilterGroupsArgs {
     /// Show every group.
     #[serde(default)]
     pub show_all: bool,
+    /// Hide every group.
+    #[serde(default)]
+    pub hide_all: bool,
     /// Put the label's groups back to its default ones.
     #[serde(default)]
     pub reset: bool,
@@ -2072,9 +2078,9 @@ fn specs() -> Vec<CommandSpec> {
             .description(
                 "Chooses which filter groups a label shows in the Filter View (`label`, or the \
                  chosen one): `group` with `shown` true (the default) or false shows or hides \
-                 that group; `show_all` shows every group; `reset` puts the label's groups \
-                 back to the default ones. Give one of `group`, `show_all` and `reset`. Kept \
-                 for the next start.",
+                 that group; `show_all` shows every group; `hide_all` hides every group; \
+                 `reset` puts the label's groups back to the default ones. Give one of \
+                 `group`, `show_all`, `hide_all` and `reset`. Kept for the next start.",
             )
             .permission(Permission::Edit)
             .contexts([Global, Browser])

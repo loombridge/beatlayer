@@ -872,3 +872,46 @@ fn dragging_a_handle_stretches_the_selection_as_one_undo_step() {
     assert!((points[1].1 + 0.25).abs() < 0.05, "{points:?}");
     e.one_step(&before, steps, "Stretch Envelope Values");
 }
+
+// Spec: clip-envelopes R13 (C-ENV). Right-clicking empty space in the
+// envelope editor opens the grid's settings, Draw Mode and the shapes.
+#[test]
+fn the_editors_menu_lists_the_grid_draw_mode_and_the_shapes() {
+    let mut e = set();
+    let step = e.h.shell.arrangement().grid_ticks(e.doc());
+    let at = e.at(6 * step, 0.5);
+    let nodes = right_click(&mut e, at);
+    use common::MenuRow::{Dim, Item, Sep, Tick};
+    common::assert_menu(
+        &nodes,
+        &[
+            Dim("Snap to Grid"),
+            Dim("Adaptive Grid:"),
+            Item("Widest"),
+            Item("Wide"),
+            Item("Medium"),
+            Item("Narrow"),
+            Item("Narrowest"),
+            Dim("Fixed Grid:"),
+            Item("8 Bars"),
+            Item("4 Bars"),
+            Item("2 Bars"),
+            Item("1 Bar"),
+            Item("1/2"),
+            Item("1/4"),
+            Item("1/8"),
+            Tick("1/16"),
+            Item("1/32"),
+            Sep,
+            Dim("Narrow Grid"),
+            Dim("Widen Grid"),
+            Sep,
+            Dim("Triplet Grid"),
+            Sep,
+            Item("Draw Mode"),
+        ],
+    );
+    // Then the shapes, under their heading.
+    assert!(nodes.iter().any(|n| n.label == "Insert Shape:"));
+    assert!(nodes.iter().any(|n| n.label == "Triangle"));
+}

@@ -49,6 +49,9 @@ const SKIPPED: &[(&str, &str)] = &[
     ("link.set_enabled", "joins a Link session on the network"),
     ("stems.install", "downloads packages from the network"),
     ("packages.install", "downloads packages from the network"),
+    ("extension.install", "needs an extension package file"),
+    ("extension.remove", "needs an installed extension"),
+    ("extension.set_enabled", "needs an installed extension"),
     (
         "stems.separate",
         "needs the stem separation packages installed",
@@ -67,6 +70,14 @@ const SKIPPED: &[(&str, &str)] = &[
         "moves files to the system's trash, outside the test's folder",
     ),
     ("control_surface.dump", "sends to a hardware controller"),
+    (
+        "meld.copy_modulation",
+        "acts only on a Meld, which the rich set has none of (bl-shell's meld tests run it)",
+    ),
+    (
+        "meld.clear_modulation",
+        "acts only on a Meld, which the rich set has none of (bl-shell's meld tests run it)",
+    ),
 ];
 
 /// Why the sweep doesn't run `command`, if it doesn't.

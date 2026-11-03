@@ -24,10 +24,15 @@ fn tempo() -> TempoMap {
     TempoMap::constant(Bpm::new(120.0).unwrap())
 }
 
-/// Grain Delay as device number `id`, fully wet, with `params`.
+/// Grain Delay as device number `id`, fully wet, with `params`: free at
+/// 100 ms and 20 Hz, as these tests were written (Live's panel starts synced
+/// at 2 sixteenths and 60 Hz; a test of that is in `live_panels`).
 fn scatter(id: u64, params: &[(ParamId, f64)]) -> Box<dyn bl_engine::Node> {
     let mut device = grain_delay_type().device(DeviceId(Id::new(id).unwrap()));
     device.params.insert(DRY_WET, 100.0);
+    device.params.insert(SYNC, 0.0);
+    device.params.insert(DIVISION, 4.0);
+    device.params.insert(FREQUENCY, 20.0);
     for (param, value) in params {
         device.params.insert(*param, *value);
     }

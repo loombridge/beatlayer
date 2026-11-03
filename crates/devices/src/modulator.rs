@@ -471,23 +471,23 @@ fn mapping_controls(slot: u8, y: f32, with_mode: bool) -> Vec<Control> {
             at(POLARITY, Widget::IconToggle, POLARITY_X, y)
                 .sized(12.0, 12.0)
                 .with_glyph(Glyph::PlusMinus)
-                .only_while(MODE, 0),
+                .shown_only_while(MODE, 0),
         );
     }
     controls.push(
         at(modulator::amount(slot), Widget::Bare, AMOUNT_X, y)
             .sized(30.0, 12.0)
-            .only_while(MODE, 0),
+            .shown_only_while(MODE, 0),
     );
     controls.push(
         at(modulator::min(slot), Widget::Bare, POLARITY_X, y)
             .sized(36.0, 12.0)
-            .only_while(MODE, 1),
+            .shown_only_while(MODE, 1),
     );
     controls.push(
         at(modulator::max(slot), Widget::Bare, MAX_X, y)
             .sized(36.0, 12.0)
-            .only_while(MODE, 1),
+            .shown_only_while(MODE, 1),
     );
     controls
 }
@@ -646,10 +646,10 @@ fn curve_panel() -> LayoutNode {
                     at(SMOOTH, Widget::Inline, 72.0, 5.0).sized(60.0, 12.0),
                     at(RESTART, Widget::Round, 4.0, 22.0)
                         .greyed_while(TIME_MODE, 1)
-                        .unless_while(TRIGGER_MODE, 2),
+                        .hidden_while(TRIGGER_MODE, 2),
                     at(PHASE, Widget::Bare, 31.0, 22.0).sized(38.0, 12.0),
                     at(OFFSET, Widget::Inline, 74.0, 22.0).sized(46.0, 12.0),
-                    at(TRIGGER, Widget::Round, 122.0, 22.0).only_while(TRIGGER_MODE, 1),
+                    at(TRIGGER, Widget::Round, 122.0, 22.0).shown_only_while(TRIGGER_MODE, 1),
                 ],
             )
             .with_labels(vec![BandLabel::new("Ø", 19.0, 23.5, 11.0)]),
@@ -661,8 +661,8 @@ fn curve_panel() -> LayoutNode {
             at(TRIGGER_MODE, Widget::Segments(3), 6.0, 4.0).sized(129.0, 12.0),
             at(RATE_HZ, Widget::SmallKnob, 8.0, 20.0)
                 .with_unit_right(TIME_MODE, [Unit::Hz, Unit::Sync])
-                .unless_while(TRIGGER_MODE, 2),
-            at(MANUAL, Widget::SmallKnob, 8.0, 20.0).only_while(TRIGGER_MODE, 2),
+                .hidden_while(TRIGGER_MODE, 2),
+            at(MANUAL, Widget::SmallKnob, 8.0, 20.0).shown_only_while(TRIGGER_MODE, 2),
             at(DEPTH, Widget::SmallKnob, 98.0, 20.0),
         ],
     );

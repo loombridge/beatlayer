@@ -17,8 +17,10 @@ use libloading::Library;
 
 use crate::annexb::Config;
 use crate::decoder::{Codec, CodedSample, Frame, VideoDecoder};
+use crate::encoder::{CodedFrame, EncoderKind, EncoderSettings, SampleEntry, VideoEncoder};
 use crate::error::VideoError;
 use crate::movie::{MAX_DIMENSION, MAX_PIXELS, VideoTrack};
+use crate::rational::Rational;
 
 type Ptr = *mut c_void;
 
@@ -92,6 +94,14 @@ struct Api {
         c_int,
     ) -> c_int,
     sws_coefficients: unsafe extern "C" fn(c_int) -> *const c_int,
+    find_encoder: unsafe extern "C" fn(c_int) -> *const c_void,
+    send_frame: unsafe extern "C" fn(Ptr, Ptr) -> c_int,
+    receive_packet: unsafe extern "C" fn(Ptr, Ptr) -> c_int,
+    packet_unref: unsafe extern "C" fn(Ptr),
+    frame_get_buffer: unsafe extern "C" fn(Ptr, c_int) -> c_int,
+    frame_make_writable: unsafe extern "C" fn(Ptr) -> c_int,
+    dict_set: unsafe extern "C" fn(*mut Ptr, *const c_char, *const c_char, c_int) -> c_int,
+    dict_free: unsafe extern "C" fn(*mut Ptr),
     // Last, so they drop after nothing needs the functions.
     _libraries: [Library; 3],
 }
@@ -164,6 +174,14 @@ impl Api {
             sws_free: symbol!(swscale, b"sws_freeContext\0"),
             sws_set_details: symbol!(swscale, b"sws_setColorspaceDetails\0"),
             sws_coefficients: symbol!(swscale, b"sws_getCoefficients\0"),
+            find_encoder: symbol!(avcodec, b"avcodec_find_encoder\0"),
+            send_frame: symbol!(avcodec, b"avcodec_send_frame\0"),
+            receive_packet: symbol!(avcodec, b"avcodec_receive_packet\0"),
+            packet_unref: symbol!(avcodec, b"av_packet_unref\0"),
+            frame_get_buffer: symbol!(avutil, b"av_frame_get_buffer\0"),
+            frame_make_writable: symbol!(avutil, b"av_frame_make_writable\0"),
+            dict_set: symbol!(avutil, b"av_dict_set\0"),
+            dict_free: symbol!(avutil, b"av_dict_free\0"),
             _libraries: [avcodec, avutil, swscale],
         })
     }
@@ -504,6 +522,285 @@ impl Drop for Ffmpeg {
         self.free_scaler();
         // SAFETY: both were made by FFmpeg and are freed once, here.
         unsafe {
+            (self.api.frame_free)(&raw mut self.frame);
+            (self.api.free_context)(&raw mut self.context);
+        }
+    }
+}
+
+const AV_PIX_FMT_YUV420P: c_int = 0;
+
+/// An FFmpeg H.264 encoder (the export spec, R47). The picture goes in as
+/// RGBA through swscale; the stream comes out as start-code NAL units, which
+/// are rewritten as the movie stores them, length-prefixed, with the
+/// parameter sets moved into an `avcC` box. Nothing is read from
+/// `AVCodecContext`: its size, rate and format are options set when it is
+/// opened, so the encoder doesn't depend on the library's version.
+pub(crate) struct FfmpegEncoder {
+    api: Api,
+    context: Ptr,
+    frame: Ptr,
+    packet: Ptr,
+    scaler: Ptr,
+    width: c_int,
+    height: c_int,
+    next: i64,
+    parameter_sets: crate::annexb::ParameterSets,
+}
+
+// SAFETY: the encoder's pointers belong to it alone, and it is used from one
+// thread at a time.
+unsafe impl Send for FfmpegEncoder {}
+
+/// Whether the libraries on the system's path hold an H.264 encoder that
+/// opens.
+#[cfg(not(any(target_os = "macos", windows)))]
+pub(crate) fn encodes(kind: EncoderKind) -> bool {
+    static FOUND: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    kind == EncoderKind::H264
+        && *FOUND.get_or_init(|| {
+            open_encoder_from(
+                None,
+                EncoderKind::H264,
+                128,
+                128,
+                Rational::new(30, 1),
+                &EncoderSettings::default(),
+            )
+            .is_ok()
+        })
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+pub(crate) fn open_encoder(
+    kind: EncoderKind,
+    width: u32,
+    height: u32,
+    frame_rate: Rational,
+    settings: &EncoderSettings,
+) -> Result<FfmpegEncoder, VideoError> {
+    open_encoder_from(None, kind, width, height, frame_rate, settings)
+}
+
+/// An H.264 encoder from the FFmpeg libraries in `dir`, or on the system's
+/// library path if `None`.
+///
+/// # Errors
+///
+/// [`VideoError::Encode`] with the reason the libraries or the encoder
+/// aren't there.
+pub fn open_h264_encoder(
+    dir: Option<&Path>,
+    width: u32,
+    height: u32,
+    frame_rate: Rational,
+    settings: &EncoderSettings,
+) -> Result<Box<dyn VideoEncoder>, VideoError> {
+    open_encoder_from(dir, EncoderKind::H264, width, height, frame_rate, settings)
+        .map(|e| Box::new(e) as Box<dyn VideoEncoder>)
+}
+
+fn open_encoder_from(
+    dir: Option<&Path>,
+    kind: EncoderKind,
+    width: u32,
+    height: u32,
+    frame_rate: Rational,
+    settings: &EncoderSettings,
+) -> Result<FfmpegEncoder, VideoError> {
+    let fail = |why: &str| VideoError::Encode(why.to_owned());
+    if kind != EncoderKind::H264 {
+        return Err(fail("FFmpeg is asked for H.264 only"));
+    }
+    let api = Api::load(dir).map_err(VideoError::Encode)?;
+    let (w, h) = (
+        c_int::try_from(width).map_err(|_| fail("too wide"))?,
+        c_int::try_from(height).map_err(|_| fail("too tall"))?,
+    );
+    // Quality 100 is constant rate factor 15 and 1 is 40.
+    let crf = 40 - i32::from(settings.quality.clamp(1, 100)) * 25 / 100;
+    let options = [
+        ("video_size", format!("{width}x{height}")),
+        ("pixel_format", "yuv420p".to_owned()),
+        (
+            "time_base",
+            format!("{}/{}", frame_rate.denom(), frame_rate.numer()),
+        ),
+        ("bf", "0".to_owned()),
+        (
+            "g",
+            ((frame_rate.seconds() * 2.0).ceil().max(1.0) as i64).to_string(),
+        ),
+        ("crf", crf.to_string()),
+        ("preset", "faster".to_owned()),
+    ];
+    // SAFETY: FFmpeg's documented calls; every pointer passed is one FFmpeg
+    // returned, or null where the API takes null. The dictionary is freed
+    // after `avcodec_open2` has taken its options.
+    unsafe {
+        let codec = (api.find_encoder)(AV_CODEC_ID_H264);
+        if codec.is_null() {
+            return Err(fail("this FFmpeg has no H.264 encoder"));
+        }
+        let mut context = (api.alloc_context)(codec);
+        if context.is_null() {
+            return Err(fail("FFmpeg ran out of memory"));
+        }
+        let mut dictionary: Ptr = std::ptr::null_mut();
+        for (key, value) in &options {
+            let (Ok(key), Ok(value)) = (CString::new(*key), CString::new(value.as_str())) else {
+                continue;
+            };
+            (api.dict_set)(&raw mut dictionary, key.as_ptr(), value.as_ptr(), 0);
+        }
+        let opened = (api.open)(context, codec, &raw mut dictionary);
+        (api.dict_free)(&raw mut dictionary);
+        if opened < 0 {
+            (api.free_context)(&raw mut context);
+            return Err(fail("FFmpeg's H.264 encoder wouldn't open"));
+        }
+        let frame = (api.frame_alloc)();
+        let packet = (api.packet_alloc)();
+        let scaler = (api.sws_get_context)(
+            w,
+            h,
+            AV_PIX_FMT_RGBA,
+            w,
+            h,
+            AV_PIX_FMT_YUV420P,
+            SWS_BICUBIC | SWS_ACCURATE_RND,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null(),
+        );
+        if frame.is_null() || packet.is_null() || scaler.is_null() {
+            return Err(fail("FFmpeg ran out of memory"));
+        }
+        // The matrix the decoders here assume: BT.709 from 720 lines up,
+        // BT.601 below, in the limited range.
+        let table = (api.sws_coefficients)(if h >= 720 {
+            SWS_CS_ITU709
+        } else {
+            SWS_CS_ITU601
+        });
+        (api.sws_set_details)(scaler, table, 1, table, 0, 0, 1 << 16, 1 << 16);
+        let at = frame.cast::<u8>();
+        at.add(104).cast::<c_int>().write_unaligned(w);
+        at.add(108).cast::<c_int>().write_unaligned(h);
+        at.add(116)
+            .cast::<c_int>()
+            .write_unaligned(AV_PIX_FMT_YUV420P);
+        if (api.frame_get_buffer)(frame, 0) < 0 {
+            return Err(fail("FFmpeg couldn't allocate a picture"));
+        }
+        Ok(FfmpegEncoder {
+            api,
+            context,
+            frame,
+            packet,
+            scaler,
+            width: w,
+            height: h,
+            next: 0,
+            parameter_sets: None,
+        })
+    }
+}
+
+impl FfmpegEncoder {
+    /// Takes every packet the encoder has ready, as movie samples.
+    fn receive(&mut self, out: &mut Vec<CodedFrame>) {
+        loop {
+            // SAFETY: `context` and `packet` are FFmpeg's. A packet's `data`
+            // and `size` are at 24 and 32, where they have been since FFmpeg
+            // 2; the bytes are copied before the packet is unreferenced.
+            let bytes = unsafe {
+                if (self.api.receive_packet)(self.context, self.packet) != 0 {
+                    return;
+                }
+                let at = self.packet.cast::<u8>();
+                let data = at.add(24).cast::<*const u8>().read_unaligned();
+                let size = at.add(32).cast::<c_int>().read_unaligned();
+                let bytes =
+                    std::slice::from_raw_parts(data, usize::try_from(size).unwrap_or(0)).to_vec();
+                (self.api.packet_unref)(self.packet);
+                bytes
+            };
+            let (data, sync) = crate::annexb::length_prefixed(&bytes, &mut self.parameter_sets);
+            out.push(CodedFrame { data, sync });
+        }
+    }
+}
+
+impl VideoEncoder for FfmpegEncoder {
+    fn encode(&mut self, frame: &Frame, out: &mut Vec<CodedFrame>) -> Result<(), VideoError> {
+        let fail = |why: &str| VideoError::Encode(why.to_owned());
+        if (frame.width(), frame.height()) != (self.width as u32, self.height as u32) {
+            return Err(fail("a picture of another size than the encoder's"));
+        }
+        // SAFETY: the frame's `data` and `linesize` are at 0 and 64, and its
+        // `pts` at 136, as the decoder reads them; `make_writable` leaves
+        // buffers of the size `get_buffer` made; the source holds
+        // `width * height * 4` bytes.
+        unsafe {
+            if (self.api.frame_make_writable)(self.frame) < 0 {
+                return Err(fail("FFmpeg couldn't make a picture writable"));
+            }
+            let at = self.frame.cast::<u8>();
+            let data = at.cast::<*mut u8>().read_unaligned_array::<8>();
+            let linesize = at.add(64).cast::<c_int>().read_unaligned_array::<8>();
+            let source = [
+                frame.rgba().as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+            ];
+            let source_stride = [self.width * 4, 0, 0, 0];
+            let rows = (self.api.sws_scale)(
+                self.scaler,
+                source.as_ptr(),
+                source_stride.as_ptr(),
+                0,
+                self.height,
+                data.as_ptr(),
+                linesize.as_ptr(),
+            );
+            if rows != self.height {
+                return Err(fail("FFmpeg couldn't convert a picture"));
+            }
+            at.add(136).cast::<i64>().write_unaligned(self.next);
+            if (self.api.send_frame)(self.context, self.frame) < 0 {
+                return Err(fail("FFmpeg's encoder refused a picture"));
+            }
+        }
+        self.next += 1;
+        self.receive(out);
+        Ok(())
+    }
+
+    fn finish(&mut self, out: &mut Vec<CodedFrame>) -> Result<(), VideoError> {
+        // SAFETY: a null frame starts the drain.
+        unsafe { (self.api.send_frame)(self.context, std::ptr::null_mut()) };
+        self.receive(out);
+        Ok(())
+    }
+
+    fn entry(&self) -> Result<SampleEntry, VideoError> {
+        let avcc = crate::annexb::avcc(&self.parameter_sets)
+            .ok_or_else(|| VideoError::Encode("no frame was encoded".to_owned()))?;
+        Ok(SampleEntry {
+            fourcc: *b"avc1",
+            extra: vec![(*b"avcC", avcc)],
+        })
+    }
+}
+
+impl Drop for FfmpegEncoder {
+    fn drop(&mut self) {
+        // SAFETY: all made by FFmpeg and freed once, here.
+        unsafe {
+            (self.api.sws_free)(self.scaler);
+            (self.api.packet_free)(&raw mut self.packet);
             (self.api.frame_free)(&raw mut self.frame);
             (self.api.free_context)(&raw mut self.context);
         }

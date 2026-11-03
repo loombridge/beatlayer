@@ -385,20 +385,22 @@ fn tab_page(tab: usize) -> LayoutNode {
             again(
                 at(POLARITY, Widget::Cycle, 4.0, 71.0)
                     .sized(44.0, 12.0)
-                    .only_while(MODE, 0),
+                    .shown_only_while(MODE, 0),
             ),
             at(modulator::amount(slot), Widget::Bare, 52.0, 71.0)
                 .sized(30.0, 12.0)
-                .only_while(MODE, 0),
+                .shown_only_while(MODE, 0),
             at(modulator::min(slot), Widget::Bare, 4.0, 71.0)
                 .sized(38.0, 12.0)
-                .only_while(MODE, 1),
+                .shown_only_while(MODE, 1),
             at(modulator::max(slot), Widget::Bare, 44.0, 71.0)
                 .sized(38.0, 12.0)
-                .only_while(MODE, 1),
+                .shown_only_while(MODE, 1),
             at(p(Field::CurveA), Widget::SmallKnob, 0.0, 92.0),
-            at(p(Field::CurveLink), Widget::Round, 35.0, 112.0).only_while(p(Field::Curve), 1),
-            at(p(Field::CurveB), Widget::SmallKnob, 48.0, 92.0).only_while(p(Field::Curve), 1),
+            at(p(Field::CurveLink), Widget::Round, 35.0, 112.0)
+                .shown_only_while(p(Field::Curve), 1),
+            at(p(Field::CurveB), Widget::SmallKnob, 48.0, 92.0)
+                .shown_only_while(p(Field::Curve), 1),
         ],
     )
     .with_labels(vec![

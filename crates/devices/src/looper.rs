@@ -11,7 +11,10 @@
 
 use bl_core::time::{Frames, SampleRate, TICKS_PER_QUARTER, TempoMap, Ticks, TimeSignatureMap};
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{
+    BODY_HEIGHT, BOX_HEIGHT, Caption, Control, ControlBand, DisplayCell, Glyph, LayoutNode,
+    PADDING, Widget,
+};
 use bl_model::{
     Device, DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayReading,
     LaunchQuantization, OrdMap, ParamDescriptor, ParamId, ParamUnit,
@@ -171,7 +174,7 @@ pub fn looper_type() -> DeviceType {
             "How long a recording runs: open-ended, until another button is pressed, or a \
              fixed number of bars after which Looper switches to Play or Overdub.",
         ),
-        ParamDescriptor::choice(AFTER_RECORD, "Play/Overdub", &["Play", "Overdub"], 0).describe(
+        ParamDescriptor::choice(AFTER_RECORD, "Play/Overdub", &["Play", "Overdub"], 1).describe(
             "What Transport becomes when a fixed-length recording ends. The manual calls it \
              the button beside the Record Length chooser.",
         ),
@@ -196,7 +199,7 @@ pub fn looper_type() -> DeviceType {
             TEMPO_CONTROL,
             "Tempo Control",
             &["None", "Follow Song Tempo", "Set & Follow Song Tempo"],
-            1,
+            2,
         )
         .describe(
             "What the tempo the buffer was recorded at means: nothing, the speed its playback \
@@ -206,39 +209,11 @@ pub fn looper_type() -> DeviceType {
             SONG_CONTROL,
             "Song Control",
             &["None", "Start Song", "Start & Stop Song"],
-            0,
+            SONG_START,
         )
         .describe("Whether entering Play or Overdub starts the song, and Stop stops it."),
     ];
-    let layout = DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (TRANSPORT, Widget::Chooser),
-                (QUANTIZATION, Widget::Chooser),
-            ],
-        )),
-        LayoutNode::Cell(
-            DisplayCell::new("Loop", 120.0, BODY_HEIGHT, 1.0).with_bottom(ControlBand::stacked(
-                BODY_HEIGHT,
-                &[
-                    (RECORD_LENGTH, Widget::Chooser),
-                    (AFTER_RECORD, Widget::Chooser),
-                    (SPEED, Widget::Knob),
-                    (REVERSE, Widget::Toggle),
-                    (FEEDBACK, Widget::Knob),
-                ],
-            )),
-        ),
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (INPUT_OUTPUT, Widget::Chooser),
-                (TEMPO_CONTROL, Widget::Chooser),
-                (SONG_CONTROL, Widget::Chooser),
-            ],
-        )),
-    ]));
+    let layout = layout();
     DeviceType::native(LOOPER, "Looper", DeviceRole::AudioEffect).with_description(
         DeviceDescription::new(params)
             .with_layout(layout)
@@ -262,6 +237,52 @@ pub fn looper_type() -> DeviceType {
 }
 
 /// The Quantization chooser's choices: the launch quantisation menu's steps.
+/// Looper as Live draws it: the display with the transport's four buttons
+/// along its foot; under it Quantization, Record Length with the button that
+/// says what follows it, Song Control and Tempo Control; Speed with Reverse,
+/// then Feedback and Input → Output. The multi-purpose button, Undo, Clear,
+/// ×2, ÷2 and the octave buttons are commands, not parameters, and the
+/// display's own readings are the display's.
+fn layout() -> DeviceLayout {
+    use Widget::{Chooser, IconSegments, SmallKnob, Toggle};
+    const WIDTH: f32 = 341.0;
+    const CELL_HEIGHT: f32 = 76.0;
+    let at = Control::new;
+    let foot = ControlBand::free(
+        WIDTH,
+        BOX_HEIGHT + PADDING,
+        vec![at(TRANSPORT, IconSegments(4), 4.0, 0.0).sized(60.0, BOX_HEIGHT)],
+    );
+    let cell = DisplayCell::new("Loop", WIDTH, CELL_HEIGHT, 1.0).with_bottom(foot);
+    let under = ControlBand::free(
+        WIDTH + 2.0 * PADDING,
+        BODY_HEIGHT - CELL_HEIGHT - PADDING,
+        vec![
+            at(QUANTIZATION, Chooser, 4.0, 55.0).sized(78.0, 21.0),
+            at(RECORD_LENGTH, Chooser, 130.0, 6.0)
+                .unnamed()
+                .sized(43.0, BOX_HEIGHT),
+            at(AFTER_RECORD, Widget::IconToggle, 198.0, 6.0)
+                .sized(19.0, BOX_HEIGHT)
+                .with_glyph(Glyph::Plus),
+            at(SONG_CONTROL, Chooser, 92.0, 27.5).sized(126.0, 21.0),
+            at(TEMPO_CONTROL, Chooser, 92.0, 52.5).sized(126.0, 21.0),
+            at(SPEED, SmallKnob, 246.0, 1.0),
+            at(REVERSE, Toggle, 229.0, 64.0).sized(45.0, BOX_HEIGHT),
+            at(FEEDBACK, SmallKnob, 289.0, 1.0),
+            at(INPUT_OUTPUT, Chooser, 270.0, 45.5).sized(73.0, 21.0),
+        ],
+    )
+    .with_captions(vec![
+        Caption::new("Record", 92.0, 6.0, 36.0),
+        Caption::new("then", 177.0, 6.0, 20.0),
+    ]);
+    DeviceLayout::new(LayoutNode::Column(vec![
+        LayoutNode::Cell(cell).inset(PADDING, PADDING, PADDING, 0.0),
+        LayoutNode::Band(under),
+    ]))
+}
+
 fn quantization_labels() -> Vec<&'static str> {
     LaunchQuantization::ALL
         .iter()

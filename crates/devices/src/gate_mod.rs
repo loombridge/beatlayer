@@ -183,13 +183,13 @@ fn layout() -> DeviceLayout {
                 at(LOOP_MODE, Widget::BareChooser, 188.0, 22.0).sized(40.0, 12.0),
                 at(SYNC_RATE, Widget::BareChooser, 188.0, 38.0)
                     .sized(40.0, 12.0)
-                    .only_while(LOOP_MODE, 1),
+                    .shown_only_while(LOOP_MODE, 1),
                 at(ECHO_TIME, Widget::Bare, 188.0, 38.0)
                     .sized(40.0, 12.0)
-                    .only_while(LOOP_MODE, 3),
+                    .shown_only_while(LOOP_MODE, 3),
                 at(ECHO_FEEDBACK, Widget::Bare, 188.0, 52.0)
                     .sized(40.0, 12.0)
-                    .only_while(LOOP_MODE, 3),
+                    .shown_only_while(LOOP_MODE, 3),
                 at(GLOBAL_TIME, Widget::Bare, 188.0, 73.0).sized(40.0, 12.0),
             ],
             vec![BandLabel::new("Time ×", 188.0, 64.0, 40.0)],

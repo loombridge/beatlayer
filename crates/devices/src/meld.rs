@@ -20,14 +20,14 @@
 use bl_dsp::random::Random;
 use bl_engine::{DeviceType, NodeConfig, NodeData, NodeEvent, Registry};
 use bl_model::device_layout::{
-    BODY_HEIGHT, ControlBand, LayoutNode, Page, PageStyle, PagesNode, TAB_HEIGHT, Widget,
+    BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Page, PageStyle, PagesNode, TAB_HEIGHT,
+    Widget,
 };
 use bl_model::{
     DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamLabel, ParamUnit,
     Relabel,
 };
 use bl_model::{Scale, param::db_to_gain};
-use lspk_dsp::envelope::{EnvelopeBank, EnvelopeParams, StealRestart, TimeUnit, Timing, Trigger};
 use lspk_dsp::filter::pitch_of;
 use lspk_voice::unison::pan_gains;
 use lspk_voice::{Start, VoiceBlock, VoiceEvent, VoiceEventKind};
@@ -38,11 +38,19 @@ use crate::fm;
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::instrument::{self, Instrument, Parts, Section, State};
 use crate::instrument_filter::{Per, PerFrame};
+use crate::meld_display;
 use crate::meld_filter::{Controls, MeldFilter};
 use crate::meld_gen::{self, Gen, Pitch};
+use crate::meld_matrix::{
+    self, GlobalRead, L_CENTS, L_FILTER_1, L_FILTER_2, L_FREQ, L_MACRO_1, L_MACRO_2, L_PAN,
+    L_QUANT, L_SEMITONES, L_TONE, L_VOLUME, Mods, SlotRead,
+};
+pub use crate::meld_matrix::{dest_engine, dest_for, source_engine, source_for};
+pub use crate::meld_mod::{FX_MACROS, FX_NAMES, LFO1_MACROS, LFO1_TYPES, LFO2_TYPES};
 use crate::meld_osc::{
     self, Bank, CHUNK, Context, Kind, LOOPS, MACROS, MAX_LANES, SWARM_COPIES, TYPES,
 };
+use crate::wavetable_mod::DIVISIONS;
 
 pub use crate::meld_osc::{shepard, shepard_width};
 
@@ -84,6 +92,44 @@ pub const OSC_SCALE: u32 = 22;
 pub const FILTER_SCALE: u32 = 23;
 pub const GLIDE_TIME: u32 = 24;
 pub const GLIDE_MODE: u32 = 25;
+/// The amplitude envelope's slopes and loop mode (R59).
+pub const ATTACK_SLOPE: u32 = 26;
+pub const DECAY_SLOPE: u32 = 27;
+pub const RELEASE_SLOPE: u32 = 28;
+pub const ENV_MODE: u32 = 29;
+/// The modulation envelope's times, Sustain, slopes, levels and loop mode,
+/// and Link Envelopes (R59).
+pub const MOD_ATTACK: u32 = 30;
+pub const MOD_DECAY: u32 = 31;
+pub const MOD_SUSTAIN: u32 = 32;
+pub const MOD_RELEASE: u32 = 33;
+pub const MOD_ATTACK_SLOPE: u32 = 34;
+pub const MOD_DECAY_SLOPE: u32 = 35;
+pub const MOD_RELEASE_SLOPE: u32 = 36;
+pub const MOD_INITIAL: u32 = 37;
+pub const MOD_PEAK: u32 = 38;
+pub const MOD_FINAL: u32 = 39;
+pub const MOD_MODE: u32 = 40;
+pub const LINK: u32 = 41;
+/// LFO 1 (R60), its two effects (R61) and LFO 2 (R60).
+pub const LFO1_TYPE: u32 = 42;
+pub const LFO1_SYNC: u32 = 43;
+pub const LFO1_RATE: u32 = 44;
+pub const LFO1_DIVISION: u32 = 45;
+pub const LFO1_MACRO_1: u32 = 46;
+pub const LFO1_MACRO_2: u32 = 47;
+pub const LFO1_OFFSET: u32 = 48;
+pub const LFO1_RETRIGGER: u32 = 49;
+pub const FX1_TYPE: u32 = 50;
+pub const FX1_AMOUNT: u32 = 51;
+pub const FX2_TYPE: u32 = 52;
+pub const FX2_AMOUNT: u32 = 53;
+pub const LFO2_TYPE: u32 = 54;
+pub const LFO2_SYNC: u32 = 55;
+pub const LFO2_RATE: u32 = 56;
+pub const LFO2_DIVISION: u32 = 57;
+pub const LFO2_OFFSET: u32 = 58;
+pub const LFO2_RETRIGGER: u32 = 59;
 
 /// The global parameters (R14, R15, R17, R18).
 pub const MODE: ParamId = ParamId(200);
@@ -97,11 +143,20 @@ pub const OUTPUT: ParamId = ParamId(207);
 pub const USE_SCALE: ParamId = ParamId(208);
 pub const PB_RANGE: ParamId = ParamId(209);
 
+/// The matrix's free routes (R62).
+pub const ROUTES: usize = 64;
+
+/// Route slot `slot`'s amount, from −100 % to 100 %.
+#[must_use]
+pub const fn route_amount(slot: usize) -> ParamId {
+    ParamId(300 + slot as u32)
+}
+
 /// The most voices Poly plays and the most copies Stacked Voices stacks
 /// (R14), and so the most slots: a voice's copy is a slot.
 pub const MAX_VOICES: usize = 12;
 pub const MAX_STACK: usize = 4;
-const SLOTS: usize = MAX_VOICES * MAX_STACK;
+pub(crate) const SLOTS: usize = MAX_VOICES * MAX_STACK;
 
 /// The filter types' names, in the manual's order (R40).
 const FILTERS: [&str; 17] = [
@@ -123,6 +178,42 @@ const FILTERS: [&str; 17] = [
     "Plate Resonator",
     "Membrane Resonator",
 ];
+
+/// A control's name as Meld's panel draws it, if `name` is one of Meld's
+/// engine parameters: it drops the engine's letter, since the page shows the
+/// engine, and the modulation envelope's "Mod", since its group shows it; the
+/// slopes' names are short, to fit a small knob (R72).
+#[must_use]
+pub fn panel_name(name: &str) -> Option<String> {
+    static NAMES: std::sync::OnceLock<std::collections::HashSet<String>> =
+        std::sync::OnceLock::new();
+    let engine = NAMES.get_or_init(|| {
+        let description = meld_description();
+        (0..2)
+            .flat_map(|engine| (0..100).map(move |offset| param(engine, offset)))
+            .filter_map(|id| description.param(id).map(|p| p.name.clone()))
+            .collect()
+    });
+    if !engine.contains(name) {
+        return None;
+    }
+    let name = name.get(2..).unwrap_or(name);
+    let name = name.strip_prefix("Mod ").unwrap_or(name);
+    let name = name.replace("Envelope Loop Mode", "Loop Mode");
+    Some(
+        ["Attack", "Decay", "Release"]
+            .iter()
+            .fold(name, |name, stage| {
+                name.replace(&format!("{stage} Slope"), &format!("{} Slope", &stage[..3]))
+            }),
+    )
+}
+
+/// The name of filter type `index`.
+#[must_use]
+pub fn filter_type_name(index: usize) -> &'static str {
+    FILTERS[index.min(FILTERS.len() - 1)]
+}
 
 /// Each filter type's two macros' names, as the panel shows them (R12,
 /// R41).
@@ -146,6 +237,27 @@ pub const FILTER_MACROS: [(&str, &str); 17] = [
     ("Q", "Damp"),
 ];
 
+/// The Matrix, MIDI and MPE tabs' grids (R63, R65), for each engine, and the
+/// Expanded View's cell (R66).
+pub const GRID_CELLS: [&str; 3] = ["Matrix", "MIDI Matrix", "MPE Matrix"];
+pub const EXPANDED_CELL: &str = "Expanded View";
+/// The least width of a grid in a tab and of the Expanded View, in points.
+const GRID_WIDTH: f32 = 330.0;
+const EXPANDED_WIDTH: f32 = 520.0;
+
+/// The name of engine `letter`'s grid cell for tab `tab` (0 Matrix, 1 MIDI,
+/// 2 MPE).
+#[must_use]
+pub fn grid_cell(letter: &str, tab: usize) -> String {
+    format!("{letter} {}", GRID_CELLS[tab])
+}
+
+/// The height of a display above its controls, in points.
+const DISPLAY_HEIGHT: f32 = 40.0;
+
+/// An envelope's loop modes (R59).
+pub const LOOP_MODES: [&str; 4] = ["None", "Trigger", "Loop", "AD Loop"];
+
 /// The types the voice code branches on (R4).
 const FOLD_FM: usize = 11;
 const SHEPARDS_PI: usize = 15;
@@ -162,6 +274,14 @@ const LIMIT_RELEASE: f32 = 0.05;
 /// The device's type.
 #[must_use]
 pub fn meld_type() -> DeviceType {
+    DeviceType::native(MELD, "Meld", DeviceRole::Instrument)
+        .with_description(meld_description())
+        .with_matrix(meld_matrix::layout().as_ref().clone())
+}
+
+/// Meld's parameters, panel and banks.
+#[must_use]
+pub fn meld_description() -> DeviceDescription {
     let mut params = Vec::new();
     for (engine, letter) in ["A", "B"].into_iter().enumerate() {
         let name = |what: &str| format!("{letter} {what}");
@@ -229,7 +349,18 @@ pub fn meld_type() -> DeviceType {
                 ..instrument::glide_mode(id(GLIDE_MODE))
             },
         ]);
+        params.extend(modulation_params(engine, letter));
     }
+    params.extend((0..ROUTES).map(|slot| {
+        ParamDescriptor::continuous(
+            route_amount(slot),
+            &format!("Route {} Amount", slot + 1),
+            (-100.0, 100.0),
+            0.0,
+            ParamUnit::Percent,
+        )
+        .describe("How far the route's source moves its destination, in per cent of its travel.")
+    }));
     params.extend([
         instrument::voice_mode(MODE, false),
         ParamDescriptor::integer(VOICES, "Voices", (2, MAX_VOICES as i64), 8, ParamUnit::None)
@@ -255,6 +386,13 @@ pub fn meld_type() -> DeviceType {
     let band = |height: f32, controls: &[(ParamId, Widget)]| {
         LayoutNode::Band(ControlBand::stacked(height, controls))
     };
+    // A display over a band of controls, together `height` tall (R67).
+    let shown = |name: String, width: f32, height: f32, controls: &[(ParamId, Widget)]| {
+        LayoutNode::Column(vec![
+            LayoutNode::Cell(DisplayCell::new(&name, width, DISPLAY_HEIGHT, 1.0)),
+            band(height - DISPLAY_HEIGHT, controls),
+        ])
+    };
     let engine_page = |engine: usize| {
         let id = |offset| param(engine, offset);
         let letter = ["A", "B"][engine];
@@ -264,15 +402,113 @@ pub fn meld_type() -> DeviceType {
             vec![
                 Page::new(
                     "Envelopes",
-                    band(
+                    LayoutNode::Row(vec![
+                        shown(
+                            meld_display::envelope_name(letter, false),
+                            120.0,
+                            tab,
+                            &[
+                                (id(ATTACK), Widget::Knob),
+                                (id(DECAY), Widget::Knob),
+                                (id(SUSTAIN), Widget::Knob),
+                                (id(RELEASE), Widget::Knob),
+                                (id(ATTACK_SLOPE), Widget::SmallKnob),
+                                (id(DECAY_SLOPE), Widget::SmallKnob),
+                                (id(RELEASE_SLOPE), Widget::SmallKnob),
+                                (id(ENV_MODE), Widget::Chooser),
+                            ],
+                        ),
+                        shown(
+                            meld_display::envelope_name(letter, true),
+                            120.0,
+                            tab,
+                            &[
+                                (id(MOD_ATTACK), Widget::Knob),
+                                (id(MOD_DECAY), Widget::Knob),
+                                (id(MOD_SUSTAIN), Widget::Knob),
+                                (id(MOD_RELEASE), Widget::Knob),
+                                (id(MOD_ATTACK_SLOPE), Widget::SmallKnob),
+                                (id(MOD_DECAY_SLOPE), Widget::SmallKnob),
+                                (id(MOD_RELEASE_SLOPE), Widget::SmallKnob),
+                                (id(MOD_INITIAL), Widget::SmallKnob),
+                                (id(MOD_PEAK), Widget::SmallKnob),
+                                (id(MOD_FINAL), Widget::SmallKnob),
+                                (id(MOD_MODE), Widget::Chooser),
+                                (id(LINK), Widget::Toggle),
+                            ],
+                        ),
+                    ]),
+                ),
+                Page::new(
+                    "LFOs",
+                    LayoutNode::Row(vec![
+                        shown(
+                            meld_display::lfo_name(letter, "LFO 1"),
+                            100.0,
+                            tab,
+                            &[
+                                (id(LFO1_TYPE), Widget::Chooser),
+                                (id(LFO1_SYNC), Widget::Toggle),
+                                (id(LFO1_RATE), Widget::Knob),
+                                (id(LFO1_DIVISION), Widget::Chooser),
+                                (id(LFO1_MACRO_1), Widget::SmallKnob),
+                                (id(LFO1_MACRO_2), Widget::SmallKnob),
+                                (id(LFO1_OFFSET), Widget::SmallKnob),
+                                (id(LFO1_RETRIGGER), Widget::Toggle),
+                            ],
+                        ),
+                        shown(
+                            meld_display::lfo_name(letter, "LFO 1 FX"),
+                            100.0,
+                            tab,
+                            &[
+                                (id(FX1_TYPE), Widget::Chooser),
+                                (id(FX1_AMOUNT), Widget::SmallKnob),
+                                (id(FX2_TYPE), Widget::Chooser),
+                                (id(FX2_AMOUNT), Widget::SmallKnob),
+                            ],
+                        ),
+                        shown(
+                            meld_display::lfo_name(letter, "LFO 2"),
+                            100.0,
+                            tab,
+                            &[
+                                (id(LFO2_TYPE), Widget::Chooser),
+                                (id(LFO2_SYNC), Widget::Toggle),
+                                (id(LFO2_RATE), Widget::Knob),
+                                (id(LFO2_DIVISION), Widget::Chooser),
+                                (id(LFO2_OFFSET), Widget::SmallKnob),
+                                (id(LFO2_RETRIGGER), Widget::Toggle),
+                            ],
+                        ),
+                    ]),
+                ),
+                Page::new(
+                    "Matrix",
+                    LayoutNode::Cell(DisplayCell::new(
+                        &grid_cell(letter, 0),
+                        GRID_WIDTH,
                         tab,
-                        &[
-                            (id(ATTACK), Widget::Knob),
-                            (id(DECAY), Widget::Knob),
-                            (id(SUSTAIN), Widget::Knob),
-                            (id(RELEASE), Widget::Knob),
-                        ],
-                    ),
+                        1.0,
+                    )),
+                ),
+                Page::new(
+                    "MIDI",
+                    LayoutNode::Cell(DisplayCell::new(
+                        &grid_cell(letter, 1),
+                        GRID_WIDTH,
+                        tab,
+                        1.0,
+                    )),
+                ),
+                Page::new(
+                    "MPE",
+                    LayoutNode::Cell(DisplayCell::new(
+                        &grid_cell(letter, 2),
+                        GRID_WIDTH,
+                        tab,
+                        1.0,
+                    )),
                 ),
                 Page::new(
                     "Settings",
@@ -295,7 +531,9 @@ pub fn meld_type() -> DeviceType {
         Page::new(
             letter,
             LayoutNode::Row(vec![
-                band(
+                shown(
+                    meld_display::oscillator_name(letter),
+                    90.0,
                     body,
                     &[
                         (id(ON), Widget::Toggle),
@@ -303,24 +541,34 @@ pub fn meld_type() -> DeviceType {
                         (id(OCTAVES), Widget::Number),
                         (id(SEMITONES), Widget::Number),
                         (id(CENTS), Widget::Number),
-                        (id(MACRO_1), Widget::Knob),
-                        (id(MACRO_2), Widget::Knob),
+                        (id(MACRO_1), Widget::SmallKnob),
+                        (id(MACRO_2), Widget::SmallKnob),
                     ],
                 ),
-                band(
+                shown(
+                    meld_display::filter_name(letter),
+                    90.0,
                     body,
                     &[
                         (id(FILTER_ON), Widget::Toggle),
                         (id(FILTER_TYPE), Widget::Chooser),
                         (id(FILTER_FREQ), Widget::Knob),
-                        (id(FILTER_MACRO_1), Widget::Knob),
-                        (id(FILTER_MACRO_2), Widget::Knob),
+                        (id(FILTER_MACRO_1), Widget::SmallKnob),
+                        (id(FILTER_MACRO_2), Widget::SmallKnob),
                     ],
                 ),
                 LayoutNode::Pages(tabs),
             ]),
         )
     };
+    // The Expanded View (R66): every source with its routes and every
+    // destination with its amount, for both engines.
+    let expanded = LayoutNode::Cell(DisplayCell::new(
+        EXPANDED_CELL,
+        EXPANDED_WIDTH,
+        BODY_HEIGHT,
+        1.0,
+    ));
     let layout = DeviceLayout::new(LayoutNode::Row(vec![
         LayoutNode::Pages(PagesNode::new(
             "Engine",
@@ -352,7 +600,8 @@ pub fn meld_type() -> DeviceType {
                 (PB_RANGE, Widget::Number),
             ],
         ),
-    ]));
+    ]))
+    .with_expanded(expanded);
     let engine_bank = |letter: &str| {
         let name = |what: &str| format!("{letter} {what}");
         vec![
@@ -385,6 +634,65 @@ pub fn meld_type() -> DeviceType {
                     name("Decay"),
                     name("Sustain"),
                     name("Release"),
+                    name("Attack Slope"),
+                    name("Decay Slope"),
+                    name("Release Slope"),
+                    name("Envelope Loop Mode"),
+                ],
+            ),
+            (
+                name("Modulation Envelope"),
+                vec![
+                    name("Mod Attack"),
+                    name("Mod Decay"),
+                    name("Mod Sustain"),
+                    name("Mod Release"),
+                    name("Mod Attack Slope"),
+                    name("Mod Decay Slope"),
+                    name("Mod Release Slope"),
+                    name("Mod Loop Mode"),
+                ],
+            ),
+            (
+                name("Modulation Envelope Levels"),
+                vec![
+                    name("Mod Initial"),
+                    name("Mod Peak"),
+                    name("Mod Final"),
+                    name("Link Envelopes"),
+                ],
+            ),
+            (
+                name("LFO 1"),
+                vec![
+                    name("LFO 1 Type"),
+                    name("LFO 1 Sync"),
+                    name("LFO 1 Rate"),
+                    name("LFO 1 Division"),
+                    name("LFO 1 Macro 1"),
+                    name("LFO 1 Macro 2"),
+                    name("LFO 1 Phase Offset"),
+                    name("LFO 1 Retrigger"),
+                ],
+            ),
+            (
+                name("LFO 1 FX"),
+                vec![
+                    name("LFO 1 FX 1"),
+                    name("LFO 1 FX 1 Amount"),
+                    name("LFO 1 FX 2"),
+                    name("LFO 1 FX 2 Amount"),
+                ],
+            ),
+            (
+                name("LFO 2"),
+                vec![
+                    name("LFO 2 Type"),
+                    name("LFO 2 Sync"),
+                    name("LFO 2 Rate"),
+                    name("LFO 2 Division"),
+                    name("LFO 2 Phase Offset"),
+                    name("LFO 2 Retrigger"),
                 ],
             ),
             (name("Mix"), vec![name("Volume"), name("Pan"), name("Tone")]),
@@ -420,6 +728,14 @@ pub fn meld_type() -> DeviceType {
         .to_vec(),
     ));
     banks.push(("Pitch Bend".to_owned(), vec!["PB Range".to_owned()]));
+    for bank in 0..ROUTES / 8 {
+        banks.push((
+            format!("Routes {} to {}", bank * 8 + 1, bank * 8 + 8),
+            (0..8)
+                .map(|i| format!("#{}", route_amount(bank * 8 + i).0))
+                .collect(),
+        ));
+    }
     let banks: Vec<(&str, Vec<&str>)> = banks
         .iter()
         .map(|(name, params)| (name.as_str(), params.iter().map(String::as_str).collect()))
@@ -455,6 +771,26 @@ pub fn meld_type() -> DeviceType {
                     param(engine, FILTER_TYPE),
                     FILTER_MACROS.iter().map(|m| m.1).collect(),
                 ),
+                by(
+                    param(engine, LFO1_MACRO_1),
+                    param(engine, LFO1_TYPE),
+                    LFO1_MACROS.iter().map(|m| m.0).collect(),
+                ),
+                by(
+                    param(engine, LFO1_MACRO_2),
+                    param(engine, LFO1_TYPE),
+                    LFO1_MACROS.iter().map(|m| m.1).collect(),
+                ),
+                by(
+                    param(engine, FX1_AMOUNT),
+                    param(engine, FX1_TYPE),
+                    FX_MACROS.to_vec(),
+                ),
+                by(
+                    param(engine, FX2_AMOUNT),
+                    param(engine, FX2_TYPE),
+                    FX_MACROS.to_vec(),
+                ),
                 Relabel {
                     param: param(engine, SEMITONES),
                     by: USE_SCALE,
@@ -470,13 +806,12 @@ pub fn meld_type() -> DeviceType {
             ]
         })
         .collect();
-    DeviceType::native(MELD, "Meld", DeviceRole::Instrument).with_description(
-        DeviceDescription::new(params)
-            .with_layout(layout)
-            .with_title_switch(USE_SCALE)
-            .with_relabels(relabels)
-            .with_banks(&banks),
-    )
+    DeviceDescription::new(params)
+        .with_layout(layout)
+        .with_title_switch(USE_SCALE)
+        .with_relabels(relabels)
+        .with_banks(&banks)
+        .with_grid_params((0..ROUTES).map(route_amount).collect())
 }
 
 /// Spec: meld R1. Meld's factory presets of Beatlayer's own: each a name and
@@ -541,6 +876,194 @@ pub fn factory_presets() -> Vec<(&'static str, Vec<(ParamId, f64)>)> {
     ]
 }
 
+/// Engine `engine`'s envelopes, LFOs and LFO 1 FX (R59 to R61).
+fn modulation_params(engine: usize, letter: &str) -> Vec<ParamDescriptor> {
+    let name = |what: &str| format!("{letter} {what}");
+    let id = |offset| param(engine, offset);
+    let slope = |offset, what: &str, default: f64, text: &str| {
+        ParamDescriptor::continuous(
+            id(offset),
+            &name(what),
+            (-100.0, 100.0),
+            default,
+            ParamUnit::Percent,
+        )
+        .describe(text)
+    };
+    let level = |offset, what: &str, default: f64, text: &str| {
+        ParamDescriptor::continuous(
+            id(offset),
+            &name(what),
+            (-100.0, 100.0),
+            default,
+            ParamUnit::Percent,
+        )
+        .describe(text)
+    };
+    let mode = |offset, what: &str| {
+        ParamDescriptor::choice(id(offset), &name(what), &LOOP_MODES, 0).describe(
+            "None holds Sustain until the note ends; Trigger runs Attack, Decay and Release once; \
+             Loop cycles the whole envelope until the note ends; AD Loop cycles Attack and Decay \
+             while the key is held.",
+        )
+    };
+    let hertz = |offset, what: &str, default: f64| {
+        ParamDescriptor::continuous(
+            id(offset),
+            &name(what),
+            (0.01, 40.0),
+            default,
+            ParamUnit::Hertz,
+        )
+        .logarithmic()
+        .describe("How fast the LFO cycles, in hertz.")
+    };
+    let sync = |offset, what: &str| {
+        ParamDescriptor::toggle(id(offset), &name(what), false)
+            .describe("Sets the LFO's rate in divisions of the song's tempo instead of hertz.")
+    };
+    let division = |offset, what: &str| {
+        ParamDescriptor::choice(id(offset), &name(what), &DIVISIONS.map(|(n, _)| n), 4)
+            .describe("The length of one cycle with sync on, from 1/64 to 8 bars.")
+    };
+    let phase = |offset, what: &str| {
+        ParamDescriptor::continuous(id(offset), &name(what), (0.0, 360.0), 0.0, ParamUnit::None)
+            .decimals(0)
+            .describe("Where in its cycle the LFO starts, in degrees, and the phase it keeps against the song.")
+    };
+    let retrigger = |offset, what: &str| {
+        ParamDescriptor::toggle(id(offset), &name(what), false).describe(
+            "Starts the LFO again at its phase offset with each note; off, it follows the song \
+             position while the song plays.",
+        )
+    };
+    vec![
+        slope(
+            ATTACK_SLOPE,
+            "Attack Slope",
+            0.0,
+            "Bends the amplitude envelope's attack: positive starts fast and ends slow, negative the reverse.",
+        ),
+        slope(
+            DECAY_SLOPE,
+            "Decay Slope",
+            50.0,
+            "Bends the amplitude envelope's decay: positive starts fast and ends slow, negative the reverse.",
+        ),
+        slope(
+            RELEASE_SLOPE,
+            "Release Slope",
+            50.0,
+            "Bends the amplitude envelope's release: positive starts fast and ends slow, negative the reverse.",
+        ),
+        mode(ENV_MODE, "Envelope Loop Mode"),
+        time(
+            id(MOD_ATTACK),
+            &name("Mod Attack"),
+            1.0,
+            "How long the modulation envelope takes to rise from Initial to Peak.",
+        ),
+        time(
+            id(MOD_DECAY),
+            &name("Mod Decay"),
+            600.0,
+            "How long the modulation envelope takes to fall from Peak to Sustain.",
+        ),
+        ParamDescriptor::continuous(
+            id(MOD_SUSTAIN),
+            &name("Mod Sustain"),
+            (0.0, 100.0),
+            0.0,
+            ParamUnit::Percent,
+        )
+        .describe("The share of Peak the modulation envelope holds while a note lasts."),
+        time(
+            id(MOD_RELEASE),
+            &name("Mod Release"),
+            50.0,
+            "How long the modulation envelope takes to fall to Final after the note ends.",
+        ),
+        slope(
+            MOD_ATTACK_SLOPE,
+            "Mod Attack Slope",
+            0.0,
+            "Bends the modulation envelope's attack.",
+        ),
+        slope(
+            MOD_DECAY_SLOPE,
+            "Mod Decay Slope",
+            50.0,
+            "Bends the modulation envelope's decay.",
+        ),
+        slope(
+            MOD_RELEASE_SLOPE,
+            "Mod Release Slope",
+            50.0,
+            "Bends the modulation envelope's release.",
+        ),
+        level(
+            MOD_INITIAL,
+            "Mod Initial",
+            0.0,
+            "The level the modulation envelope starts from when a note begins.",
+        ),
+        level(
+            MOD_PEAK,
+            "Mod Peak",
+            100.0,
+            "The level the modulation envelope's attack rises to.",
+        ),
+        level(
+            MOD_FINAL,
+            "Mod Final",
+            0.0,
+            "The level the modulation envelope's release falls to.",
+        ),
+        mode(MOD_MODE, "Mod Loop Mode"),
+        ParamDescriptor::toggle(id(LINK), &name("Link Envelopes"), false).describe(
+            "Makes the modulation envelope take the amplitude envelope's times and slopes.",
+        ),
+        ParamDescriptor::choice(id(LFO1_TYPE), &name("LFO 1 Type"), &LFO1_TYPES, 0)
+            .describe("LFO 1's type: Basic Shapes, Ramp, Wander, Alternate, Euclid or Pulsate."),
+        sync(LFO1_SYNC, "LFO 1 Sync"),
+        hertz(LFO1_RATE, "LFO 1 Rate", 1.0),
+        division(LFO1_DIVISION, "LFO 1 Division"),
+        macro_param(
+            id(LFO1_MACRO_1),
+            &name("LFO 1 Macro 1"),
+            "LFO 1's first macro.",
+        ),
+        macro_param(
+            id(LFO1_MACRO_2),
+            &name("LFO 1 Macro 2"),
+            "LFO 1's second macro.",
+        ),
+        phase(LFO1_OFFSET, "LFO 1 Phase Offset"),
+        retrigger(LFO1_RETRIGGER, "LFO 1 Retrigger"),
+        ParamDescriptor::choice(id(FX1_TYPE), &name("LFO 1 FX 1"), &FX_NAMES, 0)
+            .describe("The first effect LFO 1's output passes through."),
+        macro_param(
+            id(FX1_AMOUNT),
+            &name("LFO 1 FX 1 Amount"),
+            "The first effect's macro.",
+        ),
+        ParamDescriptor::choice(id(FX2_TYPE), &name("LFO 1 FX 2"), &FX_NAMES, 0)
+            .describe("The second effect, after the first."),
+        macro_param(
+            id(FX2_AMOUNT),
+            &name("LFO 1 FX 2 Amount"),
+            "The second effect's macro.",
+        ),
+        ParamDescriptor::choice(id(LFO2_TYPE), &name("LFO 2 Type"), &LFO2_TYPES, 0)
+            .describe("LFO 2's wave: Sine, Tri, Saw Up, Saw Down, Rectangle or Random S&H."),
+        sync(LFO2_SYNC, "LFO 2 Sync"),
+        hertz(LFO2_RATE, "LFO 2 Rate", 6.0),
+        division(LFO2_DIVISION, "LFO 2 Division"),
+        phase(LFO2_OFFSET, "LFO 2 Phase Offset"),
+        retrigger(LFO2_RETRIGGER, "LFO 2 Retrigger"),
+    ]
+}
+
 /// A macro, 0 to 100 %.
 fn macro_param(id: ParamId, name: &str, text: &str) -> ParamDescriptor {
     ParamDescriptor::continuous(id, name, (0.0, 100.0), 0.0, ParamUnit::Percent).describe(text)
@@ -562,16 +1085,8 @@ fn time(id: ParamId, name: &str, default_ms: f64, text: &str) -> ParamDescriptor
 /// Adds Meld to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, meld_type(), |device, config| {
-        make(config, device.id.0.get())
+        Meld::new(device, config)
     });
-}
-
-/// Makes a Meld for `config`'s rate and block size, whose random draws
-/// follow `seed` (the device's ID, device framework R29). Every buffer and
-/// table it needs is made here, off the audio thread.
-#[must_use]
-pub fn make(config: &NodeConfig, seed: u64) -> Meld {
-    Meld::new(config, seed)
 }
 
 /// Meld's audio-thread half.
@@ -584,13 +1099,19 @@ pub struct Meld {
 }
 
 impl Meld {
-    fn new(config: &NodeConfig, seed: u64) -> Self {
+    /// Makes a Meld for `device` at `config`'s rate and block size, holding
+    /// the device's routes, whose random draws follow the device's ID
+    /// (device framework R29). Every buffer and table it needs is made here,
+    /// off the audio thread.
+    #[must_use]
+    pub fn new(device: &bl_model::Device, config: &NodeConfig) -> Self {
         let rate = config.sample_rate.as_f64();
         let frames = config.max_frames.max(1);
+        let seed = device.id.0.get();
         Self {
             engines: [
-                Engine::new(0, rate, frames, seed),
-                Engine::new(1, rate, frames, seed),
+                Engine::new(0, rate, frames, seed, device),
+                Engine::new(1, rate, frames, seed, device),
             ],
             rate: rate as f32,
             limiter: [1.0; SLOTS],
@@ -606,7 +1127,8 @@ impl NativeDevice for Meld {
             return;
         }
         for engine in &mut self.engines {
-            engine.voices.begin(audio, params);
+            let clock = engine.section.clock();
+            engine.voices.begin(audio, params, clock);
             engine.section.process(audio, params, &mut engine.voices);
         }
         self.mix(frames, params);
@@ -628,6 +1150,30 @@ impl NativeDevice for Meld {
     fn receive_data(&mut self, data: NodeData) {
         for engine in &mut self.engines {
             engine.section.receive_data(&data);
+            if let Some(routes) = data.downcast_ref::<bl_engine::ModRoutes>() {
+                engine.voices.mods.matrix.set_free(routes.0);
+            }
+        }
+    }
+
+    fn matrix_played(&self, report: &mut dyn FnMut(ParamId, f64)) {
+        let descs = meld_matrix::descriptors();
+        // Each engine's destinations, and the global ones from engine A's.
+        for (engine, voices) in self.engines.iter().map(|e| &e.voices).enumerate() {
+            let globals = if engine == 0 {
+                meld_matrix::D_DRIVE..meld_matrix::DESTS
+            } else {
+                0..0
+            };
+            let own = engine * meld_matrix::PER_ENGINE..(engine + 1) * meld_matrix::PER_ENGINE;
+            for dest in own.chain(globals) {
+                if descs[dest].id.0 == u32::MAX {
+                    continue;
+                }
+                if let Some(position) = voices.mods.matrix.shown(dest) {
+                    report(descs[dest].id, descs[dest].denormalize(position));
+                }
+            }
         }
     }
 }
@@ -638,10 +1184,18 @@ impl Meld {
     fn mix(&mut self, frames: usize, params: &ParamBank) {
         let value = |id: ParamId| params.value(params.index(id).expect("the description lists it"));
         let ramp = |id: ParamId| params.ramp(params.index(id).expect("the description lists it"));
-        let drive = value(DRIVE) / 24.0;
-        let gain = db_to_gain(value(DRIVE)) as f32;
+        let drive_db = value(DRIVE);
         let limit = value(LIMIT) >= 0.5;
         let volume = ramp(OUTPUT);
+        // A route into Mixer Drive or Volume reads the oldest voice's
+        // sources, as they were at each frame (R62).
+        let global = &self.engines[0].voices.mods;
+        let moved = (
+            global.has[meld_matrix::D_DRIVE],
+            global.has[meld_matrix::D_OUTPUT],
+        );
+        let state = self.engines[0].section.state();
+        let clock = state.clock(0);
         let used = self.engines[0]
             .voices
             .used()
@@ -654,6 +1208,35 @@ impl Meld {
         right[..frames].fill(0.0);
         for frame in 0..frames {
             let (mut sum_l, mut sum_r) = (0.0f32, 0.0f32);
+            let due = (clock + frame as u64).is_multiple_of(32);
+            if moved.0 || moved.1 {
+                global.matrix.set_oldest(global.oldest(frame));
+            }
+            let drive_db = if moved.0 {
+                global.value(
+                    meld_matrix::D_DRIVE,
+                    drive_db,
+                    0,
+                    frame,
+                    due,
+                    &GlobalRead(global),
+                )
+            } else {
+                drive_db
+            };
+            let (drive, gain) = (drive_db / 24.0, db_to_gain(drive_db) as f32);
+            let level = if moved.1 {
+                global.value(
+                    meld_matrix::D_OUTPUT,
+                    f64::from(volume[frame]),
+                    0,
+                    frame,
+                    due,
+                    &GlobalRead(global),
+                ) as f32
+            } else {
+                volume[frame]
+            };
             for slot in 0..used {
                 let at = frame * SLOTS + slot;
                 let (mut l, mut r) = (a[0][at] + b[0][at], a[1][at] + b[1][at]);
@@ -679,8 +1262,8 @@ impl Meld {
                 sum_l += l;
                 sum_r += r;
             }
-            left[frame] = sum_l * volume[frame];
-            right[frame] = sum_r * volume[frame];
+            left[frame] = sum_l * level;
+            right[frame] = sum_r * level;
         }
     }
 }
@@ -692,7 +1275,7 @@ struct Engine {
 }
 
 impl Engine {
-    fn new(which: usize, rate: f64, frames: usize, seed: u64) -> Self {
+    fn new(which: usize, rate: f64, frames: usize, seed: u64, device: &bl_model::Device) -> Self {
         let id = |offset| Some(param(which, offset));
         Self {
             // Spec: meld R14, R16. Both engines play the same notes under
@@ -717,7 +1300,7 @@ impl Engine {
                 rate,
                 0x4D45_4C44 ^ seed,
             ),
-            voices: Voices::new(which, rate, frames, seed),
+            voices: Voices::new(which, rate, frames, seed, device),
         }
     }
 }
@@ -770,6 +1353,8 @@ struct Slot {
     tone: f32,
     /// The seed of the note's random draws (R30, R33, R35).
     seed: u64,
+    /// The Spread source's value for the slot's copy (R15, R62).
+    spread: f32,
     /// What the grid carries on for the type: Chip's arpeggio in cycles,
     /// Shepard's Pi's slide in octaves, Noise Loop's place among its loops.
     run: f32,
@@ -797,6 +1382,7 @@ impl Slot {
         fresh: false,
         tone: 0.0,
         seed: 0,
+        spread: 0.0,
         run: 0.0,
         index: 0.0,
         chunk_pitch: f32::NAN,
@@ -813,8 +1399,8 @@ struct Voices {
     gens: Vec<Gen>,
     /// The pitch, in semitones, at which a lane's partial nears Nyquist.
     top: f32,
-    envelopes: [EnvelopeBank; 2],
-    levels: [Vec<f32>; 2],
+    /// Both engines' modulators and the matrix (R59 to R62).
+    mods: Mods,
     filter: MeldFilter,
     slots: [Slot; SLOTS],
     lanes: Vec<meld_osc::Lanes>,
@@ -839,12 +1425,15 @@ struct Voices {
     cutoffs: Vec<f32>,
     /// The stretch's output, slot by slot, per channel.
     out: [Vec<f32>; 2],
-    envelope_stride: usize,
     filter_stride: usize,
+    /// The filter's Resonance and Morph for each slot and frame, when a
+    /// route moves them.
+    res_each: Vec<f32>,
+    morph_each: Vec<f32>,
 }
 
 impl Voices {
-    fn new(which: usize, rate: f64, frames: usize, seed: u64) -> Self {
+    fn new(which: usize, rate: f64, frames: usize, seed: u64, device: &bl_model::Device) -> Self {
         let banks = Kind::ALL.map(|kind| {
             Bank::new(
                 kind,
@@ -853,9 +1442,6 @@ impl Voices {
                 0x6D31 + which as u64 + (seed << 1),
             )
         });
-        let envelope = || EnvelopeBank::new(MAX_VOICES, EnvelopeParams::AMP, Timing::new(rate));
-        let envelopes = [envelope(), envelope()];
-        let envelope_stride = envelopes[0].stride();
         let filter = MeldFilter::new(rate as f32, SLOTS, frames);
         let filter_stride = filter.stride();
         let ramp = || vec![0.0; frames];
@@ -867,11 +1453,7 @@ impl Voices {
             fm: fm::Core::with_voices(rate, 1, seed, SLOTS, 0),
             gens: (0..SLOTS).map(|_| Gen::new(rate as f32)).collect(),
             top: 69.0 + 12.0 * (0.45 * rate as f32 / 440.0).log2(),
-            levels: [
-                vec![0.0; frames * envelope_stride],
-                vec![0.0; frames * envelope_stride],
-            ],
-            envelopes,
+            mods: Mods::new(device, rate, frames, seed),
             filter,
             slots: [Slot::FREE; SLOTS],
             lanes: vec![meld_osc::Lanes::default(); SLOTS],
@@ -893,8 +1475,9 @@ impl Voices {
             signal: vec![0.0; frames * 2 * filter_stride],
             cutoffs: vec![0.0; frames * filter_stride],
             out: [vec![0.0; frames * SLOTS], vec![0.0; frames * SLOTS]],
-            envelope_stride,
             filter_stride,
+            res_each: vec![0.0; frames * filter_stride],
+            morph_each: vec![0.0; frames * filter_stride],
         }
     }
 
@@ -908,18 +1491,15 @@ impl Voices {
 
     /// Forgets every note, as a switched-off device does.
     fn silence(&mut self) {
-        for voice in 0..MAX_VOICES {
-            for envelope in &mut self.envelopes {
-                envelope.reset(voice);
-            }
-        }
+        self.mods.silence();
         self.slots = [Slot::FREE; SLOTS];
         self.held_valid = false;
     }
 
     /// Reads the stretch's parameters.
-    fn begin(&mut self, audio: &Audio<'_, '_>, params: &ParamBank) {
+    fn begin(&mut self, audio: &Audio<'_, '_>, params: &ParamBank, clock: u64) {
         let frames = audio.frames();
+        self.mods.begin(audio, params, clock);
         let which = self.which;
         let value = |id: ParamId| params.value(params.index(id).expect("the description lists it"));
         let ramp = |to: &mut [f32], id: ParamId, scale: f32| {
@@ -957,19 +1537,6 @@ impl Voices {
             self.change_type(snap.kind);
         }
         self.snap = snap;
-        for (b, envelope) in self.envelopes.iter_mut().enumerate() {
-            let at = |offset| param(b, offset);
-            let curve = EnvelopeParams::AMP;
-            envelope.set_all_params(EnvelopeParams {
-                unit: TimeUnit::Milliseconds,
-                attack: value(at(ATTACK)) as f32,
-                decay: value(at(DECAY)) as f32,
-                sustain: (value(at(SUSTAIN)) / 100.0) as f32,
-                release: value(at(RELEASE)) as f32,
-                steal_restart: StealRestart::CurrentLevel,
-                ..curve
-            });
-        }
         self.filter.set_type(snap.filter_type);
         for k in 0..frames {
             self.cutoffs[k * self.filter_stride..(k + 1) * self.filter_stride]
@@ -1062,7 +1629,89 @@ impl Voices {
         if !self.snap.key_tracking {
             pitch += f64::from(s.fixed) - f64::from(s.key);
         }
-        (pitch + f64::from(12.0 * self.snap.octaves + self.snap.cents / 100.0 + s.offset)) as f32
+        let moved = self.pitch_move(voices, state, slot, frames.start + at);
+        (pitch + f64::from(12.0 * self.snap.octaves + self.snap.cents / 100.0 + s.offset + moved))
+            as f32
+    }
+
+    /// Whether a route moves this engine's pitch.
+    fn pitch_routed(&self) -> bool {
+        let which = self.which;
+        [L_SEMITONES, L_CENTS, L_QUANT]
+            .into_iter()
+            .any(|local| self.mods.has[meld_matrix::dest(which, local)])
+    }
+
+    /// What a route into this engine's Semitones, Cents or Pitch Quant adds
+    /// to slot `slot`'s pitch at frame `frame` of the stretch, in semitones
+    /// (R62): a Semitones route moves it in semitones (degrees of the scale
+    /// when it is on) and Cents in cents; Pitch Quant moves it in whole
+    /// steps, rounded.
+    fn pitch_move(&self, voices: &VoiceBlock, state: &State, slot: usize, frame: usize) -> f32 {
+        let which = self.which;
+        let has = |local| self.mods.has[meld_matrix::dest(which, local)];
+        if !(has(L_SEMITONES) || has(L_CENTS) || has(L_QUANT)) {
+            return 0.0;
+        }
+        let s = &self.slots[slot];
+        let steps = |n: f64| -> f64 {
+            let scale = state.scale();
+            if scale.enabled {
+                let (low, high) = (n.floor(), n.ceil());
+                let at = |n: f64| f64::from(scale.move_off(s.key, n as i32) - i32::from(s.key));
+                at(low) + (at(high) - at(low)) * (n - low)
+            } else {
+                n
+            }
+        };
+        let mut moved = 0.0;
+        if has(L_SEMITONES) {
+            let base = f64::from(self.snap.semitones);
+            let value = self.dest_value(voices, state, L_SEMITONES, base, slot, frame);
+            moved += steps(value) - f64::from(s.offset);
+        }
+        if has(L_CENTS) {
+            let base = f64::from(self.snap.cents);
+            moved += (self.dest_value(voices, state, L_CENTS, base, slot, frame) - base) / 100.0;
+        }
+        if has(L_QUANT) {
+            moved += steps(
+                self.dest_value(voices, state, L_QUANT, 0.0, slot, frame)
+                    .round(),
+            );
+        }
+        moved as f32
+    }
+
+    /// Destination `local` of this engine as slot `slot` plays it at frame
+    /// `frame` of the stretch, given the parameter's own `base` value: its
+    /// routes' movement, if any reaches it (R5).
+    fn dest_value(
+        &self,
+        voices: &VoiceBlock,
+        state: &State,
+        local: usize,
+        base: f64,
+        slot: usize,
+        frame: usize,
+    ) -> f64 {
+        let read = SlotRead {
+            mods: &self.mods,
+            voices,
+            state,
+            of: |slot: usize| {
+                let s = &self.slots[slot];
+                (s.voice.max(0) as usize, s.spread)
+            },
+        };
+        self.mods.value(
+            meld_matrix::dest(self.which, local),
+            base,
+            slot,
+            frame,
+            state.control_due(frame),
+            &read,
+        )
     }
 }
 
@@ -1071,31 +1720,17 @@ impl Instrument for Voices {
         let voice = event.voice;
         match event.kind {
             VoiceEventKind::Start { start, .. } => {
-                for envelope in &mut self.envelopes {
-                    match start {
-                        Start::Fresh => envelope.trigger(voice, Trigger::New),
-                        Start::Steal | Start::Retrigger => {
-                            envelope.trigger(voice, Trigger::Retrigger);
-                        }
-                        Start::Legato => envelope.trigger(voice, Trigger::Legato),
-                        Start::Join { leader } => envelope.join(voice, leader),
-                    }
-                }
+                self.mods
+                    .start(voice, start, state.clock(event.time as usize));
                 if matches!(start, Start::Legato) {
                     self.retune_slots(voices, state, voice);
                 } else {
                     self.start_slots(voices, state, voice);
                 }
             }
-            VoiceEventKind::Release => {
-                for envelope in &mut self.envelopes {
-                    envelope.release(voice);
-                }
-            }
+            VoiceEventKind::Release => self.mods.release(voice),
             VoiceEventKind::End { .. } => {
-                for envelope in &mut self.envelopes {
-                    envelope.reset(voice);
-                }
+                self.mods.end(voice);
                 self.free_slots(voice);
             }
         }
@@ -1106,9 +1741,10 @@ impl Instrument for Voices {
         if count == 0 {
             return;
         }
-        for (envelope, levels) in self.envelopes.iter_mut().zip(&mut self.levels) {
-            envelope.process(&mut levels[..count * self.envelope_stride]);
-        }
+        let newest = state.newest(voices);
+        let slot = newest.and_then(|voice| self.slots.iter().position(|s| s.voice == voice as i8));
+        self.mods.set_newest(newest, slot);
+        self.mods.run(voices, state, &frames);
         let used = self.used();
         if used > 0 {
             self.sound(voices, state, &frames, used);
@@ -1118,7 +1754,7 @@ impl Instrument for Voices {
         while mask != 0 {
             let voice = mask.trailing_zeros() as usize;
             mask &= mask - 1;
-            if self.envelopes.iter().all(|e| e.is_idle(voice)) {
+            if self.mods.idle(voice) {
                 voices.end(voice);
             }
         }
@@ -1157,6 +1793,7 @@ impl Voices {
                 fixed,
                 phase,
                 fresh: true,
+                spread: source,
                 noise_state: (self.notes.wrapping_mul(0x9E37_79B9)
                     ^ (slot as u32) << 8
                     ^ self.seed as u32)
@@ -1167,6 +1804,7 @@ impl Voices {
                 ),
                 ..Slot::FREE
             };
+            self.mods.matrix.start(slot);
             let s = &mut self.slots[slot];
             s.run = initial_run(self.current, s.noise_state);
             s.target[0] = s.run;
@@ -1249,10 +1887,19 @@ impl Voices {
         if on && self.snap.filter_on {
             let stride = self.filter_stride;
             let (start, end) = (frames.start, frames.end);
+            let (_, res, morph) = self.filter_moved(voices, state, frames, used);
             let per = PerFrame {
                 cutoff: &self.cutoffs[start * stride..end * stride],
-                res: Per::Shared(&self.res[start..end]),
-                morph: Per::Shared(&self.morph[start..end]),
+                res: if res {
+                    Per::Voice(&self.res_each[start * stride..end * stride])
+                } else {
+                    Per::Shared(&self.res[start..end])
+                },
+                morph: if morph {
+                    Per::Voice(&self.morph_each[start * stride..end * stride])
+                } else {
+                    Per::Shared(&self.morph[start..end])
+                },
                 drive: Per::Shared(&self.drive[start..end]),
             };
             // Spec: meld R52. The resonators snap to the current scale while
@@ -1272,7 +1919,72 @@ impl Voices {
                 &mut self.signal[..count * 2 * stride],
             );
         }
-        self.mix(frames, used);
+        self.mix(voices, state, frames, used);
+    }
+
+    /// Works out, for the first `used` slots, the filter controls a route
+    /// moves over the piece `frames`: Frequency into the cutoffs, Q and the
+    /// morph into their per-slot arrays. Returns which of Frequency, Q and
+    /// the morph a route moves (R62).
+    fn filter_moved(
+        &mut self,
+        voices: &VoiceBlock,
+        state: &State,
+        frames: &std::ops::Range<usize>,
+        used: usize,
+    ) -> (bool, bool, bool) {
+        let which = self.which;
+        let has = |local| self.mods.has[meld_matrix::dest(which, local)];
+        let moved = (has(L_FREQ), has(L_FILTER_1), has(L_FILTER_2));
+        if !(moved.0 || moved.1 || moved.2) {
+            return moved;
+        }
+        let stride = self.filter_stride;
+        for frame in frames.clone() {
+            for slot in 0..used {
+                if moved.0 {
+                    let v = self.dest_value(
+                        voices,
+                        state,
+                        L_FREQ,
+                        f64::from(self.cutoff[frame]),
+                        slot,
+                        frame,
+                    );
+                    self.cutoffs[frame * stride + slot] = pitch_of(v as f32, 440.0);
+                }
+                if moved.1 {
+                    let base = f64::from(self.res[frame]) * 100.0;
+                    let v = self.dest_value(voices, state, L_FILTER_1, base, slot, frame);
+                    self.res_each[frame * stride + slot] = (v * 0.01) as f32;
+                }
+                if moved.2 {
+                    let base = f64::from(self.morph[frame]) / 0.0075;
+                    let v = self.dest_value(voices, state, L_FILTER_2, base, slot, frame);
+                    self.morph_each[frame * stride + slot] = (v * 0.0075) as f32;
+                }
+            }
+        }
+        moved
+    }
+
+    /// The oscillator macros slot `slot` plays at frame `frame` of the
+    /// stretch: the held ones, moved by any route (R62).
+    fn macros(&self, voices: &VoiceBlock, state: &State, slot: usize, frame: usize) -> (f32, f32) {
+        let which = self.which;
+        let has = |local| self.mods.has[meld_matrix::dest(which, local)];
+        let one = |local, held: f32| {
+            if has(local) {
+                let v = self.dest_value(voices, state, local, f64::from(held) * 100.0, slot, frame);
+                (v * 0.01) as f32
+            } else {
+                held
+            }
+        };
+        (
+            one(L_MACRO_1, self.held.macro_1),
+            one(L_MACRO_2, self.held.macro_2),
+        )
     }
 
     /// Renders `n` frames of every slot from `at` into the piece's signal.
@@ -1289,7 +2001,6 @@ impl Voices {
             return;
         };
         let bank_at = kind.index();
-        let (m1, m2) = (self.held.macro_1, self.held.macro_2);
         let scale = if self.snap.osc_scale {
             *state.scale()
         } else {
@@ -1299,13 +2010,14 @@ impl Voices {
         let on_grid = clock.is_multiple_of(CHUNK as u64);
         let noisy = self.current == 2;
         let config = state.config();
-        let stepping = config.glissando && config.glide_secs > 0.0;
+        let stepping = (config.glissando && config.glide_secs > 0.0) || self.pitch_routed();
         let modulated = stepping;
-        let motion = m1 * m1 * 6.0;
         for slot in 0..used {
             if self.slots[slot].voice < 0 {
                 continue;
             }
+            let (m1, m2) = self.macros(voices, state, slot, frames.start + at);
+            let motion = m1 * m1 * 6.0;
             let p0 = self.pitch(voices, state, slot, frames, at);
             if on_grid {
                 match kind {
@@ -1340,12 +2052,33 @@ impl Voices {
             };
             // The slide moves from where the chunk of the grid began.
             let slid = slide * (clock % CHUNK as u64) as f32;
+            let routed = self.pitch_routed();
             let bank = &mut self.banks[bank_at];
             for (copy, lane) in lanes.lane[..lanes.count].iter().enumerate() {
-                let step = if stepping { 0.0 } else { step } + slide;
-                bank.set(slot, copy, p0 + lane.semitones + slid, step, lane.frame);
+                if routed {
+                    // A route moves the pitch frame by frame: each frame's
+                    // pitch is worked out whole, from the frame alone, so
+                    // the render is the same wherever a block cuts a chunk.
+                    bank.set(slot, copy, 0.0, 0.0, lane.frame);
+                } else {
+                    let step = if stepping { 0.0 } else { step } + slide;
+                    bank.set(slot, copy, p0 + lane.semitones + slid, step, lane.frame);
+                }
             }
-            if modulated {
+            if routed {
+                let mut pitches = [0.0f32; CHUNK];
+                for (k, pitch) in pitches[..n].iter_mut().enumerate() {
+                    *pitch = self.pitch(voices, state, slot, frames, at + k);
+                }
+                let across = (clock % CHUNK as u64) as f32;
+                for (copy, lane) in lanes.lane[..lanes.count].iter().enumerate() {
+                    let mut values = [0.0f32; CHUNK];
+                    for (k, value) in values[..n].iter_mut().enumerate() {
+                        *value = pitches[k] + lane.semitones + slide * (across + k as f32);
+                    }
+                    self.banks[bank_at].set_mod(slot, copy, &values[..n]);
+                }
+            } else if modulated {
                 // A Glissando's steps and Noisy Shapes' phase noise move the
                 // pitch frame by frame; a glide's line is its own step.
                 let mut values = [0.0f32; CHUNK];
@@ -1451,16 +2184,16 @@ impl Voices {
         n: usize,
         used: usize,
     ) {
-        let (m1, m2) = (self.held.macro_1, self.held.macro_2);
         let stride = self.filter_stride;
         let hz = |pitch: f32| 440.0 * ((pitch - 69.0) / 12.0).exp2();
         let offset = (state.clock(frames.start + at) % CHUNK as u64) as usize;
         let config = state.config();
-        let stepping = config.glissando && config.glide_secs > 0.0;
+        let stepping = (config.glissando && config.glide_secs > 0.0) || self.pitch_routed();
         for slot in 0..used {
             if self.slots[slot].voice < 0 {
                 continue;
             }
+            let (m1, m2) = self.macros(voices, state, slot, frames.start + at);
             // What a chunk works out follows the pitch at its start, so a
             // block that cuts the chunk changes nothing; a frame's own
             // frequency follows the glide's line, or a Glissando's steps.
@@ -1626,19 +2359,27 @@ impl Voices {
     }
 
     /// Spec: meld R13, R18. Takes the filtered signal under the amplitude
-    /// envelope, Tone, Pan and Volume into the stretch's output.
-    fn mix(&mut self, frames: &std::ops::Range<usize>, used: usize) {
+    /// envelope, Tone, Pan and Volume into the stretch's output, each moved
+    /// by any route into it (R62).
+    fn mix(
+        &mut self,
+        voices: &VoiceBlock,
+        state: &State,
+        frames: &std::ops::Range<usize>,
+        used: usize,
+    ) {
         let count = frames.len();
         let stride = self.filter_stride;
         let on = self.snap.on;
-        let level = &self.levels[self.which];
+        let which = self.which;
+        let moved = |local| self.mods.has[meld_matrix::dest(which, local)];
+        let (tone_moved, pan_moved, volume_moved) = (moved(L_TONE), moved(L_PAN), moved(L_VOLUME));
         for slot in 0..used {
-            let s = &mut self.slots[slot];
-            if s.voice < 0 {
+            if self.slots[slot].voice < 0 {
                 continue;
             }
-            let voice = s.voice as usize;
-            let copies = f32::from(s.copies).sqrt().recip();
+            let voice = self.slots[slot].voice as usize;
+            let copies = f32::from(self.slots[slot].copies).sqrt().recip();
             for k in 0..count {
                 let frame = frames.start + k;
                 let mut x = if on {
@@ -1646,7 +2387,13 @@ impl Voices {
                 } else {
                     0.0
                 };
-                let t = self.tone[frame];
+                let t = if tone_moved {
+                    let base = f64::from(self.tone[frame]) * 100.0;
+                    (self.dest_value(voices, state, L_TONE, base, slot, frame) * 0.01) as f32
+                } else {
+                    self.tone[frame]
+                };
+                let s = &mut self.slots[slot];
                 if t.abs() > 1e-4 {
                     // One pole: a high-pass from 20 Hz up to 2 kHz, or a
                     // low-pass from 20 kHz down to 200 Hz (R18).
@@ -1661,9 +2408,21 @@ impl Voices {
                 }
                 // The envelope is last, so a voice whose envelope has ended
                 // is exactly silent whenever the section frees it.
-                x *= level[k * self.envelope_stride + voice];
-                let (left, right) = pan_gains(self.pan[frame]);
-                let x = x * self.volume[frame] * copies;
+                x *= self.mods.level[which][k * MAX_VOICES + voice];
+                let pan = if pan_moved {
+                    let base = f64::from(self.pan[frame]) * 100.0;
+                    (self.dest_value(voices, state, L_PAN, base, slot, frame) * 0.01) as f32
+                } else {
+                    self.pan[frame]
+                };
+                let volume = if volume_moved {
+                    let base = f64::from(self.volume[frame]);
+                    self.dest_value(voices, state, L_VOLUME, base, slot, frame) as f32
+                } else {
+                    self.volume[frame]
+                };
+                let (left, right) = pan_gains(pan);
+                let x = x * volume * copies;
                 self.out[0][frame * SLOTS + slot] = x * left;
                 self.out[1][frame * SLOTS + slot] = x * right;
             }

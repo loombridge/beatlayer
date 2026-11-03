@@ -441,6 +441,13 @@ pub fn show(
             slot_cell(ui, theme, frame, panel, (id, &name, slot, rect), events);
             continue;
         }
+        // Spec: meld R63 to R66. Meld's grids and the buttons of its Matrix
+        // tab are drawn by its own panel.
+        if crate::meld_panel::is_meld(frame)
+            && crate::meld_panel::cell(ui, theme, frame, panel, (id, &name, rect), events)
+        {
+            continue;
+        }
         // Spec: wavetable R35 to R39. Wavetable's displays and its grid are
         // drawn by its own panel.
         if crate::wavetable_panel::is_wavetable(frame)
@@ -594,7 +601,14 @@ pub fn show(
                         .cloned()
                         .collect(),
                     markers: Vec::new(),
-                    readings: Vec::new(),
+                    // A cell's reading, if it has one, is what a screen
+                    // reader says of it.
+                    readings: d
+                        .readings
+                        .iter()
+                        .filter(|r| r.name == name)
+                        .cloned()
+                        .collect(),
                     ..d.clone()
                 };
                 Some(&own)
@@ -667,6 +681,9 @@ pub fn show(
             }
         });
     }
+    for caption in &laid.captions {
+        parts::caption(ui, theme, caption, body.min);
+    }
     for label in &laid.labels {
         parts::band_label(ui, theme, label, body.min);
     }
@@ -688,13 +705,12 @@ pub fn show(
             }
             continue;
         }
-        // A control that is there only while another's value says so.
-        if extra
-            .and_then(|e| e.only)
-            .is_some_and(|only| panel.read(only.param).round() as i32 != only.value)
-            || extra
-                .and_then(|e| e.unless)
-                .is_some_and(|un| panel.read(un.param).round() as i32 == un.value)
+        // A control put away while another's value says so: its place is
+        // another control's.
+        let at_value =
+            |g: bl_model::device_layout::GreyWhen| panel.read(g.param).round() as i32 == g.value;
+        if extra.and_then(|e| e.hide).is_some_and(at_value)
+            || extra.and_then(|e| e.only).is_some_and(|g| !at_value(g))
         {
             continue;
         }
@@ -733,6 +749,9 @@ pub fn show(
             .label(&read, param)
             .is_some_and(|label| label.unit.is_some() || label.law.is_some())
             .then(|| panel.description.text(&read, &descriptor, value));
+        // Spec: meld R63. A touch on a control adds its parameter as a row
+        // of the grid the tab shows.
+        crate::meld_panel::touched(ui, frame, panel, (&descriptor.name, rect), events);
         let control = Control {
             device: frame.id,
             enabled: frame.enabled,
@@ -788,6 +807,12 @@ pub fn show(
             } else {
                 1
             },
+            steps: extra.and_then(|e| e.steps),
+            at_left: extra.is_some_and(|e| e.titled)
+                || matches!(
+                    widget,
+                    Widget::Number | Widget::Slider | Widget::Marked | Widget::Chooser
+                ),
             unnamed: extra.is_some_and(|e| e.unnamed),
             caption: extra.and_then(|e| e.caption.as_deref()),
         };
@@ -795,12 +820,25 @@ pub fn show(
         // scale is drawn disabled.
         let locked = panel.locked.contains(&param);
         let glyph = extra.and_then(|e| e.glyph);
+        let named = !extra.is_some_and(|e| e.unnamed);
+        let titled = extra.is_some_and(|e| e.titled);
+        // The buttons of a row, stack or grid: all of the control, or what is
+        // left under its name.
+        let buttons = if titled {
+            control.label(ui, theme)
+        } else {
+            rect
+        };
         let mut draw = |ui: &mut Ui| match widget {
-            Widget::Knob => control.knob(ui, theme, events, false),
-            Widget::SmallKnob => control.knob(ui, theme, events, true),
-            Widget::Number => control.number(ui, theme, events, (false, false)),
-            Widget::Slider => control.number(ui, theme, events, (true, false)),
-            Widget::Marked => control.number(ui, theme, events, (false, true)),
+            Widget::Knob => control.knob(ui, theme, events, (false, named)),
+            Widget::SmallKnob => control.knob(ui, theme, events, (true, named)),
+            Widget::Number => control.number(ui, theme, events, (false, false, named)),
+            Widget::Slider => control.number(ui, theme, events, (true, false, named)),
+            Widget::Marked => control.number(ui, theme, events, (false, true, named)),
+            Widget::Inline => control.inline(ui, theme, events),
+            Widget::Tick => control.tick(ui, theme, events),
+            Widget::Stacked => control.stacked(ui, theme, events, false),
+            Widget::Spread => control.stacked(ui, theme, events, true),
             Widget::Toggle => control.toggle(ui, theme, events, (false, None)),
             Widget::Abbreviated(n) => {
                 control.toggle(ui, theme, events, (false, Some(usize::from(n))));
@@ -818,8 +856,8 @@ pub fn show(
             }
             Widget::Unboxed => control.bare(ui, theme, events),
             Widget::IconColumn(n) => {
-                let cells = button_cells(rect, 1, usize::from(n));
-                control.choice_buttons(ui, theme, events, (&cells, true));
+                let cells = button_cells(buttons, 1, usize::from(n));
+                control.choice_buttons(ui, theme, events, (&cells, true, false));
             }
             Widget::Beside(label) => control.beside(ui, theme, events, (f32::from(label), true)),
             Widget::BesideDim(label) => {
@@ -831,21 +869,22 @@ pub fn show(
             Widget::Check => control.check(ui, theme, events),
             Widget::Pill => control.pill(ui, theme, events),
             Widget::Readout => control.readout(ui, theme, events),
-            Widget::Segments(n) => {
-                let cells = button_cells(rect, usize::from(n), 1);
-                control.choice_buttons(ui, theme, events, (&cells, false));
-            }
-            Widget::IconSegments(n) => {
-                let cells = button_cells(rect, usize::from(n), 1);
-                control.choice_buttons(ui, theme, events, (&cells, true));
+            Widget::Segments(n) | Widget::Tabs(n) | Widget::IconSegments(n) => {
+                let cells = button_cells(buttons, usize::from(n), 1);
+                let (icons, outlined) = match widget {
+                    Widget::Segments(_) => (false, false),
+                    Widget::Tabs(_) => (false, true),
+                    _ => (true, false),
+                };
+                control.choice_buttons(ui, theme, events, (&cells, icons, outlined));
             }
             Widget::Stack(n) => {
-                let cells = button_cells(rect, 1, usize::from(n));
-                control.choice_buttons(ui, theme, events, (&cells, false));
+                let cells = button_cells(buttons, 1, usize::from(n));
+                control.choice_buttons(ui, theme, events, (&cells, false, false));
             }
             Widget::Grid { columns, rows } => {
-                let cells = button_cells(rect, usize::from(columns), usize::from(rows));
-                control.choice_buttons(ui, theme, events, (&cells, true));
+                let cells = button_cells(buttons, usize::from(columns), usize::from(rows));
+                control.choice_buttons(ui, theme, events, (&cells, true, false));
             }
             Widget::Large => control.large(ui, theme, events),
             Widget::Bare => control.boxed(ui, theme, events, (false, false)),
@@ -854,7 +893,6 @@ pub fn show(
             Widget::Checkbox => control.checkbox(ui, theme, events),
             Widget::Map(_) => {}
             Widget::Cycle => control.cycle(ui, theme, events),
-            Widget::Inline => control.inline(ui, theme, events),
         };
         if locked {
             ui.add_enabled_ui(false, draw);
@@ -1022,6 +1060,8 @@ fn display_drag(
         under: None,
         automation: None,
         coarse: 1,
+        steps: None,
+        at_left: false,
         unnamed: false,
         caption: None,
     };
@@ -1045,8 +1085,11 @@ fn pan_reading(kind: &bl_model::DeviceKind, param: &ParamDescriptor, value: f64)
 
 /// What a control's name above it reads: a sample slot's parameter drops the
 /// slot's number (`Slot 3 Start` reads `Start`), since the panel shows one
-/// slot's at a time.
-fn short_name(name: &str) -> &str {
+/// slot's at a time, and one of Meld's drops its engine's letter.
+fn short_name(name: &str) -> std::borrow::Cow<'_, str> {
+    if let Some(short) = bl_devices::meld::panel_name(name) {
+        return short.into();
+    }
     name.strip_prefix("Slot ")
         .and_then(|rest| rest.split_once(' '))
         .filter(|(number, _)| number.chars().all(|c| c.is_ascii_digit()))
@@ -1059,6 +1102,7 @@ fn short_name(name: &str) -> &str {
                 other => other,
             }
         })
+        .into()
 }
 
 /// A display cell standing for a sample slot (WP-5.17): its number and key,
@@ -1308,6 +1352,11 @@ struct Control<'a> {
     /// How many steps Shift with Up or Down moves it: 12 for Roar's
     /// Feedback Note, an octave (the roar spec, R26), else 1.
     coarse: i32,
+    /// The values the buttons of a whole-number parameter set.
+    steps: Option<&'static [i32]>,
+    /// Whether the name above the control is set at its left (a box or a
+    /// chooser) rather than centred (a knob).
+    at_left: bool,
     /// Whether the layout leaves the name off a box or a chooser.
     unnamed: bool,
     /// The name the layout shows in place of the parameter's.

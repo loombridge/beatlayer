@@ -75,27 +75,28 @@ enum Look {
 }
 
 impl Control<'_> {
-    /// The name above the control, in a row of [`LABEL_HEIGHT`]; it stays as
-    /// it is when the device is switched off (observed). Returns the rest.
+    /// The name above the control, in a row of [`LABEL_HEIGHT`]: centred over
+    /// a knob and at the left over a box or a chooser (observed); it stays as
+    /// it is when the device is switched off. Returns the rest.
     pub(super) fn label(&self, ui: &Ui, theme: &Theme) -> Rect {
         if self.unnamed {
             return self.rect;
         }
         let top = Rect::from_min_size(self.rect.min, vec2(self.rect.width(), LABEL_HEIGHT));
-        ui.painter().text(
-            top.center(),
-            Align2::CENTER_CENTER,
-            self.name(),
-            font(),
-            theme.colors.text.0,
-        );
+        let (at, align) = if self.at_left {
+            (top.left_center(), Align2::LEFT_CENTER)
+        } else {
+            (top.center(), Align2::CENTER_CENTER)
+        };
+        ui.painter()
+            .text(at, align, self.name(), font(), theme.colors.text.0);
         Rect::from_min_max(pos2(self.rect.left(), top.bottom()), self.rect.max)
     }
 
     /// The name the control shows: its caption where the layout gives one.
-    pub(super) fn name(&self) -> &str {
+    pub(super) fn name(&self) -> std::borrow::Cow<'_, str> {
         self.caption
-            .unwrap_or_else(|| short_name(&self.descriptor.name))
+            .map_or_else(|| short_name(&self.descriptor.name), Into::into)
     }
 
     /// Whether the value is a lit (on) one of a switch.
@@ -112,8 +113,18 @@ impl Control<'_> {
     /// The lit arc runs in the accent from the knob's low end, or from zero on
     /// a range that spans it, where a notch marks the place (observed on
     /// Pitch and Chord).
-    pub(super) fn knob(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>, small: bool) {
-        let below = self.label(ui, theme);
+    pub(super) fn knob(
+        &self,
+        ui: &mut Ui,
+        theme: &Theme,
+        events: &mut Vec<UiEvent>,
+        (small, named): (bool, bool),
+    ) {
+        let below = if named {
+            self.label(ui, theme)
+        } else {
+            self.rect
+        };
         let value_row =
             Rect::from_min_max(pos2(below.left(), below.bottom() - LABEL_HEIGHT), below.max);
         let face = Rect::from_min_max(below.min, pos2(below.right(), value_row.top()));
@@ -205,9 +216,13 @@ impl Control<'_> {
         ui: &mut Ui,
         theme: &Theme,
         events: &mut Vec<UiEvent>,
-        (lit, marked): (bool, bool),
+        (lit, marked, named): (bool, bool, bool),
     ) {
-        let below = self.label(ui, theme);
+        let below = if named {
+            self.label(ui, theme)
+        } else {
+            self.rect
+        };
         let field = Rect::from_min_size(below.min, vec2(below.width(), BOX_HEIGHT));
         self.number_field(ui, theme, events, field, (lit, marked));
     }
@@ -614,6 +629,7 @@ impl Control<'_> {
         let look = if outlined { Look::Outlined } else { Look::Dark };
         let on = self.on();
         let name = self.name();
+        let name = &*name;
         let name = chars.map_or(name, |n| {
             name.char_indices()
                 .nth(n)
@@ -632,34 +648,125 @@ impl Control<'_> {
         self.describe_switch(ui, &response);
     }
 
-    /// A single button showing the chosen choice, lit: a click takes the next.
-    pub(super) fn cycle(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
-        let text = self.descriptor.format(self.value);
-        let response = self.button(
-            ui,
-            theme,
-            (self.rect, self.id()),
-            (
-                Look::Dark,
-                !matches!(self.descriptor.kind, bl_model::ParamKind::Toggle) || self.on(),
-            ),
-            Face::Text(&text),
+    /// A name and the value after it on one line, the value in blue, dragged
+    /// or typed like a box's.
+    pub(super) fn inline(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
+        let response = ui.interact(self.rect, self.id(), Sense::click_and_drag());
+        crate::focus::register(ui.ctx(), self.id(), bl_shell::Area::Detail, None);
+        self.value_input(ui, &response, events);
+        let c = &theme.colors;
+        let painter = ui.painter();
+        let name = self.name();
+        let width = text_width(painter, &name, c.text.0);
+        let left = pos2(self.rect.left(), self.rect.center().y);
+        painter.text(left, Align2::LEFT_CENTER, name, font(), c.text.0);
+        painter.text(
+            left + vec2(width + 5.0, 0.0),
+            Align2::LEFT_CENTER,
+            self.descriptor.format(self.shown()),
+            font(),
+            if self.enabled {
+                c.value_fill.0
+            } else {
+                super::highlight(theme, false)
+            },
+        );
+        focus_ring(ui, theme, self.rect, &response);
+        self.describe(ui, &response, Role::SpinButton);
+    }
+
+    /// The name over the value, both centred, or (`spread`) the name at the
+    /// left and the value at the right of one line; the value in blue,
+    /// dragged or typed like a box's.
+    pub(super) fn stacked(
+        &self,
+        ui: &mut Ui,
+        theme: &Theme,
+        events: &mut Vec<UiEvent>,
+        spread: bool,
+    ) {
+        let response = ui.interact(self.rect, self.id(), Sense::click_and_drag());
+        crate::focus::register(ui.ctx(), self.id(), bl_shell::Area::Detail, None);
+        self.value_input(ui, &response, events);
+        let c = &theme.colors;
+        let painter = ui.painter();
+        let value = self.descriptor.format(self.shown());
+        let ink = if self.enabled {
+            c.value_fill.0
+        } else {
+            super::highlight(theme, false)
+        };
+        if spread {
+            painter.text(
+                self.rect.left_center(),
+                Align2::LEFT_CENTER,
+                self.name(),
+                font(),
+                c.text_dim.0,
+            );
+            painter.text(
+                self.rect.right_center(),
+                Align2::RIGHT_CENTER,
+                value,
+                font(),
+                ink,
+            );
+        } else {
+            let half = self.rect.height() / 2.0;
+            let (top, bottom) = (
+                Rect::from_min_size(self.rect.min, vec2(self.rect.width(), half)),
+                Rect::from_min_size(
+                    pos2(self.rect.left(), self.rect.top() + half),
+                    vec2(self.rect.width(), half),
+                ),
+            );
+            painter.text(
+                top.center(),
+                Align2::CENTER_CENTER,
+                self.name(),
+                font(),
+                c.text.0,
+            );
+            painter.text(bottom.center(), Align2::CENTER_CENTER, value, font(), ink);
+        }
+        focus_ring(ui, theme, self.rect, &response);
+        self.describe(ui, &response, Role::SpinButton);
+    }
+
+    /// A small box, filled while on, with the name after it.
+    pub(super) fn tick(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
+        let on = self.on();
+        let response = ui.interact(self.rect, self.id(), Sense::click());
+        crate::focus::register(ui.ctx(), self.id(), bl_shell::Area::Detail, None);
+        let c = &theme.colors;
+        let painter = ui.painter();
+        let size = BOX_HEIGHT - 4.0;
+        let boxed = Rect::from_min_size(
+            pos2(self.rect.left(), self.rect.center().y - size / 2.0),
+            vec2(size, size),
+        );
+        if on {
+            painter.rect_filled(boxed, BOX_CORNER, c.value_fill.0);
+        } else {
+            painter.rect_stroke(
+                boxed,
+                BOX_CORNER,
+                Stroke::new(1.0, c.text.0),
+                StrokeKind::Inside,
+            );
+        }
+        painter.text(
+            pos2(boxed.right() + 4.0, self.rect.center().y),
+            Align2::LEFT_CENTER,
+            self.name(),
+            font(),
+            c.text.0,
         );
         if Self::chosen(ui, &response) {
-            let count = match &self.descriptor.kind {
-                bl_model::ParamKind::Choice { choices } => choices.len().max(1),
-                bl_model::ParamKind::Toggle => 2,
-                _ => 1,
-            };
-            self.change(((self.value.round() as usize + 1) % count) as f64, events);
+            self.change(if on { 0.0 } else { 1.0 }, events);
         }
-        let name = self.descriptor.name.clone();
-        response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &name));
-        ui.ctx().accesskit_node_builder(response.id, |node| {
-            node.set_role(Role::Button);
-            node.set_label(self.descriptor.name.clone());
-            node.set_value(text.clone());
-        });
+        focus_ring(ui, theme, self.rect, &response);
+        self.describe_switch(ui, &response);
     }
 
     /// An icon button or a round one: lit while on.
@@ -682,7 +789,7 @@ impl Control<'_> {
         } else if let Some(glyph) = glyph {
             Face::Glyph(glyph)
         } else {
-            Face::Text(self.name())
+            Face::Text(&self.name())
         };
         let response = self.button(ui, theme, (self.rect, self.id()), (Look::Dark, on), face);
         if Self::chosen(ui, &response) {
@@ -828,31 +935,34 @@ impl Control<'_> {
         self.describe(ui, &response, Role::SpinButton);
     }
 
-    /// The name and the value on one line, the value in the accent.
-    pub(super) fn inline(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
-        let response = ui.interact(self.rect, self.id(), Sense::click_and_drag());
-        crate::focus::register(ui.ctx(), self.id(), bl_shell::Area::Detail, None);
-        self.value_input(ui, &response, events);
-        let c = &theme.colors;
-        let painter = ui.painter();
-        let name = short_name(&self.descriptor.name);
-        let wide = text_width(painter, name, c.text_dim.0);
-        painter.text(
-            self.rect.left_center(),
-            Align2::LEFT_CENTER,
-            name,
-            font(),
-            c.text_dim.0,
+    /// A single button showing the chosen choice, lit: a click takes the next.
+    pub(super) fn cycle(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
+        let text = self.descriptor.format(self.value);
+        let response = self.button(
+            ui,
+            theme,
+            (self.rect, self.id()),
+            (
+                Look::Dark,
+                !matches!(self.descriptor.kind, bl_model::ParamKind::Toggle) || self.on(),
+            ),
+            Face::Text(&text),
         );
-        painter.text(
-            self.rect.left_center() + vec2(wide + 4.0, 0.0),
-            Align2::LEFT_CENTER,
-            self.descriptor.format(self.shown()),
-            font(),
-            self.lit(theme),
-        );
-        focus_ring(ui, theme, self.rect, &response);
-        self.describe(ui, &response, Role::SpinButton);
+        if Self::chosen(ui, &response) {
+            let count = match &self.descriptor.kind {
+                bl_model::ParamKind::Choice { choices } => choices.len().max(1),
+                bl_model::ParamKind::Toggle => 2,
+                _ => 1,
+            };
+            self.change(((self.value.round() as usize + 1) % count) as f64, events);
+        }
+        let name = self.descriptor.name.clone();
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &name));
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_role(Role::Button);
+            node.set_label(self.descriptor.name.clone());
+            node.set_value(text.clone());
+        });
     }
 
     /// The choices of a choice parameter as buttons in `cells`, the chosen
@@ -863,21 +973,40 @@ impl Control<'_> {
         ui: &mut Ui,
         theme: &Theme,
         events: &mut Vec<UiEvent>,
-        (cells, icons): (&[Rect], bool),
+        (cells, icons, outlined): (&[Rect], bool, bool),
     ) {
-        let bl_model::ParamKind::Choice { choices } = &self.descriptor.kind else {
-            return;
+        // A choice parameter's choices, or the numbers a whole-number
+        // parameter's buttons set: a button's name and the value it sets.
+        let buttons: Vec<(String, f64)> = match (&self.descriptor.kind, self.steps) {
+            (bl_model::ParamKind::Choice { choices }, Some(steps)) => steps
+                .iter()
+                .filter_map(|index| {
+                    let choice = choices.get(usize::try_from(*index).ok()?)?;
+                    Some((choice.clone(), f64::from(*index)))
+                })
+                .collect(),
+            (bl_model::ParamKind::Choice { choices }, None) => choices
+                .iter()
+                .enumerate()
+                .map(|(index, choice)| (choice.clone(), index as f64))
+                .collect(),
+            (bl_model::ParamKind::Integer { .. }, Some(steps)) => steps
+                .iter()
+                .map(|step| (step.to_string(), f64::from(*step)))
+                .collect(),
+            _ => return,
         };
-        for (index, (rect, choice)) in cells.iter().zip(choices).enumerate() {
-            let chosen = index as f64 == self.value;
-            let glyph = icons.then(|| filter_glyph(choice)).flatten();
+        let look = if outlined { Look::Outlined } else { Look::Dark };
+        for (index, (rect, (choice, set))) in cells.iter().zip(buttons).enumerate() {
+            let chosen = set == self.value;
+            let glyph = icons.then(|| filter_glyph(&choice)).flatten();
             let id = self.id().with(index);
-            let face = glyph.map_or(Face::Text(choice), Face::Glyph);
-            let response = self.button(ui, theme, (*rect, id), (Look::Dark, chosen), face);
+            let face = glyph.map_or(Face::Text(&choice), Face::Glyph);
+            let response = self.button(ui, theme, (*rect, id), (look, chosen), face);
             if Self::chosen(ui, &response) && !chosen {
-                self.change(index as f64, events);
+                self.change(set, events);
             }
-            let (name, choice) = (self.descriptor.name.clone(), choice.clone());
+            let name = self.descriptor.name.clone();
             response.widget_info(|| {
                 WidgetInfo::selected(
                     WidgetType::RadioButton,
@@ -976,6 +1105,14 @@ pub fn glyph_for(choice: &str) -> Option<Glyph> {
         Some(Glyph::BandPass)
     } else if name.contains("notch") || name == "n" {
         Some(Glyph::Notch)
+    } else if name == "record" {
+        Some(Glyph::Record)
+    } else if name == "overdub" {
+        Some(Glyph::Plus)
+    } else if name == "play" {
+        Some(Glyph::Play)
+    } else if name == "stop" {
+        Some(Glyph::Stop)
     } else if name == "sync" {
         Some(Glyph::Metronome)
     } else if name == "crossfade" {
@@ -1109,6 +1246,31 @@ pub fn paint_glyph(painter: &Painter, rect: Rect, glyph: Glyph, ink: Color32) {
                 line(&[(-0.6, y), (0.6, y)]);
             }
         }
+        Glyph::Link => {
+            // Two rings that overlap.
+            for x in [-0.35, 0.35] {
+                painter.rect_stroke(
+                    Rect::from_center_size(at(x, 0.0), vec2(s * 1.0, s * 0.8)),
+                    s * 0.4,
+                    stroke,
+                    StrokeKind::Inside,
+                );
+            }
+        }
+        Glyph::Freeze => {
+            // An asterisk of three crossing lines.
+            line(&[(0.0, -0.8), (0.0, 0.8)]);
+            line(&[(-0.7, -0.4), (0.7, 0.4)]);
+            line(&[(-0.7, 0.4), (0.7, -0.4)]);
+        }
+        Glyph::Record => {
+            painter.circle_filled(at(0.0, 0.0), s * 0.6, ink);
+        }
+        Glyph::Stop => fill(&[(-0.6, -0.6), (0.6, -0.6), (0.6, 0.6), (-0.6, 0.6)]),
+        Glyph::PhaseInvert => {
+            painter.circle_stroke(at(0.0, 0.0), s * 0.6, stroke);
+            line(&[(-0.7, 0.7), (0.7, -0.7)]);
+        }
         Glyph::FlatSharp => {
             // A flat, then a sharp.
             line(&[(-0.8, -0.8), (-0.8, 0.6)]);
@@ -1133,6 +1295,26 @@ pub fn paint_glyph(painter: &Painter, rect: Rect, glyph: Glyph, ink: Color32) {
             fill(&[(0.6, 0.1), (1.0, 0.1), (1.0, 0.7), (0.6, 0.7)]);
         }
     }
+}
+
+/// A line of text among the controls.
+pub(super) fn caption(
+    ui: &Ui,
+    theme: &Theme,
+    placed: &bl_model::device_layout::PlacedCaption,
+    origin: Pos2,
+) {
+    let rect = Rect::from_min_size(
+        origin + vec2(placed.rect.x, placed.rect.y),
+        vec2(placed.rect.width, placed.rect.height),
+    );
+    let (at, align) = if placed.centered {
+        (rect.center(), Align2::CENTER_CENTER)
+    } else {
+        (rect.left_center(), Align2::LEFT_CENTER)
+    };
+    ui.painter()
+        .text(at, align, &placed.text, font(), theme.colors.text.0);
 }
 
 /// A band's text label, centred in its place.
@@ -1401,6 +1583,8 @@ pub(super) fn plain_control<'a>(
         under: None,
         automation: None,
         coarse: 1,
+        steps: None,
+        at_left: false,
         unnamed: false,
         caption: None,
     }

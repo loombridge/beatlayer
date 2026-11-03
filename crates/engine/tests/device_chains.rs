@@ -117,6 +117,7 @@ fn a_chain_edit_makes_only_the_nodes_it_adds() {
             shape: None,
             mpe: None,
             similarity_reference: None,
+            patch: None,
         },
     ] {
         let synced = rig.apply(command.clone());

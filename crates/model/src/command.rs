@@ -1932,6 +1932,10 @@ pub enum Command {
         /// its preset holds; `null` to keep the one the device has.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         similarity_reference: Option<ContentHash>,
+        /// A Modular's patch (the modular device spec, R8), which its preset
+        /// holds; `null` to keep the one the device has.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        patch: Option<crate::modular::Patch>,
     },
     /// Switches a plug-in device's MPE Mode (the MPE spec, R14): on, the
     /// plug-in gets each note's pitch, slide and pressure as its format takes
@@ -5188,8 +5192,12 @@ impl Document {
                 routes,
                 mpe,
                 similarity_reference,
+                patch,
             } => {
                 let mut loaded = self.device_ref(*device)?.clone();
+                if patch.is_some() && loaded.patch.is_some() {
+                    loaded.patch.clone_from(patch);
+                }
                 if similarity_reference.is_some() {
                     loaded.similarity_reference = *similarity_reference;
                 }
@@ -12736,6 +12744,7 @@ mod tests {
             routes: None,
             mpe: None,
             similarity_reference: None,
+            patch: None,
         })
         .unwrap();
         let loaded = song.doc.device(device).unwrap();
@@ -12752,6 +12761,7 @@ mod tests {
                 routes: None,
                 mpe: None,
                 similarity_reference: None,
+                patch: None,
             }),
             ModelError::InvalidValue { .. }
         ));
@@ -15039,6 +15049,7 @@ mod tests {
             routes: None,
             mpe: None,
             similarity_reference: None,
+            patch: None,
         })
         .unwrap();
         let d = song.doc.device(device).unwrap();

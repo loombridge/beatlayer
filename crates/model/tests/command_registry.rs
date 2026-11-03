@@ -3917,6 +3917,7 @@ fn schemas_match_what_commands_serialise() {
                 shape: None,
                 mpe: None,
                 similarity_reference: None,
+                patch: None,
             },
         ),
         (

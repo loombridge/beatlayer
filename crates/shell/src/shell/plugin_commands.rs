@@ -1042,6 +1042,7 @@ impl Shell {
                         routes: None,
                         mpe: None,
                         similarity_reference: None,
+                        patch: None,
                     })
                     .map(|_| ())
                     .map_err(|e| failed(e.to_string()))

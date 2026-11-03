@@ -1160,6 +1160,49 @@ fn lfo_reset_restarts_the_lfo_at_each_onset() {
     );
 }
 
+// Spec: auto-shift R12. In the MIDI tab a note-on restarts the LFO only with
+// LFO Reset on.
+#[test]
+fn a_midi_note_restarts_the_lfo_only_with_lfo_reset() {
+    let input = held(48.0, 110_000);
+    let (first_on, second_on) = (10_000, 91_600);
+    let notes = [
+        on(first_on, 48),
+        off(60_000, 48),
+        on(second_on, 48),
+        off(108_000, 48),
+    ];
+    let at_notes = |reset: f64| {
+        let mut rig = Rig::new(&[
+            (MIDI_ON, 1.0),
+            (ATTACK, 0.0),
+            (RELEASE, 0.0),
+            (LFO_PITCH, 50.0),
+            (LFO_RATE, 1_200.0),
+            (LFO_RESET, reset),
+        ]);
+        let latency = rig.latency();
+        let out = rig
+            .render(&input, 512, &[], &notes, |_| Scale::default())
+            .swap_remove(0);
+        let note = |from: usize| {
+            let f = pitch_between(&out, from + latency + 6_000, from + latency + 9_600);
+            cents(f, hz(48.0))
+        };
+        (note(first_on), note(second_on))
+    };
+    let (first, second) = at_notes(1.0);
+    assert!(
+        (first - second).abs() < 120.0,
+        "with Reset the two notes start alike: {first:.0} and {second:.0}"
+    );
+    let (first, second) = at_notes(0.0);
+    assert!(
+        (first - second).abs() > 400.0,
+        "without it the LFO runs on: {first:.0} and {second:.0}"
+    );
+}
+
 // Spec: auto-shift R12. The LFO's Volume depth moves the level.
 #[test]
 fn the_lfo_s_volume_depth_tremolos_the_voice() {

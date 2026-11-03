@@ -1211,7 +1211,7 @@ impl AutoShift {
             ..Note::IDLE
         };
         self.next_age += 1;
-        self.restart();
+        self.restart(set.reset);
         let pitch = f64::from(event.key);
         if !set.poly {
             if self.held_len == HELD_KEYS {
@@ -1284,12 +1284,15 @@ impl AutoShift {
         }
     }
 
-    /// An onset: the LFO and the vibrato start over (R12, R14).
-    fn restart(&mut self) {
+    /// An onset: the vibrato starts over, and the LFO with LFO Reset on (R12,
+    /// R14).
+    fn restart(&mut self, lfo: bool) {
         self.vibrato_age = 0;
-        self.lfo_age = 0;
-        self.lfo.restart();
-        self.lamp = (LAMP_SECONDS * self.rate) as u32;
+        if lfo {
+            self.lfo_age = 0;
+            self.lfo.restart();
+            self.lamp = (LAMP_SECONDS * self.rate) as u32;
+        }
     }
 
     /// The mask of the notes the Quantizer corrects to at this sample.
@@ -1678,12 +1681,7 @@ impl NativeDevice for AutoShift {
                 self.aimed = true;
             }
             if onset && !set.midi {
-                self.vibrato_age = 0;
-                if set.reset {
-                    self.lfo_age = 0;
-                    self.lfo.restart();
-                    self.lamp = (LAMP_SECONDS * rate) as u32;
-                }
+                self.restart(set.reset);
             }
 
             // What the voices make, from a latency ago: each one's level and

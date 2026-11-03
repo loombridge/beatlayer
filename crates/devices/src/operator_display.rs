@@ -137,9 +137,9 @@ fn algorithm_readings(algorithm: usize) -> Vec<DisplayReading> {
         unit: String::new(),
         text: format!("{}", algorithm + 1),
     }];
-    for op in 0..OPERATORS {
+    for (op, modulated_by) in modulators.into_iter().enumerate() {
         let by: Vec<&str> = (0..OPERATORS)
-            .filter(|m| modulators[op] >> m & 1 == 1)
+            .filter(|m| modulated_by >> m & 1 == 1)
             .map(letter)
             .collect();
         let role = if carriers >> op & 1 == 1 {
@@ -152,7 +152,7 @@ fn algorithm_readings(algorithm: usize) -> Vec<DisplayReading> {
             value: by.len() as f32,
             unit: String::new(),
             text: if by.is_empty() {
-                format!("{role}")
+                role.to_owned()
             } else {
                 format!("{role}, modulated by {}", by.join(" and "))
             },

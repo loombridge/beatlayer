@@ -1712,7 +1712,7 @@ fn each_global_target_moves_its_destination_by_its_amount() {
     // Mod Wheel to Volume (19): a wheel at 0.5 with -100 % halves the output.
     let volume = |wheel, amount| {
         let signal = run(
-            patch(&target(4, 19, amount).to_vec()),
+            patch(&target(4, 19, amount)),
             vec![controller(1, wheel), on(0, A3, 0.8)],
         )
         .left(48_000);

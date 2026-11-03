@@ -127,7 +127,10 @@ fn part_twos_controls_and_partial_edits_during_playback_pass_under_rtsan() {
             7 => Some(set(op::FILTER_CIRCUIT, (step % 5) as f64)),
             8 => Some(set(op::SHAPER_TYPE, (step % 5) as f64)),
             9 => Some(set(SPREAD, (step % 4) as f64 * 33.0)),
-            10 => Some(set(target_dest(step % 5, step % 2 == 0), (step % 23) as f64)),
+            10 => Some(set(
+                target_dest(step % 5, step % 2 == 0),
+                (step % 23) as f64,
+            )),
             11 => Some(set(osc(0, ENV_LOOP), (step % 5) as f64)),
             // Partials drawn while notes play swap a table in.
             12 => Some(Command::SetPartials {

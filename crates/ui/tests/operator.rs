@@ -237,13 +237,8 @@ fn dragging_across_the_partials_sets_each_one_to_the_height_as_one_undo_step() {
     drag(&mut h, &[at(2, 0.7), at(3, 0.7), at(4, 0.7), at(5, 0.7)]);
     let levels = drawn_partials(&h, device).expect("a drawn wave");
     assert_eq!(levels.len(), 16);
-    for k in 1..5 {
-        assert!(
-            (levels[k] - 0.7).abs() < 0.05,
-            "partial {}: {}",
-            k + 1,
-            levels[k]
-        );
+    for (k, level) in levels.iter().enumerate().take(5).skip(1) {
+        assert!((level - 0.7).abs() < 0.05, "partial {}: {level}", k + 1);
     }
     assert_eq!(levels[0], 1.0, "the first partial is as it was");
     assert_eq!(levels[8], 0.0);

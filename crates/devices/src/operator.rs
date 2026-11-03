@@ -1882,8 +1882,8 @@ impl Synth {
                 e[self.destination] += second;
                 e[lfo.dest_b] += lfo_value * lfo.amount_b;
                 let mut scale = [1.0f32; OPERATORS];
-                for op in 0..OPERATORS {
-                    if lfo.to[op] {
+                for (scale, to) in scale.iter_mut().zip(lfo.to) {
+                    if to {
                         // Tremolo: the level swings between its whole and
                         // none, by the LFO's depth and Amount A.
                         let high = (wave + 1.0) / 2.0;
@@ -1892,7 +1892,7 @@ impl Synth {
                         } else {
                             1.0 - high
                         };
-                        scale[op] = 1.0 - depth.abs() * lfo.amount_a.abs() * (1.0 - high);
+                        *scale = 1.0 - depth.abs() * lfo.amount_a.abs() * (1.0 - high);
                     }
                 }
                 // Osc Crossfade moves level from the first to the second.

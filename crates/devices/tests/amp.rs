@@ -19,6 +19,8 @@ use bl_engine::{Node, Registry};
 use bl_model::ParamId;
 
 const HI: f64 = 4.0 * 48_000.0;
+/// The lowest Gain that isn't muted (rule R5's mute fades in over 0 to 0.05).
+const LOWEST_GAIN: f64 = 0.05;
 /// The oversampler's latency, in frames at the sample rate.
 const LATENCY: usize = 48;
 
@@ -236,9 +238,14 @@ fn active_sections((bass, middle, treble): (f64, f64, f64)) -> [([f64; 3], [f64;
     ]
 }
 
+/// How many of each model's last preamp stages average their curve over each
+/// step (rule R11): in the small-signal range each is the filter
+/// (1 + z⁻¹) / 2 at the 4 times rate.
+const AVERAGED: [usize; 7] = [0, 1, 1, 0, 0, 3, 1];
+
 /// The design response of a model's whole small-signal chain at `hz`, in
-/// dB: its tone stack at knobs 0 to 10 and the high-passes (the 20 Hz ones
-/// between stages, the two 5 Hz ones).
+/// dB: its tone stack at knobs 0 to 10, the high-passes (the 20 Hz ones
+/// between stages, the two 5 Hz ones) and the averaging stages' roll-off.
 fn design_db(model: usize, knobs: (f64, f64, f64), hz: f64) -> f64 {
     let (stages, _, _, _, stack, _) = ROWS[model];
     let high_pass = |corner: f64| db(hz / hz.hypot(corner));
@@ -249,7 +256,11 @@ fn design_db(model: usize, knobs: (f64, f64, f64), hz: f64) -> f64 {
             .map(|s| biquad_db(*s, hz, HI))
             .sum(),
     };
-    stack_db + (stages - 1) as f64 * high_pass(20.0) + 2.0 * high_pass(5.0)
+    let average = db((std::f64::consts::PI * hz / HI).cos());
+    stack_db
+        + (stages - 1) as f64 * high_pass(20.0)
+        + 2.0 * high_pass(5.0)
+        + AVERAGED[model] as f64 * average
 }
 
 /// The device's response at `hz` from an impulse response, in dB.
@@ -372,7 +383,7 @@ fn each_models_tone_stack_follows_its_design_at_nine_knob_settings() {
         for knobs in settings {
             let ir = small_signal(&[
                 (MODEL, model as f64),
-                (GAIN, 0.0),
+                (GAIN, LOWEST_GAIN),
                 (BASS, knobs.0),
                 (MIDDLE, knobs.1),
                 (TREBLE, knobs.2),
@@ -619,7 +630,7 @@ fn each_models_second_and_third_harmonic_follow_the_design() {
 #[test]
 fn no_model_leaves_dc_above_minus_80_dbfs() {
     for model in 0..7 {
-        for gain in [0.0, 10.0] {
+        for gain in [LOWEST_GAIN, 10.0] {
             let tail = device_tail(model, &[(GAIN, gain)]);
             let mean: f64 = tail.iter().map(|s| f64::from(*s)).sum::<f64>() / tail.len() as f64;
             assert!(
@@ -639,7 +650,7 @@ fn sag_follows_the_power_stage_envelope() {
     let model = 2;
     let level = |tail: &[f32]| db(magnitude(tail, 1_000));
     let frames = 144_000;
-    let params = [(MODEL, model as f64), (GAIN, 3.0), (VOLUME, 1.0)];
+    let params = [(MODEL, model as f64), (GAIN, 3.0), (VOLUME, 9.0)];
     let out = run(
         amp(&params, frames).as_mut(),
         &sine(1_000.0, 0.3, frames),
@@ -668,36 +679,44 @@ fn sag_follows_the_power_stage_envelope() {
 
 // Spec: amp R8
 #[test]
-fn volume_at_minus_infinity_is_silent_and_a_clean_signal_keeps_its_level() {
+fn volume_at_zero_is_silent_and_a_clean_signal_keeps_its_level() {
     let input = sine(1_000.0, 0.03, 48_000);
     let silent = run(
-        amp(&[(MODEL, 0.0), (GAIN, 0.0), (VOLUME, 0.0)], 48_000).as_mut(),
+        amp(&[(MODEL, 0.0), (GAIN, LOWEST_GAIN), (VOLUME, 0.0)], 48_000).as_mut(),
         &input,
         &[],
     );
     assert!(silent[0].iter().all(|s| *s == 0.0));
-    let level = |volume_db: f64| {
-        let volume = 10f64.powf(volume_db / 20.0);
+    // Volume 9 is 0 dB into the power stage, and each unit is 6 dB.
+    let level = |volume: f64| {
         let out = run(
-            amp(&[(MODEL, 0.0), (GAIN, 0.0), (VOLUME, volume)], 48_000).as_mut(),
+            amp(
+                &[(MODEL, 0.0), (GAIN, LOWEST_GAIN), (VOLUME, volume)],
+                48_000,
+            )
+            .as_mut(),
             &input,
             &[],
         );
         db(rms(&out[0][24_000..]))
     };
-    let reference = level(0.0);
-    for volume_db in [-40.0, -24.0, -12.0, -6.0, 6.0, 12.0] {
-        let l = level(volume_db);
+    let reference = level(9.0);
+    for volume in [2.4, 5.0, 7.0, 8.0, 10.0] {
+        let l = level(volume);
         assert!(
             (l - reference).abs() < 1.0,
-            "Volume {volume_db} dB: {l:.2} against {reference:.2}"
+            "Volume {volume}: {l:.2} against {reference:.2}"
         );
     }
     // Driven harder, a loud signal distorts more.
     let loud = sine(1_000.0, 0.5, 72_000);
     let distortion = |volume: f64| {
         let out = run(
-            amp(&[(MODEL, 0.0), (GAIN, 0.0), (VOLUME, volume)], 72_000).as_mut(),
+            amp(
+                &[(MODEL, 0.0), (GAIN, LOWEST_GAIN), (VOLUME, volume)],
+                72_000,
+            )
+            .as_mut(),
             &loud,
             &[],
         );
@@ -705,7 +724,30 @@ fn volume_at_minus_infinity_is_silent_and_a_clean_signal_keeps_its_level() {
         let harmonics: f64 = (2..=9).map(|h| magnitude(tail, h * 1_000).powi(2)).sum();
         10.0 * (harmonics / magnitude(tail, 1_000).powi(2)).log10()
     };
-    assert!(distortion(4.0) > distortion(0.25) + 1.0);
+    assert!(distortion(10.0) > distortion(7.0) + 1.0);
+}
+
+// Spec: amp R5
+#[test]
+fn gain_at_zero_silences_every_model_and_comes_back_at_the_next_value() {
+    let input = sine(220.0, 0.2512, 24_000);
+    for model in 0..7 {
+        let at = |gain: f64| {
+            run(
+                amp(&[(MODEL, f64::from(model)), (GAIN, gain)], 24_000).as_mut(),
+                &input,
+                &[],
+            )
+        };
+        assert!(
+            at(0.0)[0].iter().all(|s| *s == 0.0),
+            "model {model} at Gain 0"
+        );
+        assert!(
+            rms(&at(0.5)[0][12_000..]) > 1e-3,
+            "model {model} at Gain 0.5"
+        );
+    }
 }
 
 /// Runs `left` and `right` through an Amp of `params`, `block` frames at a
@@ -792,24 +834,82 @@ fn every_model_reports_the_same_latency_and_dry_wet_aligns_the_dry_signal() {
     }
 }
 
+/// Live's aliasing at Gain 10 for each model, in dB below the fundamental:
+/// a 5 kHz sine at -12 dBFS at 44.1 kHz, the strongest line below 20 kHz
+/// that isn't DC or a harmonic of 5 kHz, through a Blackman-Harris window.
+const ALIASING_LIMITS: [f64; 7] = [-37.0, -37.3, -38.0, -28.3, -23.9, -32.3, -35.6];
+
+/// The worst alias of a 5 kHz sine through `model` at `gain`, in dB below
+/// the fundamental.
+fn worst_alias(model: usize, gain: f64) -> f64 {
+    use bl_core::time::SampleRate;
+    use bl_engine::{Block, NodeConfig, TransportInfo};
+    use realfft::RealFftPlanner;
+
+    let rate = SampleRate::HZ_44100;
+    let frames = 88_200;
+    let device = device(&amp_type(), &[(MODEL, model as f64), (GAIN, gain)]);
+    let mut node = registry()
+        .create(
+            &device,
+            &NodeConfig {
+                round_trip_latency: 0,
+                sample_rate: rate,
+                max_frames: frames,
+                channels: 2,
+            },
+        )
+        .expect("the registry makes Amp");
+    let tone: Vec<f32> = (0..frames)
+        .map(|i| (0.2512 * (TAU * 5_000.0 * i as f64 / 44_100.0).sin()) as f32)
+        .collect();
+    let mut data: Vec<f32> = tone.iter().chain(&tone).copied().collect();
+    {
+        let mut block = Block::new(
+            &mut data,
+            2,
+            frames,
+            frames,
+            &[],
+            TransportInfo::default(),
+            rate,
+        );
+        bl_rt::rt_test!({ node.process(&mut block) });
+    }
+    // The last half second: 2 Hz bins, so 5 kHz is bin 2,500.
+    let n = 22_050;
+    let window: Vec<f64> = (0..n)
+        .map(|i| {
+            let x = TAU * i as f64 / n as f64;
+            0.35875 - 0.48829 * x.cos() + 0.14128 * (2.0 * x).cos() - 0.01168 * (3.0 * x).cos()
+        })
+        .collect();
+    let mut input: Vec<f64> = data[frames - n..frames]
+        .iter()
+        .zip(&window)
+        .map(|(s, w)| f64::from(*s) * w)
+        .collect();
+    let fft = RealFftPlanner::<f64>::new().plan_fft_forward(n);
+    let mut spectrum = fft.make_output_vec();
+    fft.process(&mut input, &mut spectrum).unwrap();
+    let fundamental = spectrum[2_500].norm();
+    // The window's main lobe is 4 bins to a side.
+    let worst = (0..10_000)
+        .filter(|bin| bin % 2_500 > 4 && bin % 2_500 < 2_496)
+        .map(|bin| spectrum[bin].norm())
+        .fold(0.0, f64::max);
+    db(worst / fundamental)
+}
+
 // Spec: amp R11
 #[test]
-fn aliasing_from_a_5_khz_sine_at_gain_10_stays_70_db_below_the_fundamental() {
-    for model in 0..7 {
-        let frames = 96_000;
-        let out = run(
-            amp(&[(MODEL, model as f64), (GAIN, 10.0)], frames).as_mut(),
-            &sine(5_000.0, 0.2512, frames),
-            &[],
+fn aliasing_from_a_5_khz_sine_at_gain_10_is_no_worse_than_lives() {
+    let aliases: Vec<f64> = (0..7).map(|model| worst_alias(model, 10.0)).collect();
+    for (model, (alias, limit)) in aliases.iter().zip(ALIASING_LIMITS).enumerate() {
+        assert!(
+            *alias <= limit,
+            "model {model}: {alias:.1} dB against {limit} dB; {aliases:.1?}"
         );
-        let tail = &out[0][frames - 48_000..];
-        let fundamental = magnitude(tail, 5_000);
-        // The folded harmonics land on whole kHz that aren't harmonics of
-        // 5 kHz, below 20 kHz.
-        for khz in (1..20).filter(|k| k % 5 != 0) {
-            let alias = db(magnitude(tail, khz * 1_000) / fundamental);
-            assert!(alias < -70.0, "model {model}: {alias:.1} dB at {khz} kHz");
-        }
     }
 }
 
@@ -824,7 +924,7 @@ fn renders_are_bit_identical_at_any_block_size() {
         (BASS, 3.0),
         (TREBLE, 8.0),
         (PRESENCE, 7.0),
-        (VOLUME, 2.0),
+        (VOLUME, 10.0),
         (DRY_WET, 80.0),
         (OUTPUT, 1.0),
     ];

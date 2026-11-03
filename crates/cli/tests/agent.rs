@@ -6012,11 +6012,14 @@ fn an_agent_adds_sets_and_reads_amp_by_id_and_reopens_it() {
             .unwrap_or_else(|| panic!("no {name}"))["value"]
             .clone()
     };
-    assert_eq!(parameters(&mut client).as_array().unwrap().len(), 9);
+    let defaults = parameters(&mut client);
+    assert_eq!(defaults.as_array().unwrap().len(), 9);
+    assert_eq!(value_of(&defaults, "Volume"), json!(9.0));
     for (param, value) in [
         (amp::MODEL, 5.0),
         (amp::GAIN, 8.0),
         (amp::TREBLE, 2.5),
+        (amp::VOLUME, 7.5),
         (amp::OUTPUT, 1.0),
     ] {
         call(
@@ -6032,6 +6035,7 @@ fn an_agent_adds_sets_and_reads_amp_by_id_and_reopens_it() {
     assert_eq!(value_of(&params, "Model"), json!(5.0));
     assert_eq!(value_of(&params, "Gain"), json!(8.0));
     assert_eq!(value_of(&params, "Treble"), json!(2.5));
+    assert_eq!(value_of(&params, "Volume"), json!(7.5));
     assert_eq!(value_of(&params, "Output"), json!(1.0));
 
     let saved = call(
@@ -6052,6 +6056,7 @@ fn an_agent_adds_sets_and_reads_amp_by_id_and_reopens_it() {
     assert_eq!(reopened.params[&amp::MODEL], 5.0);
     assert_eq!(reopened.params[&amp::GAIN], 8.0);
     assert_eq!(reopened.params[&amp::TREBLE], 2.5);
+    assert_eq!(reopened.params[&amp::VOLUME], 7.5);
     assert_eq!(reopened.params[&amp::OUTPUT], 1.0);
 }
 

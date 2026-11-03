@@ -8,6 +8,8 @@
 //! 2006) discretised by the bilinear transform; the Bass model's stack is
 //! three cookbook filters. Every value and every voicing is Beatlayer's own.
 
+use std::sync::OnceLock;
+
 use bl_dsp::{EnvelopeFollower, Oversampler};
 use bl_engine::{DeviceType, NodeConfig, Registry};
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, LayoutNode, Widget};
@@ -33,7 +35,7 @@ pub const MIDDLE: ParamId = ParamId(3);
 pub const TREBLE: ParamId = ParamId(4);
 /// Presence, 0 to 10: the power stage's high shelf.
 pub const PRESENCE: ParamId = ParamId(5);
-/// Volume: how hard the power stage is driven, as a gain.
+/// Volume, 0 to 10: how hard the power stage is driven.
 pub const VOLUME: ParamId = ParamId(6);
 /// Dry/Wet, per cent.
 pub const DRY_WET: ParamId = ParamId(7);
@@ -46,6 +48,8 @@ pub const MODELS: [&str; 7] = ["Clean", "Boost", "Blues", "Rock", "Lead", "Heavy
 /// The oversampler's stages: 4 times the rate, fixed, so a render doesn't
 /// depend on the block size or the model.
 const STAGES: u32 = 2;
+/// Samples the amp runs per frame.
+const FACTOR: usize = 1 << STAGES;
 /// Frames between coefficient updates, counted from the device's first
 /// frame, so a render doesn't depend on its block size.
 const REFRESH_FRAMES: u64 = 16;
@@ -62,6 +66,11 @@ const PRESENCE_HZ: f64 = 3_000.0;
 const PRESENCE_DB: (f64, f64) = (-6.0, 9.0);
 /// The sag follower's attack and release time constants, in seconds.
 const SAG_SECONDS: (f64, f64) = (0.03, 0.3);
+/// Volume's gain is 0 dB at knob 9, and this many dB per knob unit.
+const VOLUME_DB_PER_UNIT: f64 = 6.0;
+/// Gain and Volume at 0 are silent: below this knob value the output fades
+/// to nothing, so the change doesn't click.
+const MUTE_BELOW: f64 = 0.05;
 /// Volume's scale-back stops at this gain: below it the output falls to
 /// silence with Volume (rule G1), above it a clean signal keeps its level.
 const VOLUME_FLOOR: f64 = 0.01;
@@ -84,6 +93,10 @@ struct Spec {
     stack: Option<[f64; 6]>,
     /// The share the power stage's drive falls by at full output.
     sag: f64,
+    /// How many of the preamp's last stages average their curve over each
+    /// step (see [`triode_averaged`]): as many as the model's aliasing at
+    /// Gain 10 needs, since each takes a little off the top end.
+    averaged: usize,
 }
 
 const fn passive(r: [f64; 3], c: [f64; 3]) -> Option<[f64; 6]> {
@@ -104,6 +117,7 @@ const SPECS: [Spec; 7] = [
         beta: 0.05,
         stack: passive([250.0, 1000.0, 25.0], [0.25, 20.0, 20.0]),
         sag: 0.05,
+        averaged: 0,
     },
     Spec {
         stages: 2,
@@ -111,6 +125,7 @@ const SPECS: [Spec; 7] = [
         beta: 0.1,
         stack: passive([220.0, 1000.0, 22.0], [0.47, 22.0, 22.0]),
         sag: 0.1,
+        averaged: 1,
     },
     Spec {
         stages: 2,
@@ -118,6 +133,7 @@ const SPECS: [Spec; 7] = [
         beta: 0.15,
         stack: passive([250.0, 250.0, 56.0], [0.25, 20.0, 20.0]),
         sag: 0.2,
+        averaged: 1,
     },
     Spec {
         stages: 3,
@@ -125,6 +141,7 @@ const SPECS: [Spec; 7] = [
         beta: 0.1,
         stack: passive([220.0, 1000.0, 33.0], [0.47, 22.0, 22.0]),
         sag: 0.15,
+        averaged: 0,
     },
     Spec {
         stages: 3,
@@ -132,6 +149,7 @@ const SPECS: [Spec; 7] = [
         beta: 0.2,
         stack: passive([250.0, 1000.0, 33.0], [0.47, 47.0, 22.0]),
         sag: 0.15,
+        averaged: 0,
     },
     Spec {
         stages: 4,
@@ -139,6 +157,7 @@ const SPECS: [Spec; 7] = [
         beta: 0.2,
         stack: passive([220.0, 1000.0, 47.0], [0.68, 47.0, 47.0]),
         sag: 0.1,
+        averaged: 3,
     },
     Spec {
         stages: 2,
@@ -146,6 +165,7 @@ const SPECS: [Spec; 7] = [
         beta: 0.05,
         stack: None,
         sag: 0.2,
+        averaged: 1,
     },
 ];
 
@@ -160,6 +180,75 @@ pub fn triode(x: f64) -> f64 {
     } else {
         1.2 * (x / 1.2).tanh() - 0.08 * x * x / (1.0 + x * x)
     }
+}
+
+/// The triode curve's antiderivative from 0, for the anti-aliased stages.
+/// The positive branch has none in closed form, so it is tabulated at
+/// [`TABLE_STEP`] and read by cubic Hermite interpolation, whose slope is the
+/// curve itself.
+const TABLE_STEP: f64 = 1.0 / 16.0;
+const TABLE_LEN: usize = 8192;
+
+/// The antiderivative at each table point, and the curve there.
+static TABLE: OnceLock<Vec<[f64; 2]>> = OnceLock::new();
+
+fn table() -> &'static [[f64; 2]] {
+    TABLE.get_or_init(|| {
+        let mut sum = 0.0;
+        (0..TABLE_LEN)
+            .map(|i| {
+                let x = i as f64 * TABLE_STEP;
+                if i > 0 {
+                    // Simpson's rule over the step, which is exact enough that the
+                    // table's slope error stays below 1e-5.
+                    sum += TABLE_STEP / 6.0
+                        * (triode(x - TABLE_STEP) + 4.0 * triode(x - 0.5 * TABLE_STEP) + triode(x));
+                }
+                [sum, triode(x)]
+            })
+            .collect()
+    })
+}
+
+fn triode_integral(x: f64) -> f64 {
+    if x < 0.0 {
+        return 1.44 * ln_cosh(x / 1.2) - 0.08 * (x - x.atan());
+    }
+    let table = table();
+    let at = x / TABLE_STEP;
+    let i = at as usize;
+    if i + 1 >= TABLE_LEN {
+        let [f, t] = table[TABLE_LEN - 1];
+        return f + t * (x - (TABLE_LEN - 1) as f64 * TABLE_STEP);
+    }
+    let ([f0, t0], [f1, t1]) = (table[i], table[i + 1]);
+    let (u, h) = (at - i as f64, TABLE_STEP);
+    let (u2, u3) = (u * u, u * u * u);
+    (2.0 * u3 - 3.0 * u2 + 1.0) * f0
+        + (u3 - 2.0 * u2 + u) * h * t0
+        + (-2.0 * u3 + 3.0 * u2) * f1
+        + (u3 - u2) * h * t1
+}
+
+/// The triode curve averaged over the step from `last` to `x` (first-order
+/// antiderivative anti-aliasing), which keeps a hard-driven stage's fold-over
+/// down.
+#[inline]
+fn triode_averaged(x: f64, last: f64) -> f64 {
+    let step = x - last;
+    // Below this step the midpoint is as good as the average and the table's
+    // slope error (about 1e-6) would show against a small signal.
+    if step.abs() < 1e-3 {
+        triode(0.5 * (x + last))
+    } else {
+        (triode_integral(x) - triode_integral(last)) / step
+    }
+}
+
+/// ln cosh x, the antiderivative of tanh, without overflow.
+fn ln_cosh(x: f64) -> f64 {
+    let x = x.abs();
+    x + (-2.0 * x).exp().ln_1p() - std::f64::consts::LN_2
 }
 
 /// A value far below the audio's noise floor is left as zero rather than as
@@ -321,6 +410,15 @@ fn passive_stack(values: &[f64; 6], bass: f64, middle: f64, treble: f64, rate: f
     }
 }
 
+/// The power stage's gain at Volume knob position `volume`.
+fn volume_gain(volume: f64) -> f64 {
+    if volume <= 0.0 {
+        0.0
+    } else {
+        10f64.powf(VOLUME_DB_PER_UNIT * (volume - 9.0) / 20.0)
+    }
+}
+
 /// The Presence shelf's gain at `presence`, in dB.
 fn presence_db(presence: f64) -> f64 {
     PRESENCE_DB.0 + (PRESENCE_DB.1 - PRESENCE_DB.0) * presence / 10.0
@@ -342,7 +440,7 @@ pub fn amp_type() -> DeviceType {
         knob(TREBLE, "Treble", 5.0).describe("The tone stack's high end."),
         knob(PRESENCE, "Presence", 5.0)
             .describe("Brightens or darkens the top end in the power stage."),
-        ParamDescriptor::gain(VOLUME, "Volume", 12.0, 0.0).describe(
+        knob(VOLUME, "Volume", 9.0).describe(
             "How hard the power stage is driven; a clean signal keeps its level. At the bottom \
              the amp is silent.",
         ),
@@ -394,6 +492,7 @@ pub fn register(registry: &mut Registry) {
 /// size. Every buffer is made here, off the audio thread.
 #[must_use]
 pub fn make(device: &Device, config: &NodeConfig) -> Amp {
+    table();
     Amp::new(device, config)
 }
 
@@ -404,6 +503,8 @@ struct Frame {
     /// The power stage's drive before sag, and its scale-back.
     volume: f64,
     comp: f64,
+    /// The output's level: 0 while Gain is 0.
+    mute: f64,
 }
 
 /// One model's chain on one channel, at 4 times the rate.
@@ -421,6 +522,8 @@ struct Voice {
     follower: EnvelopeFollower,
     /// The sag follower's level.
     sag: f64,
+    /// The preamp stages' last inputs.
+    inputs: [f64; 4],
     /// Whether its filters wait for a design from the knobs.
     fresh: bool,
     rate: f64,
@@ -439,6 +542,7 @@ impl Voice {
             presence: Iir::PASS,
             follower,
             sag: 0.0,
+            inputs: [SPECS[model].beta; 4],
             fresh: true,
             rate,
         }
@@ -484,7 +588,13 @@ impl Voice {
         let bias = triode(spec.beta);
         let mut u = x;
         for stage in 0..spec.stages {
-            u = triode(frame.k * u + spec.beta) - bias;
+            let x = frame.k * u + spec.beta;
+            u = if stage + spec.averaged >= spec.stages {
+                triode_averaged(x, self.inputs[stage])
+            } else {
+                triode(x)
+            } - bias;
+            self.inputs[stage] = x;
             if stage + 1 < spec.stages {
                 u = self.coupling[stage].process(u);
             }
@@ -497,7 +607,7 @@ impl Voice {
         let drive = frame.volume * (1.0 - spec.sag * self.sag.min(1.0));
         let y = (drive * u).tanh();
         self.sag = self.follower.process(y as f32);
-        self.dc[1].process(y * frame.comp)
+        self.dc[1].process(y * frame.comp) * frame.mute
     }
 }
 
@@ -508,7 +618,6 @@ struct Run<'a> {
     fade_done: u64,
     fade_frames: u64,
     active: usize,
-    factor: usize,
     gain: &'a [f32],
     bass: &'a [f32],
     middle: &'a [f32],
@@ -521,7 +630,7 @@ impl Run<'_> {
     /// Runs `voices` over `high`, the channel at 4 times the rate, from base
     /// frame `first` of the stretch.
     fn channel(&self, voices: &mut [Voice; 2], high: &mut [f32], first: usize) {
-        for (j, quad) in high.chunks_exact_mut(self.factor).enumerate() {
+        for (j, quad) in high.chunks_exact_mut(FACTOR).enumerate() {
             let i = first + j;
             let refresh = (self.ticks + i as u64).is_multiple_of(REFRESH_FRAMES);
             let fade = self.fade_done + i as u64;
@@ -531,9 +640,9 @@ impl Run<'_> {
             } else {
                 1.0
             };
-            let volume = f64::from(self.volume[i]);
+            let volume = volume_gain(f64::from(self.volume[i]));
             let comp = 1.0 / volume.max(VOLUME_FLOOR);
-            let mut out = [0.0f64; 4];
+            let mut out = [0.0f64; FACTOR];
             for (slot, voice) in voices.iter_mut().enumerate() {
                 if slot != self.active && !fading {
                     continue;
@@ -547,10 +656,12 @@ impl Run<'_> {
                     );
                 }
                 let (lo, hi) = SPECS[voice.model].k;
+                let gain = f64::from(self.gain[i]);
                 let frame = Frame {
-                    k: lo * (hi / lo).powf(f64::from(self.gain[i]) / 10.0),
+                    k: lo * (hi / lo).powf(gain / 10.0),
                     volume,
                     comp,
+                    mute: (gain / MUTE_BELOW).min(1.0),
                 };
                 let weight = if slot == self.active { mix } else { 1.0 - mix };
                 for (sample, out) in quad.iter().zip(&mut out) {
@@ -625,7 +736,7 @@ impl NativeDevice for Amp {
         let model = (params.value(MODEL.0 as usize) as usize).min(MODELS.len() - 1);
         let dual = params.value(OUTPUT.0 as usize) >= 0.5;
         // shortcut: a second change inside a crossfade cuts the voice that
-        // was fading out; a smoother cut needs a third voice.
+        // was fading out; a averageder cut needs a third voice.
         if model != self.model {
             self.model = model;
             self.active = 1 - self.active;
@@ -641,7 +752,6 @@ impl NativeDevice for Amp {
             fade_done: self.fade_done,
             fade_frames: self.fade_frames,
             active: self.active,
-            factor: self.oversamplers[0].factor(),
             gain: ramp(GAIN),
             bass: ramp(BASS),
             middle: ramp(MIDDLE),
@@ -677,13 +787,12 @@ impl NativeDevice for Amp {
         for channel in 0..runs {
             let voices = &mut self.voices[channel];
             let mut first = 0;
-            let factor = run.factor;
             self.oversamplers[channel].process(
                 channel,
                 &mut self.work[channel][..frames],
                 |high| {
                     run.channel(voices, high, first);
-                    first += high.len() / factor;
+                    first += high.len() / FACTOR;
                 },
             );
         }

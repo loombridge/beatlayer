@@ -1256,7 +1256,7 @@ fn amp_passes_under_rtsan() {
             (MIDDLE, &[0.0, 10.0]),
             (TREBLE, &[0.0, 10.0]),
             (PRESENCE, &[0.0, 10.0]),
-            (VOLUME, &[0.0, 1.0, 4.0]),
+            (VOLUME, &[0.0, 5.0, 10.0]),
             (DRY_WET, &[0.0, 50.0, 100.0]),
             (OUTPUT, &[1.0, 0.0]),
         ],

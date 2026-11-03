@@ -1,6 +1,6 @@
 # The Drum Synths: DS Kick, DS Snare, DS Clap, DS HH, DS Cymbal, DS Tom, DS FM and DS Clang
 
-- **Status:** draft
+- **Status:** implemented
 - **Work packages:** WP-8.24 (the shared rules and DS Kick, DS Snare, DS Tom and DS Clap: R1 to R14), WP-8.25 (DS HH, DS Cymbal, DS FM and DS Clang: R15 to R20). DS FM's operators are [Operator](operator.md)'s core (R1 to R3); a Drum Rack's pads and choke groups are [drum racks](drum-racks.md)'
 - **Parity-matrix row:** Instruments: Drum Synths (Kick, Snare, Clap, Hi-hat, Cymbal, Tom, FM, Clang)
 - **Checked against:** the Live 12 reference manual (online edition), read 30 October 2026 (chapter 33 "Max for Live Devices", section 33.1 "Max for Live Instruments": 33.1.1 to 33.1.8); the Live 12 release notes, 12.0 to 12.3.5 (the Drum Synths' fixes)
@@ -66,5 +66,6 @@ Live's Drum Synths are Max for Live devices; Beatlayer's are native, with Live's
 | R8, R10 | `crates/devices/tests/drum_synths.rs`; `rtsan/tests/drum_synths.rs` | render at block sizes 1, 64, 512 and 4,096; repeated renders identical |
 | R9 | `crates/engine/tests/drum_racks.rs` (`a_drum_synth_plays_from_its_pad_and_its_choke_group_cuts_it`) | engine test (a Drum Rack with a choke group) |
 | R11, R12, R13, R14 | `crates/devices/tests/drum_synths.rs` | unit and golden render of each device (pitch sweep, click, noise filter types, bend, spread and tail) |
-| R15, R16, R17, R18, R19 | to be written in WP-8.25 | unit and golden render (noise colours and slopes; FM feedback and amount; the clave's repeats on their frames; fold-back) |
-| R20 | to be written in WP-8.25 | engine test |
+| R15, R16, R17, R18 | `crates/devices/tests/drum_synths.rs` (`ds_hh_noise_colour_slope_tone_pitch_and_attack`, `ds_cymbal_tone_pitch_and_its_long_decay`, `ds_fm_pitch_amount_feedback_mod_tone_and_the_modulators_envelope`, `ds_clang_tones_filter_noise_and_the_claves_repeats`, `the_claves_repeats_land_on_the_same_frames_at_any_block_size`, `each_device_renders_its_golden_hit`) | unit and golden render (noise colours and slopes; FM feedback and amount; the clave's repeats on their frames) |
+| R19 | `crates/devices/src/ds_metal.rs` (`squares_at_the_highest_pitch_keep_only_harmonics_below_nyquist_and_play_them_cleanly`); `crates/devices/tests/drum_synths.rs` (`ds_clang_at_its_highest_pitch_folds_back_nothing_above_minus_80_db`) | unit (the squares against the ideal; the device's spectrum at Pitch +24) |
+| R20 | `crates/engine/tests/drum_racks.rs` (`a_drum_synth_plays_from_its_pad_and_its_choke_group_cuts_it`, for all eight devices); `rtsan/tests/drum_synths.rs` | engine test (a Drum Rack with a choke group); RealtimeSanitizer |

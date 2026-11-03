@@ -4508,6 +4508,62 @@ A file a missing file could be relinked to (R14).
 
 </details>
 
+### `Caption`
+
+A line of text in a band, which names nothing and sets nothing: the L beside Align Delay's left box.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `text` | string | yes | The text. |
+| `x` | number | yes | Its left edge, from the band's. |
+| `y` | number | yes | Its top edge, from the band's. |
+| `width` | number | yes | The width it is set in: left-aligned in it, or centred. |
+| `centered` | boolean | yes | Whether the text is centred in its width. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A line of text in a band, which names nothing and sets nothing: the L beside Align Delay's left box.",
+  "properties": {
+    "centered": {
+      "default": false,
+      "description": "Whether the text is centred in its width.",
+      "type": "boolean"
+    },
+    "text": {
+      "description": "The text.",
+      "type": "string"
+    },
+    "width": {
+      "description": "The width it is set in: left-aligned in it, or centred.",
+      "format": "float",
+      "type": "number"
+    },
+    "x": {
+      "description": "Its left edge, from the band's.",
+      "format": "float",
+      "type": "number"
+    },
+    "y": {
+      "description": "Its top edge, from the band's.",
+      "format": "float",
+      "type": "number"
+    }
+  },
+  "required": [
+    "text",
+    "x",
+    "y",
+    "width",
+    "centered"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `CaptureResult`
 
 What `perception.capture_view` returns, beside the image.
@@ -8189,9 +8245,13 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
 | `caption` | string or null | no | The name the control shows in place of its parameter's, where a section's own heading makes the full name redundant (Vinyl Distortion's Freq and B in each section). |
 | `glyph` | [`Glyph`](#glyph) or null | no | The icon of an icon button or a round button. |
 | `grey` | [`GreyWhen`](#greywhen) or null | no | The condition that greys the control. |
+| `hide` | [`GreyWhen`](#greywhen) or null | no | The condition that puts the control away, so another control of a different kind can take its place (Delay's time grid and its millisecond box). |
+| `only` | [`GreyWhen`](#greywhen) or null | no | The condition that puts the control away unless it holds: the control shows only while the parameter's value, rounded, is the value (one of three modes' boxes in the same place). |
 | `size` | [`Size`](#size) or null | no | Its size where the device sets it, in place of the widget's: the width of a box, a row of buttons or a unit pair's control. |
+| `steps` | array or null | no | For a grid, row or stack of buttons over a whole-number parameter, the values its buttons set, in order (Delay's 1 2 3 4 5 6 8 16 of the sixteen steps its time takes): the button for the value the parameter has is lit, and none is while it has another. Over a choice parameter, the indexes of the choices that have a button, in order. |
+| `titled` | boolean | no | Set for a row, stack or grid of buttons with its parameter's name above it, left-aligned (Chorus-Ensemble's Taps). |
 | `unit` | [`UnitPair`](#unitpair) or null | no | The unit pair beside a knob, which makes the knob show one of two parameters. |
-| `unnamed` | boolean | no | Set for a box or a chooser drawn without the name above it (the Saturator's curve chooser inside its display): it takes only the box's height. |
+| `unnamed` | boolean | no | Set for a box drawn without its name above it: its place says what it is (Delay's offset under its grid), and the control is its box alone. |
 
 <details><summary>JSON Schema</summary>
 
@@ -8228,6 +8288,28 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
       ],
       "description": "The condition that greys the control."
     },
+    "hide": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/GreyWhen"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The condition that puts the control away, so another control of a different kind can take its place (Delay's time grid and its millisecond box)."
+    },
+    "only": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/GreyWhen"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The condition that puts the control away unless it holds: the control shows only while the parameter's value, rounded, is the value (one of three modes' boxes in the same place)."
+    },
     "param": {
       "$ref": "#/$defs/ParamId",
       "description": "The parameter."
@@ -8243,6 +8325,22 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
       ],
       "description": "Its size where the device sets it, in place of the widget's: the width of a box, a row of buttons or a unit pair's control."
     },
+    "steps": {
+      "description": "For a grid, row or stack of buttons over a whole-number parameter, the values its buttons set, in order (Delay's 1 2 3 4 5 6 8 16 of the sixteen steps its time takes): the button for the value the parameter has is lit, and none is while it has another. Over a choice parameter, the indexes of the choices that have a button, in order.",
+      "items": {
+        "format": "int32",
+        "type": "integer"
+      },
+      "readOnly": true,
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "titled": {
+      "description": "Set for a row, stack or grid of buttons with its parameter's name above it, left-aligned (Chorus-Ensemble's Taps).",
+      "type": "boolean"
+    },
     "unit": {
       "anyOf": [
         {
@@ -8255,7 +8353,7 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
       "description": "The unit pair beside a knob, which makes the knob show one of two parameters."
     },
     "unnamed": {
-      "description": "Set for a box or a chooser drawn without the name above it (the Saturator's curve chooser inside its display): it takes only the box's height.",
+      "description": "Set for a box drawn without its name above it: its place says what it is (Delay's offset under its grid), and the control is its box alone.",
       "type": "boolean"
     },
     "widget": {
@@ -8294,6 +8392,7 @@ A band of controls, of a fixed size.
 | `width` | number | yes | Its width. |
 | `height` | number | yes | Its height. |
 | `controls` | array of [`Control`](#control) | yes | Its controls. |
+| `captions` | array of [`Caption`](#caption) | no | Lines of text among the controls: an L beside a box, an ms after it. |
 | `labels` | array of [`BandLabel`](#bandlabel) | no | Its text labels, drawn beside the controls they name. |
 | `slots` | [`SlotGroup`](#slotgroup) or null | no | Set for a band that shows the selected sample slot's controls: its controls name the first slot's parameters, and the band is placed for the selected slot ([`DeviceLayout::place_for`]). |
 
@@ -8303,6 +8402,13 @@ A band of controls, of a fixed size.
 {
   "description": "A band of controls, of a fixed size.",
   "properties": {
+    "captions": {
+      "description": "Lines of text among the controls: an L beside a box, an ms after it.",
+      "items": {
+        "$ref": "#/$defs/Caption"
+      },
+      "type": "array"
+    },
     "controls": {
       "description": "Its controls.",
       "items": {
@@ -15625,6 +15731,11 @@ One of:
 - `"plus"`: A plus sign.
 - `"minus"`: A minus sign.
 - `"flat_sharp"`: A flat and a sharp: Use Current Scale.
+- `"link"`: Two linked rings: the link between a device's two channels.
+- `"freeze"`: An asterisk: Freeze.
+- `"phase_invert"`: A circle struck through: invert the phase.
+- `"record"`: A filled circle: record.
+- `"stop"`: A filled square: stop.
 - `"crossfade"`: Two lines crossing: a crossfade.
 - `"envelope"`: A rise and a fall: an envelope's shape.
 - `"phase"`: A circle cut by a line: a phase.
@@ -15703,6 +15814,31 @@ One of:
     {
       "const": "flat_sharp",
       "description": "A flat and a sharp: Use Current Scale.",
+      "type": "string"
+    },
+    {
+      "const": "link",
+      "description": "Two linked rings: the link between a device's two channels.",
+      "type": "string"
+    },
+    {
+      "const": "freeze",
+      "description": "An asterisk: Freeze.",
+      "type": "string"
+    },
+    {
+      "const": "phase_invert",
+      "description": "A circle struck through: invert the phase.",
+      "type": "string"
+    },
+    {
+      "const": "record",
+      "description": "A filled circle: record.",
+      "type": "string"
+    },
+    {
+      "const": "stop",
+      "description": "A filled square: stop.",
       "type": "string"
     },
     {
@@ -44264,6 +44400,11 @@ One of:
 - an object with `stack` (integer from 0 to 255): The same as a column of that many buttons.
 - an object with `grid` (object with `columns` (integer from 0 to 255), `rows` (integer from 0 to 255)): The choices of a choice parameter as a grid of small buttons, filled by rows (Note Echo's 1 2 3 4 over 5 6 8 16).
 - an object with `icon_segments` (integer from 0 to 255): A row of that many icon buttons, one for each choice of a choice parameter (the filter types), the chosen one lit.
+- `"inline"`: A name and the value after it on one line, the value in blue, dragged or typed (Freq and Width along the foot of Delay's display).
+- `"tick"`: A small box that is filled while the switch is on, with the name after it (the Filter switch along the foot of a display).
+- `"stacked"`: The name over the value, both centred, the value in blue and dragged or typed, with no box (Reverb's Amount and Rate).
+- `"spread"`: The name at the left and the value at the right of one line, the value in blue (Reverb's Shape).
+- an object with `tabs` (integer from 0 to 255): A row of that many tabs, one for each choice of a choice parameter, outlined in orange while off and filled while on (Chorus-Ensemble's Chorus, Ensemble and Vibrato).
 - an object with `beside` (integer from 0 to 255): A lit number box with its name to its left on the same line (Pedal's Dry/Wet, Overdrive's Dynamics): the number is the points the name has before the box.
 - an object with `beside_dim` (integer from 0 to 255): A plain number box with its name in dim text to its left on the same line (Spectral Resonator's Glide and PB): the number is the points the name has before the box.
 - an object with `beside_switch` (integer from 0 to 255): A button that reads On or Off, lit while on, with its name in dim text to its left (Spectral Resonator's MIDI Gate): the number is the points the name has before the button.
@@ -44281,7 +44422,6 @@ One of:
 - an object with `abbreviated` (integer from 0 to 255): A text button like [`Toggle`](Self::Toggle) that holds only the first that many characters of its parameter's name (Impulse's M, S and Sat).
 - `"bare_chooser"`: A [`Chooser`](Self::Chooser) with no name row: the device's own label is beside it, or it needs none (the Drum Sampler's effect type).
 - `"cycle"`: A lit text button holding the chosen choice's name, a press taking the next choice and the last going round to the first (the Drum Sampler's modulation source, Resonators' Mode).
-- `"inline"`: The name and the value on one line, the value in the accent, dragged or typed (the Drum Sampler's Start, Length and Gain under its sample).
 
 <details><summary>JSON Schema</summary>
 
@@ -44417,6 +44557,42 @@ One of:
       },
       "required": [
         "icon_segments"
+      ],
+      "type": "object"
+    },
+    {
+      "const": "inline",
+      "description": "A name and the value after it on one line, the value in blue, dragged or typed (Freq and Width along the foot of Delay's display).",
+      "type": "string"
+    },
+    {
+      "const": "tick",
+      "description": "A small box that is filled while the switch is on, with the name after it (the Filter switch along the foot of a display).",
+      "type": "string"
+    },
+    {
+      "const": "stacked",
+      "description": "The name over the value, both centred, the value in blue and dragged or typed, with no box (Reverb's Amount and Rate).",
+      "type": "string"
+    },
+    {
+      "const": "spread",
+      "description": "The name at the left and the value at the right of one line, the value in blue (Reverb's Shape).",
+      "type": "string"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A row of that many tabs, one for each choice of a choice parameter, outlined in orange while off and filled while on (Chorus-Ensemble's Chorus, Ensemble and Vibrato).",
+      "properties": {
+        "tabs": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "tabs"
       ],
       "type": "object"
     },
@@ -44558,11 +44734,6 @@ One of:
     {
       "const": "cycle",
       "description": "A lit text button holding the chosen choice's name, a press taking the next choice and the last going round to the first (the Drum Sampler's modulation source, Resonators' Mode).",
-      "type": "string"
-    },
-    {
-      "const": "inline",
-      "description": "The name and the value on one line, the value in the accent, dragged or typed (the Drum Sampler's Start, Length and Gain under its sample).",
       "type": "string"
     }
   ]

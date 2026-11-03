@@ -11,7 +11,7 @@
 //! | [`INSTRUMENT`] | Framework Test Instrument | the instruments' shared parts: sine voices with every part of the voice section, or a source as the output; a menu option | generic |
 //! | [`FM`] | Framework Test FM | the FM core's four operators on the voice section, each operator's controls as parameters | generic |
 //! | [`PAGES`] | Framework Test Pages | passes audio through; tabs of three pages in the body beside a shell of three sections and its display | its own |
-//! | [`PARTS`] | Framework Test Parts | passes audio through; one of each part a panel is made of: both knobs, the boxes, the buttons, a unit pair, a side strip, headings, title-bar parts and a greyed control | its own |
+//! | [`PARTS`] | Framework Test Parts | passes audio through; one of each part a panel is made of: both knobs, the boxes, the buttons, a unit pair, a side strip, headings, captions, title-bar parts, a greyed control, a control put away or shown by another's value, a label over a name, unnamed boxes and knobs, inline and spread values, readouts, tick boxes, tabs, buttons for chosen numbers and choices | its own |
 //!
 //! Between them they have a parameter of every kind: gains, continuous
 //! values with linear and logarithmic tapers, toggles, choices, and whole
@@ -21,8 +21,8 @@ use bl_dsp::stft::{self, Stft, Window};
 use bl_dsp::{EnvelopeFollower, Oversampler};
 use bl_engine::{DeviceType, NodeConfig, NodeData, Registry};
 use bl_model::device_layout::{
-    BODY_HEIGHT, Control, ControlBand, DisplayCell, Glyph, Heading, LayoutNode, Maker, Page,
-    PageStyle, PagesNode, TAB_HEIGHT, TitlePart, Unit, Widget,
+    BODY_HEIGHT, Caption, Control, ControlBand, DisplayCell, Glyph, Heading, LayoutNode, Maker,
+    Page, PageStyle, PagesNode, TAB_HEIGHT, TitlePart, Unit, Widget,
 };
 use bl_model::{
     Device, DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole,
@@ -514,6 +514,32 @@ pub const PARTS_LEARN: ParamId = ParamId(23);
 pub const PARTS_USE_SCALE: ParamId = ParamId(24);
 /// The side strip of the test parts.
 pub const PARTS_STRIP: &str = "Audio Routing";
+/// A name and its value on one line, the value in blue.
+pub const PARTS_INLINE: ParamId = ParamId(25);
+/// A small box that fills while on, with its name after it.
+pub const PARTS_TICK: ParamId = ParamId(26);
+/// A name over its value, no box.
+pub const PARTS_READOUT: ParamId = ParamId(27);
+/// A name at the left and its value at the right.
+pub const PARTS_SPREAD: ParamId = ParamId(28);
+/// A row of outlined tabs.
+pub const PARTS_TABS: ParamId = ParamId(29);
+/// A small knob with no name above it.
+pub const PARTS_BARE_KNOB: ParamId = ParamId(30);
+/// A box with no name above it.
+pub const PARTS_BARE_BOX: ParamId = ParamId(31);
+/// A whole number whose buttons set 1, 2, 3, 4, 5, 6, 8 and 16.
+pub const PARTS_STEPS: ParamId = ParamId(32);
+/// A choice of four whose buttons are the third and the second.
+pub const PARTS_SUBSET: ParamId = ParamId(33);
+/// A control shown only while Hold is on.
+pub const PARTS_SHOWN: ParamId = ParamId(34);
+/// A control put away while Hold is on, in the same place.
+pub const PARTS_PUT_AWAY: ParamId = ParamId(35);
+/// A button that shows other text than its parameter's name.
+pub const PARTS_NAMED: ParamId = ParamId(36);
+/// A row of buttons with its name above it.
+pub const PARTS_TITLED: ParamId = ParamId(37);
 
 /// The test parts' type: one of each part a device panel is made of (layout
 /// L-DEV-042 to L-DEV-046), laid out by hand.
@@ -564,6 +590,25 @@ pub fn parts_type() -> DeviceType {
         toggle(PARTS_INFO, "Info"),
         toggle(PARTS_LEARN, "Learn"),
         toggle(PARTS_USE_SCALE, "Use Current Scale"),
+        ParamDescriptor::continuous(
+            PARTS_INLINE,
+            "Freq",
+            (20.0, 20_000.0),
+            1_000.0,
+            ParamUnit::Hertz,
+        ),
+        toggle(PARTS_TICK, "Filter"),
+        percent(PARTS_READOUT, "Diffusion", (0.0, 100.0), 60.0),
+        percent(PARTS_SPREAD, "Shape", (0.0, 100.0), 50.0),
+        choice(PARTS_TABS, "Tabs", &["Chorus", "Ensemble", "Vibrato"]),
+        percent(PARTS_BARE_KNOB, "Bare", (0.0, 100.0), 25.0),
+        ParamDescriptor::integer(PARTS_BARE_BOX, "Box", (0, 10), 4, ParamUnit::None),
+        ParamDescriptor::integer(PARTS_STEPS, "Steps", (1, 16), 3, ParamUnit::None),
+        choice(PARTS_SUBSET, "Subset", &["A", "B", "C", "D"]),
+        percent(PARTS_SHOWN, "Shown", (0.0, 100.0), 10.0),
+        percent(PARTS_PUT_AWAY, "Put Away", (0.0, 100.0), 20.0),
+        toggle(PARTS_NAMED, "Named"),
+        choice(PARTS_TITLED, "Titled", &["On", "Latch"]),
     ]
     .into_iter()
     .map(|p| p.describe("A parameter whose control shows one part of a panel."))
@@ -617,6 +662,49 @@ pub fn parts_type() -> DeviceType {
             BOX_ROW + 12.0,
             vec![at(PARTS_CELL_BOTTOM, Widget::Number, 4.0, 4.0)],
         ));
+    let more = ControlBand::free(
+        200.0,
+        BODY_HEIGHT,
+        vec![
+            at(PARTS_INLINE, Widget::Inline, 4.0, 4.0).sized(70.0, 12.0),
+            at(PARTS_TICK, Widget::Tick, 80.0, 4.0).sized(48.0, 12.0),
+            at(PARTS_READOUT, Widget::Stacked, 4.0, 20.0).sized(40.0, 24.0),
+            at(PARTS_SPREAD, Widget::Spread, 50.0, 20.0).sized(76.0, 12.0),
+            at(PARTS_TABS, Widget::Tabs(3), 4.0, 48.0).sized(120.0, 12.0),
+            at(PARTS_BARE_KNOB, Widget::SmallKnob, 4.0, 64.0).unnamed(),
+            at(PARTS_BARE_BOX, Widget::Number, 50.0, 64.0)
+                .unnamed()
+                .sized(40.0, 12.0),
+            at(
+                PARTS_STEPS,
+                Widget::Grid {
+                    columns: 4,
+                    rows: 2,
+                },
+                4.0,
+                100.0,
+            )
+            .with_steps(&[1, 2, 3, 4, 5, 6, 8, 16]),
+            at(PARTS_SUBSET, Widget::Segments(2), 100.0, 100.0)
+                .with_steps(&[2, 1])
+                .sized(60.0, 12.0),
+            at(PARTS_SHOWN, Widget::Number, 100.0, 120.0)
+                .unnamed()
+                .sized(40.0, 12.0)
+                .shown_only_while(PARTS_HOLD, 1),
+            at(PARTS_PUT_AWAY, Widget::Number, 100.0, 120.0)
+                .unnamed()
+                .sized(40.0, 12.0)
+                .hidden_while(PARTS_HOLD, 1),
+            at(PARTS_NAMED, Widget::Toggle, 4.0, 134.0)
+                .sized(60.0, 12.0)
+                .captioned("Shown as"),
+            at(PARTS_TITLED, Widget::Segments(2), 130.0, 134.0)
+                .titled()
+                .sized(60.0, 21.0),
+        ],
+    )
+    .with_captions(vec![Caption::new("Caption", 130.0, 64.0, 60.0)]);
     let layout = DeviceLayout::new(LayoutNode::Row(vec![
         LayoutNode::Pages(PagesNode::side_strip(
             PARTS_STRIP,
@@ -631,6 +719,7 @@ pub fn parts_type() -> DeviceType {
         ]),
         LayoutNode::Band(buttons),
         LayoutNode::Cell(cell),
+        LayoutNode::Band(more),
     ]))
     .with_title(vec![
         TitlePart::Heading("Parts".to_owned()),

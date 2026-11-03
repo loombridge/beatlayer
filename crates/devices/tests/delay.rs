@@ -8,10 +8,32 @@ use bl_core::time::{Bpm, Frames, TempoMap, TempoSegment, Ticks};
 use bl_devices::delay::{
     DRY_WET, FEEDBACK, FILTER, FREEZE, FREQ, L_OFFSET, L_SYNC, L_TIME, LFO_DELAY, LFO_DOTTED,
     LFO_FILTER, LFO_MORPH, LFO_RATE, LFO_RATE_MODE, LFO_SIXTEENTH, LFO_SYNCED, LFO_TIME,
-    LFO_TRIPLET, LFO_WAVE, LINK, PING_PONG, R_SYNC, SYNC, TIME_MODE, delay_type,
+    LFO_TRIPLET, LFO_WAVE, LINK, PING_PONG, R_SYNC, R_SYNC_ON, SYNC, TIME_MODE, WIDTH, delay_type,
 };
-use bl_engine::{Registry, TransportInfo};
-use common::{device, node, noise, run_at, run_blocks, set};
+use bl_engine::{DeviceType, Registry, TransportInfo};
+use bl_model::{Device, ParamId};
+use common::{node, noise, run_at, run_blocks, set};
+
+/// A delay set up as these tests were written: the filter off at Q 2.5,
+/// four sixteenths a side, fully wet, and the right channel's Sync following
+/// the left's unless a test sets it. Live's panel starts the filter on at 8.00,
+/// at 3 sixteenths and 50 % wet (a test of those is in `live_panels`).
+fn device(device_type: &DeviceType, params: &[(ParamId, f64)]) -> Device {
+    let sync = params
+        .iter()
+        .rfind(|(id, _)| *id == SYNC)
+        .map_or(1.0, |p| p.1);
+    let mut all = vec![
+        (FILTER, 0.0),
+        (WIDTH, 2.5),
+        (DRY_WET, 100.0),
+        (L_SYNC, 4.0),
+        (R_SYNC, 4.0),
+        (R_SYNC_ON, sync),
+    ];
+    all.extend_from_slice(params);
+    common::device(device_type, &all)
+}
 
 fn registry() -> Registry {
     let mut registry = Registry::new();
@@ -107,6 +129,40 @@ fn link_gives_both_channels_the_left_time_and_offsets_stay_apart() {
     );
     assert!(out[0][9_000].abs() > 0.99, "half a division later");
     assert!(out[0][6_000].abs() < 1e-6, "not on the division");
+}
+
+// Spec: delay R16
+#[test]
+fn each_channel_has_its_own_sync_until_link_ties_them() {
+    use bl_devices::delay::R_TIME;
+    // Left synced to one sixteenth, right free at 100 ms.
+    let params = vec![
+        (SYNC, 1.0),
+        (R_SYNC_ON, 0.0),
+        (LINK, 0.0),
+        (L_SYNC, 1.0),
+        (R_TIME, 100.0),
+        (FEEDBACK, 0.0),
+    ];
+    let render = |params: &[(ParamId, f64)]| {
+        let mut delay = node(&registry(), &device(&delay_type(), params), 16_384);
+        run_at(
+            delay.as_mut(),
+            &impulse(14_000),
+            &[],
+            &tempo(120.0),
+            TransportInfo::default(),
+        )
+    };
+    let out = render(&params);
+    assert!(out[0][6_000].abs() > 0.99, "the left, one sixteenth");
+    assert!(out[1][4_800].abs() > 0.99, "the right, 100 ms");
+    assert!(out[1][6_000].abs() < 1e-6, "not the left's division");
+    // Linked, the right takes the left's setting, Sync included.
+    let mut linked = params;
+    linked.push((LINK, 1.0));
+    let out = render(&linked);
+    assert!(out[1][6_000].abs() > 0.99, "the right follows the left");
 }
 
 // Spec: delay R7

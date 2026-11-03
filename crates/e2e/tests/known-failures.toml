@@ -47,3 +47,9 @@ suite = "background"
 key = "export flac 24-bit mono"
 property = "round trip keeps it"
 description = "The same FLAC fault as the 24-bit stereo file, for a mono export: the file decodes 8,192 frames short (180,677 frames, not 188,869). It is only checked at full depth."
+
+[[failure]]
+suite = "devices"
+key = "beatlayer.phaser_flanger/Feedback"
+property = "level bounded"
+description = "At its maximum (100 %, which the device holds at 0.99) with Dry/Wet at its 100 % default the output is 14.9 dBFS, 28.7 dB above the default setting's -13.8 dBFS: the all-pass chain rings and the feedback adds the wet signal to itself. Dry/Wet's old default of 50 % kept the peak under the check's bound."

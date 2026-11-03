@@ -666,6 +666,11 @@ fn every_icon_draws_something_inside_its_button() {
         Glyph::Plus,
         Glyph::Minus,
         Glyph::FlatSharp,
+        Glyph::Link,
+        Glyph::Freeze,
+        Glyph::PhaseInvert,
+        Glyph::Record,
+        Glyph::Stop,
         Glyph::Headphones,
     ];
     let ctx = egui::Context::default();
@@ -692,4 +697,178 @@ fn every_icon_draws_something_inside_its_button() {
     );
     assert_eq!(bl_ui::device_panel::glyph_for("Notch"), Some(Glyph::Notch));
     assert_eq!(bl_ui::device_panel::glyph_for("Peak"), None);
+    // Looper's transport names find theirs.
+    assert_eq!(
+        bl_ui::device_panel::glyph_for("Record"),
+        Some(Glyph::Record)
+    );
+    assert_eq!(bl_ui::device_panel::glyph_for("Overdub"), Some(Glyph::Plus));
+    assert_eq!(bl_ui::device_panel::glyph_for("Stop"), Some(Glyph::Stop));
+}
+
+// Spec: device-framework R52, R54
+#[test]
+fn a_name_and_value_on_one_line_a_tick_box_a_readout_and_a_spread_value_draw_and_set() {
+    let (mut h, device) = harness();
+    let output = h.settle();
+    // Inline: the name and the value, the value after it.
+    let inline = control(&mut h, device, PARTS_INLINE);
+    assert_eq!(texts(&output, inline), ["Freq", "1.00 kHz"]);
+    // Stacked: the name over the value.
+    let readout = control(&mut h, device, PARTS_READOUT);
+    assert_eq!(texts(&output, readout), ["Diffusion", "60 %"]);
+    // Spread: the name at the left, the value at the right.
+    let spread = control(&mut h, device, PARTS_SPREAD);
+    assert_eq!(texts(&output, spread), ["Shape", "50 %"]);
+    // All three take a screen reader's step like a box.
+    let nodes = Harness::nodes(&output);
+    for name in ["Freq", "Diffusion", "Shape"] {
+        assert_eq!(Harness::node(&nodes, name).role, Role::SpinButton, "{name}");
+    }
+    h.accesskit(
+        param_control_id(device, PARTS_READOUT),
+        egui::accesskit::Action::Increment,
+    );
+    h.settle();
+    assert!(value(&h, device, PARTS_READOUT) > 60.0);
+    // Tick: filled while on, and a press turns it.
+    let tick = control(&mut h, device, PARTS_TICK);
+    let theme = Theme::bundled(true);
+    let blue = theme.colors.value_fill.0;
+    assert!(!fills(&output, tick).contains(&blue), "empty while off");
+    pressed(&mut h, tick);
+    assert_eq!(value(&h, device, PARTS_TICK), 1.0);
+    assert!(fills(&h.settle(), tick).contains(&blue), "filled while on");
+    assert_eq!(
+        Harness::node(&Harness::nodes(&h.settle()), "Filter").role,
+        Role::Switch
+    );
+}
+
+// Spec: device-framework R54
+#[test]
+fn tabs_are_outlined_while_off_and_filled_while_on() {
+    let (mut h, device) = harness();
+    let theme = Theme::bundled(true);
+    let accent = theme.colors.accent.0;
+    let tabs = control(&mut h, device, PARTS_TABS);
+    let output = h.settle();
+    assert_eq!(texts(&output, tabs), ["Chorus", "Ensemble", "Vibrato"]);
+    assert!(fills(&output, tabs).contains(&accent), "the first is lit");
+    assert_eq!(
+        outlined(&output, tabs, accent),
+        2,
+        "the other two are outlined"
+    );
+    let second = Rect::from_min_size(
+        pos2(tabs.left() + tabs.width() / 3.0, tabs.top()),
+        egui::vec2(tabs.width() / 3.0, tabs.height()),
+    );
+    pressed(&mut h, second);
+    assert_eq!(value(&h, device, PARTS_TABS), 1.0);
+}
+
+// Spec: device-framework R52
+#[test]
+fn an_unnamed_box_or_knob_is_just_its_box_or_its_ring_and_value() {
+    let (mut h, device) = harness();
+    let output = h.settle();
+    let all = controls(&mut h, device);
+    let size = |param: ParamId| all.iter().find(|(p, _, _)| *p == param).unwrap().2.size();
+    assert_eq!(size(PARTS_BARE_BOX), egui::vec2(40.0, BOX_HEIGHT));
+    assert_eq!(
+        size(PARTS_BARE_KNOB).y,
+        Widget::SmallKnob.size().height - 9.0,
+        "a knob without its name is 9 points shorter"
+    );
+    // Its name isn't drawn, and it still reads to a screen reader by it.
+    let bare_box = control(&mut h, device, PARTS_BARE_BOX);
+    assert_eq!(texts(&output, bare_box), ["4"]);
+    let bare_knob = control(&mut h, device, PARTS_BARE_KNOB);
+    assert_eq!(texts(&output, bare_knob), ["25 %"]);
+    let nodes = Harness::nodes(&output);
+    assert_eq!(Harness::node(&nodes, "Bare").role, Role::Slider);
+}
+
+// Spec: device-framework R54
+#[test]
+fn buttons_for_chosen_numbers_and_choices_set_those_and_light_the_one_that_is_set() {
+    let (mut h, device) = harness();
+    let theme = Theme::bundled(true);
+    let accent = theme.colors.accent.0;
+    // The grid of numbers: 3 is lit; a press on the last sets 16.
+    let grid = control(&mut h, device, PARTS_STEPS);
+    let output = h.settle();
+    assert_eq!(
+        texts(&output, grid),
+        ["1", "2", "3", "4", "5", "6", "8", "16"]
+    );
+    let last = Rect::from_min_size(
+        pos2(grid.right() - 22.0, grid.bottom() - BOX_HEIGHT),
+        egui::vec2(22.0, BOX_HEIGHT),
+    );
+    pressed(&mut h, last);
+    assert_eq!(value(&h, device, PARTS_STEPS), 16.0);
+    assert!(fills(&h.settle(), last).contains(&accent));
+    // A number the buttons don't set (7) is valid, and lights none.
+    set(&mut h, device, PARTS_STEPS, 7.0);
+    assert!(!fills(&h.settle(), grid).contains(&accent));
+    // The subset of a choice: C then B, and a press on the first sets C (2).
+    let subset = control(&mut h, device, PARTS_SUBSET);
+    assert_eq!(texts(&h.settle(), subset), ["C", "B"]);
+    pressed(
+        &mut h,
+        Rect::from_min_size(subset.min, egui::vec2(30.0, subset.height())),
+    );
+    assert_eq!(value(&h, device, PARTS_SUBSET), 2.0);
+}
+
+// Spec: device-framework R56
+#[test]
+fn a_control_is_put_away_or_shown_only_while_another_controls_value_says_so() {
+    let (mut h, device) = harness();
+    let drawn = |h: &mut Harness, name: &str| {
+        Harness::nodes(&h.settle())
+            .iter()
+            .any(|node| node.label == name)
+    };
+    // Hold is off: the control that shows only while it is on isn't there, and
+    // the one put away while it is on is, in the same place.
+    assert!(!drawn(&mut h, "Shown"));
+    assert!(drawn(&mut h, "Put Away"));
+    let (shown, put_away) = (
+        control(&mut h, device, PARTS_SHOWN),
+        control(&mut h, device, PARTS_PUT_AWAY),
+    );
+    assert_eq!(shown, put_away);
+    set(&mut h, device, PARTS_HOLD, 1.0);
+    assert!(drawn(&mut h, "Shown"));
+    assert!(!drawn(&mut h, "Put Away"));
+}
+
+// Spec: device-framework R52, R56
+#[test]
+fn a_label_replaces_the_name_on_the_button_and_a_title_sits_over_its_buttons_and_a_caption_is_text()
+{
+    let (mut h, device) = harness();
+    let output = h.settle();
+    // The button reads its label; a screen reader still hears the name.
+    let named = control(&mut h, device, PARTS_NAMED);
+    assert_eq!(texts(&output, named), ["Shown as"]);
+    assert_eq!(
+        Harness::node(&Harness::nodes(&output), "Named").role,
+        Role::Switch
+    );
+    // A title over a row of buttons: the name above, the buttons below.
+    let titled = control(&mut h, device, PARTS_TITLED);
+    let words = texts(&output, titled);
+    assert_eq!(words, ["Titled", "On", "Latch"]);
+    assert_eq!(titled.height(), 21.0);
+    // A caption is text at its place.
+    let frame = frame_of(&mut h, device);
+    let body = body_rect(frame, TITLE_BAR_HEIGHT);
+    assert!(
+        texts(&output, body).iter().any(|text| text == "Caption"),
+        "drawn"
+    );
 }

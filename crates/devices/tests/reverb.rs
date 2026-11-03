@@ -82,7 +82,10 @@ fn impulse_response(params: &[(ParamId, f64)], frames: usize, block: usize) -> [
 }
 
 /// The settings every measurement starts from: no modulation, no damping,
-/// no predelay, fully wet, everything audible.
+/// no predelay, fully wet, everything audible, and the rest as these tests were
+/// written (the input's high cut off, the Mid density, Smooth off, Decay 2 s,
+/// Diffusion and Scale at 50 %, Freeze's Flat off). Live's panel starts
+/// otherwise: a test of that is in `live_panels`.
 fn with(more: &[(ParamId, f64)]) -> Vec<(ParamId, f64)> {
     let mut params = vec![
         (SPIN, 0.0),
@@ -91,9 +94,18 @@ fn with(more: &[(ParamId, f64)]) -> Vec<(ParamId, f64)> {
         (LOW_DAMP, 0.0),
         (FREEZE, 0.0),
         (PREDELAY, 0.0),
-        (REFLECT, 100.0),
-        (DIFFUSE, 100.0),
+        (REFLECT, 1.0),
+        (DIFFUSE, 1.0),
         (DRY_WET, 100.0),
+        (HIGH_CUT, 0.0),
+        (SPIN_RATE, 1.0),
+        (CHORUS_RATE, 0.5),
+        (DIFFUSION, 50.0),
+        (SCALE, 50.0),
+        (SMOOTH, 0.0),
+        (DECAY, 2.0),
+        (FLAT, 0.0),
+        (DENSITY, 1.0),
     ];
     for (id, value) in more {
         params.retain(|(existing, _)| existing != id);
@@ -122,12 +134,7 @@ fn arrival(samples: &[f32], threshold: f32) -> usize {
 #[test]
 fn decay_time_matches_the_setting_at_three_settings() {
     for decay in [0.5, 2.0, 5.0] {
-        let params = with(&[
-            (DECAY, decay),
-            (REFLECT, 0.0),
-            (DIFFUSE, 100.0),
-            (SCALE, 0.0),
-        ]);
+        let params = with(&[(DECAY, decay), (REFLECT, 0.0), (DIFFUSE, 1.0), (SCALE, 0.0)]);
         let frames = (decay * 1.5 * RATE.as_f64()) as usize;
         let [left, _] = impulse_response(&params, frames, 512);
         // Schroeder's energy decay curve: EDC[n] is the energy left after n.
@@ -161,7 +168,7 @@ fn decay_time_holds_at_full_size() {
             (DECAY, decay),
             (SIZE, size),
             (REFLECT, 0.0),
-            (DIFFUSE, 100.0),
+            (DIFFUSE, 1.0),
             (SCALE, 0.0),
         ]);
         let frames = (decay * 1.5 * RATE.as_f64()) as usize;
@@ -261,7 +268,7 @@ fn flat_and_cut_decide_what_a_freeze_keeps() {
             (FLAT, flat),
             (HIGH_DAMP, 1.0),
             (HIGH, 100.0),
-            (DIFFUSE, 100.0),
+            (DIFFUSE, 1.0),
         ]);
         let mut node = reverb(&with(&all), 4_800);
         let burst = noise(4_800);
@@ -294,7 +301,7 @@ fn flat_and_cut_decide_what_a_freeze_keeps() {
 // Spec: reverb R15
 #[test]
 fn the_impulse_response_is_finite_and_ends_in_silence() {
-    let params = with(&[(DECAY, 0.2), (DIFFUSE, 100.0)]);
+    let params = with(&[(DECAY, 0.2), (DIFFUSE, 1.0)]);
     let frames = 48_000 * 6;
     let [left, right] = impulse_response(&params, frames, 512);
     for (channel, samples) in [("left", &left), ("right", &right)] {

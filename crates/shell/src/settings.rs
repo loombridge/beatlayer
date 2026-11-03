@@ -68,6 +68,9 @@ pub struct Preferences {
     /// Where the second window sat and how big it was when it was last open
     /// (second-window R1).
     pub second_window: Option<bl_model::WindowFrame>,
+    /// Where the Video Window sat and how big it was, the same in every set
+    /// (video R17).
+    pub video_window: Option<bl_model::WindowFrame>,
     /// The Settings page shown last.
     pub settings_page: SettingsPage,
     /// The agent server: whether it runs, its port and token, and the

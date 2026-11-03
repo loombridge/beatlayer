@@ -153,9 +153,9 @@ Commands the manual places in the Edit menu that didn't show with this focus, an
 | M-CREATE-010 | Create Fade | ⌥⌘F | S-ARR-008 | disabled | The manual names it Create Fade In/Out or Create Crossfade depending on the selection |
 | | — | | | | |
 | M-CREATE-011 | Slice to New MIDI Track | | | disabled | |
-| M-CREATE-012 | Convert Harmony to New MIDI Track | | | disabled | [audio to MIDI](../specs/audio-to-midi.md) R1; built in WP-9.7 |
-| M-CREATE-013 | Convert Melody to New MIDI Track | | | disabled | [audio to MIDI](../specs/audio-to-midi.md) R1; built in WP-9.7 |
-| M-CREATE-014 | Convert Drums to New MIDI Track | | | disabled | [audio to MIDI](../specs/audio-to-midi.md) R1; built in WP-9.7 |
+| M-CREATE-012 | Convert Harmony to New MIDI Track | | | disabled | [audio to MIDI](../specs/audio-to-midi.md) R1; acts on one audio clip in either view, disabled otherwise (WP-9.7) |
+| M-CREATE-013 | Convert Melody to New MIDI Track | | | disabled | [audio to MIDI](../specs/audio-to-midi.md) R1; acts on one audio clip in either view, disabled otherwise (WP-9.7) |
+| M-CREATE-014 | Convert Drums to New MIDI Track | | | disabled | [audio to MIDI](../specs/audio-to-midi.md) R1; acts on one audio clip in either view, disabled otherwise (WP-9.7) |
 | M-CREATE-015 | Separate Stems to New Audio Tracks | | | disabled | [stem separation](../specs/stem-separation.md) R22; acts on one audio clip in either view, a time selection holding audio, or one audio file in the browser (WP-9.2) |
 | | — | | | | |
 | M-CREATE-016 | Add Locator | | | disabled | Reads "Delete Locator" with a locator selected (manual 6.4) |
@@ -612,7 +612,7 @@ Other states:
 
 | ID | Command | Source |
 |---|---|---|
-| C-CLIP-SES-019 | Slice to New MIDI Track and the three Convert ... to New MIDI Track commands (audio clips); Beatlayer puts them after Crop Clip and a separator, in C-CLIP-ARR-027's order ([session context menus](../specs/session-context-menus.md) R2); the Convert commands built in WP-9.7 | manual 13 |
+| C-CLIP-SES-019 | Slice to New MIDI Track and the three Convert ... to New MIDI Track commands (audio clips); Beatlayer puts them after Crop Clip and a separator, in C-CLIP-ARR-027's order ([session context menus](../specs/session-context-menus.md) R2); the Convert commands built in WP-9.7, each running `audio_to_midi.convert` with its kind | manual 13 |
 | C-CLIP-SES-020 | Separate Stems to New Audio Tracks (audio clips); after C-CLIP-SES-019, as C-CLIP-ARR-027d follows the Convert items; built in WP-9.2 | manual 22.2 |
 
 ### Clip, in the Arrangement (C-CLIP-ARR)

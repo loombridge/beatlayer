@@ -1232,6 +1232,7 @@ impl BrowserUi {
                     folder: &state.folder,
                     install: &state.install,
                     install_command: bl_shell::library_commands::INSTALL,
+                    install_args: &json!({}),
                     close_command: bl_shell::library_commands::CANCEL,
                 },
                 events,

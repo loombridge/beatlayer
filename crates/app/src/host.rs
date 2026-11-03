@@ -55,6 +55,7 @@ use bl_ui::main_window::{DrawnMenuBar, MainWindowUi, UiEvent};
 use bl_ui::settings_window::SettingsUi;
 use bl_ui::theme::{Theme, fonts};
 use bl_ui::theme_library::ThemeLibrary;
+use bl_ui::video_window::VideoWindowUi;
 use egui::{ViewportId, ViewportInfo};
 use egui_wgpu::winit::Painter;
 use egui_wgpu::{
@@ -315,6 +316,29 @@ fn device_window_attributes(
     }
 }
 
+/// Window attributes for the Video Window: a window of the system's own
+/// look, owned by the main window `owner` on Windows and a utility window on
+/// X11, so it stays above it; macOS floats it after it opens
+/// ([`crate::title_bar::float_above_main`]).
+fn video_window_attributes(
+    attributes: WindowAttributes,
+    owner: Option<&Window>,
+) -> WindowAttributes {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = owner;
+        attributes
+    }
+    #[cfg(not(target_os = "macos"))]
+    device_window_attributes(attributes, owner)
+}
+
+/// Moves and sizes the Video Window to `frame` (`video.set_window`).
+fn place_video_window(window: &Window, frame: &bl_model::WindowFrame) {
+    window.set_outer_position(LogicalPosition::new(frame.x, frame.y));
+    let _ = window.request_inner_size(LogicalSize::new(frame.width, frame.height));
+}
+
 /// Gives a floating device's window Windows' tool window style: a short
 /// title bar with only a close button (Windows only; nothing elsewhere).
 fn make_tool_window(window: &Window) {
@@ -483,6 +507,9 @@ struct Host {
     /// (WP-2.23, part 3; D24), with what it draws.
     assistant: Option<Surface>,
     assistant_ui: AssistantPanelUi,
+    /// The Video Window (WP-9.26), while it shows, with what it draws.
+    video: Option<Surface>,
+    video_ui: VideoWindowUi,
     /// Floating devices' windows (WP-2.5b), each with what it draws.
     devices: BTreeMap<bl_model::DeviceId, (Option<Surface>, DeviceViewUi)>,
     /// Always `None`: what [`Host::surface`] gives for a device window
@@ -490,6 +517,7 @@ struct Host {
     no_surface: Option<Surface>,
     device_keys: KeyDispatcher,
     assistant_keys: KeyDispatcher,
+    video_keys: KeyDispatcher,
     main_ui: MainWindowUi,
     second_ui: MainWindowUi,
     settings_ui: SettingsUi,
@@ -722,10 +750,13 @@ pub fn run(args: Args) -> Result<(), String> {
         settings: None,
         assistant: None,
         assistant_ui: AssistantPanelUi::default(),
+        video: None,
+        video_ui: VideoWindowUi::default(),
         devices: BTreeMap::new(),
         no_surface: None,
         device_keys: KeyDispatcher::new(platform),
         assistant_keys: KeyDispatcher::new(platform),
+        video_keys: KeyDispatcher::new(platform),
         main_ui,
         second_ui,
         settings_ui: SettingsUi::new(),
@@ -1198,6 +1229,7 @@ impl Host {
             WindowKind::Second => &mut self.second,
             WindowKind::Settings => &mut self.settings,
             WindowKind::Assistant => &mut self.assistant,
+            WindowKind::Video => &mut self.video,
             WindowKind::Device(device) => match self.devices.get_mut(&device) {
                 Some((surface, _)) => surface,
                 None => {
@@ -1217,6 +1249,8 @@ impl Host {
             Some(WindowKind::Settings)
         } else if self.assistant.as_ref().is_some_and(|s| s.window.id() == id) {
             Some(WindowKind::Assistant)
+        } else if self.video.as_ref().is_some_and(|s| s.window.id() == id) {
+            Some(WindowKind::Video)
         } else {
             self.devices
                 .iter()
@@ -1240,10 +1274,16 @@ impl Host {
 
     /// Every open window's surface.
     fn surfaces(&self) -> impl Iterator<Item = &Surface> {
-        [&self.main, &self.second, &self.settings, &self.assistant]
-            .into_iter()
-            .flatten()
-            .chain(self.devices.values().filter_map(|(s, _)| s.as_ref()))
+        [
+            &self.main,
+            &self.second,
+            &self.settings,
+            &self.assistant,
+            &self.video,
+        ]
+        .into_iter()
+        .flatten()
+        .chain(self.devices.values().filter_map(|(s, _)| s.as_ref()))
     }
 
     /// Opens, closes, shows, hides, and titles floating devices' windows to
@@ -1385,6 +1425,68 @@ impl Host {
         }
     }
 
+    /// Opens and closes the Video Window to match the shell's: it floats
+    /// above the main window at the place and size it was last at (video
+    /// R16, R17).
+    fn sync_video_window(&mut self, event_loop: &ActiveEventLoop) {
+        if !self.shell.video_window_shown() {
+            if self.video.take().is_some() && self.shell.focused_window() == WindowKind::Video {
+                self.shell.set_focused_window(WindowKind::Main);
+            }
+            return;
+        }
+        if self.video.is_some() {
+            return;
+        }
+        let mut attributes = Window::default_attributes()
+            .with_title("Video")
+            .with_inner_size(LogicalSize::new(640.0, 360.0))
+            .with_min_inner_size(LogicalSize::new(160.0, 90.0));
+        if let Some(frame) = self.shell.video_window_frame() {
+            attributes = attributes
+                .with_position(LogicalPosition::new(frame.x, frame.y))
+                .with_inner_size(LogicalSize::new(frame.width, frame.height));
+        }
+        let attributes =
+            video_window_attributes(attributes, self.main.as_ref().map(|m| &*m.window));
+        // The window ignores the interface zoom: the picture fits it.
+        match self.create_surface(event_loop, attributes, self.main.as_ref(), 1.0) {
+            Ok(surface) => {
+                make_tool_window(&surface.window);
+                #[cfg(target_os = "macos")]
+                crate::title_bar::float_above_main(&surface.window);
+                self.video = Some(surface);
+                self.shell.set_video_full_screen_state(false);
+                self.record_video_frame();
+            }
+            Err(error) => self.shell.set_message(error, true),
+        }
+    }
+
+    /// Records where the Video Window sits and how big it is, for the
+    /// preferences (video R17).
+    fn record_video_frame(&mut self) {
+        let Some(video) = &self.video else {
+            return;
+        };
+        let window = &video.window;
+        if window.fullscreen().is_some() || window.is_minimized() == Some(true) {
+            return;
+        }
+        let Ok(position) = window.outer_position() else {
+            return;
+        };
+        let scale = window.scale_factor();
+        let position = position.to_logical::<f64>(scale);
+        let size = window.inner_size().to_logical::<f64>(scale);
+        self.shell.set_video_window_frame(bl_model::WindowFrame {
+            x: position.x,
+            y: position.y,
+            width: size.width,
+            height: size.height,
+        });
+    }
+
     /// Records where a floating device's window sits, for the set to save
     /// (`device.set_window`: no undo step).
     fn record_device_frame(&mut self, device: bl_model::DeviceId, window: &Window) {
@@ -1451,6 +1553,7 @@ impl Host {
             WindowKind::Second => &mut self.second_keys,
             WindowKind::Settings => &mut self.settings_keys,
             WindowKind::Assistant => &mut self.assistant_keys,
+            WindowKind::Video => &mut self.video_keys,
             WindowKind::Device(_) => &mut self.device_keys,
         };
         keys.leave_space_to_focus(bl_ui::clip_panels::tab_has_focus(&surface.ctx));
@@ -1478,14 +1581,17 @@ impl Host {
             platform: self.platform,
         });
         // A floating device's window keeps the system's title bar.
-        let title_bar = !matches!(kind, WindowKind::Device(_) | WindowKind::Assistant)
-            && draws_title_bar(&surface.window);
+        let title_bar = !matches!(
+            kind,
+            WindowKind::Device(_) | WindowKind::Assistant | WindowKind::Video
+        ) && draws_title_bar(&surface.window);
         let shell = &self.shell;
         let theme = &self.theme;
         let main_ui = &mut self.main_ui;
         let second_ui = &mut self.second_ui;
         let settings_ui = &mut self.settings_ui;
         let assistant_ui = &mut self.assistant_ui;
+        let video_ui = &mut self.video_ui;
         let mut device_ui = match kind {
             WindowKind::Device(device) => self.devices.get_mut(&device).map(|(_, ui)| ui),
             _ => None,
@@ -1509,6 +1615,11 @@ impl Host {
                     let mut events = Vec::new();
                     let rect = ui.max_rect();
                     assistant_ui.show(ui, shell, theme, rect, false, &mut events);
+                    events
+                }
+                WindowKind::Video => {
+                    let mut events = Vec::new();
+                    video_ui.show(ui, shell, &mut events);
                     events
                 }
                 WindowKind::Device(_) => {
@@ -1720,6 +1831,7 @@ impl Host {
             self.sync_device_windows(event_loop);
             self.sync_assistant_window(event_loop);
             self.sync_second_window(event_loop);
+            self.sync_video_window(event_loop);
             self.shown_revision = Some(self.shell.revision());
             #[cfg(any(target_os = "macos", windows))]
             if let Some(menu) = &self.native_menu {
@@ -2081,6 +2193,18 @@ impl Host {
                         .set_fullscreen(on.then_some(Fullscreen::Borderless(None)));
                 }
             }
+            Effect::SetVideoFullScreen(on) => {
+                if let Some(video) = &self.video {
+                    video
+                        .window
+                        .set_fullscreen(on.then_some(Fullscreen::Borderless(None)));
+                }
+            }
+            Effect::PlaceVideoWindow(frame) => {
+                if let Some(video) = &self.video {
+                    place_video_window(&video.window, &frame);
+                }
+            }
             Effect::SetSecondFullScreen(on) => {
                 if let Some(second) = &self.second {
                     second
@@ -2159,7 +2283,7 @@ impl Host {
                         settings.window.request_redraw();
                     }
                 }
-                WindowKind::Device(_) | WindowKind::Assistant => {}
+                WindowKind::Device(_) | WindowKind::Assistant | WindowKind::Video => {}
             },
         }
     }
@@ -2294,6 +2418,7 @@ impl Host {
                             WindowKind::Second => self.second.as_ref(),
                             WindowKind::Settings => self.settings.as_ref(),
                             WindowKind::Assistant => self.assistant.as_ref(),
+                            WindowKind::Video => self.video.as_ref(),
                             WindowKind::Device(device) => {
                                 self.devices.get(&device).and_then(|(s, _)| s.as_ref())
                             }
@@ -2633,7 +2758,7 @@ impl ApplicationHandler<UserEvent> for Host {
                 // leaving full screen.
                 if matches!(kind, WindowKind::Device(_)) {
                     fit_device_title_bar(&surface.window);
-                } else if kind != WindowKind::Assistant {
+                } else if !matches!(kind, WindowKind::Assistant | WindowKind::Video) {
                     fit_title_bar(&surface.window);
                 }
             }
@@ -2661,6 +2786,10 @@ impl ApplicationHandler<UserEvent> for Host {
                         bl_shell::assistant::VIEW_TOGGLE_ASSISTANT,
                         json!({}),
                     )),
+                    // The close button hides the Video Window (R16).
+                    WindowKind::Video => {
+                        self.invoke(&Invocation::new(bl_shell::video::TOGGLE_WINDOW, json!({})))
+                    }
                     // Closing a floating device's window docks the device
                     // (IMP-14): one undo step.
                     WindowKind::Device(device) => self.invoke(&Invocation::new(
@@ -2687,6 +2816,13 @@ impl ApplicationHandler<UserEvent> for Host {
                 if let Some(second) = &self.second {
                     let full = second.window.fullscreen().is_some();
                     self.shell.set_second_full_screen_state(full);
+                }
+            }
+            WindowEvent::Moved(_) | WindowEvent::Resized(_) if kind == WindowKind::Video => {
+                self.record_video_frame();
+                if let Some(video) = &self.video {
+                    let full = video.window.fullscreen().is_some();
+                    self.shell.set_video_full_screen_state(full);
                 }
             }
             // Follow System (themes R3).
@@ -2830,6 +2966,7 @@ impl ApplicationHandler<UserEvent> for Host {
                     WindowKind::Second => self.second.as_ref(),
                     WindowKind::Settings => self.settings.as_ref(),
                     WindowKind::Assistant => self.assistant.as_ref(),
+                    WindowKind::Video => self.video.as_ref(),
                     WindowKind::Device(device) => {
                         self.devices.get(&device).and_then(|(s, _)| s.as_ref())
                     }
@@ -2860,10 +2997,15 @@ impl ApplicationHandler<UserEvent> for Host {
             }
         }
         let devices = self.devices.values_mut().filter_map(|(s, _)| s.as_mut());
-        for surface in [&mut self.main, &mut self.second, &mut self.settings]
-            .into_iter()
-            .flatten()
-            .chain(devices)
+        for surface in [
+            &mut self.main,
+            &mut self.second,
+            &mut self.settings,
+            &mut self.video,
+        ]
+        .into_iter()
+        .flatten()
+        .chain(devices)
         {
             match surface.repaint_at {
                 Some(at) if at <= now => {

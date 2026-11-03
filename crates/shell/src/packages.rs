@@ -100,6 +100,11 @@ pub struct Package {
     /// `library.state` before it is installed.
     #[serde(default)]
     pub items: u32,
+    /// What this computer must have for the package to be offered; none if
+    /// left out. `nvidia-cuda-12` and `nvidia-cuda-13` name an NVIDIA driver
+    /// new enough to run that CUDA, which says a GPU is there as well (R40).
+    #[serde(default)]
+    pub needs: Option<String>,
 }
 
 /// A feature that runs an on-device model, and the roles it needs.
@@ -122,6 +127,37 @@ pub struct Manifest {
     /// The packages, for every platform.
     #[serde(default)]
     pub packages: Vec<Package>,
+}
+
+/// The major version of the NVIDIA kernel driver loaded on this computer, if
+/// one is: Linux's `/proc/driver/nvidia/version` is there only while a
+/// driver is running a GPU.
+fn nvidia_driver() -> Option<u32> {
+    static DRIVER: OnceLock<Option<u32>> = OnceLock::new();
+    *DRIVER
+        .get_or_init(|| driver_major(&std::fs::read_to_string("/proc/driver/nvidia/version").ok()?))
+}
+
+/// The driver's major version from the first line of that file, such as
+/// `NVRM version: NVIDIA UNIX x86_64 Kernel Module  580.65.06  Wed …`.
+fn driver_major(text: &str) -> Option<u32> {
+    text.lines().next()?.split_whitespace().find_map(|word| {
+        let mut parts = word.split('.').map(str::parse::<u32>);
+        let major = parts.next()?.ok()?;
+        (parts.next()?.is_ok()).then_some(major)
+    })
+}
+
+/// Whether a package's `needs` is met by a driver of this major version:
+/// CUDA 12 runs on 525 and later, CUDA 13 on 580 and later. A need this
+/// build doesn't know is never met.
+fn met(needs: &str, driver: Option<u32>) -> bool {
+    let minimum = match needs {
+        "nvidia-cuda-12" => 525,
+        "nvidia-cuda-13" => 580,
+        _ => return false,
+    };
+    driver.is_some_and(|d| d >= minimum)
 }
 
 /// What this build runs on, as a manifest names it.
@@ -169,10 +205,16 @@ impl Manifest {
     /// The packages for this platform, in the manifest's order.
     #[must_use]
     pub fn for_platform(&self) -> Vec<&Package> {
-        let here = platform();
+        self.offered(&platform(), nvidia_driver())
+    }
+
+    /// The packages offered on `platform` by a computer whose NVIDIA driver
+    /// is of major version `driver`, if it has one (R39, R40).
+    fn offered(&self, platform: &str, driver: Option<u32>) -> Vec<&Package> {
         self.packages
             .iter()
-            .filter(|p| !p.disabled && (p.platform == "any" || p.platform == here))
+            .filter(|p| !p.disabled && (p.platform == "any" || p.platform == platform))
+            .filter(|p| p.needs.as_deref().is_none_or(|n| met(n, driver)))
             .collect()
     }
 
@@ -672,6 +714,7 @@ mod tests {
             disabled: false,
             keep_all: false,
             items: 0,
+            needs: None,
         };
         (package, dir.join("Packages"))
     }
@@ -779,17 +822,32 @@ mod tests {
     }
 
     // Spec: stem-separation R38. The split model is in the manifest, in
-    // the role of the whole network, and isn't offered while it's disabled.
+    // the role of the whole network, for each platform with a GPU path, and
+    // isn't offered while it's disabled.
     #[test]
     fn a_disabled_package_is_listed_but_never_offered() {
         let manifest = Manifest::parse(BUILT_IN).unwrap();
-        let split = manifest
+        let split: Vec<_> = manifest
             .packages
             .iter()
-            .find(|p| p.id == "htdemucs-split")
-            .expect("the manifest lists the split model");
-        assert_eq!((split.role.as_str(), split.disabled), ("stems-model", true));
-        assert!(manifest.for_platform().iter().all(|p| p.id != split.id));
+            .filter(|p| p.id == "htdemucs-split")
+            .collect();
+        let platforms: Vec<_> = split.iter().map(|p| p.platform.as_str()).collect();
+        assert_eq!(
+            platforms,
+            ["macos-aarch64", "windows-x86_64", "linux-x86_64"]
+        );
+        assert!(
+            split
+                .iter()
+                .all(|p| (p.role.as_str(), p.disabled) == ("stems-model", true))
+        );
+        assert!(
+            manifest
+                .for_platform()
+                .iter()
+                .all(|p| p.id != "htdemucs-split")
+        );
         if let Some(model) = manifest.for_role("stems-model", None) {
             assert_eq!(model.id, "htdemucs");
         }
@@ -798,12 +856,150 @@ mod tests {
         let enabled = BUILT_IN.replace(r#""disabled": true"#, r#""disabled": false"#);
         let manifest = Manifest::parse(&enabled).unwrap();
         let model = manifest.for_role("stems-model", None).unwrap();
-        let expected = if platform() == split.platform {
+        let expected = if platforms.contains(&platform().as_str()) {
             "htdemucs-split"
         } else {
             "htdemucs"
         };
         assert_eq!(model.id, expected);
+    }
+
+    /// The IDs offered for the `onnx-runtime` role on `platform`.
+    fn runtimes(platform: &str, driver: Option<u32>) -> Vec<String> {
+        let manifest = Manifest::parse(BUILT_IN).unwrap();
+        manifest
+            .offered(platform, driver)
+            .into_iter()
+            .filter(|p| p.role == "onnx-runtime")
+            .map(|p| p.id.clone())
+            .collect()
+    }
+
+    // Spec: stem-separation R39. Windows is offered the DirectML build
+    // ahead of the CPU one, with only its libraries and licence notices
+    // kept from the NuGet package.
+    #[test]
+    fn windows_is_offered_the_directml_build_first() {
+        assert_eq!(
+            runtimes("windows-x86_64", None),
+            ["onnxruntime-directml", "onnxruntime"]
+        );
+        let manifest = Manifest::parse(BUILT_IN).unwrap();
+        let dml = manifest
+            .packages
+            .iter()
+            .find(|p| p.id == "onnxruntime-directml")
+            .unwrap();
+        assert_eq!(dml.unpack, Unpack::Zip);
+        assert!(dml.url.ends_with(".nupkg") && dml.sha256.len() == 64);
+        let kept: Vec<_> = dml.files.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(
+            kept,
+            [
+                "onnxruntime.dll",
+                "onnxruntime_providers_shared.dll",
+                "LICENSE",
+                "ThirdPartyNotices.txt"
+            ]
+        );
+        assert!(runtimes("macos-aarch64", None) == ["onnxruntime"]);
+    }
+
+    // Spec: stem-separation R40. Linux is offered a CUDA build only where an
+    // NVIDIA driver new enough for it is running, the newest first.
+    #[test]
+    fn linux_is_offered_a_cuda_build_only_with_an_nvidia_driver() {
+        let p = "linux-x86_64";
+        assert_eq!(runtimes(p, None), ["onnxruntime"]);
+        assert_eq!(runtimes(p, Some(470)), ["onnxruntime"]);
+        assert_eq!(
+            runtimes(p, Some(535)),
+            ["onnxruntime-cuda12", "onnxruntime"]
+        );
+        assert_eq!(
+            runtimes(p, Some(580)),
+            ["onnxruntime-cuda13", "onnxruntime-cuda12", "onnxruntime"]
+        );
+        assert_eq!(runtimes("linux-aarch64", Some(580)), ["onnxruntime"]);
+    }
+
+    // Spec: stem-separation R40. The driver's version is read from the first
+    // line of the kernel module's file, closed or open.
+    #[test]
+    fn the_driver_version_is_read_from_the_kernel_module_file() {
+        let closed = "NVRM version: NVIDIA UNIX x86_64 Kernel Module  580.65.06  Wed Jul 16 2025\nGCC version:  gcc version 13.2.0\n";
+        let open =
+            "NVRM version: NVIDIA UNIX Open Kernel Module for x86_64  535.183.01  Release Build\n";
+        assert_eq!(driver_major(closed), Some(580));
+        assert_eq!(driver_major(open), Some(535));
+        assert_eq!(driver_major(""), None);
+        assert_eq!(driver_major("no version here\n"), None);
+        assert!(met("nvidia-cuda-13", Some(580)) && !met("nvidia-cuda-13", Some(575)));
+        assert!(met("nvidia-cuda-12", Some(525)) && !met("nvidia-cuda-12", None));
+        assert!(!met("something-else", Some(999)));
+    }
+
+    // Spec: stem-separation R39, R40. The GPU builds' archives keep their
+    // libraries beside the main one and their licence notices, and nothing
+    // else: a NuGet package's other platforms, headers and build files stay
+    // out.
+    #[test]
+    fn a_gpu_build_keeps_its_libraries_and_notices_only() {
+        let mut zip_bytes = Vec::new();
+        {
+            let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut zip_bytes));
+            let options = zip::write::SimpleFileOptions::default();
+            for (path, body) in [
+                ("runtimes/win-x64/native/onnxruntime.dll", "x64 library"),
+                ("runtimes/win-arm64/native/onnxruntime.dll", "arm64 library"),
+                (
+                    "runtimes/win-x64/native/onnxruntime_providers_shared.dll",
+                    "shared",
+                ),
+                ("runtimes/win-x64/native/onnxruntime.lib", "import library"),
+                ("LICENSE", "licence"),
+                ("ThirdPartyNotices.txt", "notices"),
+                (
+                    "build/native/Microsoft.ML.OnnxRuntime.DirectML.props",
+                    "props",
+                ),
+                ("README.md", "readme"),
+            ] {
+                zip.start_file(path, options).unwrap();
+                zip.write_all(body.as_bytes()).unwrap();
+            }
+            zip.finish().unwrap();
+        }
+        let (mut package, packages) = package_of("nupkg", &zip_bytes);
+        let manifest = Manifest::parse(BUILT_IN).unwrap();
+        let dml = manifest
+            .packages
+            .iter()
+            .find(|p| p.id == "onnxruntime-directml")
+            .unwrap();
+        package.unpack = Unpack::Zip;
+        package.files.clone_from(&dml.files);
+        assert_eq!(run(&package, &packages), Ended::Done(()));
+        let dir = package.dir(&packages);
+        let mut installed: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        installed.sort();
+        assert_eq!(
+            installed,
+            [
+                "LICENSE",
+                "ThirdPartyNotices.txt",
+                "onnxruntime.dll",
+                "onnxruntime_providers_shared.dll",
+                "package.json"
+            ]
+        );
+        assert_eq!(
+            std::fs::read(dir.join("onnxruntime.dll")).unwrap(),
+            b"x64 library"
+        );
     }
 
     #[test]

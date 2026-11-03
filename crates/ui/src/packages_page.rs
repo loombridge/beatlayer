@@ -27,12 +27,14 @@ pub struct Page<'a> {
     pub install: &'a JobStatus,
     /// The command the button runs.
     pub install_command: &'a str,
+    /// The arguments it runs with.
+    pub install_args: &'a serde_json::Value,
     /// The command Cancel runs.
     pub close_command: &'a str,
 }
 
-fn invoke(events: &mut Vec<UiEvent>, id: &str) {
-    events.push(UiEvent::Invoke(Invocation::new(id, json!({}))));
+fn invoke(events: &mut Vec<UiEvent>, id: &str, args: serde_json::Value) {
+    events.push(UiEvent::Invoke(Invocation::new(id, args)));
 }
 
 /// Draws the page: the packages, the total, the folder, and Download
@@ -110,10 +112,10 @@ pub fn show(ui: &mut Ui, theme: &Theme, page: &Page<'_>, events: &mut Vec<UiEven
     ui.add_space(12.0);
     ui.horizontal(|ui| {
         if ui.button("Download Required Packages Now").clicked() {
-            invoke(events, page.install_command);
+            invoke(events, page.install_command, page.install_args.clone());
         }
         if ui.button("Cancel").clicked() {
-            invoke(events, page.close_command);
+            invoke(events, page.close_command, json!({}));
         }
     });
 }

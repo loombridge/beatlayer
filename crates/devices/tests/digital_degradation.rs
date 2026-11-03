@@ -128,7 +128,7 @@ fn filter_width_sets_how_wide_the_noise_band_is() {
             |low: usize, high: usize| spectrum[low..high].iter().map(|v| v * v).sum::<f64>();
         power(3_397, 3_630) / power(3_020, 5_000)
     };
-    let (narrow, middle, wide) = (share(0.0), share(50.0), share(100.0));
+    let (narrow, middle, wide) = (share(0.25), share(1.0), share(4.0));
     assert!(narrow > 0.6, "{narrow}");
     assert!(narrow > middle && middle > wide, "{narrow} {middle} {wide}");
     assert!(wide < 0.15, "{wide}");
@@ -139,7 +139,7 @@ fn filter_width_sets_how_wide_the_noise_band_is() {
 fn filter_width_does_nothing_at_a_noise_blend_of_0() {
     let input = noise(16_384);
     let at = |width: f64| render(&[(NOISE_BLEND, 0.0), (FILTER_WIDTH, width)], &input, 512);
-    assert_eq!(at(0.0), at(100.0));
+    assert_eq!(at(0.25), at(4.0));
 }
 
 // Spec: digital-degradation R6

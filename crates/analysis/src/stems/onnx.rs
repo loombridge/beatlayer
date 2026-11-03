@@ -13,7 +13,8 @@
 //! the window and its spectrogram (`mix` and `spec`, `[1, 4, F, T]`) and
 //! gives the two branches' outputs (`spec_out`, `[1, 4, 4, F, T]`, and
 //! `time_out`, `[1, 4, 2, L]`), which [`Transform`] turns back and adds.
-//! Only the split model runs on Core ML (R33).
+//! Only the split model runs on the GPU: Core ML on macOS (R33), DirectML on
+//! Windows (R39) and CUDA on Linux (R40).
 
 #[cfg(target_os = "macos")]
 use std::io::Read;
@@ -22,6 +23,7 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
+use ort::ep::{DirectML, ExecutionProvider};
 use ort::session::Session;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::value::Tensor;
@@ -87,6 +89,10 @@ pub enum Provider {
     Cpu,
     /// The GPU, through ONNX Runtime's Core ML execution provider.
     CoreMl,
+    /// The GPU, through ONNX Runtime's DirectML execution provider.
+    DirectMl,
+    /// An NVIDIA GPU, through ONNX Runtime's CUDA execution provider.
+    Cuda,
 }
 
 impl Provider {
@@ -96,6 +102,23 @@ impl Provider {
         match self {
             Self::Cpu => "CPU",
             Self::CoreMl => "Core ML",
+            Self::DirectMl => "DirectML",
+            Self::Cuda => "CUDA",
+        }
+    }
+
+    /// The GPU provider this platform tries before the CPU (R33, R39, R40);
+    /// none where no package offers one.
+    #[must_use]
+    pub const fn for_platform() -> Option<Self> {
+        if cfg!(target_os = "macos") {
+            Some(Self::CoreMl)
+        } else if cfg!(all(windows, target_arch = "x86_64")) {
+            Some(Self::DirectMl)
+        } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+            Some(Self::Cuda)
+        } else {
+            None
         }
     }
 }
@@ -105,11 +128,12 @@ impl Provider {
 pub struct Options {
     /// Threads for what runs on the processor.
     pub threads: usize,
-    /// Whether to try the platform's GPU provider before the CPU (R33).
+    /// Whether to try the platform's GPU provider before the CPU (R33,
+    /// R39, R40).
     pub accelerate: bool,
     /// Where Core ML keeps its compiled model (R34): a folder for each
     /// model and ONNX Runtime build is made in it. `None` compiles on
-    /// every load.
+    /// every load. The other providers compile nothing to keep.
     pub cache: Option<PathBuf>,
 }
 
@@ -179,13 +203,13 @@ impl Demucs {
         let kind = kind_of(&probe)?;
         drop(probe);
         let mut fallback = None;
-        if options.accelerate && cfg!(target_os = "macos") {
+        if let Some(gpu) = Provider::for_platform().filter(|_| options.accelerate) {
             match &kind {
                 Kind::Whole => {
                     fallback = Some("the model has its transform inside the graph".to_owned());
                 }
                 Kind::Split(_) => {
-                    match Self::on_core_ml(environment, model, options, kind.clone(), stage) {
+                    match Self::on_gpu(gpu, environment, model, options, kind.clone(), stage) {
                         Ok(mut demucs) => {
                             demucs.report.load = started.elapsed();
                             return Ok(demucs);
@@ -216,21 +240,26 @@ impl Demucs {
         })
     }
 
-    /// The model on Core ML, proved by a run on silence: Core ML takes a
-    /// model's nodes at load but only shows it can run them on a run.
-    fn on_core_ml(
+    /// The model on a GPU provider, proved by a run on silence: a provider
+    /// takes a model's nodes at load but only shows it can run them on a run.
+    fn on_gpu(
+        provider: Provider,
         environment: &ort::environment::Environment,
         model: &Path,
         options: &Options,
         kind: Kind,
         stage: &mut dyn FnMut(&str),
     ) -> Result<Self, String> {
-        let (session, compiled) = core_ml(environment, model, options, stage)?;
+        let (session, compiled) = match provider {
+            Provider::DirectMl => (direct_ml(environment, model, options)?, None),
+            Provider::Cuda => (cuda(environment, model, options)?, None),
+            Provider::CoreMl | Provider::Cpu => core_ml(environment, model, options, stage)?,
+        };
         let mut demucs = Self {
             session,
             kind,
             report: Report {
-                provider: Provider::CoreMl,
+                provider,
                 fallback: None,
                 compiled,
                 load: Duration::ZERO,
@@ -340,6 +369,13 @@ fn session(
         .with_intra_threads(threads)
         .map_err(|e| failed(&e))?;
     if !providers.is_empty() {
+        // DirectML runs one thing at a time and plans its own memory.
+        if providers.iter().any(|p| p.name() == DirectML::NAME) {
+            builder = builder.with_memory_pattern(false).map_err(|e| failed(&e))?;
+            builder = builder
+                .with_parallel_execution(false)
+                .map_err(|e| failed(&e))?;
+        }
         builder = builder
             .with_execution_providers(providers)
             .map_err(|e| failed(&e))?;
@@ -429,6 +465,45 @@ fn core_ml(
     Err("Core ML is for macOS".to_owned())
 }
 
+/// DirectML's session for the split model (R39), on whichever GPU Windows
+/// picks.
+fn direct_ml(
+    environment: &ort::environment::Environment,
+    model: &Path,
+    options: &Options,
+) -> Result<Session, String> {
+    session(
+        environment,
+        model,
+        options.threads.max(1),
+        GraphOptimizationLevel::Level3,
+        &[DirectML::default().build().error_on_failure()],
+    )
+    .map_err(|e| format!("DirectML didn't take the model: {e}"))
+}
+
+/// CUDA's session for the split model (R40). CUDA and cuDNN are NVIDIA's,
+/// and only used where they're already installed: a library that's missing
+/// is named in ONNX Runtime's error, which becomes the reason.
+fn cuda(
+    environment: &ort::environment::Environment,
+    model: &Path,
+    options: &Options,
+) -> Result<Session, String> {
+    session(
+        environment,
+        model,
+        options.threads.max(1),
+        GraphOptimizationLevel::Level3,
+        &[ort::ep::CUDA::default().build().error_on_failure()],
+    )
+    .map_err(|e| {
+        format!(
+            "CUDA didn't take the model, which needs NVIDIA's CUDA and cuDNN libraries installed on this computer: {e}"
+        )
+    })
+}
+
 /// The loaded ONNX Runtime's build, by the commit its build information
 /// names: a release's version says no more.
 #[cfg(target_os = "macos")]
@@ -464,6 +539,41 @@ fn sha256(path: &Path) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Spec: stem-separation R33, R39, R40 and R41. Each platform tries its
+    // own GPU provider, which the report and `stems.status` name, and the
+    // CPU says why it isn't one.
+    #[test]
+    fn each_platform_names_its_own_gpu_provider() {
+        let names = [
+            Provider::Cpu,
+            Provider::CoreMl,
+            Provider::DirectMl,
+            Provider::Cuda,
+        ]
+        .map(Provider::name);
+        assert_eq!(names, ["CPU", "Core ML", "DirectML", "CUDA"]);
+        let tried = Provider::for_platform();
+        assert_eq!(tried == Some(Provider::CoreMl), cfg!(target_os = "macos"));
+        assert_eq!(
+            tried == Some(Provider::DirectMl),
+            cfg!(all(windows, target_arch = "x86_64"))
+        );
+        assert_eq!(
+            tried == Some(Provider::Cuda),
+            cfg!(all(target_os = "linux", target_arch = "x86_64"))
+        );
+        let report = Report {
+            provider: Provider::Cpu,
+            fallback: Some("CUDA didn't take the model: libcudnn.so.9 is missing".to_owned()),
+            compiled: None,
+            load: Duration::ZERO,
+        };
+        assert_eq!(
+            report.describe(),
+            "CPU (not the GPU: CUDA didn't take the model: libcudnn.so.9 is missing)"
+        );
+    }
 
     // Spec: stem-separation R19. Two features asking for the library load
     // it once: the second finds the first's environment, here its refusal,

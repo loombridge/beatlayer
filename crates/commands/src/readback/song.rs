@@ -105,6 +105,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("library.install", read("library.state", "install")),
     ("library.cancel", read("library.state", "install")),
     ("library.export_credits", nothing(FILE)),
+    ("audio_to_midi.convert", query(Song, "tracks")),
     ("stems.cancel", read("stems.status", "separation")),
     ("stems.install", read("stems.status", "install")),
     ("stems.separate", query(Song, "tracks")),

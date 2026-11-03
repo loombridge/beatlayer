@@ -1,9 +1,10 @@
-//! Granulator III, part 1 (WP-8.26; spec: granulator iii R1 to R17): a
+//! Granulator III (WP-8.26, WP-8.27; spec: granulator iii R1 to R27): a
 //! sample played as a stream of short windowed grains in three modes,
 //! Classic, Loop and Cloud, through the instruments' voice section, an
 //! amplitude envelope, the instruments' filter and Volume, with the
-//! waveform and grain display the framework publishes. Capturing audio in
-//! real time is part 2's.
+//! waveform and grain display the framework publishes. It can also capture
+//! the audio of its sidechain's source in real time and play grains from it
+//! while it fills (R18 to R26).
 //!
 //! Every voice owns a pool of [`POOL`] grains made with the device. A
 //! grain's onset is a frame worked out from its note's frame or the song
@@ -13,6 +14,7 @@
 
 use core::ops::Range;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
 use bl_core::time::{Frames, TICKS_PER_QUARTER, Ticks};
 use bl_dsp::Random;
@@ -67,6 +69,7 @@ pub const PB_RANGE: ParamId = ParamId(26);
 pub const SLIDE_AMOUNT: ParamId = ParamId(27);
 pub const PRESSURE_SIZE: ParamId = ParamId(28);
 pub const PRESSURE_SHAPE: ParamId = ParamId(29);
+pub const CAPTURE_LENGTH: ParamId = ParamId(30);
 
 pub const MODES: [&str; 3] = ["Classic", "Loop", "Cloud"];
 pub const CLASSIC: usize = 0;
@@ -88,8 +91,13 @@ pub const POOL: usize = 64;
 /// Spec: granulator iii R14. The waveform's peaks at a fixed resolution.
 pub const PEAKS: usize = 128;
 /// The floats the display data holds: the grains dropped, the grains shown,
-/// the source's length in seconds, then the grains' positions and the peaks.
-pub const DISPLAY_LEN: usize = 3 + POOL + PEAKS;
+/// the source's length in seconds, then the grains' positions and the peaks,
+/// and last whether a capture runs and how many seconds it holds.
+pub const DISPLAY_LEN: usize = 3 + POOL + PEAKS + 2;
+
+/// Spec: granulator iii R18. The longest capture, in seconds: the capture
+/// buffer is made with the device at this length.
+pub const CAPTURE_MAX_SECONDS: f64 = 30.0;
 
 /// Spec: granulator iii R5. Size's range in milliseconds, and the share of
 /// Spray's reach: a second.
@@ -219,53 +227,66 @@ pub fn granulator_iii_type() -> DeviceType {
             .describe("How far an MPE note's pressure moves its grains' Size."),
         percent(PRESSURE_SHAPE, "Pressure > Shape", (-100.0, 100.0), 0.0)
             .describe("How far an MPE note's pressure moves its grains' Shape."),
+        ParamDescriptor::continuous(
+            CAPTURE_LENGTH,
+            "Capture Length",
+            (1.0, CAPTURE_MAX_SECONDS),
+            10.0,
+            ParamUnit::Seconds,
+        )
+        .describe("How long a capture runs before it stops by itself."),
     ];
-    DeviceType::native(GRANULATOR_III, "Granulator III", DeviceRole::Instrument).with_description(
-        DeviceDescription::new(params)
-            .with_layout(layout())
-            .with_banks(&[
-                (
-                    "Grain",
-                    &[
-                        "Mode", "Position", "Size", "Shape", "Spray", "Scan", "Density", "Rate",
-                    ],
-                ),
-                (
-                    "Pitch",
-                    &[
-                        "Variation",
-                        "Width",
-                        "Transpose",
-                        "Fine",
-                        "Voices",
-                        "Priority",
-                        "Volume",
-                    ],
-                ),
-                ("Envelope", &["Attack", "Decay", "Sustain", "Release"]),
-                (
-                    "Filter",
-                    &[
+    // Spec: granulator iii R18. The capture's source is the sidechain's,
+    // always heard.
+    DeviceType::native(GRANULATOR_III, "Granulator III", DeviceRole::Instrument)
+        .with_sidechain_on()
+        .with_description(
+            DeviceDescription::new(params)
+                .with_layout(layout())
+                .with_banks(&[
+                    (
+                        "Grain",
+                        &[
+                            "Mode", "Position", "Size", "Shape", "Spray", "Scan", "Density", "Rate",
+                        ],
+                    ),
+                    (
+                        "Pitch",
+                        &[
+                            "Variation",
+                            "Width",
+                            "Transpose",
+                            "Fine",
+                            "Voices",
+                            "Priority",
+                            "Volume",
+                        ],
+                    ),
+                    ("Envelope", &["Attack", "Decay", "Sustain", "Release"]),
+                    ("Capture", &["Capture Length"]),
+                    (
                         "Filter",
-                        "Filter Type",
-                        "Filter Slope",
-                        "Filter Circuit",
-                        "Filter Freq",
-                        "Filter Res",
-                    ],
-                ),
-                (
-                    "MPE",
-                    &[
-                        "Note PB",
-                        "PB Range",
-                        "Slide Amount",
-                        "Pressure > Size",
-                        "Pressure > Shape",
-                    ],
-                ),
-            ]),
-    )
+                        &[
+                            "Filter",
+                            "Filter Type",
+                            "Filter Slope",
+                            "Filter Circuit",
+                            "Filter Freq",
+                            "Filter Res",
+                        ],
+                    ),
+                    (
+                        "MPE",
+                        &[
+                            "Note PB",
+                            "PB Range",
+                            "Slide Amount",
+                            "Pressure > Size",
+                            "Pressure > Shape",
+                        ],
+                    ),
+                ]),
+        )
 }
 
 /// The name of the node that holds the three pages, which `device.set_page`
@@ -304,7 +325,12 @@ fn layout() -> DeviceLayout {
                             (TRANSPOSE, Number),
                             (FINE, Knob),
                         ]),
-                        band(&[(VOICES, Number), (PRIORITY, Chooser), (VOLUME, Knob)]),
+                        band(&[
+                            (VOICES, Number),
+                            (PRIORITY, Chooser),
+                            (VOLUME, Knob),
+                            (CAPTURE_LENGTH, Number),
+                        ]),
                     ]),
                 ),
                 Page::new(
@@ -372,6 +398,75 @@ struct Stream {
     scan: f64,
 }
 
+/// Spec: granulator iii R19, R22. The audio a capture has written, shared
+/// between the audio thread, which writes it, and the shell, which reads it
+/// once the capture is over to write the file. It is made off the audio
+/// thread, at the length the capture will run for, and never grows; the
+/// audio thread only stores into it.
+pub struct CaptureBuffer {
+    /// Stereo frames, a left sample then a right one, as `f32` bits.
+    samples: Box<[AtomicU32]>,
+    filled: AtomicUsize,
+    finished: AtomicBool,
+}
+
+impl CaptureBuffer {
+    /// An empty buffer for a capture of `frames` frames.
+    #[must_use]
+    pub fn new(frames: usize) -> Self {
+        Self {
+            samples: (0..frames * 2).map(|_| AtomicU32::new(0)).collect(),
+            filled: AtomicUsize::new(0),
+            finished: AtomicBool::new(false),
+        }
+    }
+
+    /// How many frames the capture can hold.
+    #[must_use]
+    pub fn capacity(&self) -> usize {
+        self.samples.len() / 2
+    }
+
+    /// The frames captured so far.
+    #[must_use]
+    pub fn filled(&self) -> usize {
+        self.filled.load(Ordering::Acquire)
+    }
+
+    /// Whether the capture is over, stopped or full.
+    #[must_use]
+    pub fn finished(&self) -> bool {
+        self.finished.load(Ordering::Acquire)
+    }
+
+    /// Ends the capture from outside, for a node that will never finish it.
+    pub fn end(&self) {
+        self.finished.store(true, Ordering::Release);
+    }
+
+    /// The audio captured so far, planar: the left channel then the right.
+    #[must_use]
+    pub fn read(&self) -> [Vec<f32>; 2] {
+        let frames = self.filled();
+        let channel = |c: usize| {
+            (0..frames)
+                .map(|frame| f32::from_bits(self.samples[frame * 2 + c].load(Ordering::Relaxed)))
+                .collect()
+        };
+        [channel(0), channel(1)]
+    }
+}
+
+/// Spec: granulator iii R19. What the shell tells a Granulator III's node
+/// about a capture, as node data; it changes nothing in the set.
+#[derive(Clone)]
+pub enum CaptureCommand {
+    /// Starts a capture into the buffer, from the node's next block.
+    Start(Arc<CaptureBuffer>),
+    /// Ends the capture running now.
+    Stop,
+}
+
 /// Granulator III's audio-thread half.
 pub struct GranulatorIii {
     section: Section,
@@ -379,6 +474,9 @@ pub struct GranulatorIii {
     /// The decoded sample, kept as node data so that letting go of it never
     /// frees on the audio thread.
     data: Option<NodeData>,
+    /// The running capture's [`CaptureCommand::Start`], likewise kept as
+    /// node data.
+    capture: Option<NodeData>,
 }
 
 impl GranulatorIii {
@@ -403,7 +501,64 @@ impl GranulatorIii {
             ),
             grains: Grains::new(rate, config.max_frames, u64::from(device.id.0)),
             data: None,
+            capture: None,
         }
+    }
+
+    /// Spec: granulator iii R19, R20. Writes the stretch's sidechain audio,
+    /// aligned for latency by the engine as a sidechain's is, into the
+    /// capture's buffer and the grains' own copy, sample for sample from
+    /// the frame the capture started on, and ends the capture at Length.
+    fn capture_stretch(&mut self, audio: &Audio<'_, '_>, params: &ParamBank) {
+        let Some(CaptureCommand::Start(buffer)) = self
+            .capture
+            .as_ref()
+            .and_then(|data| data.downcast_ref::<CaptureCommand>())
+        else {
+            return;
+        };
+        if !self.grains.capturing {
+            return;
+        }
+        let length = params.value(
+            params
+                .index(CAPTURE_LENGTH)
+                .expect("the description holds it"),
+        );
+        let wanted = (length * self.grains.rate).round() as usize;
+        let room = wanted
+            .min(buffer.capacity())
+            .min(self.grains.mirror_capacity())
+            .saturating_sub(self.grains.captured);
+        let take = audio.frames().min(room);
+        let start = self.grains.captured;
+        for channel in 0..2 {
+            let key = audio.sidechain(channel.min(audio.channels() - 1));
+            for frame in 0..take {
+                let sample = key.map_or(0.0, |key| key[frame]);
+                self.grains.write_capture(channel, start + frame, sample);
+                buffer.samples[(start + frame) * 2 + channel]
+                    .store(sample.to_bits(), Ordering::Relaxed);
+            }
+        }
+        self.grains.captured += take;
+        buffer.filled.store(self.grains.captured, Ordering::Release);
+        if take == room {
+            self.end_capture();
+        }
+    }
+
+    /// Ends the capture: the grains go back to the sample, and the buffer
+    /// tells its reader it's complete.
+    fn end_capture(&mut self) {
+        if let Some(CaptureCommand::Start(buffer)) = self
+            .capture
+            .as_ref()
+            .and_then(|data| data.downcast_ref::<CaptureCommand>())
+        {
+            buffer.finished.store(true, Ordering::Release);
+        }
+        self.grains.capturing = false;
     }
 }
 
@@ -419,18 +574,34 @@ impl NativeDevice for GranulatorIii {
             .and_then(|data| data.downcast_ref::<SlotSample>())
             .filter(|slot| slot.sample.frames() > 0)
             .map(|slot| Arc::clone(&slot.sample));
+        self.capture_stretch(audio, params);
         self.grains.snapshot(audio, params, sample);
         self.section.process(audio, params, &mut self.grains);
         self.grains.finish(audio, params);
     }
 
     fn flush(&mut self, _events: &[NodeEvent], _params: &ParamBank) {
+        self.end_capture();
         self.section.reset();
         self.grains.silence();
     }
 
     fn receive_data(&mut self, data: NodeData) {
         self.section.receive_data(&data);
+        match data.downcast_ref::<CaptureCommand>() {
+            Some(CaptureCommand::Start(_)) => {
+                self.end_capture();
+                self.grains.captured = 0;
+                self.grains.capturing = true;
+                self.capture = Some(data);
+                return;
+            }
+            Some(CaptureCommand::Stop) => {
+                self.end_capture();
+                return;
+            }
+            None => {}
+        }
         // The device has one sample slot.
         if data
             .downcast_ref::<SlotSample>()
@@ -488,6 +659,28 @@ struct Grains {
     scanning: usize,
     /// The source's length in frames, for the display.
     length: f64,
+    /// Spec: granulator iii R18. The grains' copy of a capture, stereo and
+    /// planar, made with the device at [`CAPTURE_MAX_SECONDS`]; `captured`
+    /// frames of it are written while `capturing`.
+    mirror: Box<[f32]>,
+    captured: usize,
+    capturing: bool,
+}
+
+/// A source the grains read: two planar channels of one length, a sample's
+/// (a mono one twice) or what a capture has written so far.
+#[derive(Clone, Copy)]
+struct View<'a>([&'a [f32]; 2]);
+
+impl<'a> View<'a> {
+    fn of(sample: &'a SampleData) -> Option<Self> {
+        let left = sample.channel(0)?;
+        Some(Self([left, sample.channel(1).unwrap_or(left)]))
+    }
+
+    fn frames(&self) -> usize {
+        self.0[0].len()
+    }
 }
 
 impl Grains {
@@ -542,7 +735,20 @@ impl Grains {
             scanned: 0,
             scanning: 0,
             length: 0.0,
+            mirror: vec![0.0; 2 * (rate * CAPTURE_MAX_SECONDS) as usize].into_boxed_slice(),
+            captured: 0,
+            capturing: false,
         }
+    }
+
+    /// How many frames the capture's copy holds.
+    fn mirror_capacity(&self) -> usize {
+        self.mirror.len() / 2
+    }
+
+    fn write_capture(&mut self, channel: usize, frame: usize, sample: f32) {
+        let capacity = self.mirror_capacity();
+        self.mirror[channel * capacity + frame] = sample;
     }
 
     fn ramp(&self, which: usize, frame: usize) -> f32 {
@@ -726,7 +932,9 @@ impl Grains {
             }
         }
         out[1] = shown as f32;
-        out[3 + POOL..].copy_from_slice(&self.peaks);
+        out[3 + POOL..3 + POOL + PEAKS].copy_from_slice(&self.peaks);
+        out[3 + POOL + PEAKS] = f32::from(u8::from(self.capturing));
+        out[3 + POOL + PEAKS + 1] = (self.captured as f64 / self.rate) as f32;
     }
 }
 
@@ -741,7 +949,7 @@ impl Grains {
         frame: usize,
         slide: f64,
         pressure: f64,
-        source: &SampleData,
+        source: View<'_>,
     ) {
         let ramps: [f64; RAMPED.len()] = core::array::from_fn(|k| f64::from(self.ramp(k, frame)));
         let ramp = |which: usize| ramps[which];
@@ -836,17 +1044,17 @@ impl Grains {
 
     /// One grain's output at its position, read with linear interpolation;
     /// `None` once it runs off the end of the source.
-    fn read(grain: &Grain, source: &SampleData) -> Option<[f32; 2]> {
+    fn read(grain: &Grain, source: View<'_>) -> Option<[f32; 2]> {
         let index = grain.at as usize;
         if index + 1 >= source.frames() {
             return None;
         }
         let fraction = grain.at.fract() as f32;
         let at = |channel: usize| {
-            let samples = source.channel(channel.min(source.channel_count() - 1))?;
-            Some(samples[index] + (samples[index + 1] - samples[index]) * fraction)
+            let samples = source.0[channel];
+            samples[index] + (samples[index + 1] - samples[index]) * fraction
         };
-        Some([at(0)?, at(1)?])
+        Some([at(0), at(1)])
     }
 
     /// One voice's frames: its stream's grains started where its mode says,
@@ -858,7 +1066,7 @@ impl Grains {
         voices: &VoiceBlock,
         state: &State,
         frames: &Range<usize>,
-        source: &SampleData,
+        source: View<'_>,
     ) {
         let sources = Sources::of(voices);
         let (slide, pressure) = (sources.slide(voice), sources.pressure(voice));
@@ -958,12 +1166,30 @@ impl Instrument for Grains {
             return;
         }
         self.env.process(&mut self.env_out[..count * ENV_STRIDE]);
-        let source = self.sample.take();
+        let sample = self.sample.take();
+        let mirror = core::mem::take(&mut self.mirror);
+        // Spec: granulator iii R20. While a capture fills, the grains read
+        // what it has written so far and nothing beyond.
+        let capacity = mirror.len() / 2;
+        let captured = (self.capturing && self.captured >= 2).then(|| {
+            View([
+                &mirror[..self.captured],
+                &mirror[capacity..capacity + self.captured],
+            ])
+        });
+        let source = if self.capturing {
+            captured
+        } else {
+            sample.as_deref().and_then(View::of)
+        };
+        if let Some(source) = source {
+            self.length = source.frames() as f64;
+        }
         let mut mask = voices.active_mask();
         while mask != 0 {
             let voice = mask.trailing_zeros() as usize;
             mask &= mask - 1;
-            if let Some(source) = &source {
+            if let Some(source) = source {
                 self.render_voice(voice, voices, state, &frames, source);
             } else {
                 // Without a source the streams wait too, so a sample that
@@ -971,7 +1197,8 @@ impl Instrument for Grains {
                 self.streams[voice].next = state.clock(frames.end) as f64;
             }
         }
-        self.sample = source;
+        self.mirror = mirror;
+        self.sample = sample;
         // A voice whose envelope has ended is silent.
         let mut mask = voices.active_mask();
         while mask != 0 {
@@ -999,6 +1226,9 @@ pub fn display(
     let data = data.filter(|d| d.len() == DISPLAY_LEN);
     let length = data.map_or(0.0, |d| f64::from(d[2]));
     let (dropped, shown) = data.map_or((0, 0), |d| (d[0] as u64, d[1] as usize));
+    let (capturing, captured) = data.map_or((0.0, 0.0), |d| {
+        (d[3 + POOL + PEAKS], d[3 + POOL + PEAKS + 1])
+    });
     let waveform = DisplaySeries {
         name: "Waveform".to_owned(),
         unit: "".to_owned(),
@@ -1007,7 +1237,7 @@ pub fn display(
         log_x: false,
         y_range: [0.0, 1.0],
         detail: false,
-        values: data.map_or_else(Vec::new, |d| d[3 + POOL..].to_vec()),
+        values: data.map_or_else(Vec::new, |d| d[3 + POOL..3 + POOL + PEAKS].to_vec()),
     };
     let mut markers = Vec::new();
     let mut mark = |name: &str, x: f64, y: f32, text: String| {
@@ -1070,6 +1300,20 @@ pub fn display(
                 value: dropped as f32,
                 unit: String::new(),
                 text: dropped.to_string(),
+            },
+            // Spec: granulator iii R23, R25. Whether a capture runs and how
+            // much it holds, which the panel's Capture button shows.
+            DisplayReading {
+                name: "Capturing".to_owned(),
+                value: capturing,
+                unit: String::new(),
+                text: if capturing > 0.0 { "On" } else { "Off" }.to_owned(),
+            },
+            DisplayReading {
+                name: "Captured".to_owned(),
+                value: captured,
+                unit: "s".to_owned(),
+                text: format!("{captured:.2} s"),
             },
         ],
     }

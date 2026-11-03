@@ -1433,7 +1433,12 @@ fn compare_items_follow_the_state_and_are_disabled_for_racks_and_plugins() {
         assert!(!edit_item(&h, row).enabled, "{row} on a plug-in");
     }
     let fp = frame_of(&mut h, plugin);
-    let out = right_click(&mut h, title_rect(fp, false).center());
+    // A plug-in's name starts after its window and Configure buttons.
+    let name = pos2(
+        bl_ui::device_view::plugin_configure_rect(fp, false).right() + 12.0,
+        title_rect(fp, false).center().y,
+    );
+    let out = right_click(&mut h, name);
     let nodes = Harness::nodes(&out);
     for label in ["Compare: Switch to B", "Compare: Copy A to B"] {
         let item = nodes

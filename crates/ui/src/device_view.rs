@@ -800,29 +800,29 @@ impl DeviceViewUi {
                         }
                     }
                 }
+                // What the device adds to its title bar takes the room it needs;
+                // the name and the tabs share the rest (L-DEV-045).
+                let title = if strip {
+                    controls.title
+                } else {
+                    crate::device_panel::title_parts(ui, theme, frame, controls.title, events)
+                };
                 self.title(
                     ui,
                     shell,
                     theme,
                     frame,
-                    (controls.title, strip, window),
+                    (title, strip, window),
                     text_colour,
                     events,
                 );
                 if let (Some(state), false) = (&frame.multisampler, strip) {
                     self.multisampler
-                        .tabs(ui, theme, frame, state, controls.title, events);
+                        .tabs(ui, theme, frame, state, title, events);
                 }
                 if !strip {
                     // Spec: device-framework R41. Title-bar tabs.
-                    crate::device_panel::title_tabs(
-                        ui,
-                        theme,
-                        frame,
-                        controls.title,
-                        &played,
-                        events,
-                    );
+                    crate::device_panel::title_tabs(ui, theme, frame, title, &played, events);
                 }
                 self.activator(ui, theme, frame, controls.activator, events);
                 if let Some(expand) = controls.expand {
@@ -935,10 +935,20 @@ impl DeviceViewUi {
             );
             painter.add(egui::epaint::TextShape::new(at, galley, colour).with_angle(-FRAC_PI_2));
         } else {
+            // A name wider than the room the tabs leave is cut short with an
+            // ellipsis (observed on Note Length).
+            let room = rect.width() - crate::device_panel::title_tabs_width(frame);
+            let name = crate::device_panel::truncated(&frame.title_text(), |text| {
+                painter
+                    .layout_no_wrap(text.to_owned(), theme.small_font(), colour)
+                    .size()
+                    .x
+                    <= room
+            });
             painter.text(
                 pos2(rect.left(), rect.center().y),
                 Align2::LEFT_CENTER,
-                frame.title_text(),
+                name,
                 theme.small_font(),
                 colour,
             );
@@ -1176,8 +1186,6 @@ impl DeviceViewUi {
         }
         let c = &theme.colors;
         let painter = ui.painter_at(rect.expand(2.0));
-        let centre = rect.center();
-        let r = rect.width() / 2.0;
         let face = if switch.on {
             c.accent.0
         } else if response.hovered() && enabled {
@@ -1185,9 +1193,10 @@ impl DeviceViewUi {
         } else {
             c.window.0
         };
-        painter.circle_filled(
-            centre,
-            r,
+        // A small square with a flat and a sharp (observed in Live 12.4.16).
+        painter.rect_filled(
+            rect,
+            crate::device_panel::BOX_CORNER,
             if enabled {
                 face
             } else {
@@ -1201,18 +1210,12 @@ impl DeviceViewUi {
         } else {
             c.text_dim.0
         };
-        let stroke = Stroke::new(1.0, ink);
-        // Three rising steps, standing for the notes of a scale.
-        for step in 0..3 {
-            let x = centre.x - r * 0.5 + step as f32 * r * 0.5;
-            painter.line_segment(
-                [
-                    pos2(x, centre.y + r * 0.45),
-                    pos2(x, centre.y + r * 0.45 - (step + 1) as f32 * r * 0.35),
-                ],
-                stroke,
-            );
-        }
+        crate::device_panel::paint_glyph(
+            &painter,
+            rect.shrink(2.0),
+            bl_model::device_layout::Glyph::FlatSharp,
+            ink,
+        );
         focus_ring(ui, theme, rect, &response);
         let name = switch.name.to_owned();
         let on = switch.on;
@@ -2091,7 +2094,7 @@ struct Controls {
 }
 
 /// The size of a title bar's round buttons.
-const BUTTON: f32 = 11.0;
+const BUTTON: f32 = bl_model::device_layout::BOX_HEIGHT;
 
 /// An unfolded frame's title bar along its top: the activator, the expand
 /// toggle where the device has an expanded part, a plug-in's window button,

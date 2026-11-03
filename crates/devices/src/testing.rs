@@ -11,6 +11,7 @@
 //! | [`INSTRUMENT`] | Framework Test Instrument | the instruments' shared parts: sine voices with every part of the voice section, or a source as the output; a menu option | generic |
 //! | [`FM`] | Framework Test FM | the FM core's four operators on the voice section, each operator's controls as parameters | generic |
 //! | [`PAGES`] | Framework Test Pages | passes audio through; tabs of three pages in the body beside a shell of three sections and its display | its own |
+//! | [`PARTS`] | Framework Test Parts | passes audio through; one of each part a panel is made of: both knobs, the boxes, the buttons, a unit pair, a side strip, headings, title-bar parts and a greyed control | its own |
 //!
 //! Between them they have a parameter of every kind: gains, continuous
 //! values with linear and logarithmic tapers, toggles, choices, and whole
@@ -20,8 +21,8 @@ use bl_dsp::stft::{self, Stft, Window};
 use bl_dsp::{EnvelopeFollower, Oversampler};
 use bl_engine::{DeviceType, NodeConfig, NodeData, Registry};
 use bl_model::device_layout::{
-    BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Page, PageStyle, PagesNode, TAB_HEIGHT,
-    Widget,
+    BODY_HEIGHT, Control, ControlBand, DisplayCell, Glyph, Heading, LayoutNode, Maker, Page,
+    PageStyle, PagesNode, TAB_HEIGHT, TitlePart, Unit, Widget,
 };
 use bl_model::{
     Device, DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole,
@@ -60,6 +61,8 @@ pub const INSTRUMENT: &str = "test.framework.instrument";
 pub const FM: &str = "test.framework.fm";
 /// The test pages' device type.
 pub const PAGES: &str = "test.framework.pages";
+/// The test parts' device type.
+pub const PARTS: &str = "test.framework.parts";
 
 /// The utility's gain: −∞ to +12 dB, 0 dB by default.
 pub const UTILITY_GAIN: ParamId = ParamId(0);
@@ -458,6 +461,196 @@ pub fn pages_type() -> DeviceType {
     DeviceType::native(PAGES, "Framework Test Pages", DeviceRole::AudioEffect)
         .with_description(DeviceDescription::new(params).with_layout(layout))
 }
+
+/// The test parts' large knob.
+pub const PARTS_LEVEL: ParamId = ParamId(0);
+/// The test parts' small knob, bipolar.
+pub const PARTS_AMOUNT: ParamId = ParamId(1);
+/// The test parts' lit number box.
+pub const PARTS_MIX: ParamId = ParamId(2);
+/// The test parts' plain number box.
+pub const PARTS_PLAIN: ParamId = ParamId(3);
+/// The test parts' marked number box.
+pub const PARTS_MARKED: ParamId = ParamId(4);
+/// The test parts' chooser.
+pub const PARTS_CHOOSER: ParamId = ParamId(5);
+/// The test parts' knob with a unit pair: its rate in milliseconds.
+pub const PARTS_RATE_MS: ParamId = ParamId(6);
+/// The unit pair's switch: off, milliseconds; on, synced.
+pub const PARTS_SYNC: ParamId = ParamId(7);
+/// The rate the knob shows while the switch is on.
+pub const PARTS_RATE_SYNC: ParamId = ParamId(8);
+/// A control greyed while Hold is off.
+pub const PARTS_GATED: ParamId = ParamId(9);
+/// The test parts' text button.
+pub const PARTS_HOLD: ParamId = ParamId(10);
+/// The test parts' outlined text button.
+pub const PARTS_EDGE: ParamId = ParamId(11);
+/// The test parts' icon button.
+pub const PARTS_ICON: ParamId = ParamId(12);
+/// The test parts' round button.
+pub const PARTS_ROUND: ParamId = ParamId(13);
+/// The test parts' row of text buttons.
+pub const PARTS_MODE: ParamId = ParamId(14);
+/// The test parts' stack of text buttons.
+pub const PARTS_STACK: ParamId = ParamId(15);
+/// The test parts' grid of buttons.
+pub const PARTS_GRID: ParamId = ParamId(16);
+/// The test parts' row of filter-type icons.
+pub const PARTS_FILTER: ParamId = ParamId(17);
+/// The control in the side strip.
+pub const PARTS_STRIP_GAIN: ParamId = ParamId(18);
+/// The control in the display cell's top row.
+pub const PARTS_CELL_TOP: ParamId = ParamId(19);
+/// The control in the display cell's bottom row.
+pub const PARTS_CELL_BOTTOM: ParamId = ParamId(20);
+/// The title bar's lettered button.
+pub const PARTS_LETTER: ParamId = ParamId(21);
+/// The title bar's round button after the activator.
+pub const PARTS_INFO: ParamId = ParamId(22);
+/// The title bar's text button.
+pub const PARTS_LEARN: ParamId = ParamId(23);
+/// The title bar's Use Current Scale switch.
+pub const PARTS_USE_SCALE: ParamId = ParamId(24);
+/// The side strip of the test parts.
+pub const PARTS_STRIP: &str = "Audio Routing";
+
+/// The test parts' type: one of each part a device panel is made of (layout
+/// L-DEV-042 to L-DEV-046), laid out by hand.
+#[must_use]
+pub fn parts_type() -> DeviceType {
+    let percent = |id, name: &str, range: (f64, f64), default| {
+        ParamDescriptor::continuous(id, name, range, default, ParamUnit::Percent)
+    };
+    let toggle = |id, name: &str| ParamDescriptor::toggle(id, name, false);
+    let choice = |id, name: &str, names: &[&str]| ParamDescriptor::choice(id, name, names, 0);
+    let params = vec![
+        percent(PARTS_LEVEL, "Level", (0.0, 100.0), 50.0),
+        percent(PARTS_AMOUNT, "Amount", (-50.0, 50.0), 0.0),
+        percent(PARTS_MIX, "Mix", (0.0, 100.0), 25.0),
+        ParamDescriptor::integer(PARTS_PLAIN, "Plain", (0, 10), 3, ParamUnit::None),
+        percent(PARTS_MARKED, "Marked", (0.0, 100.0), 100.0),
+        choice(PARTS_CHOOSER, "Chooser", &["Off", "Block", "Scale"]),
+        ParamDescriptor::continuous(
+            PARTS_RATE_MS,
+            "Rate",
+            (1.0, 1000.0),
+            100.0,
+            ParamUnit::Milliseconds,
+        ),
+        toggle(PARTS_SYNC, "Sync"),
+        percent(PARTS_RATE_SYNC, "Rate", (0.0, 100.0), 50.0),
+        percent(PARTS_GATED, "Gated", (0.0, 100.0), 0.0),
+        toggle(PARTS_HOLD, "Hold"),
+        toggle(PARTS_EDGE, "Edge"),
+        toggle(PARTS_ICON, "Icon"),
+        toggle(PARTS_ROUND, "Round"),
+        choice(PARTS_MODE, "Mode", &["Peak", "RMS", "Expand"]),
+        choice(PARTS_STACK, "Stack", &["On", "Latch"]),
+        choice(
+            PARTS_GRID,
+            "Grid",
+            &["1", "2", "3", "4", "5", "6", "8", "16"],
+        ),
+        choice(
+            PARTS_FILTER,
+            "Filter",
+            &["Low Pass", "High Pass", "Band Pass", "Notch"],
+        ),
+        percent(PARTS_STRIP_GAIN, "Gain", (0.0, 100.0), 0.0),
+        toggle(PARTS_CELL_TOP, "Top"),
+        percent(PARTS_CELL_BOTTOM, "Bottom", (0.0, 100.0), 0.0),
+        toggle(PARTS_LETTER, "Letter"),
+        toggle(PARTS_INFO, "Info"),
+        toggle(PARTS_LEARN, "Learn"),
+        toggle(PARTS_USE_SCALE, "Use Current Scale"),
+    ]
+    .into_iter()
+    .map(|p| p.describe("A parameter whose control shows one part of a panel."))
+    .collect::<Vec<_>>();
+    let at = |param, widget, x, y| Control::new(param, widget, x, y);
+    let controls = ControlBand::free(
+        230.0,
+        140.0,
+        vec![
+            at(PARTS_LEVEL, Widget::Knob, 4.0, 4.0),
+            at(PARTS_AMOUNT, Widget::SmallKnob, 50.0, 4.0),
+            at(PARTS_MIX, Widget::Slider, 90.0, 4.0),
+            at(PARTS_PLAIN, Widget::Number, 90.0, 30.0),
+            at(PARTS_MARKED, Widget::Marked, 90.0, 56.0),
+            at(PARTS_CHOOSER, Widget::Chooser, 90.0, 82.0),
+            at(PARTS_RATE_MS, Widget::Knob, 150.0, 4.0)
+                .with_unit(PARTS_SYNC, [Unit::Ms, Unit::Sync]),
+            at(PARTS_GATED, Widget::Number, 150.0, 66.0).greyed_while(PARTS_HOLD, 0),
+        ],
+    );
+    let buttons = ControlBand::free(
+        175.0,
+        BODY_HEIGHT,
+        vec![
+            at(PARTS_HOLD, Widget::Toggle, 4.0, 4.0),
+            at(PARTS_EDGE, Widget::Outlined, 46.0, 4.0),
+            at(PARTS_ICON, Widget::IconToggle, 88.0, 4.0).with_glyph(Glyph::Metronome),
+            at(PARTS_ROUND, Widget::Round, 116.0, 4.0).with_glyph(Glyph::Info),
+            at(PARTS_MODE, Widget::Segments(3), 4.0, 24.0),
+            at(PARTS_STACK, Widget::Stack(2), 4.0, 44.0),
+            at(
+                PARTS_GRID,
+                Widget::Grid {
+                    columns: 4,
+                    rows: 2,
+                },
+                60.0,
+                44.0,
+            ),
+            at(PARTS_FILTER, Widget::IconSegments(4), 4.0, 90.0),
+        ],
+    );
+    let cell = DisplayCell::new("Parts Display", 120.0, BODY_HEIGHT, 1.0)
+        .with_top(ControlBand::free(
+            120.0,
+            BOX_ROW,
+            vec![at(PARTS_CELL_TOP, Widget::Toggle, 4.0, 4.0)],
+        ))
+        .with_bottom(ControlBand::free(
+            120.0,
+            BOX_ROW + 12.0,
+            vec![at(PARTS_CELL_BOTTOM, Widget::Number, 4.0, 4.0)],
+        ));
+    let layout = DeviceLayout::new(LayoutNode::Row(vec![
+        LayoutNode::Pages(PagesNode::side_strip(
+            PARTS_STRIP,
+            LayoutNode::Band(ControlBand::stacked(
+                BODY_HEIGHT,
+                &[(PARTS_STRIP_GAIN, Widget::Knob)],
+            )),
+        )),
+        LayoutNode::Column(vec![
+            LayoutNode::Heading(Heading::new("Controls", 60.0)),
+            LayoutNode::Band(controls),
+        ]),
+        LayoutNode::Band(buttons),
+        LayoutNode::Cell(cell),
+    ]))
+    .with_title(vec![
+        TitlePart::Heading("Parts".to_owned()),
+        TitlePart::Mpe,
+        TitlePart::Maker(Maker::Softube),
+        TitlePart::Letter('A', PARTS_LETTER),
+        TitlePart::Round(Glyph::Info, PARTS_INFO),
+        TitlePart::Button(PARTS_LEARN),
+    ]);
+    DeviceType::native(PARTS, "Framework Test Parts", DeviceRole::AudioEffect).with_description(
+        DeviceDescription::new(params)
+            .with_alternate(PARTS_SYNC, PARTS_RATE_MS, PARTS_RATE_SYNC)
+            .with_title_switch(PARTS_USE_SCALE)
+            .with_layout(layout),
+    )
+}
+
+/// The height of the row of controls along an edge of the test parts' cell:
+/// one text button's, and its padding.
+const BOX_ROW: f32 = 20.0;
 
 /// The test effects' type: every shared part of the effects (WP-5.42), a
 /// menu option and an expanded part.
@@ -866,6 +1059,7 @@ pub fn device_types() -> Vec<DeviceType> {
         instrument_type(),
         fm_type(),
         pages_type(),
+        parts_type(),
     ]
 }
 
@@ -881,6 +1075,7 @@ pub fn register(registry: &mut Registry) {
     add(registry, instrument_type(), TestInstrument::new);
     add(registry, fm_type(), |_, config| FmInstrument::new(config));
     add(registry, pages_type(), |_, _| Scope);
+    add(registry, parts_type(), |_, _| Scope);
 }
 
 /// The engine's own devices and the test devices.

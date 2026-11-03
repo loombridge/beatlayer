@@ -33,6 +33,7 @@ mod delay_limiter;
 mod detail_views;
 mod device_pages;
 mod device_panel;
+mod device_parts;
 mod device_view;
 mod drum_racks;
 mod drum_sampler;

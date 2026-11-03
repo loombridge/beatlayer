@@ -444,6 +444,7 @@ pub fn meld_type() -> DeviceType {
                         ParamLabel {
                             name: "Semitones".to_owned(),
                             unit: Some("sd".to_owned()),
+                            law: None,
                         },
                     ],
                 },

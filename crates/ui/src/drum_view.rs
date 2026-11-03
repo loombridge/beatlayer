@@ -10,8 +10,8 @@ use bl_shell::context_menus;
 use bl_shell::device_commands::{ChainRow, DeviceFrame, RackFrame};
 use bl_shell::menus::Action;
 use bl_shell::pad_commands::{
-    PAD_GAP, PAD_HEIGHT, PAD_OVERVIEW_WIDTH, PAD_WIDTH, PADS_PER_ROW, PADS_SHOWN, PadFrame,
-    PadKind, PadState, PadSwitch,
+    PAD_GAP, PAD_HEIGHT, PAD_MARGIN, PAD_OVERVIEW_GAP, PAD_OVERVIEW_WIDTH, PAD_ROW_GAP, PAD_WIDTH,
+    PADS_PER_ROW, PADS_SHOWN, PadFrame, PadKind, PadState, PadSwitch,
 };
 use bl_shell::{Area, Invocation, Shell};
 use egui::accesskit::Role;
@@ -78,8 +78,11 @@ const SMALL: f32 = 9.0;
 #[must_use]
 pub fn pad_layout(frame: &PadFrame, area: Rect) -> PadLayout {
     let overview = Rect::from_min_max(
-        pos2(area.left() + 2.0, area.top() + 2.0),
-        pos2(area.left() + 2.0 + PAD_OVERVIEW_WIDTH, area.bottom() - 2.0),
+        pos2(area.left() + PAD_MARGIN, area.top() + 3.5),
+        pos2(
+            area.left() + PAD_MARGIN + PAD_OVERVIEW_WIDTH,
+            area.bottom() - 3.5,
+        ),
     );
     let cell_height = overview.height() / 8.0;
     let groups = (0..8)
@@ -102,15 +105,15 @@ pub fn pad_layout(frame: &PadFrame, area: Rect) -> PadLayout {
             overview.bottom() - f32::from(frame.first) * per_note,
         ),
     );
-    let grid_height = 4.0 * PAD_HEIGHT + 3.0 * PAD_GAP;
-    let grid_bottom = area.center().y + grid_height / 2.0;
-    let left = overview.right() + 4.0;
+    let grid_height = 4.0 * PAD_HEIGHT + 3.0 * PAD_ROW_GAP;
+    let grid_bottom = area.top() + 4.1 + grid_height;
+    let left = overview.right() + PAD_OVERVIEW_GAP;
     let pads = (0..PADS_SHOWN)
         .map(|n| {
             let (column, row) = (n % PADS_PER_ROW, n / PADS_PER_ROW);
             let min = pos2(
                 left + f32::from(column) * (PAD_WIDTH + PAD_GAP),
-                grid_bottom - f32::from(row + 1) * PAD_HEIGHT - f32::from(row) * PAD_GAP,
+                grid_bottom - f32::from(row + 1) * PAD_HEIGHT - f32::from(row) * PAD_ROW_GAP,
             );
             let pad = Rect::from_min_size(min, vec2(PAD_WIDTH, PAD_HEIGHT));
             let small = |k: f32| {
@@ -355,17 +358,22 @@ impl DeviceViewUi {
         let painter = ui.painter_at(layout.overview.expand(1.0));
         painter.rect_filled(layout.overview, theme.sizes.corner, c.control.0);
         for (g, cell) in layout.groups.iter().enumerate() {
-            // A dot per note that has a chain, in the group's 4 by 4.
+            // The group as a 4 by 4 of small squares, one a note, brighter
+            // where the note has a chain (observed in Live).
+            let side = ((cell.width() - 6.0) / 4.0 - 0.7).min((cell.height() - 4.0) / 4.0 - 0.7);
             for n in 0..16u8 {
                 let note = g as u8 * 16 + n;
-                if pads.occupied.contains(&note) {
-                    let (column, row) = (n % 4, n / 4);
-                    let dot = pos2(
-                        cell.left() + 4.0 + f32::from(column) * (cell.width() - 8.0) / 3.0,
-                        cell.bottom() - 3.0 - f32::from(row) * (cell.height() - 6.0) / 3.0,
-                    );
-                    painter.circle_filled(dot, 1.0, c.text_dim.0);
-                }
+                let (column, row) = (n % 4, n / 4);
+                let at = pos2(
+                    cell.left() + 3.0 + f32::from(column) * (side + 0.7),
+                    cell.bottom() - 2.0 - side - f32::from(row) * (side + 0.7),
+                );
+                let ink = if pads.occupied.contains(&note) {
+                    c.text_dim.0
+                } else {
+                    c.separator.0
+                };
+                painter.rect_filled(Rect::from_min_size(at, vec2(side, side)), 0.0, ink);
             }
             painter.line_segment(
                 [cell.left_top(), cell.right_top()],

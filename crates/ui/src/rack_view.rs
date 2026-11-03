@@ -13,9 +13,9 @@ use bl_model::{ChainId, DeviceId, RackView, ZoneKind};
 use bl_shell::context_menus::{self, CHAIN_COLOUR_ROW};
 use bl_shell::device_commands::{
     CHAIN_DROP_AREA_HEIGHT, CHAIN_ROW_HEIGHT, ChainRow, DEVICE_GAP, DeviceFrame,
-    RACK_CHAIN_LIST_WIDTH, RACK_COLUMN_WIDTH, RACK_EMPTY_DEVICES_WIDTH, RACK_END_BRACKET_WIDTH,
-    RACK_LIST_HEADER_HEIGHT, RACK_MACROS_WIDTH, RACK_VARIATIONS_WIDTH, RACK_ZONE_EDITOR_WIDTH,
-    RackFrame, TITLE_BAR_HEIGHT, frame_width, rack_chain_list_width, rack_pads_width,
+    RACK_CHAIN_LIST_WIDTH, RACK_COLUMN_WIDTH, RACK_LIST_HEADER_HEIGHT, RACK_MACROS_WIDTH,
+    RACK_VARIATIONS_WIDTH, RACK_ZONE_EDITOR_WIDTH, RackFrame, TITLE_BAR_HEIGHT, frame_width,
+    rack_chain_list_width, rack_pads_width,
 };
 use bl_shell::pad_commands::{DRUM_IO_WIDTH, DRUM_SEND_WIDTH, RETURN_HEADING_HEIGHT};
 use bl_shell::{Area, InfoTarget, Invocation, Shell};
@@ -33,6 +33,15 @@ use crate::theme::Theme;
 
 /// The size of the chain list's round and square buttons.
 const BUTTON: f32 = 11.0;
+
+/// The diameter of the round view buttons in a rack's view column, how far
+/// apart their centres are, and where the first one's centre sits from the
+/// column's top and its left edge (observed in Live 12.4.16, 2 November 2026;
+/// layout L-DEV-049).
+const VIEW_BUTTON: f32 = 12.0;
+const VIEW_PITCH: f32 = 15.85;
+const VIEW_FIRST: f32 = 9.5;
+const VIEW_CENTRE_X: f32 = 9.2;
 
 /// The height of Volume and Pan's sliders.
 const SLIDER_HEIGHT: f32 = 9.0;
@@ -275,12 +284,23 @@ const DRUM_VIEWS: [RackView; 9] = [
     RackView::AutoSelect,
 ];
 
+/// A drum rack's selectors while its chain list is hidden: the four views
+/// Live shows, and Auto Select at the foot of the column. The rest act on the
+/// chain list, and come with it.
+const DRUM_VIEWS_COMPACT: [RackView; 5] = [
+    RackView::Macros,
+    RackView::Variations,
+    RackView::Pads,
+    RackView::ChainList,
+    RackView::AutoSelect,
+];
+
 /// The selectors a rack's view column has, top to bottom.
 fn views_of(rack: &RackFrame) -> &'static [RackView] {
-    if rack.pads.is_some() {
-        &DRUM_VIEWS
-    } else {
-        &VIEWS
+    match (rack.pads.is_some(), rack.views.chain_list) {
+        (true, true) => &DRUM_VIEWS,
+        (true, false) => &DRUM_VIEWS_COMPACT,
+        (false, _) => &VIEWS,
     }
 }
 
@@ -292,7 +312,7 @@ fn selector_y(top: f32, n: usize, views: &[RackView]) -> f32 {
         .position(|v| *v == RackView::InputOutput)
         .filter(|&at| n >= at)
         .map_or(0.0, |_| 5.0);
-    top + n as f32 * (BUTTON + 3.0) + gap
+    top + n as f32 * VIEW_PITCH + gap
 }
 
 /// The ID of a rack's view selector.
@@ -485,7 +505,7 @@ pub fn mappings_list(
 /// under the activator.
 fn strip_selectors(rect: Rect, views: &[RackView]) -> Vec<(RackView, Rect)> {
     let x = rect.center().x;
-    let first = rect.top() + 2.0 + BUTTON + 6.0 + BUTTON / 2.0;
+    let first = rect.top() + 2.0 + VIEW_BUTTON + 6.0 + VIEW_BUTTON / 2.0;
     views
         .iter()
         .enumerate()
@@ -493,7 +513,7 @@ fn strip_selectors(rect: Rect, views: &[RackView]) -> Vec<(RackView, Rect)> {
             let y = selector_y(first, n, views);
             (
                 *view,
-                Rect::from_center_size(pos2(x, y), vec2(BUTTON, BUTTON)),
+                Rect::from_center_size(pos2(x, y), vec2(VIEW_BUTTON, VIEW_BUTTON)),
             )
         })
         .collect()
@@ -524,11 +544,18 @@ pub fn layout(rack: &RackFrame, rect: Rect, scroll: f32) -> RackLayout {
         .iter()
         .enumerate()
         .map(|(n, view)| {
-            let centre = pos2(
-                column.center().x,
-                selector_y(column.top() + 4.0 + BUTTON / 2.0, n, views),
-            );
-            (*view, Rect::from_center_size(centre, vec2(BUTTON, BUTTON)))
+            // Auto Select of a drum rack's compact column sits at its foot.
+            let y =
+                if *view == RackView::AutoSelect && rack.pads.is_some() && !rack.views.chain_list {
+                    column.bottom() - 3.7 - VIEW_BUTTON / 2.0
+                } else {
+                    selector_y(column.top() + VIEW_FIRST, n, views)
+                };
+            let centre = pos2(column.left() + VIEW_CENTRE_X, y);
+            (
+                *view,
+                Rect::from_center_size(centre, vec2(VIEW_BUTTON, VIEW_BUTTON)),
+            )
         })
         .collect();
     let mut x = column.right();
@@ -574,7 +601,10 @@ pub fn layout(rack: &RackFrame, rect: Rect, scroll: f32) -> RackLayout {
             at += w + DEVICE_GAP;
         }
         bracket = Some(Rect::from_min_max(
-            pos2(area.right() - RACK_END_BRACKET_WIDTH, area.top()),
+            pos2(
+                area.right() - bl_shell::device_commands::rack_bracket_width(rack),
+                area.top(),
+            ),
             area.max,
         ));
         devices = Some(area);
@@ -1251,17 +1281,36 @@ impl DeviceViewUi {
             painter.rect_filled(area, 0.0, c.panel.0.gamma_multiply(0.7));
             if rack.devices.is_empty() {
                 let text = rack.note.as_deref().unwrap_or(if rack.chains.is_empty() {
-                    "No chains"
+                    // Live's words over an empty Drum Rack's drop place.
+                    if rack.pads.is_some() {
+                        "Drop an Instrument or Sample Here"
+                    } else {
+                        "No chains"
+                    }
                 } else {
                     "Drop a device here"
                 });
-                let text_area =
-                    Rect::from_min_size(area.min, vec2(RACK_EMPTY_DEVICES_WIDTH, area.height()));
-                painter.text(
-                    text_area.center(),
-                    Align2::CENTER_CENTER,
-                    text,
+                let text_area = Rect::from_min_size(
+                    area.min,
+                    vec2(
+                        bl_shell::device_commands::rack_empty_width(rack),
+                        area.height(),
+                    ),
+                );
+                let mut job = egui::text::LayoutJob::simple(
+                    text.to_owned(),
                     theme.small_font(),
+                    c.text_dim.0,
+                    text_area.width() - 12.0,
+                );
+                job.halign = egui::Align::Center;
+                let galley = painter.layout_job(job);
+                painter.galley(
+                    pos2(
+                        text_area.center().x,
+                        text_area.center().y - galley.size().y / 2.0,
+                    ),
+                    galley,
                     c.text_dim.0,
                 );
                 let id = Id::new(("rack-devices-note", frame.id));
@@ -1330,7 +1379,7 @@ impl DeviceViewUi {
             c.window.0
         };
         let painter = ui.painter_at(at.expand(2.0));
-        painter.rect_filled(at, theme.sizes.corner, face);
+        painter.circle_filled(at.center(), at.width() / 2.0, face);
         let ink = if on { c.accent_text.0 } else { c.text_dim.0 };
         let stroke = Stroke::new(1.0, ink);
         let c0 = at.center();

@@ -111,7 +111,7 @@ pub const LINK: ParamId = ParamId(259);
 /// The stretch modes: A for low sounds, B for high ones (the manual).
 pub const STRETCH_MODES: [&str; 2] = ["A", "B"];
 /// The decay modes.
-pub const DECAY_MODES: [&str; 2] = ["Trigger", "Gate"];
+pub const DECAY_MODES: [&str; 2] = ["Trig", "Gate"];
 
 /// Stretch's whole range: a stretch of 100 % doubles the sample's length and
 /// −100 % halves it (Beatlayer's own).
@@ -123,6 +123,9 @@ const TRANSPOSE_SPAN: f64 = 24.0;
 const STRETCH_SPAN: f64 = 100.0;
 const FILTER_SPAN_OCTAVES: f64 = 4.0;
 const PAN_SPAN: f64 = 50.0;
+/// How many times longer Time at 100 % makes the stretch and the decay, and
+/// how many times shorter at -100 % (Beatlayer's own).
+const TIME_RANGE: f64 = 4.0;
 /// The most Start can skip, in milliseconds (the manual).
 const START_MAX_MS: f64 = 100.0;
 /// The longest decay, in milliseconds (the manual).
@@ -180,19 +183,22 @@ pub fn kitbag_type() -> DeviceType {
             .describe("The whole instrument's output level; reaches silence at its bottom."),
         ParamDescriptor::integer(TRANSPOSE, "Transpose", (-48, 48), 0, ParamUnit::Semitones)
             .describe("Transposes every slot, in whole semitones, from the next note."),
-        ParamDescriptor::continuous(TIME, "Time", (25.0, 400.0), 100.0, ParamUnit::Percent)
-            .logarithmic()
+        ParamDescriptor::continuous(TIME, "Time", (-100.0, 100.0), 0.0, ParamUnit::Percent)
             .describe(
-                "Scales every slot's stretch and decay time, from the next note: below 100 % \
-                 the sounds get shorter, above they get longer.",
+                "Scales every slot's stretch and decay time, from the next note: below 0 % the \
+                 sounds get shorter, down to a quarter at -100 %, and above they get longer, up \
+                 to four times at 100 %.",
             ),
         ParamDescriptor::toggle(LINK, "Link", false).describe(
             "Slot 7 stops slot 8's playback, and slot 8 stops slot 7's, as a closed hi-hat \
              stops an open one.",
         ),
     ]);
-    DeviceType::native(KITBAG, "Impulse", DeviceRole::Instrument)
-        .with_description(DeviceDescription::new(params).with_layout(layout()))
+    DeviceType::native(KITBAG, "Impulse", DeviceRole::Instrument).with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout())
+            .with_menu_options(&[LINK]),
+    )
 }
 
 /// Slot `s`'s parameters, named `Slot <n> <what>`.
@@ -213,6 +219,7 @@ fn slot_params(s: usize, params: &mut Vec<ParamDescriptor>) {
             0.0,
             ParamUnit::Milliseconds,
         )
+        .decimals(2)
         .describe("How far into the sample playback starts, up to 100 ms."),
         ParamDescriptor::integer(
             id(TRANSPOSE),
@@ -263,18 +270,19 @@ fn slot_params(s: usize, params: &mut Vec<ParamDescriptor>) {
             id(FILTER_FREQ),
             &name("Filter Freq"),
             (20.0, 20_000.0),
-            1_000.0,
+            18_500.0,
             ParamUnit::Hertz,
         )
         .logarithmic()
         .describe("The filter's cutoff frequency."),
-        percent(
-            FILTER_RES,
-            "Filter Res",
-            (0.0, 100.0),
-            0.0,
-            "Boosts frequencies near the cutoff.",
-        ),
+        ParamDescriptor::continuous(
+            id(FILTER_RES),
+            &name("Filter Res"),
+            (0.0, 1.0),
+            0.7,
+            ParamUnit::None,
+        )
+        .describe("Boosts frequencies near the cutoff, from none at 0 to the most at 1."),
         percent(
             FILTER_VELOCITY,
             "Filter Velocity",
@@ -292,18 +300,16 @@ fn slot_params(s: usize, params: &mut Vec<ParamDescriptor>) {
         ),
         ParamDescriptor::toggle(id(SATURATOR), &name("Saturator"), false)
             .describe("Runs the slot through its saturator; off bypasses it."),
-        percent(
-            DRIVE,
-            "Drive",
-            (0.0, 100.0),
-            0.0,
-            "Boosts the signal into the saturator, up to 24 dB, and adds warmth and distortion.",
-        ),
+        ParamDescriptor::continuous(id(DRIVE), &name("Drive"), (0.0, 1.0), 0.0, ParamUnit::None)
+            .describe(
+                "Boosts the signal into the saturator, up to 24 dB at 1, and adds warmth and \
+                 distortion.",
+            ),
         ParamDescriptor::continuous(
             id(DECAY),
             &name("Decay"),
             (1.0, DECAY_MAX_MS),
-            DECAY_MAX_MS,
+            2_000.0,
             ParamUnit::Milliseconds,
         )
         .logarithmic()
@@ -322,24 +328,27 @@ fn slot_params(s: usize, params: &mut Vec<ParamDescriptor>) {
             0.0,
             "How far note velocity moves the pan: at 100 % the softest note sits 50 steps \
              left of the hardest.",
-        ),
+        )
+        .decimals(2),
         percent(
             PAN_RANDOM,
             "Pan Random",
             (0.0, 100.0),
             0.0,
             "How far a random value moves the pan, up to 50 steps each way.",
-        ),
+        )
+        .decimals(2),
         ParamDescriptor::gain(id(VOLUME), &name("Volume"), 6.0, 0.0)
             .describe("The slot's level; reaches silence at its bottom."),
         percent(
             VOLUME_VELOCITY,
             "Volume Velocity",
             (0.0, 100.0),
-            100.0,
+            70.0,
             "How much note velocity scales the level: at 0 it doesn't, at 100 % the level \
              follows it in a straight line.",
-        ),
+        )
+        .decimals(1),
         ParamDescriptor::toggle(id(MUTE), &name("Mute"), false)
             .describe("Silences the slot from the next note."),
         ParamDescriptor::toggle(id(SOLO), &name("Solo"), false)
@@ -347,62 +356,117 @@ fn slot_params(s: usize, params: &mut Vec<ParamDescriptor>) {
     ]);
 }
 
-/// The panel: the eight slots along the top as cells, the selected slot's
-/// controls under them, the globals beside.
+/// The panel as Live draws it (layout L-DEV-015, observed in Live 12.4.16 on
+/// 2 November 2026): the eight slot cells along the top, under them the
+/// selected slot's controls in columns, each knob over what modulates it, and
+/// the global knobs in a column of their own. Every place is in points from
+/// the body's top-left corner.
 fn layout() -> DeviceLayout {
+    use bl_model::device_layout::{BOX_HEIGHT, BandLabel, Control};
     use slot::*;
-    let cell_height = 36.0;
+    // The cells: 44.1 points wide every 46.45 from 1.7, 43.5 tall at 2.9.
+    let (pitch, inset, edge) = (46.45, 1.175, 1.7);
+    let cells_height = 45.85;
     let cells: Vec<LayoutNode> = (0..SLOTS)
         .map(|s| {
             LayoutNode::Cell(
-                DisplayCell::new(&format!("Slot {}", s + 1), 64.0, cell_height, 1.0)
+                DisplayCell::new(&format!("Slot {}", s + 1), pitch - 2.0 * inset, 43.5, 1.0)
+                    .with_inset(inset)
                     .for_slot(s as u32),
             )
         })
         .collect();
-    let controls = [
-        (START, Widget::Knob),
-        (TRANSPOSE, Widget::Number),
-        (TRANSPOSE_VELOCITY, Widget::Knob),
-        (TRANSPOSE_RANDOM, Widget::Knob),
-        (STRETCH, Widget::Knob),
-        (STRETCH_MODE, Widget::Chooser),
-        (STRETCH_VELOCITY, Widget::Knob),
-        (FILTER, Widget::Toggle),
-        (FILTER_TYPE, Widget::Chooser),
-        (FILTER_FREQ, Widget::Knob),
-        (FILTER_RES, Widget::Knob),
-        (FILTER_VELOCITY, Widget::Knob),
-        (FILTER_RANDOM, Widget::Knob),
-        (SATURATOR, Widget::Toggle),
-        (DRIVE, Widget::Knob),
-        (DECAY, Widget::Knob),
-        (DECAY_MODE, Widget::Chooser),
-        (PAN, Widget::Knob),
-        (PAN_VELOCITY, Widget::Knob),
-        (PAN_RANDOM, Widget::Knob),
-        (VOLUME, Widget::Knob),
-        (VOLUME_VELOCITY, Widget::Knob),
-        (MUTE, Widget::Toggle),
-        (SOLO, Widget::Toggle),
-    ]
-    .map(|(local, widget)| (ParamId(local), widget));
-    let selected =
-        ControlBand::stacked(BODY_HEIGHT - cell_height, &controls).for_slots(SlotGroup {
-            stride: STRIDE,
-            count: SLOTS as u32,
-        });
-    let globals = ControlBand::stacked(
+    let spacer = |width, height| LayoutNode::Band(ControlBand::free(width, height, Vec::new()));
+    let across = edge + SLOTS as f32 * pitch;
+    // The columns' centres, in order: Start, Transp, Stretch, Drive, Freq,
+    // Res, Decay, Pan and Volume.
+    let centre = [23.7, 64.4, 104.6, 145.1, 185.9, 223.0, 266.4, 308.5, 350.5];
+    let top = edge + cells_height;
+    let knob_top = 50.7 - top;
+    let knob = |local, column: usize| {
+        Control::new(
+            ParamId(local),
+            Widget::Knob,
+            centre[column] - 20.0,
+            knob_top,
+        )
+        .sized(40.0, 49.5)
+    };
+    // A box under its own name, which Live writes "Velocity" or "Random".
+    let number = |local, widget, column: usize, y: f32| {
+        Control::new(ParamId(local), widget, centre[column] - 18.0, y + 9.0 - top)
+            .sized(36.0, BOX_HEIGHT)
+    };
+    let button = |local, widget, (x, y, width): (f32, f32, f32)| {
+        Control::new(ParamId(local), widget, x, y - top).sized(width, BOX_HEIGHT)
+    };
+    let label = |text: &str, column: usize, y: f32| {
+        BandLabel::new(text, centre[column] - 16.5, y - top, 33.0)
+    };
+    let (first, second) = (105.8, 132.0);
+    let selected = ControlBand::free(
+        across,
+        BODY_HEIGHT - top,
+        vec![
+            knob(START, 0),
+            knob(TRANSPOSE, 1),
+            number(TRANSPOSE_VELOCITY, Widget::Bare, 1, first),
+            number(TRANSPOSE_RANDOM, Widget::Bare, 1, second),
+            knob(STRETCH, 2),
+            number(STRETCH_VELOCITY, Widget::Bare, 2, first),
+            button(STRETCH_MODE, Widget::Cycle, (88.1, 142.8, 32.9)),
+            knob(DRIVE, 3).greyed_while(ParamId(SATURATOR), 0),
+            button(SATURATOR, Widget::Abbreviated(3), (129.8, 116.9, 30.5)),
+            knob(FILTER_FREQ, 4).greyed_while(ParamId(FILTER), 0),
+            button(FILTER, Widget::Toggle, (168.9, 116.9, 34.0)),
+            button(FILTER_TYPE, Widget::BareChooser, (168.9, 142.8, 34.0)),
+            knob(FILTER_RES, 5).greyed_while(ParamId(FILTER), 0),
+            number(FILTER_VELOCITY, Widget::Bare, 5, first),
+            number(FILTER_RANDOM, Widget::Bare, 5, second),
+            knob(DECAY, 6),
+            button(DECAY_MODE, Widget::Cycle, (249.1, 116.9, 32.9)),
+            knob(PAN, 7),
+            number(PAN_VELOCITY, Widget::Bare, 7, first),
+            number(PAN_RANDOM, Widget::Bare, 7, second),
+            knob(VOLUME, 8),
+            number(VOLUME_VELOCITY, Widget::BareSlider, 8, first),
+            button(MUTE, Widget::Abbreviated(1), (333.1, 142.8, 15.5)),
+            button(SOLO, Widget::Abbreviated(1), (353.1, 142.8, 15.5)),
+        ],
+    )
+    .with_labels(vec![
+        label("Velocity", 1, first),
+        label("Random", 1, second),
+        label("Velocity", 2, first),
+        label("Mode", 2, 130.9),
+        label("Mode", 4, 130.9),
+        label("Velocity", 5, first),
+        label("Random", 5, second),
+        label("Velocity", 7, first),
+        label("Random", 7, second),
+        label("Velocity", 8, first),
+    ])
+    .for_slots(SlotGroup {
+        stride: STRIDE,
+        count: SLOTS as u32,
+    });
+    // The global knobs, each 47.5 tall from 2.7, 54.4 and 106.7, 41.7 across.
+    let global = |param, y: f32| Control::new(param, Widget::Knob, 1.7, y).sized(40.0, 47.5);
+    let globals = ControlBand::free(
+        45.0,
         BODY_HEIGHT,
-        &[
-            (self::VOLUME, Widget::Knob),
-            (self::TRANSPOSE, Widget::Number),
-            (TIME, Widget::Knob),
-            (LINK, Widget::Toggle),
+        vec![
+            global(self::VOLUME, 2.7),
+            global(TIME, 54.4),
+            global(self::TRANSPOSE, 106.7),
         ],
     );
     DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Column(vec![LayoutNode::Row(cells), LayoutNode::Band(selected)]),
+        LayoutNode::Column(vec![
+            spacer(1.0, edge),
+            LayoutNode::Row(std::iter::once(spacer(edge, 1.0)).chain(cells).collect()),
+            LayoutNode::Band(selected),
+        ]),
         LayoutNode::Band(globals),
     ]))
 }
@@ -567,11 +631,11 @@ impl Kitbag {
             filter: at(FILTER) >= 0.5,
             filter_type: (at(FILTER_TYPE) as usize).min(FILTER_TYPES.len() - 1),
             filter_freq: at(FILTER_FREQ),
-            filter_res: share(FILTER_RES),
+            filter_res: at(FILTER_RES),
             filter_velocity: share(FILTER_VELOCITY),
             filter_random: share(FILTER_RANDOM),
             saturator: at(SATURATOR) >= 0.5,
-            drive: share(DRIVE),
+            drive: at(DRIVE),
             decay_ms: at(DECAY),
             gate: at(DECAY_MODE) >= 0.5,
             pan: at(PAN),
@@ -646,7 +710,7 @@ impl Kitbag {
         }
         let s = Self::slot(params, slot, frame);
         let transpose_global = Self::global(params, TRANSPOSE, frame);
-        let time = Self::global(params, TIME, frame) / 100.0;
+        let time = TIME_RANGE.powf(Self::global(params, TIME, frame) / 100.0);
         // The same draws for every note, whatever the settings, so a
         // render repeats.
         let (random_pitch, random_filter, random_pan) =

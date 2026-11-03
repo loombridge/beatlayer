@@ -18,7 +18,7 @@ use egui::{
 use serde_json::{Value, json};
 
 use crate::keymap::{Platform, chord_text, parse_binding};
-use crate::layout::{SEARCH_HEADER, SEARCH_ROW, SEARCH_ROWS, search_field_rect};
+use crate::layout::{SEARCH_HEADER, SEARCH_ROWS, list_row, search_field_rect};
 use crate::main_window::{InfoViewContent, UiEvent};
 use crate::theme::Theme;
 
@@ -468,7 +468,7 @@ impl SearchFieldUi {
         if count == 0 {
             if no_match(field) {
                 ui.painter().text(
-                    pos2(rect.left() + MARGIN + 2.0, rect.top() + SEARCH_ROW / 2.0),
+                    pos2(rect.left() + MARGIN + 2.0, rect.top() + list_row() / 2.0),
                     Align2::LEFT_CENTER,
                     "No tracks match",
                     theme.small_font(),
@@ -477,7 +477,7 @@ impl SearchFieldUi {
             }
             return;
         }
-        let height = rect.height().min(SEARCH_ROWS as f32 * SEARCH_ROW);
+        let height = rect.height().min(SEARCH_ROWS as f32 * list_row());
         let area = Rect::from_min_size(rect.min, vec2(rect.width(), height));
         let mut scroll = egui::ScrollArea::vertical()
             .id_salt("search-field-rows")
@@ -486,7 +486,7 @@ impl SearchFieldUi {
             && let Some(row) = highlighted
         {
             scroll = scroll
-                .vertical_scroll_offset((row as f32 * SEARCH_ROW + SEARCH_ROW - height).max(0.0));
+                .vertical_scroll_offset((row as f32 * list_row() + list_row() - height).max(0.0));
         }
         self.scrolled_to = highlighted;
         let mut inner = ui.new_child(
@@ -496,7 +496,7 @@ impl SearchFieldUi {
         );
         inner.set_clip_rect(area);
         inner.spacing_mut().item_spacing.y = 0.0;
-        scroll.show_rows(&mut inner, SEARCH_ROW, count, |ui, range| {
+        scroll.show_rows(&mut inner, list_row(), count, |ui, range| {
             let (left, top, width) = (
                 ui.max_rect().left(),
                 ui.max_rect().top(),
@@ -504,8 +504,8 @@ impl SearchFieldUi {
             );
             for index in range.clone() {
                 let at = Rect::from_min_size(
-                    pos2(left, top + (index - range.start) as f32 * SEARCH_ROW),
-                    vec2(width, SEARCH_ROW),
+                    pos2(left, top + (index - range.start) as f32 * list_row()),
+                    vec2(width, list_row()),
                 );
                 let clicked = match field.scope {
                     SearchScope::Commands => command_row(

@@ -237,7 +237,7 @@ fn controls_keep_their_live_size_times_the_zoom() {
                 bl_ui::layout::Element::SyncInput | bl_ui::layout::Element::SyncOutput
             );
             if placement.strip == Strip::ControlBar && !lamp {
-                assert!((rect.height() - 18.0 * zoom).abs() < EPS * 10.0);
+                assert!((rect.height() - 16.0 * zoom).abs() < EPS * 10.0);
             }
             // The Global Amount is hidden unless the pool holds a groove, and the
             // sync lamps and the Resync button unless an input has Sync on or
@@ -470,11 +470,11 @@ fn the_main_window_draws_every_row_scaled_at_every_step() {
                 );
 
                 // In window points, the drawn title bar is 23 points at every
-                // zoom, and the Control Bar's controls sit 5 points under it
-                // (37 less 23, less half their 18), times the zoom.
+                // zoom, and the Control Bar's controls sit 6 points under it
+                // (37 less 23, less half their 16), times the zoom.
                 let tap = drawn(&nodes, "Tap Tempo").unwrap();
                 let tap_top = tap.top() * zoom;
-                let expected_top = if title_bar { TITLE_BAR } else { 0.0 } + 5.0 * zoom;
+                let expected_top = if title_bar { TITLE_BAR } else { 0.0 } + 6.0 * zoom;
                 assert!((tap_top - expected_top).abs() < 0.1, "{what}: {tap_top}");
             }
         }

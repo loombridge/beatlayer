@@ -352,7 +352,7 @@ impl BrowserUi {
             let response = ui.add_enabled(false, egui::Button::new(dim));
             crate::menus::register_item(ui.ctx(), &response);
         }
-        ui.separator();
+        crate::menus::separator(ui);
         let response = ui.add_enabled(
             !state.shown.is_empty(),
             egui::Button::new("Hide All Extra Columns"),
@@ -362,7 +362,7 @@ impl BrowserUi {
             invoke(events, ids::SET_COLUMNS, json!({ "shown": [] }));
             ui.close();
         }
-        ui.separator();
+        crate::menus::separator(ui);
         let mark = if state.file_extensions {
             "\u{2714} "
         } else {

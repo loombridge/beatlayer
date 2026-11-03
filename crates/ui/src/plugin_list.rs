@@ -10,13 +10,12 @@ use egui::accesskit::Role;
 use egui::{Align2, Id, Rect, Sense, Ui, WidgetInfo, WidgetType, pos2, vec2};
 use serde_json::json;
 
+use crate::layout::list_row;
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
 
 /// The title bar's height, as the other views' title bars.
 const TITLE: f32 = 17.0;
-/// A row's height.
-const ROW: f32 = 16.0;
 /// The count line's height.
 const LINE: f32 = 14.0;
 /// The switch's and the Export button's height.
@@ -193,10 +192,10 @@ impl PluginListUi {
             .iter()
             .filter(|plugin| !only_missing || plugin.missing)
             .collect();
-        self.scroll = scrolled(ui, rows_area, self.scroll, shown.len() as f32 * ROW);
-        let first = (self.scroll / ROW).floor().max(0.0) as usize;
-        let shown_rows =
-            ((rows_area.height() / ROW).ceil() as usize + 1).min(shown.len().saturating_sub(first));
+        self.scroll = scrolled(ui, rows_area, self.scroll, shown.len() as f32 * list_row());
+        let first = (self.scroll / list_row()).floor().max(0.0) as usize;
+        let shown_rows = ((rows_area.height() / list_row()).ceil() as usize + 1)
+            .min(shown.len().saturating_sub(first));
         let table = list_id();
         let _ = ui.interact(rows_area, table, Sense::hover());
         ui.ctx().accesskit_node_builder(table, |node| {
@@ -265,8 +264,11 @@ impl PluginListUi {
     ) {
         let (area, theme, shell) = (rows.area, rows.theme, rows.shell);
         let rect = Rect::from_min_size(
-            pos2(area.left(), area.top() + index as f32 * ROW - self.scroll),
-            vec2(area.width(), ROW),
+            pos2(
+                area.left(),
+                area.top() + index as f32 * list_row() - self.scroll,
+            ),
+            vec2(area.width(), list_row()),
         );
         let c = &theme.colors;
         let painter = ui.painter_at(rect);
@@ -276,7 +278,10 @@ impl PluginListUi {
         // The row's columns, left to right: the name, the vendor, the
         // version, the preset names, the tracks, and the Missing mark.
         let column = |at: f32, to: f32| {
-            Rect::from_min_size(pos2(rect.left() + at, rect.top()), vec2(to - at, ROW))
+            Rect::from_min_size(
+                pos2(rect.left() + at, rect.top()),
+                vec2(to - at, list_row()),
+            )
         };
         let name_at = column(0.0, VENDOR);
         let vendor_at = column(VENDOR, VERSION);

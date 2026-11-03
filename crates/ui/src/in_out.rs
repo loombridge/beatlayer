@@ -241,7 +241,7 @@ impl InOutParts<'_> {
                 for entry in &chooser.entries {
                     match entry {
                         Entry::Separator => {
-                            ui.separator();
+                            crate::menus::separator(ui);
                         }
                         Entry::Choice {
                             label,

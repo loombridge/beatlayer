@@ -114,7 +114,10 @@ fn accesskit_center(bounds: egui::accesskit::Rect) -> Pos2 {
 
 /// The middle of the list's row `index`.
 fn row(index: usize) -> Pos2 {
-    pos2(160.0, LIST_TOP + 17.0 * index as f32 + 8.5)
+    pos2(
+        160.0,
+        LIST_TOP + bl_ui::layout::list_row() * (index as f32 + 0.5),
+    )
 }
 
 fn names(h: &Harness) -> Vec<String> {
@@ -349,6 +352,26 @@ fn add_folder_asks_for_a_folder() {
     assert_eq!(names(&h), ["Break.wav"]);
     let label = Label::Folder(loops.to_string_lossy().into_owned());
     assert!(h.ctx.read_response(label_id(&label)).is_some(), "in Places");
+}
+
+// UI parity: L-BRW rows are the theme's `list_row` (19 points) apart.
+#[test]
+fn list_rows_are_a_list_row_apart() {
+    let scratch = Scratch::new("row-pitch");
+    let (mut h, _) = harness(&scratch);
+    h.shell
+        .run(ids::SET_PREVIEW, json!({ "on": false }))
+        .unwrap();
+    assert_eq!(bl_ui::layout::list_row(), 19.0);
+    // A selected row is highlighted over its whole height.
+    h.click(row(6));
+    let output = h.settle();
+    let highlight = common::painted_rects(&output)
+        .into_iter()
+        .map(|(rect, _)| rect)
+        .find(|rect| rect.contains(row(6)) && rect.height() < 40.0)
+        .expect("the selected row is highlighted");
+    assert_eq!(highlight.height(), bl_ui::layout::list_row());
 }
 
 // Spec: browser R7.

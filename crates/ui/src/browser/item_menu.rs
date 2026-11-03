@@ -161,7 +161,7 @@ pub(super) fn show(ui: &mut Ui, shell: &Shell, item: &Item, events: &mut Vec<UiE
         invoke(events, bl_shell::stems_commands::OPEN, stems);
         ui.close();
     }
-    ui.separator();
+    crate::menus::separator(ui);
     // C-BROWSER-004 to 011.
     if add(ui, Button::new("Clear All Colors").shortcut_text("0"), true).clicked() {
         invoke(events, ids::CLEAR_COLLECTIONS, json!({}));
@@ -198,7 +198,7 @@ pub(super) fn show(ui: &mut Ui, shell: &Shell, item: &Item, events: &mut Vec<UiE
     // Spec: browser-tags R41. Hide Plug-In or Show Plug-In, at the end of a
     // plug-in row's menu, after Gray (7) (Live 12.4.16).
     if item.kind == ItemKind::Plugin {
-        ui.separator();
+        crate::menus::separator(ui);
         let label = if item.hidden {
             "Show Plug-In"
         } else {
@@ -216,7 +216,7 @@ pub(super) fn show(ui: &mut Ui, shell: &Shell, item: &Item, events: &mut Vec<UiE
     // C-BROWSER-014. A project folder's menu has Manage Project, which shows
     // the File Manager at that project (spec: file-management R10).
     if item.kind == ItemKind::Folder && shell.is_project_folder(Path::new(&item.path)) {
-        ui.separator();
+        crate::menus::separator(ui);
         if add(ui, Button::new("Manage Project"), true).clicked() {
             invoke(
                 events,

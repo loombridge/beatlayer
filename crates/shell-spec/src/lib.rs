@@ -134,6 +134,7 @@ pub mod file_manager;
 pub mod freeze;
 pub mod groove;
 pub mod keymap;
+pub mod library;
 pub mod link;
 pub mod linked_clips;
 pub mod locator;
@@ -223,6 +224,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     perception::register(registry)?;
     stems::register(registry)?;
     packages::register(registry)?;
+    library::register(registry)?;
     sample_editor::register(registry)?;
     audio_editing::register(registry)?;
     audio_panel::register(registry)?;

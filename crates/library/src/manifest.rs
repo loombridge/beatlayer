@@ -34,6 +34,34 @@ pub enum Kind {
     Texture,
 }
 
+/// The names of the browser's content labels an item can list under (R8).
+pub const LABELS: [&str; 8] = [
+    "Sounds",
+    "Drums",
+    "Instruments",
+    "Audio Effects",
+    "MIDI Effects",
+    "Clips",
+    "Samples",
+    "Grooves",
+];
+
+impl Kind {
+    /// The content label it lists under unless its item names another.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Instrument => "Instruments",
+            Self::Preset | Self::Rack => "Sounds",
+            Self::DrumKit => "Drums",
+            Self::Loop | Self::OneShot | Self::Texture => "Samples",
+            Self::MidiClip => "Clips",
+            Self::Groove => "Grooves",
+            Self::ChordBank => "MIDI Effects",
+        }
+    }
+}
+
 /// Where an item comes from (R1): a URL with its checksum, or a script that
 /// generates it from a seed; a script may also convert what a URL gives.
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -79,6 +107,9 @@ pub struct ItemDef {
     pub package: String,
     /// The file it's built as, in the package.
     pub file: String,
+    /// The content label it lists under, if not its kind's.
+    #[serde(default)]
+    pub label: Option<String>,
     /// Its licence, as an SPDX identifier.
     #[serde(default)]
     pub licence: String,
@@ -207,6 +238,14 @@ impl ItemDef {
             bad(format!(
                 "its file name {:?} may hold letters, digits, - _ and . only",
                 self.file
+            ));
+        }
+        if let Some(label) = &self.label
+            && !LABELS.contains(&label.as_str())
+        {
+            bad(format!(
+                "label {label:?} isn't one of {}",
+                LABELS.join(", ")
             ));
         }
         if !ALLOWED_LICENCES.contains(&self.licence.as_str()) {

@@ -106,6 +106,10 @@ fn make(
         id: item.id.clone(),
         name: item.name.clone(),
         kind: item.kind,
+        label: item
+            .label
+            .clone()
+            .unwrap_or_else(|| item.kind.label().to_owned()),
         file: format!("{}/{}", item.id, item.file),
         sha256: sha256_hex(&bytes),
         size: bytes.len() as u64,

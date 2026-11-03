@@ -20,6 +20,8 @@ pub struct Item {
     pub name: String,
     /// What it is.
     pub kind: Kind,
+    /// The content label it lists under in the browser.
+    pub label: String,
     /// Its file, relative to the package's folder.
     pub file: String,
     /// Its file's SHA-256, in hex.

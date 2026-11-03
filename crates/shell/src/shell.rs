@@ -136,6 +136,7 @@ mod gestures;
 mod info_text;
 mod instant;
 mod invoke;
+mod library;
 mod map_mode;
 mod menus;
 mod midi_input;
@@ -299,6 +300,17 @@ pub enum Effect {
     PickDawProjectPath {
         /// The suggested name: the set's, with `.dawproject`.
         file_name: String,
+        /// The folder the dialog opens in, if there is one.
+        folder: Option<PathBuf>,
+    },
+    /// Ask where to write the library's credits, in a save dialog that
+    /// suggests `file_name`, then run `library.export_credits` with the path
+    /// and `set` (the core library spec, R12).
+    PickCreditsPath {
+        /// The suggested name.
+        file_name: String,
+        /// Whether the file credits only the open set's library items.
+        set: bool,
         /// The folder the dialog opens in, if there is one.
         folder: Option<PathBuf>,
     },
@@ -786,6 +798,8 @@ pub struct Shell {
     stems: stems::StemsState,
     /// The Packages manager: the installer thread and its queue (WP-9.1).
     packages: packages::PackagesState,
+    /// Beatlayer's library (WP-9.46).
+    library: library::LibraryShell,
     /// The Export Audio/Video dialog and the export under way (WP-6.71).
     export: export_dialog::ExportState,
     packs: packs::PackState,
@@ -1341,6 +1355,7 @@ impl Shell {
             processed: Vec::new(),
             stems: stems::StemsState::default(),
             packages: packages::PackagesState::default(),
+            library: library::LibraryShell::default(),
             export: export_dialog::ExportState::default(),
             packs: packs::PackState::default(),
             mpe_dialog: None,
@@ -2304,6 +2319,9 @@ impl Shell {
         }
         if packages_ids::handles(id) {
             return self.run_packages(id, args);
+        }
+        if bl_shell_spec::library::handles(id) {
+            return self.run_library(id, args);
         }
         if slice_ids::handles(id) {
             return self.run_slice(id, args);

@@ -96,6 +96,10 @@ pub struct Package {
     /// names only the main one: the library's packages (core library R7).
     #[serde(default)]
     pub keep_all: bool,
+    /// For a library package, how many items it holds, for the page and
+    /// `library.state` before it is installed.
+    #[serde(default)]
+    pub items: u32,
 }
 
 /// A feature that runs an on-device model, and the roles it needs.
@@ -357,11 +361,17 @@ fn set_readonly(dir: &Path, readonly: bool) -> std::io::Result<()> {
 fn files_under(dir: &Path, prefix: &str, out: &mut Vec<RecordedFile>) -> std::io::Result<()> {
     for entry in std::fs::read_dir(dir)? {
         let path = entry?.path();
-        let name = format!("{prefix}{}", path.file_name().unwrap_or_default().to_string_lossy());
+        let name = format!(
+            "{prefix}{}",
+            path.file_name().unwrap_or_default().to_string_lossy()
+        );
         if path.is_dir() {
             files_under(&path, &format!("{name}/"), out)?;
         } else if name != RECORD {
-            out.push(RecordedFile { name, size: std::fs::metadata(&path)?.len() });
+            out.push(RecordedFile {
+                name,
+                size: std::fs::metadata(&path)?.len(),
+            });
         }
     }
     Ok(())
@@ -541,7 +551,7 @@ fn unpack(package: &Package, part: &Path, dir: &Path) -> Result<(), String> {
                     continue;
                 }
                 let path = entry.path().map_err(|e| failed(&e))?.into_owned();
-                let Some(name) = wanted(package, &path) else {
+                let Some(name) = kept_name(package, &path) else {
                     continue;
                 };
                 found |= name == *main;
@@ -557,7 +567,7 @@ fn unpack(package: &Package, part: &Path, dir: &Path) -> Result<(), String> {
                     continue;
                 }
                 let path = PathBuf::from(entry.name().map_err(|e| failed(&e))?.into_owned());
-                let Some(name) = wanted(package, &path) else {
+                let Some(name) = kept_name(package, &path) else {
                     continue;
                 };
                 found |= name == *main;
@@ -571,24 +581,31 @@ fn unpack(package: &Package, part: &Path, dir: &Path) -> Result<(), String> {
 }
 
 /// The name an archive's file is installed under, if it's one the package
-/// keeps: its entry's path ends with the file's `path`; or, for a package
-/// that keeps all, the entry's own path, if it stays inside the folder.
-fn wanted(package: &Package, path: &Path) -> Option<String> {
-    if package.keep_all {
-        let parts: Option<Vec<_>> = path
-            .components()
-            .map(|c| match c {
-                std::path::Component::Normal(part) => part.to_str(),
-                _ => None,
-            })
-            .collect();
-        return parts.map(|parts| parts.join("/")).filter(|name| !name.is_empty());
-    }
+/// keeps: its entry's path ends with the file's `path`.
+fn wanted<'a>(package: &'a Package, path: &Path) -> Option<&'a str> {
     package
         .files
         .iter()
         .find(|kept| path.ends_with(kept.path.as_deref().unwrap_or(&kept.name)))
-        .map(|kept| kept.name.clone())
+        .map(|kept| kept.name.as_str())
+}
+
+/// [`wanted`], or for a package that keeps all, the entry's own path if it
+/// stays inside the folder.
+fn kept_name(package: &Package, path: &Path) -> Option<String> {
+    if !package.keep_all {
+        return wanted(package, path).map(str::to_owned);
+    }
+    let parts: Option<Vec<_>> = path
+        .components()
+        .map(|c| match c {
+            std::path::Component::Normal(part) => part.to_str(),
+            _ => None,
+        })
+        .collect();
+    parts
+        .map(|parts| parts.join("/"))
+        .filter(|name| !name.is_empty())
 }
 
 /// Writes an archive's file as `name` in `dir`, making the folders it's in.
@@ -640,6 +657,7 @@ mod tests {
             }],
             disabled: false,
             keep_all: false,
+            items: 0,
         };
         (package, dir.join("Packages"))
     }

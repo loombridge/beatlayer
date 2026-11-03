@@ -1,7 +1,8 @@
 //! The File menu.
 
-use super::Action::{Command as Cmd, Pending, Submenu};
-use super::{DAWPROJECT_EXPORT, IMP_05, IMP_29, Row, SEPARATOR};
+use super::Action::{Choice, Command as Cmd, Pending, Submenu};
+use super::{DAWPROJECT_EXPORT, IMP_05, IMP_29, LIBRARY_EXPORT, Row, SEPARATOR};
+use crate::library::EXPORT_CREDITS;
 use crate::browser::ADD_FOLDER as BROWSER_ADD_FOLDER;
 use crate::commands::{
     SET_COLLECT_ALL, SET_NEW, SET_OPEN, SET_SAVE, SET_SAVE_AS, SET_SAVE_AS_DEFAULT,
@@ -56,5 +57,10 @@ pub(super) const FILE: &[Row] = &[
         DAWPROJECT_EXPORT,
         "Export DAWproject...",
         Cmd(EXPORT_DAWPROJECT),
+    ),
+    (
+        LIBRARY_EXPORT,
+        "Export Library Credits...",
+        Choice(EXPORT_CREDITS, r#"{"set":true}"#),
     ),
 ];

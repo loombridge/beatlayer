@@ -33,6 +33,8 @@ bl-devices.workspace = true
 bl-engine.workspace = true
 # Standard MIDI File import and export (WP-2.21).
 bl-interop.workspace = true
+# Beatlayer's library: the installed packages and their credits (WP-9.46).
+bl-library.workspace = true
 # Link 4.1.1: the audio host gives the engine a Link session to follow, and
 # the shell switches it (WP-7.14).
 bl-link.workspace = true

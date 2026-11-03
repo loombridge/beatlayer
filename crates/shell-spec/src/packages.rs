@@ -75,10 +75,18 @@ pub struct PackageStatus {
     pub at_next_launch: bool,
     /// The features that need it, by ID.
     pub features: Vec<String>,
+    /// For a library package, how many items it holds: counted once it's
+    /// installed, as its manifest entry says before (core library R13).
+    #[serde(default, skip_serializing_if = "is_zero_count")]
+    pub items: u32,
 }
 
 fn is_zero(x: &f32) -> bool {
     *x == 0.0
+}
+
+fn is_zero_count(x: &u32) -> bool {
+    *x == 0
 }
 
 /// What `packages.list` and the other commands return.

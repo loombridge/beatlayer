@@ -184,6 +184,9 @@ pub use bl_shell_spec::file_manager as file_manager_commands;
 /// The grooves' commands that need the shell, and the Groove Pool's view
 /// (WP-6.19, WP-6.20), for the UI to run by ID.
 pub use bl_shell_spec::groove as groove_commands;
+/// The Packages manager's command IDs and their argument and result types
+/// (WP-9.1).
+pub use bl_shell_spec::library as library_commands;
 pub use bl_shell_spec::linked_clips as linked_clip_commands;
 /// The Arrangement's locator command IDs and their argument and result
 /// types (WP-6.24).
@@ -208,8 +211,6 @@ pub use bl_shell_spec::note_filters as note_filter_commands;
 /// The Clip View's note-editing command IDs and their argument and result
 /// types (WP-2.3).
 pub use bl_shell_spec::notes as note_commands;
-/// The Packages manager's command IDs and their argument and result types
-/// (WP-9.1).
 pub use bl_shell_spec::packages as package_commands;
 /// A drum rack's pad view and the commands on pads (WP-5.6).
 pub use bl_shell_spec::pads as pad_commands;

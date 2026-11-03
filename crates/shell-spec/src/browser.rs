@@ -220,6 +220,9 @@ pub const MAX_PREVIEW_VOLUME: f64 = 1.995_262_314_968_879_5;
 pub enum Label {
     /// Everything: the places as folders, searched together.
     All,
+    /// Beatlayer's own sound library (core library R8): its items once
+    /// it's installed, its download page before.
+    CoreLibrary,
     /// Instrument presets.
     Sounds,
     /// Drum kits.
@@ -261,8 +264,9 @@ pub enum Label {
 impl Label {
     /// The Library labels, in the sidebar's order (Max for Live is left
     /// out, D21).
-    pub const LIBRARY: [Self; 13] = [
+    pub const LIBRARY: [Self; 14] = [
         Self::All,
+        Self::CoreLibrary,
         Self::Sounds,
         Self::Drums,
         Self::Instruments,
@@ -283,6 +287,7 @@ impl Label {
     pub fn name(&self) -> String {
         match self {
             Self::All => "All".to_owned(),
+            Self::CoreLibrary => "Core Library".to_owned(),
             Self::Sounds => "Sounds".to_owned(),
             Self::Drums => "Drums".to_owned(),
             Self::Instruments => "Instruments".to_owned(),
@@ -314,6 +319,7 @@ impl Label {
     pub fn key(&self) -> String {
         match self {
             Self::All => "all".to_owned(),
+            Self::CoreLibrary => "core_library".to_owned(),
             Self::Sounds => "sounds".to_owned(),
             Self::Drums => "drums".to_owned(),
             Self::Instruments => "instruments".to_owned(),

@@ -16,7 +16,7 @@ use bl_engine::{
     DeviceData, DeviceType, NodeConfig, NodeData, NoteBuffer, NoteEvent, NoteExpression, NoteKind,
     Registry,
 };
-use bl_model::modular::{self, MAX_PARAMS, MAX_VOICES, VOICES, slot_param};
+use bl_model::modular::{self, DEFAULT_VOICES, MAX_PARAMS, MAX_VOICES, VOICES, slot_param};
 use bl_model::{Device, DeviceDescription, DeviceKind, DeviceRole, ParamDescriptor, ParamUnit};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add_with_data};
@@ -28,8 +28,6 @@ mod schedule;
 use blocks::Frame;
 use schedule::{Handoff, Run, Schedule, at};
 
-/// How many voices play in a new Modular Instrument (R5).
-const DEFAULT_VOICES: i64 = 8;
 /// How long a stolen voice fades out before the new note takes its place
 /// (R5), in seconds.
 const STEAL_FADE: f64 = 0.005;
@@ -59,15 +57,21 @@ fn device_type(id: &str, name: &str, role: DeviceRole) -> DeviceType {
         .collect();
     if role == DeviceRole::Instrument {
         params.push(
-            ParamDescriptor::integer(VOICES, "Voices", (1, i64::from(MAX_VOICES)), DEFAULT_VOICES, ParamUnit::None)
-                .describe(
-                    "How many voices play. A new note past it takes the oldest voice, which \
+            ParamDescriptor::integer(
+                VOICES,
+                "Voices",
+                (1, i64::from(MAX_VOICES)),
+                i64::from(DEFAULT_VOICES),
+                ParamUnit::None,
+            )
+            .describe(
+                "How many voices play. A new note past it takes the oldest voice, which \
                      fades out over 5 ms.",
-                ),
+            ),
         );
     }
-    let device_type = DeviceType::native(id, name, role)
-        .with_description(DeviceDescription::new(params));
+    let device_type =
+        DeviceType::native(id, name, role).with_description(DeviceDescription::new(params));
     if role == DeviceRole::AudioEffect {
         device_type.with_sidechain()
     } else {
@@ -78,9 +82,17 @@ fn device_type(id: &str, name: &str, role: DeviceRole) -> DeviceType {
 /// Adds the three Modular device types to `registry`.
 pub fn register(registry: &mut Registry) {
     for (id, name, role) in [
-        (modular::INSTRUMENT, "Modular Instrument", DeviceRole::Instrument),
+        (
+            modular::INSTRUMENT,
+            "Modular Instrument",
+            DeviceRole::Instrument,
+        ),
         (modular::EFFECT, "Modular Effect", DeviceRole::AudioEffect),
-        (modular::MIDI_EFFECT, "Modular MIDI Effect", DeviceRole::MidiEffect),
+        (
+            modular::MIDI_EFFECT,
+            "Modular MIDI Effect",
+            DeviceRole::MidiEffect,
+        ),
     ] {
         add_with_data(
             registry,
@@ -102,7 +114,7 @@ fn compile(device: &Device, config: &NodeConfig) -> Schedule {
     let voices = device
         .params
         .get(&VOICES)
-        .map_or(DEFAULT_VOICES as f64, |v| *v)
+        .map_or(f64::from(DEFAULT_VOICES), |v| *v)
         .round() as usize;
     Schedule::build(
         device.patch.as_ref().unwrap_or(&modular::Patch::default()),
@@ -115,7 +127,11 @@ fn compile(device: &Device, config: &NodeConfig) -> Schedule {
 /// The schedule of `device`'s patch, built off the audio thread for its node
 /// to swap in when the patch changes (R4).
 #[must_use]
-pub fn device_data(device: &Device, config: &NodeConfig, _file: bl_engine::FileOf<'_>) -> DeviceData {
+pub fn device_data(
+    device: &Device,
+    config: &NodeConfig,
+    _file: bl_engine::FileOf<'_>,
+) -> DeviceData {
     let schedule = compile(device, config);
     let mut data = DeviceData::default();
     data.items
@@ -281,7 +297,11 @@ impl Modular {
                     }
                 }
             } else if voice.released {
-                voice.quiet = if self.heard[lane] < SILENT { voice.quiet + 1 } else { 0 };
+                voice.quiet = if self.heard[lane] < SILENT {
+                    voice.quiet + 1
+                } else {
+                    0
+                };
                 if voice.quiet >= quiet {
                     self.active &= !(1 << lane);
                 }
@@ -349,8 +369,8 @@ impl NativeDevice for Modular {
                 heard: &mut self.heard,
             };
             let out = sched.frame(&mut run);
-            for side in 0..channels.min(2) {
-                audio.channel_mut(side)[f] = out[side];
+            for (side, sample) in out.iter().enumerate().take(channels) {
+                audio.channel_mut(side)[f] = *sample;
             }
             self.after_frame();
         }
@@ -375,7 +395,11 @@ impl NativeDevice for Modular {
             next.take_state_from(&mut self.schedule);
             let lanes = next.lanes;
             let previous = std::mem::replace(&mut self.schedule, next);
-            self.active &= if lanes >= 32 { u32::MAX } else { (1 << lanes) - 1 };
+            self.active &= if lanes >= 32 {
+                u32::MAX
+            } else {
+                (1 << lanes) - 1
+            };
             handoff.give(previous);
         }
     }

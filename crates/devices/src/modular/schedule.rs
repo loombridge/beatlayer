@@ -94,10 +94,7 @@ impl Schedule {
         let mut order = Vec::with_capacity(known.len());
         let mut pending: Vec<_> = known.iter().map(|b| b.id).collect();
         while !pending.is_empty() {
-            let at = pending
-                .iter()
-                .position(|id| waiting[id] == 0)
-                .unwrap_or(0);
+            let at = pending.iter().position(|id| waiting[id] == 0).unwrap_or(0);
             let id = pending.remove(at);
             for c in patch.cables.iter().filter(|c| c.from == id && decides(c)) {
                 if let Some(n) = waiting.get_mut(&c.to) {
@@ -127,20 +124,27 @@ impl Schedule {
                         .filter(|c| c.from == id)
                         .map(|c| c.to)
                         .filter(|to| {
-                            patch
-                                .block(*to)
-                                .is_some_and(|b| !matches!(b.kind.as_str(), "audio_out" | "note_out"))
+                            patch.block(*to).is_some_and(|b| {
+                                !matches!(b.kind.as_str(), "audio_out" | "note_out")
+                            })
                         }),
                 );
             }
         }
-        let lanes = if per_voice.is_empty() { 1 } else { voices.clamp(1, MAX_VOICES as usize) };
+        let lanes = if per_voice.is_empty() {
+            1
+        } else {
+            voices.clamp(1, MAX_VOICES as usize)
+        };
         // Output slots, in step order.
         let mut first = BTreeMap::new();
         let mut slots = 0;
         for id in &order {
             first.insert(*id, slots);
-            slots += patch.block(*id).and_then(|b| b.spec()).map_or(0, |s| s.outputs.len());
+            slots += patch
+                .block(*id)
+                .and_then(|b| b.spec())
+                .map_or(0, |s| s.outputs.len());
         }
         let mut schedule = Self {
             steps: Vec::with_capacity(order.len()),
@@ -154,7 +158,9 @@ impl Schedule {
             values: vec![0.0; slots * lanes],
         };
         for (n, id) in order.iter().enumerate() {
-            let Some(block) = patch.block(*id) else { continue };
+            let Some(block) = patch.block(*id) else {
+                continue;
+            };
             let Some(spec) = block.spec() else { continue };
             let voice = per_voice.contains(id);
             let mut ins = [Src::Open; MAX_IN];
@@ -211,15 +217,18 @@ impl Schedule {
                 ins,
                 out: first[id],
                 outs: spec.outputs.len(),
-                computed: !matches!(
-                    block.kind.as_str(),
-                    "note_in" | "audio_in" | "sidechain_in"
-                ),
+                computed: !matches!(block.kind.as_str(), "note_in" | "audio_in" | "sidechain_in"),
                 base,
                 now: base,
                 exposed,
                 states: (0..count)
-                    .map(|lane| State::new(&block.kind, rate, id.0.wrapping_mul(2_654_435_761) ^ lane as u32))
+                    .map(|lane| {
+                        State::new(
+                            &block.kind,
+                            rate,
+                            id.0.wrapping_mul(2_654_435_761) ^ lane as u32,
+                        )
+                    })
                     .collect(),
             });
         }
@@ -381,7 +390,8 @@ impl Schedule {
                     ins[k] = read(&self.values, lanes, run, *src, step.voice, lane);
                 }
                 out.fill(0.0);
-                step.states[if step.voice { lane } else { 0 }].tick(run.frame, ins, &step.now, &mut out);
+                step.states[if step.voice { lane } else { 0 }]
+                    .tick(run.frame, ins, &step.now, &mut out);
                 for (k, v) in out.iter().take(step.outs).enumerate() {
                     self.values[at(step.out + k, lanes, lane)] = *v;
                 }

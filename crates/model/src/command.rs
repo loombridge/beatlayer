@@ -5370,9 +5370,12 @@ impl Document {
                 *device,
                 &crate::modular::Cable::of(*from, from_port, *to, to_port),
             ),
-            Command::ModularMoveBlock { device, block, x, y } => {
-                self.modular_move_block(*device, *block, *x, *y)
-            }
+            Command::ModularMoveBlock {
+                device,
+                block,
+                x,
+                y,
+            } => self.modular_move_block(*device, *block, *x, *y),
             Command::ModularSet {
                 device,
                 block,

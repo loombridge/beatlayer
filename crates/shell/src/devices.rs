@@ -3448,8 +3448,16 @@ impl DeviceView {
                 index,
                 device,
             })?;
-            if let Some((params, name, shape, articulations, routes, mpe, similarity_reference, patch)) =
-                state
+            if let Some((
+                params,
+                name,
+                shape,
+                articulations,
+                routes,
+                mpe,
+                similarity_reference,
+                patch,
+            )) = state
             {
                 editor.apply(Command::SetDeviceState {
                     device: id,
@@ -4096,7 +4104,16 @@ impl DeviceView {
                 editor.apply(Command::AddChain { rack, index, chain })?;
                 if let (
                     Some(device),
-                    Some((params, name, shape, articulations, routes, mpe, similarity_reference, patch)),
+                    Some((
+                        params,
+                        name,
+                        shape,
+                        articulations,
+                        routes,
+                        mpe,
+                        similarity_reference,
+                        patch,
+                    )),
                 ) = (device_id, state)
                 {
                     editor.apply(Command::SetDeviceState {

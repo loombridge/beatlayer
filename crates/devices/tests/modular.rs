@@ -140,13 +140,6 @@ impl Rig {
     /// engine does on the audio thread: the whole delivery is a real-time
     /// section.
     fn swap(&mut self, device: &Device) {
-        let registry = common::registry();
-        let ty = registry
-            .device_types()
-            .into_iter()
-            .find(|t| t.kind == device.kind)
-            .unwrap();
-        let _ = ty;
         let data = bl_devices::modular::device_data(device, &common::config(self.block), &|_| None);
         for item in data.items {
             let data: NodeData = item(&self.collector.handle());
@@ -280,7 +273,10 @@ fn a_new_instrument_plays_the_note_it_is_sent_at_its_pitch() {
     // A saw at A3 (key 69 is A4 here): its fundamental is the note's pitch.
     assert!(amplitude_at(&signal[4800..], hz(69)) > 0.3);
     let c = Rig::new(&sine(0.0).device(), 512).play(24_000, &[on(0, 60, 1)]);
-    assert!((amplitude_at(&c[2400..], 261.625_565) - 1.0).abs() < 0.02, "key 60 is C3 at 0 octaves");
+    assert!(
+        (amplitude_at(&c[2400..], 261.625_565) - 1.0).abs() < 0.02,
+        "key 60 is C3 at 0 octaves"
+    );
 }
 
 // Spec: modular-device R5, R13
@@ -299,9 +295,15 @@ fn velocity_gate_and_release_shape_the_note() {
     let mut rig = Rig::new(&b.device(), 64);
     let out = rig.play(24_000, &[on(100, 60, 1), off(12_000, 60, 1)]);
     assert_eq!(out[99], 0.0);
-    assert!((out[100] - 1.0).abs() < 1e-6, "the gate opens on the note's frame");
+    assert!(
+        (out[100] - 1.0).abs() < 1e-6,
+        "the gate opens on the note's frame"
+    );
     assert!((out[11_999] - 1.0).abs() < 1e-6);
-    assert!(out[12_000 + 2400] > 0.4 && out[12_000 + 2400] < 0.6, "half way down a 100 ms release");
+    assert!(
+        out[12_000 + 2400] > 0.4 && out[12_000 + 2400] < 0.6,
+        "half way down a 100 ms release"
+    );
     assert!(out[12_000 + 4900].abs() < 1e-6);
 }
 
@@ -335,16 +337,31 @@ fn a_patch_renders_the_same_at_any_block_size_and_moving_a_block_changes_nothing
         .set(6, "rate", 3.0)
         .set(7, "time", 37.0)
         .set(8, "level2", 0.5);
-    let notes = [on(10, 60, 1), on(2000, 64, 2), off(9000, 60, 1), on(10_000, 67, 3), off(20_000, 64, 2)];
+    let notes = [
+        on(10, 60, 1),
+        on(2000, 64, 2),
+        off(9000, 60, 1),
+        on(10_000, 67, 3),
+        off(20_000, 64, 2),
+    ];
     let device = b.device();
     let reference = Rig::new(&device, 512).play(30_000, &notes);
     assert!(peak(&reference) > 0.1);
     for block in [1, 61, 4096] {
-        assert_eq!(Rig::new(&device, block).play(30_000, &notes), reference, "block size {block}");
+        assert_eq!(
+            Rig::new(&device, block).play(30_000, &notes),
+            reference,
+            "block size {block}"
+        );
     }
     // R20: another place for a block, and a block no cable reaches.
     let device_id = b.device;
-    b.run(Command::ModularMoveBlock { device: device_id, block: BlockId(4), x: 9.0, y: 9.0 });
+    b.run(Command::ModularMoveBlock {
+        device: device_id,
+        block: BlockId(4),
+        x: 9.0,
+        y: 9.0,
+    });
     b.add("oscillator", 20);
     assert_eq!(Rig::new(&b.device(), 61).play(30_000, &notes), reference);
 }
@@ -352,7 +369,12 @@ fn a_patch_renders_the_same_at_any_block_size_and_moving_a_block_changes_nothing
 // Spec: modular-device R4
 #[test]
 fn a_patch_edit_swaps_in_without_a_click_and_keeps_the_blocks_state() {
-    let step = |signal: &[f32]| signal.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0, f32::max);
+    let step = |signal: &[f32]| {
+        signal
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .fold(0.0, f32::max)
+    };
     let before = sine(0.0);
     let mut rig = Rig::new(&before.device(), 61);
     let mut signal = rig.play(2000, &[on(0, 69, 1)]);
@@ -361,7 +383,10 @@ fn a_patch_edit_swaps_in_without_a_click_and_keeps_the_blocks_state() {
     after.set(2, "coarse", 7.0);
     rig.swap(&after.device());
     signal.extend(rig.play(2000, &[]));
-    assert!(step(&signal) < 0.1, "a sine at 659 Hz steps by at most 0.087");
+    assert!(
+        step(&signal) < 0.1,
+        "a sine at 659 Hz steps by at most 0.087"
+    );
     assert!(amplitude_at(&signal[2400 - 400 + 400..], 440.0 * 2f64.powf(7.0 / 12.0)) > 0.9);
     // A block of another ID starts from rest: its phase jumps. It is the
     // control: the check above would see that.
@@ -377,7 +402,10 @@ fn a_patch_edit_swaps_in_without_a_click_and_keeps_the_blocks_state() {
         .set(12, "wave", 0.0);
     rig.swap(&fresh.device());
     jumped.extend(rig.play(500, &[]));
-    assert!(step(&jumped) > 0.3, "a block that isn't kept restarts its phase");
+    assert!(
+        step(&jumped) > 0.3,
+        "a block that isn't kept restarts its phase"
+    );
 }
 
 // Spec: modular-device R5
@@ -394,17 +422,25 @@ fn an_instrument_plays_up_to_its_voices_and_a_new_note_takes_the_oldest_with_a_f
     // The third takes the oldest, which was the first: C is gone, G and the
     // new note stay.
     let after = &signal[30_000..48_000];
-    assert!(amplitude_at(after, hz(60)) < 0.02, "the oldest voice is gone");
+    assert!(
+        amplitude_at(after, hz(60)) < 0.02,
+        "the oldest voice is gone"
+    );
     assert!(amplitude_at(after, hz(67)) > 0.4 && amplitude_at(after, hz(72)) > 0.4);
     // The oldest fades over 5 ms rather than cutting off.
     let fade = &signal[24_000..24_000 + 260];
-    let step = fade.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0, f32::max);
+    let step = fade
+        .windows(2)
+        .map(|w| (w[1] - w[0]).abs())
+        .fold(0.0, f32::max);
     assert!(step < 0.2, "no click when a voice is stolen: {step}");
     // Four voices, more notes than that: the oldest of the four goes.
     let mut b = sine(0.0);
     b.param(modular::VOICES, 4.0);
     let mut rig = Rig::new(&b.device(), 512);
-    let many: Vec<_> = (0..6u32).map(|i| on(i * 100, 60 + i as u8, i + 1)).collect();
+    let many: Vec<_> = (0..6u32)
+        .map(|i| on(i * 100, 60 + i as u8, i + 1))
+        .collect();
     let out = rig.play(12_000, &many);
     assert!(peak(&out) <= 4.2, "at most four voices sound");
 }
@@ -424,7 +460,10 @@ fn a_patch_parameter_moves_its_setting_and_automation_reaches_it() {
     let up = common::set(24_000, param, 0.5 + 12.0 / 96.0);
     let [signal, _] = rig.render(48_000, &notes, &[up], None, None);
     assert!(amplitude_at(&signal[4000..20_000], 261.625_565) > 0.9);
-    assert!(amplitude_at(&signal[30_000..46_000], 2.0 * 261.625_565) > 0.9, "an octave up");
+    assert!(
+        amplitude_at(&signal[30_000..46_000], 2.0 * 261.625_565) > 0.9,
+        "an octave up"
+    );
 }
 
 // Spec: modular-device R3, R28
@@ -440,15 +479,27 @@ fn a_delay_delays_by_its_time_and_closes_a_feedback_loop() {
     let mut input = vec![0.0f32; 4800];
     input[100] = 1.0;
     let [out, _] = Rig::new(&b.device(), 61).render(4800, &[], &[], Some(&input), None);
-    assert_eq!(out.iter().position(|x| *x != 0.0), Some(580), "10 ms is 480 frames");
+    assert_eq!(
+        out.iter().position(|x| *x != 0.0),
+        Some(580),
+        "10 ms is 480 frames"
+    );
     // The smallest delay is one sample.
     b.set(2, "time", 0.0);
     let [out, _] = Rig::new(&b.device(), 61).render(4800, &[], &[], Some(&input), None);
     assert_eq!(out.iter().position(|x| *x != 0.0), Some(101));
     // The time input adds seconds.
-    b.set(2, "time", 0.0).add("arithmetic", 4).wire(4, "out", 2, "time").set(4, "op", 6.0).set(4, "a", 0.0078125);
+    b.set(2, "time", 0.0)
+        .add("arithmetic", 4)
+        .wire(4, "out", 2, "time")
+        .set(4, "op", 6.0)
+        .set(4, "a", 0.0078125);
     let [out, _] = Rig::new(&b.device(), 61).render(4800, &[], &[], Some(&input), None);
-    assert_eq!(out.iter().position(|x| *x != 0.0), Some(475), "1/128 s is 375 frames");
+    assert_eq!(
+        out.iter().position(|x| *x != 0.0),
+        Some(475),
+        "1/128 s is 375 frames"
+    );
     // A loop through the delay: each trip comes back at half the level.
     let mut b = Build::new(modular::EFFECT, true);
     b.add("audio_in", 1)
@@ -464,14 +515,24 @@ fn a_delay_delays_by_its_time_and_closes_a_feedback_loop() {
         .set(3, "time", 1.0)
         .set(4, "gain", -6.0206);
     let [out, _] = Rig::new(&b.device(), 61).render(4800, &[], &[], Some(&input), None);
-    assert!((out[100] - 1.0).abs() < 1e-6 && (out[148] - 0.5).abs() < 1e-4 && (out[196] - 0.25).abs() < 1e-4);
+    assert!(
+        (out[100] - 1.0).abs() < 1e-6
+            && (out[148] - 0.5).abs() < 1e-4
+            && (out[196] - 0.25).abs() < 1e-4
+    );
 }
 
 // Spec: modular-device R14
 #[test]
 fn an_effect_passes_audio_in_to_audio_out_and_is_silent_with_no_cable_to_it() {
     let input = common::noise(2048);
-    let [out, _] = Rig::new(&Build::new(modular::EFFECT, false).device(), 512).render(2048, &[], &[], Some(&input), None);
+    let [out, _] = Rig::new(&Build::new(modular::EFFECT, false).device(), 512).render(
+        2048,
+        &[],
+        &[],
+        Some(&input),
+        None,
+    );
     assert_eq!(out, input);
     let mut b = Build::new(modular::EFFECT, false);
     let device = b.device;
@@ -491,7 +552,9 @@ fn an_effect_passes_audio_in_to_audio_out_and_is_silent_with_no_cable_to_it() {
 #[test]
 fn sidechain_in_gives_the_devices_sidechain() {
     let mut b = Build::new(modular::EFFECT, true);
-    b.add("sidechain_in", 1).add("audio_out", 2).wire(1, "left", 2, "left");
+    b.add("sidechain_in", 1)
+        .add("audio_out", 2)
+        .wire(1, "left", 2, "left");
     let side = common::noise(1024);
     let input = vec![0.0f32; 1024];
     let [out, _] = Rig::new(&b.device(), 256).render(1024, &[], &[], Some(&input), Some(&side));
@@ -525,17 +588,30 @@ fn an_oscillator_plays_its_four_waves_at_its_pitch_with_coarse_fine_pulse_width_
     for (wave, rms) in [(0.0, 0.707), (1.0, 0.577), (2.0, 0.577), (3.0, 1.0)] {
         let out = Rig::new(&sine(wave).device(), 512).play(24_000, &[on(0, 69, 1)]);
         let body = &out[2400..];
-        let level = (body.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>() / body.len() as f64).sqrt();
+        let level =
+            (body.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>() / body.len() as f64).sqrt();
         assert!((level - rms).abs() < 0.03, "wave {wave}: {level}");
-        let crossings = body.windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count() as f64;
-        assert!((crossings / (body.len() as f64 / HZ) - 440.0).abs() < 2.0, "wave {wave}");
+        let crossings = body
+            .windows(2)
+            .filter(|w| w[0] < 0.0 && w[1] >= 0.0)
+            .count() as f64;
+        assert!(
+            (crossings / (body.len() as f64 / HZ) - 440.0).abs() < 2.0,
+            "wave {wave}"
+        );
     }
     // Coarse and Fine: 12 semitones and 1,200 cents are one octave each.
     for (setting, value) in [("coarse", 12.0), ("fine", 100.0)] {
         let mut b = sine(0.0);
         b.set(2, setting, value);
         let out = Rig::new(&b.device(), 512).play(24_000, &[on(0, 69, 1)]);
-        assert!(amplitude_at(&out[2400..], 440.0 * 2f64.powf(value / if setting == "coarse" { 12.0 } else { 1200.0 })) > 0.95, "{setting}");
+        assert!(
+            amplitude_at(
+                &out[2400..],
+                440.0 * 2f64.powf(value / if setting == "coarse" { 12.0 } else { 1200.0 })
+            ) > 0.95,
+            "{setting}"
+        );
     }
     // Pulse width: the share of the cycle the square is high.
     let mut b = sine(3.0);
@@ -546,9 +622,16 @@ fn an_oscillator_plays_its_four_waves_at_its_pitch_with_coarse_fine_pulse_width_
     // Phase modulation: a constant shifts the starting phase by half the
     // input in cycles.
     let mut b = Build::new(modular::INSTRUMENT, true);
-    b.add("note_in", 1).add("oscillator", 2).add("arithmetic", 3).add("audio_out", 4)
-        .wire(1, "pitch", 2, "pitch").wire(3, "out", 2, "pm").wire(2, "out", 4, "left")
-        .set(2, "wave", 0.0).set(3, "op", 6.0).set(3, "a", 0.5);
+    b.add("note_in", 1)
+        .add("oscillator", 2)
+        .add("arithmetic", 3)
+        .add("audio_out", 4)
+        .wire(1, "pitch", 2, "pitch")
+        .wire(3, "out", 2, "pm")
+        .wire(2, "out", 4, "left")
+        .set(2, "wave", 0.0)
+        .set(3, "op", 6.0)
+        .set(3, "a", 0.5);
     let out = Rig::new(&b.device(), 512).play(100, &[on(0, 60, 1)]);
     assert!((out[0] - (TAU * 0.25).sin() as f32).abs() < 1e-5);
     // Band-limited: a saw high in the range keeps its energy at its
@@ -569,7 +652,11 @@ fn an_oscillator_plays_its_four_waves_at_its_pitch_with_coarse_fine_pulse_width_
             aliased += power * power;
         }
     }
-    assert!(10.0 * (aliased / total).log10() < -30.0, "{} dB", 10.0 * (aliased / total).log10());
+    assert!(
+        10.0 * (aliased / total).log10() < -30.0,
+        "{} dB",
+        10.0 * (aliased / total).log10()
+    );
 }
 
 // Spec: modular-device R22
@@ -577,8 +664,13 @@ fn an_oscillator_plays_its_four_waves_at_its_pitch_with_coarse_fine_pulse_width_
 fn a_filter_cuts_above_its_cutoff_by_its_slope_and_follows_its_cutoff_input() {
     let level = |setup: &dyn Fn(&mut Build), hz: f64| {
         let mut b = Build::new(modular::EFFECT, true);
-        b.add("audio_in", 1).add("filter", 2).add("audio_out", 3)
-            .wire(1, "left", 2, "in").wire(2, "out", 3, "left").set(2, "cutoff", 1000.0).set(2, "resonance", 0.0);
+        b.add("audio_in", 1)
+            .add("filter", 2)
+            .add("audio_out", 3)
+            .wire(1, "left", 2, "in")
+            .wire(2, "out", 3, "left")
+            .set(2, "cutoff", 1000.0)
+            .set(2, "resonance", 0.0);
         setup(&mut b);
         let input = common::sine(hz, 1.0, 24_000);
         let [out, _] = Rig::new(&b.device(), 512).render(24_000, &[], &[], Some(&input), None);
@@ -587,16 +679,65 @@ fn a_filter_cuts_above_its_cutoff_by_its_slope_and_follows_its_cutoff_input() {
     let nothing = |_: &mut Build| {};
     assert!(level(&nothing, 100.0) > 0.95);
     let twelve = level(&nothing, 8000.0);
-    let twenty_four = level(&|b: &mut Build| { b.set(2, "slope", 1.0); }, 8000.0);
-    assert!(twelve < 0.03 && twenty_four < twelve * 0.2, "{twelve} {twenty_four}");
-    assert!(level(&|b: &mut Build| { b.set(2, "mode", 1.0); }, 100.0) < 0.03, "high-pass");
-    assert!(level(&|b: &mut Build| { b.set(2, "mode", 1.0); }, 8000.0) > 0.95);
-    assert!(level(&|b: &mut Build| { b.set(2, "mode", 2.0); }, 1000.0) > 0.5, "band-pass");
-    assert!(level(&|b: &mut Build| { b.set(2, "mode", 2.0); }, 100.0) < 0.2);
-    assert!(level(&|b: &mut Build| { b.set(2, "mode", 3.0); }, 1000.0) < 0.1, "notch");
+    let twenty_four = level(
+        &|b: &mut Build| {
+            b.set(2, "slope", 1.0);
+        },
+        8000.0,
+    );
+    assert!(
+        twelve < 0.03 && twenty_four < twelve * 0.2,
+        "{twelve} {twenty_four}"
+    );
+    assert!(
+        level(
+            &|b: &mut Build| {
+                b.set(2, "mode", 1.0);
+            },
+            100.0
+        ) < 0.03,
+        "high-pass"
+    );
+    assert!(
+        level(
+            &|b: &mut Build| {
+                b.set(2, "mode", 1.0);
+            },
+            8000.0
+        ) > 0.95
+    );
+    assert!(
+        level(
+            &|b: &mut Build| {
+                b.set(2, "mode", 2.0);
+            },
+            1000.0
+        ) > 0.5,
+        "band-pass"
+    );
+    assert!(
+        level(
+            &|b: &mut Build| {
+                b.set(2, "mode", 2.0);
+            },
+            100.0
+        ) < 0.2
+    );
+    assert!(
+        level(
+            &|b: &mut Build| {
+                b.set(2, "mode", 3.0);
+            },
+            1000.0
+        ) < 0.1,
+        "notch"
+    );
     // Two octaves up on the cutoff input passes what 1 kHz stopped.
     let up = |b: &mut Build| {
-        b.add("arithmetic", 4).wire(4, "out", 2, "cutoff").set(4, "op", 6.0).set(4, "a", 3.0);
+        b.add("arithmetic", 4)
+            .wire(4, "out", 2, "cutoff")
+            .set(4, "op", 6.0)
+            .set(4, "a", 3.0);
     };
     assert!(level(&nothing, 4000.0) < 0.1 && level(&up, 4000.0) > 0.8);
 }
@@ -605,14 +746,23 @@ fn a_filter_cuts_above_its_cutoff_by_its_slope_and_follows_its_cutoff_input() {
 #[test]
 fn an_envelope_attacks_decays_sustains_and_releases_from_where_it_is() {
     let mut b = Build::new(modular::INSTRUMENT, true);
-    b.add("note_in", 1).add("envelope", 2).add("audio_out", 3)
-        .wire(1, "gate", 2, "gate").wire(2, "out", 3, "left")
-        .set(2, "attack", 10.0).set(2, "decay", 20.0).set(2, "sustain", 0.5).set(2, "release", 30.0);
+    b.add("note_in", 1)
+        .add("envelope", 2)
+        .add("audio_out", 3)
+        .wire(1, "gate", 2, "gate")
+        .wire(2, "out", 3, "left")
+        .set(2, "attack", 10.0)
+        .set(2, "decay", 20.0)
+        .set(2, "sustain", 0.5)
+        .set(2, "release", 30.0);
     let out = Rig::new(&b.device(), 100).play(12_000, &[on(0, 60, 1), off(6000, 60, 1)]);
     assert!((out[240] - 0.5).abs() < 0.01, "half way up a 10 ms attack");
     assert!((out[480] - 1.0).abs() < 0.01 && (out[481] - 1.0).abs() < 0.01 && out[500] < 1.0);
     assert!((out[480 + 960] - 0.5).abs() < 0.01 && (out[3000] - 0.5).abs() < 1e-6);
-    assert!((out[6000 + 720] - 0.25).abs() < 0.01, "half way down a 30 ms release from 0.5");
+    assert!(
+        (out[6000 + 720] - 0.25).abs() < 0.01,
+        "half way down a 30 ms release from 0.5"
+    );
     assert!(out[6000 + 1500].abs() < 1e-6);
     // A note released mid-attack releases from where the attack had got.
     let out = Rig::new(&b.device(), 100).play(3000, &[on(0, 60, 1), off(240, 60, 1)]);
@@ -620,14 +770,21 @@ fn an_envelope_attacks_decays_sustains_and_releases_from_where_it_is() {
     // A curve bends a segment: above 0 starts slowly.
     b.set(2, "attack_curve", 1.0);
     let out = Rig::new(&b.device(), 100).play(1000, &[on(0, 60, 1)]);
-    assert!(out[240] < 0.2, "a convex attack is low half way: {}", out[240]);
+    assert!(
+        out[240] < 0.2,
+        "a convex attack is low half way: {}",
+        out[240]
+    );
 }
 
 // Spec: modular-device R24
 #[test]
 fn an_lfo_runs_at_its_rate_or_the_songs_tempo_and_resets_on_a_gate() {
     let mut b = Build::new(modular::EFFECT, true);
-    b.add("lfo", 1).add("audio_out", 2).wire(1, "out", 2, "left").set(1, "rate", 6.0);
+    b.add("lfo", 1)
+        .add("audio_out", 2)
+        .wire(1, "out", 2, "left")
+        .set(1, "rate", 6.0);
     let [out, _] = Rig::new(&b.device(), 512).render(48_000, &[], &[], None, None);
     let crossings = |s: &[f32]| s.windows(2).filter(|w| w[0] <= 0.0 && w[1] > 0.0).count();
     assert_eq!(crossings(&out), 6);
@@ -641,7 +798,10 @@ fn an_lfo_runs_at_its_rate_or_the_songs_tempo_and_resets_on_a_gate() {
     }
     // Random waves repeat from one render to the next.
     let a = Rig::new(&b.device(), 512).render(20_000, &[], &[], None, None);
-    assert_eq!(a, Rig::new(&b.device(), 33).render(20_000, &[], &[], None, None));
+    assert_eq!(
+        a,
+        Rig::new(&b.device(), 33).render(20_000, &[], &[], None, None)
+    );
 }
 
 // Spec: modular-device R25, R26, R27
@@ -649,25 +809,55 @@ fn an_lfo_runs_at_its_rate_or_the_songs_tempo_and_resets_on_a_gate() {
 fn an_amplifier_a_mixer_and_arithmetic_do_what_they_say() {
     let run = |b: &Build| Rig::new(&b.device(), 32).render(64, &[], &[], None, None)[0][63];
     let mut b = Build::new(modular::EFFECT, true);
-    b.add("arithmetic", 1).add("amplifier", 2).add("audio_out", 3)
-        .wire(1, "out", 2, "in").wire(2, "out", 3, "left").set(1, "op", 6.0).set(1, "a", 0.5).set(2, "gain", -6.0206);
-    assert!((run(&b) - 0.25).abs() < 1e-4, "gain in decibels; an open control input is 1");
-    b.add("arithmetic", 4).wire(4, "out", 2, "cv").set(4, "op", 6.0).set(4, "a", 0.5);
+    b.add("arithmetic", 1)
+        .add("amplifier", 2)
+        .add("audio_out", 3)
+        .wire(1, "out", 2, "in")
+        .wire(2, "out", 3, "left")
+        .set(1, "op", 6.0)
+        .set(1, "a", 0.5)
+        .set(2, "gain", -6.0206);
+    assert!(
+        (run(&b) - 0.25).abs() < 1e-4,
+        "gain in decibels; an open control input is 1"
+    );
+    b.add("arithmetic", 4)
+        .wire(4, "out", 2, "cv")
+        .set(4, "op", 6.0)
+        .set(4, "a", 0.5);
     assert!((run(&b) - 0.125).abs() < 1e-4, "times a control input");
     // Mixer: four inputs, a level each.
     let mut m = Build::new(modular::EFFECT, true);
-    m.add("mixer", 1).add("audio_out", 2).wire(1, "out", 2, "left");
+    m.add("mixer", 1)
+        .add("audio_out", 2)
+        .wire(1, "out", 2, "left");
     for (i, v) in [0.1, 0.2, 0.3, 0.4].into_iter().enumerate() {
         let id = 10 + i as u32;
         let port = format!("in{}", i + 1);
-        m.add("arithmetic", id).set(id, "op", 6.0).set(id, "a", v).wire(id, "out", 1, &port);
+        m.add("arithmetic", id)
+            .set(id, "op", 6.0)
+            .set(id, "a", v)
+            .wire(id, "out", 1, &port);
     }
     m.set(1, "level2", 0.5).set(1, "level4", 0.0);
     assert!((run(&m) - (0.1 + 0.1 + 0.3)).abs() < 1e-6);
     // Arithmetic: every operation.
-    for (op, a, b_, want) in [(0.0, 0.5, 0.25, 0.75), (1.0, 0.5, 0.25, 0.25), (2.0, 0.5, 0.25, 0.125), (3.0, 0.5, 0.25, 0.25), (4.0, 0.5, 0.25, 0.5), (5.0, -0.5, 0.25, 0.5), (6.0, 0.5, 0.25, 0.5)] {
+    for (op, a, b_, want) in [
+        (0.0, 0.5, 0.25, 0.75),
+        (1.0, 0.5, 0.25, 0.25),
+        (2.0, 0.5, 0.25, 0.125),
+        (3.0, 0.5, 0.25, 0.25),
+        (4.0, 0.5, 0.25, 0.5),
+        (5.0, -0.5, 0.25, 0.5),
+        (6.0, 0.5, 0.25, 0.5),
+    ] {
         let mut c = Build::new(modular::EFFECT, true);
-        c.add("arithmetic", 1).add("audio_out", 2).wire(1, "out", 2, "left").set(1, "op", op).set(1, "a", a).set(1, "b", b_);
+        c.add("arithmetic", 1)
+            .add("audio_out", 2)
+            .wire(1, "out", 2, "left")
+            .set(1, "op", op)
+            .set(1, "a", a)
+            .set(1, "b", b_);
         assert!((run(&c) - want).abs() < 1e-6, "op {op}");
     }
 }
@@ -675,8 +865,7 @@ fn an_amplifier_a_mixer_and_arithmetic_do_what_they_say() {
 // Spec: modular-device R10
 #[test]
 fn a_block_of_a_later_version_is_kept_and_silent() {
-    let mut b = Build::new(modular::EFFECT, false);
-    let mut device = b.device();
+    let mut device = Build::new(modular::EFFECT, false).device();
     let patch = device.patch.as_mut().unwrap();
     patch.blocks.push(modular::Block {
         id: BlockId(7),
@@ -685,15 +874,18 @@ fn a_block_of_a_later_version_is_kept_and_silent() {
         y: 0.0,
         settings: std::collections::BTreeMap::new(),
     });
-    patch.cables.push(Cable::of(BlockId(7), "anything", BlockId(2), "right"));
-    patch.cables.retain(|c| !(c.to == BlockId(2) && c.to_port == "right"));
-    patch.cables.push(Cable::of(BlockId(7), "anything", BlockId(2), "right"));
+    // It feeds Audio Out's right side in place of Audio In.
+    patch
+        .cables
+        .retain(|c| !(c.to == BlockId(2) && c.to_port == "right"));
+    patch
+        .cables
+        .push(Cable::of(BlockId(7), "anything", BlockId(2), "right"));
     assert!(patch.check().is_ok());
     let input = common::noise(512);
     let [left, right] = Rig::new(&device, 512).render(512, &[], &[], Some(&input), None);
     assert_eq!(left, input);
     assert_eq!(peak(&right), 0.0);
-    let _ = &mut b;
 }
 
 // Spec: modular-device R12

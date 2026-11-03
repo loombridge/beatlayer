@@ -650,13 +650,13 @@ impl Compiler {
             {
                 self.send_device_data(document, id, &mut update);
             }
-            // A Modular whose patch changed, or its voice count, gets its
-            // schedule compiled again, with no new program (modular-device
-            // R4).
+            // A Modular whose patch changed gets its schedule compiled
+            // again, with no new program (modular-device R4); a change of
+            // its voice count does the same, as a parameter its data is
+            // built from.
             if let (Change::Modified, Some(before), Some(after)) =
                 (change, old.device(id), document.device(id))
-                && (before.patch != after.patch
-                    || self.registry.data_params_changed(before, after))
+                && before.patch != after.patch
             {
                 self.send_device_data(document, id, &mut update);
             }
@@ -948,7 +948,10 @@ impl Compiler {
         };
         let library = self.registry.media();
         let file = |media| library.and_then(|library| library.file(media));
-        let Some(data) = self.registry.data(device_ref, &self.config.node_config(), &file) else {
+        let Some(data) = self
+            .registry
+            .data(device_ref, &self.config.node_config(), &file)
+        else {
             return;
         };
         update.missing.extend(data.missing);

@@ -30,8 +30,9 @@ pub const MAX_CABLES: usize = 1024;
 pub const MAX_PARAMS: usize = 64;
 /// The most voices an instrument patch plays (R5).
 pub const MAX_VOICES: u32 = 32;
-/// The parameter that sets how many voices play (R5): 1 to 32, 8 in a new
-/// device.
+/// How many voices play in a new Modular Instrument (R5).
+pub const DEFAULT_VOICES: u32 = 8;
+/// The parameter that sets how many voices play (R5): 1 to 32.
 pub const VOICES: ParamId = ParamId(100);
 
 /// The device parameter that patch parameter `slot` (1 to 64) is.
@@ -114,7 +115,11 @@ impl SettingSpec {
     #[must_use]
     pub fn at_travel(&self, travel: f64) -> f64 {
         let value = self.min + (self.max - self.min) * travel.clamp(0.0, 1.0);
-        if self.is_choice() { value.round() } else { value }
+        if self.is_choice() {
+            value.round()
+        } else {
+            value
+        }
     }
 
     /// Where `value` sits in the setting's range, 0 to 1.
@@ -210,7 +215,11 @@ pub const BLOCKS: &[BlockSpec] = &[
     BlockSpec {
         id: "oscillator",
         name: "Oscillator",
-        inputs: &[port("pitch", Control), port("pm", Audio), port("sync", Gate)],
+        inputs: &[
+            port("pitch", Control),
+            port("pm", Audio),
+            port("sync", Gate),
+        ],
         outputs: &[port("out", Audio)],
         settings: &[
             choice("wave", "Wave", &["Sine", "Triangle", "Saw", "Square"], 2),
@@ -586,10 +595,9 @@ impl Patch {
             let (Some(from), Some(to)) = (from.spec(), to.spec()) else {
                 continue;
             };
-            let (Some(out), Some(input)) = (
-                from.output(&cable.from_port),
-                to.input(&cable.to_port),
-            ) else {
+            let (Some(out), Some(input)) =
+                (from.output(&cable.from_port), to.input(&cable.to_port))
+            else {
                 return Err(bad("a cable joins a port its block doesn't have"));
             };
             if !out.ty.joins(input.ty) {
@@ -624,9 +632,8 @@ impl Patch {
     /// so a cable into that input makes no edge.
     #[must_use]
     pub fn has_cycle(&self) -> bool {
-        let delayed = |c: &Cable| {
-            c.to_port == "in" && self.block(c.to).is_some_and(|b| b.kind == "delay")
-        };
+        let delayed =
+            |c: &Cable| c.to_port == "in" && self.block(c.to).is_some_and(|b| b.kind == "delay");
         let mut next: BTreeMap<BlockId, Vec<BlockId>> = BTreeMap::new();
         for cable in self.cables.iter().filter(|c| !delayed(c)) {
             next.entry(cable.from).or_default().push(cable.to);
@@ -702,7 +709,14 @@ impl crate::Document {
         }
         self.edit_patch(device, |patch, _| {
             let id = id.unwrap_or_else(|| {
-                BlockId(patch.blocks.iter().map(|b| b.id.0).max().map_or(1, |m| m + 1))
+                BlockId(
+                    patch
+                        .blocks
+                        .iter()
+                        .map(|b| b.id.0)
+                        .max()
+                        .map_or(1, |m| m + 1),
+                )
             });
             patch.blocks.push(Block {
                 id,
@@ -842,7 +856,9 @@ impl crate::Document {
                 (true, None) => {
                     let slot = (1..=MAX_PARAMS as u8)
                         .find(|s| patch.params.iter().all(|p| p.slot != *s))
-                        .ok_or(ModelError::InvalidInput("a patch has at most 64 parameters"))?;
+                        .ok_or(ModelError::InvalidInput(
+                            "a patch has at most 64 parameters",
+                        ))?;
                     let value = patch.block(block).and_then(|b| b.setting(setting));
                     moves.push((
                         slot_param(slot),
@@ -886,27 +902,19 @@ mod tests {
     // Spec: modular-device R2
     #[test]
     fn a_cable_joins_ports_of_one_type_or_control_and_audio_and_an_input_takes_one() {
-        let mut p = patch();
-        let cable = |from, fp: &str, to, tp: &str| Cable {
-            from: BlockId(from),
-            from_port: fp.to_owned(),
-            to: BlockId(to),
-            to_port: tp.to_owned(),
+        let with = |cable: Cable| {
+            let mut p = patch();
+            p.cables.push(cable);
+            p.check()
         };
-        // Control into audio, and audio into control.
-        let mut ok = p.clone();
-        ok.cables.push(cable(1, "velocity", 2, "pm"));
-        ok.cables.push(cable(2, "out", 4, "gate").clone());
-        assert!(ok.check().is_err(), "audio does not join a gate");
-        ok.cables.pop();
-        ok.check().unwrap();
-        // Notes join notes only.
-        p.cables.push(cable(1, "notes", 3, "in"));
-        assert!(p.check().is_err());
+        let (note, osc, amp) = (BlockId(1), BlockId(2), BlockId(3));
+        // Control into an audio input joins.
+        with(Cable::of(note, "velocity", osc, "pm")).unwrap();
+        // Control into a gate input, and notes into an audio input, don't.
+        assert!(with(Cable::of(note, "velocity", osc, "sync")).is_err());
+        assert!(with(Cable::of(note, "notes", amp, "cv")).is_err());
         // The oscillator's pitch already has a cable.
-        let mut twice = patch();
-        twice.cables.push(cable(1, "velocity", 2, "pitch"));
-        assert!(twice.check().is_err());
+        assert!(with(Cable::of(note, "velocity", osc, "pitch")).is_err());
     }
 
     // Spec: modular-device R3

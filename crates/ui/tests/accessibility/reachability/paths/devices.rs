@@ -737,6 +737,37 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                 "`device.set_partials`, which also sets Repeat in the same undo step",
             )),
         ),
+        // WP-9.36: the patch editor (WP-9.38) draws a Modular's patch and
+        // gives each edit its keyboard path (modular-device R48, R50).
+        ("modular.patch", Exception(Query)),
+        (
+            "modular.add_block",
+            Exception(LaterView("the patch editor (WP-9.38)")),
+        ),
+        (
+            "modular.remove_block",
+            Exception(LaterView("the patch editor (WP-9.38)")),
+        ),
+        (
+            "modular.connect",
+            Exception(LaterView("the patch editor (WP-9.38)")),
+        ),
+        (
+            "modular.disconnect",
+            Exception(LaterView("the patch editor (WP-9.38)")),
+        ),
+        (
+            "modular.move_block",
+            Exception(LaterView("the patch editor (WP-9.38)")),
+        ),
+        (
+            "modular.set",
+            Exception(LaterView("the patch editor (WP-9.38)")),
+        ),
+        (
+            "modular.expose",
+            Exception(LaterView("the patch editor (WP-9.38)")),
+        ),
         // WP-8.11: the cells of Wavetable's grid take the arrow keys and
         // Delete; Meld's Matrix tab comes with WP-8.20.
         (

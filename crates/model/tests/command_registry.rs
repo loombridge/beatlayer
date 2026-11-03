@@ -1755,7 +1755,8 @@ fn every_command_runs_by_id() {
             json!({ "device": modular, "block_type": kind, "id": id, "x": 0.0, "y": 0.0 }),
         );
     }
-    let cable = json!({ "device": modular, "from": 1, "from_port": "out", "to": 2, "to_port": "in" });
+    let cable =
+        json!({ "device": modular, "from": 1, "from_port": "out", "to": 2, "to_port": "in" });
     agent.run("modular.connect", cable.clone());
     agent.run("modular.disconnect", cable);
     agent.run(
@@ -1770,13 +1771,31 @@ fn every_command_runs_by_id() {
         "modular.expose",
         json!({ "device": modular, "block": 1, "setting": "coarse", "exposed": true }),
     );
-    let patch = agent.editor.document().device(modular).unwrap().patch.clone().unwrap();
+    let patch = agent
+        .editor
+        .document()
+        .device(modular)
+        .unwrap()
+        .patch
+        .clone()
+        .unwrap();
     assert_eq!((patch.blocks.len(), patch.params.len()), (2, 1));
     agent.run(
         "modular.remove_block",
         json!({ "device": modular, "block": 1 }),
     );
-    assert!(agent.editor.document().device(modular).unwrap().patch.as_ref().unwrap().params.is_empty());
+    assert!(
+        agent
+            .editor
+            .document()
+            .device(modular)
+            .unwrap()
+            .patch
+            .as_ref()
+            .unwrap()
+            .params
+            .is_empty()
+    );
 
     // A device with a sidechain input (WP-2.19b), listening to another
     // track.

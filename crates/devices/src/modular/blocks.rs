@@ -27,10 +27,18 @@ pub(super) struct Frame {
 /// A block's state: what it remembers from frame to frame. The variant is
 /// the block's type.
 pub(super) enum State {
-    Oscillator { phase: f64, sync: bool },
+    Oscillator {
+        phase: f64,
+        sync: bool,
+    },
     Filter(Box<Chan>),
     Envelope(Envelope),
-    Lfo { phase: f64, seed: u32, held: f32, reset: bool },
+    Lfo {
+        phase: f64,
+        seed: u32,
+        held: f32,
+        reset: bool,
+    },
     Amplifier,
     Mixer,
     Arithmetic,
@@ -313,11 +321,7 @@ impl Envelope {
         self.gate = gate;
         // Moves along a stage of `ms`; true once it has ended.
         let advance = |progress: &mut f64, ms: f64| {
-            *progress += if ms > 0.0 {
-                1000.0 / (ms * rate)
-            } else {
-                1.0
-            };
+            *progress += if ms > 0.0 { 1000.0 / (ms * rate) } else { 1.0 };
             *progress >= 1.0
         };
         let bend = |progress: f64, curve: f64| progress.min(1.0).powf((curve * 4f64.ln()).exp());
@@ -325,7 +329,8 @@ impl Envelope {
             Stage::Idle => {}
             Stage::Attack => {
                 if advance(&mut self.progress, set[0]) {
-                    (self.level, self.stage, self.from, self.progress) = (1.0, Stage::Decay, 1.0, 0.0);
+                    (self.level, self.stage, self.from, self.progress) =
+                        (1.0, Stage::Decay, 1.0, 0.0);
                 } else {
                     self.level = self.from + (1.0 - self.from) * bend(self.progress, set[4]);
                 }
@@ -396,7 +401,10 @@ mod tests {
         for _ in 0..24_000 {
             tick(&mut lfo, [None; MAX_IN], &set);
         }
-        assert!(tick(&mut lfo, [None; MAX_IN], &set).abs() < 0.01, "half way through the cycle");
+        assert!(
+            tick(&mut lfo, [None; MAX_IN], &set).abs() < 0.01,
+            "half way through the cycle"
+        );
         assert!((tick(&mut lfo, [Some(1.0), None, None, None], &set) + 1.0).abs() < 0.01);
     }
 }

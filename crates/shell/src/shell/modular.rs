@@ -2,17 +2,14 @@
 //! spec, R9). The edits are `bl-model`'s commands; this is the one command
 //! that reports what they made.
 
-use bl_model::modular::{self, VOICES, slot_param};
 use bl_model::Device;
+use bl_model::modular::{self, DEFAULT_VOICES, VOICES, slot_param};
 use bl_shell_spec::modular::{
     self as ids, BlockView, ParamView, PatchArgs, PatchState, PortView, SettingView,
 };
 use serde_json::Value;
 
 use super::*;
-
-/// How many voices a new Modular Instrument plays (R5).
-const DEFAULT_VOICES: u32 = 8;
 
 impl Shell {
     /// Runs `modular.patch`.
@@ -24,7 +21,7 @@ impl Shell {
                     .editor
                     .document()
                     .device(device)
-                    .and_then(|d| patch_state(d))
+                    .and_then(patch_state)
                     .ok_or_else(|| ShellError::Unavailable {
                         command: id.to_owned(),
                         reason: "the device isn't a Modular".to_owned(),
@@ -38,8 +35,7 @@ impl Shell {
 
 /// `device`'s patch as `modular.patch` reports it, or `None` for a device
 /// that isn't a Modular.
-#[must_use]
-pub fn patch_state(device: &Device) -> Option<PatchState> {
+pub(super) fn patch_state(device: &Device) -> Option<PatchState> {
     let patch = device.patch.as_ref()?;
     let ports = |ports: &[modular::PortSpec]| {
         ports

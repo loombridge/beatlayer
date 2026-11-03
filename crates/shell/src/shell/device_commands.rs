@@ -310,10 +310,27 @@ impl Shell {
     pub fn device_display(&self, device: bl_model::DeviceId) -> Option<bl_model::DeviceDisplay> {
         let doc = self.editor.document();
         let device = doc.device(device)?;
-        Some(
-            self.devices
-                .display(device, crate::devices::followed_tuning(doc, device.id)),
-        )
+        let tuning = crate::devices::followed_tuning(doc, device.id);
+        Some(match self.wavetable_previews(device) {
+            Some(tables) => self.devices.display_with(device, tuning, tables),
+            None => self.devices.display(device, tuning),
+        })
+    }
+
+    /// The tables `device`'s oscillators play, drawn small for its display
+    /// (the wavetable spec, R35), if it is a Wavetable.
+    fn wavetable_previews(
+        &self,
+        device: &bl_model::Device,
+    ) -> Option<[Option<std::sync::Arc<bl_devices::wavetable_display::Preview>>; 2]> {
+        let plays = matches!(&device.kind, bl_model::DeviceKind::Native { device_type }
+            if device_type == bl_devices::wavetable::WAVETABLE);
+        let file = |media: bl_model::ContentHash| {
+            self.media
+                .entry(bl_media::ContentHash::from_bytes(media.0))
+                .map(|entry| entry.path)
+        };
+        plays.then(|| std::array::from_fn(|at| bl_devices::wavetables::preview(device, at, &file)))
     }
 
     /// Takes the state of every running plug-in into the set, so a copy of a
@@ -369,6 +386,19 @@ impl Shell {
             // Spec: device-framework R37. The newest the nodes published,
             // for an agent that never polls the engine.
             self.audio.displays_into(self.devices.displays_mut());
+        }
+        // Spec: wavetable R35. A Wavetable's display holds its oscillators'
+        // tables, which only the shell can find.
+        if id == device_ids::DISPLAY {
+            let target = args
+                .get("device")
+                .and_then(|d| serde_json::from_value(d.clone()).ok())
+                .or_else(|| self.devices.selected());
+            if let Some(device) = target.and_then(|d| self.editor.document().device(d))
+                && self.wavetable_previews(device).is_some()
+            {
+                return Ok(to_value(&self.device_display(device.id)));
+            }
         }
         // Spec: mixer-view R28. Selecting a device that floats brings its
         // window to the front.

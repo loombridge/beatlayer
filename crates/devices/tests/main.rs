@@ -122,4 +122,5 @@ mod vinyl_distortion;
 mod vocoder;
 mod wave_mod;
 mod wavetable;
+mod wavetable_display;
 mod wavetables;

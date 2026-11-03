@@ -258,7 +258,7 @@ pub fn folder_files(file: &Path) -> Vec<PathBuf> {
 }
 
 /// What an oscillator's table is made from.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Source {
     /// A factory table.
     Factory {
@@ -292,6 +292,54 @@ impl Source {
             Self::File { path, raw } => Ok(Cache::global().share(user::read(path, *raw)?)),
         }
     }
+}
+
+/// The most previews kept.
+const PREVIEWS: usize = 64;
+
+/// The preview of the table `device`'s oscillator `at` (from 0) plays, drawn
+/// small for its display (R35): built the first time and kept. `file` finds
+/// a user table's file. Not for the audio thread.
+// shortcut: a changed file keeps its old preview until the program restarts,
+// as the kit's cache keeps its table; upgrade when tables are watched.
+#[must_use]
+pub fn preview(
+    device: &bl_model::Device,
+    at: usize,
+    file: bl_engine::FileOf<'_>,
+) -> Option<Arc<crate::wavetable_display::Preview>> {
+    static KEPT: std::sync::OnceLock<
+        Mutex<std::collections::HashMap<Source, Option<Arc<crate::wavetable_display::Preview>>>>,
+    > = std::sync::OnceLock::new();
+    let source = match device.wavetable_at(at) {
+        None => default_source(),
+        Some(bl_model::WavetableChoice::Factory { category, name }) => Source::Factory {
+            category: category.clone(),
+            name: name.clone(),
+        },
+        Some(bl_model::WavetableChoice::User { raw, .. }) => Source::File {
+            path: file(device.media_at(at)?)?,
+            raw: *raw,
+        },
+    };
+    let mut kept = KEPT
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(found) = kept.get(&source) {
+        return found.clone();
+    }
+    // A table that can't be built is kept as nothing, so it isn't tried on
+    // every repaint.
+    let made = source
+        .build()
+        .ok()
+        .map(|table| Arc::new(crate::wavetable_display::Preview::of(table.source())));
+    if kept.len() >= PREVIEWS {
+        kept.clear();
+    }
+    kept.insert(source, made.clone());
+    made
 }
 
 /// A table for an oscillator, as the compiler sends it to a node: built off

@@ -6,7 +6,10 @@ use std::f64::consts::TAU;
 
 use bl_core::time::TempoMap;
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{
+    BODY_HEIGHT, BOX_HEIGHT, CELL_WIDTH, Control, ControlBand, DisplayCell, Glyph, HEADING_HEIGHT,
+    Heading, LayoutNode, PADDING, Widget,
+};
 use bl_model::{
     Device, DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit,
 };
@@ -17,7 +20,8 @@ use crate::lfo::{Lfo, Rate, Shape, Stereo, Wave};
 /// The delay's device type.
 pub const DELAY: &str = "bl.device.reprise";
 
-/// Sync: beat divisions on, free milliseconds off.
+/// Sync: beat divisions on, free milliseconds off. It is the left channel's
+/// switch; the right channel's is [`R_SYNC_ON`].
 pub const SYNC: ParamId = ParamId(0);
 /// Link: one delay time for both channels.
 pub const LINK: ParamId = ParamId(1);
@@ -74,8 +78,12 @@ pub const LFO_DOTTED: ParamId = ParamId(25);
 /// The LFO's cycle in Sixteenth mode, in sixteenth notes.
 pub const LFO_SIXTEENTH: ParamId = ParamId(26);
 
+/// Sync for the right channel: beat divisions on, free milliseconds off. With
+/// Link on the right channel follows [`SYNC`] instead.
+pub const R_SYNC_ON: ParamId = ParamId(27);
+
 /// How many parameters the delay has.
-const PARAMS: usize = 27;
+const PARAMS: usize = 28;
 
 /// The LFO's rate modes, in the Rate chooser's order.
 pub const RATE_MODES: [&str; 6] = ["Rate", "Time", "Synced", "Triplet", "Dotted", "Sixteenth"];
@@ -99,6 +107,13 @@ const DEFAULT_SYNCED: usize = 4;
 /// The division a new device's Triplet and Dotted modes start on: 1/8.
 const DEFAULT_TRIPLET_DOTTED: usize = 3;
 
+/// The delay times the sync buttons set, in sixteenth notes: Live's buttons
+/// are 1 2 3 4 5 6 8 16.
+const SYNC_STEPS: [i32; 8] = [1, 2, 3, 4, 5, 6, 8, 16];
+
+/// The division a new device's sync buttons start on: 3 sixteenths.
+const DEFAULT_SIXTEENTHS: i64 = 3;
+
 /// The longest free delay the manual records, in seconds.
 pub(crate) const MAX_DELAY_SECONDS: f64 = 5.0;
 /// The longest synced delay, in seconds: sixteen sixteenths with a +50% Offset
@@ -121,18 +136,19 @@ fn division_names() -> Vec<&'static str> {
 #[must_use]
 pub fn delay_type() -> DeviceType {
     let params = vec![
-        ParamDescriptor::toggle(SYNC, "Sync", true)
-            .describe("Sets the delay time in beat divisions rather than milliseconds."),
+        ParamDescriptor::toggle(SYNC, "Sync", true).describe(
+            "Sets the left channel's delay time in beat divisions rather than milliseconds.",
+        ),
         ParamDescriptor::toggle(LINK, "Link", false)
             .describe("Gives both channels the left channel's delay time."),
         ParamDescriptor::toggle(FREEZE, "Freeze", false)
             .describe("Cycles what is in the delay lines and ignores new input."),
-        ParamDescriptor::toggle(FILTER, "Filter", false)
+        ParamDescriptor::toggle(FILTER, "Filter", true)
             .describe("Shapes each repeat with a band-pass filter."),
         ParamDescriptor::continuous(FREQ, "Freq", (20.0, 20_000.0), 1_000.0, ParamUnit::Hertz)
             .logarithmic()
             .describe("The band-pass filter's center frequency."),
-        ParamDescriptor::continuous(WIDTH, "Width", (0.5, 9.0), 2.5, ParamUnit::None)
+        ParamDescriptor::continuous(WIDTH, "Width", (0.5, 9.0), 8.0, ParamUnit::None)
             .describe("The band-pass filter's bandwidth."),
         ParamDescriptor::continuous(FEEDBACK, "Feedback", (0.0, 100.0), 50.0, ParamUnit::Percent)
             .describe("How much of the delayed signal feeds back into the delay line."),
@@ -140,12 +156,24 @@ pub fn delay_type() -> DeviceType {
             .describe("How a change of delay time sounds: a pitch glide, a crossfade, or a cut."),
         ParamDescriptor::toggle(PING_PONG, "Ping Pong", false)
             .describe("Bounces the echoes back and forth between the channels."),
-        ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 100.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 50.0, ParamUnit::Percent)
             .describe("The balance between the dry and the delayed signal."),
-        ParamDescriptor::integer(L_SYNC, "L Sync", (1, 16), 4, ParamUnit::None)
-            .describe("The left channel's delay time in sixteenth notes."),
-        ParamDescriptor::integer(R_SYNC, "R Sync", (1, 16), 4, ParamUnit::None)
-            .describe("The right channel's delay time in sixteenth notes."),
+        ParamDescriptor::integer(
+            L_SYNC,
+            "L Sync",
+            (1, 16),
+            DEFAULT_SIXTEENTHS,
+            ParamUnit::None,
+        )
+        .describe("The left channel's delay time in sixteenth notes."),
+        ParamDescriptor::integer(
+            R_SYNC,
+            "R Sync",
+            (1, 16),
+            DEFAULT_SIXTEENTHS,
+            ParamUnit::None,
+        )
+        .describe("The right channel's delay time in sixteenth notes."),
         ParamDescriptor::continuous(
             L_TIME,
             "L Time",
@@ -223,6 +251,9 @@ pub fn delay_type() -> DeviceType {
         .describe("The LFO's cycle as a dotted division of the beat in Dotted mode."),
         ParamDescriptor::integer(LFO_SIXTEENTH, "LFO Sixteenth", (1, 16), 4, ParamUnit::None)
             .describe("The LFO's cycle in sixteenth notes in Sixteenth mode."),
+        ParamDescriptor::toggle(R_SYNC_ON, "R Sync On", true).describe(
+            "Sets the right channel's delay time in beat divisions rather than milliseconds.",
+        ),
     ];
     DeviceType::native(DELAY, "Delay", DeviceRole::AudioEffect).with_description(
         DeviceDescription::new(params)
@@ -243,7 +274,14 @@ pub fn delay_type() -> DeviceType {
                 ),
                 (
                     "Time",
-                    &["L Time", "R Time", "L Offset", "R Offset", "Time Mode"],
+                    &[
+                        "L Time",
+                        "R Time",
+                        "L Offset",
+                        "R Offset",
+                        "Time Mode",
+                        "R Sync On",
+                    ],
                 ),
                 // Two parameters are named Filter: the switch and the
                 // LFO's amount.
@@ -275,44 +313,121 @@ pub fn delay_type() -> DeviceType {
     )
 }
 
-/// A layout of fixed control bands and the delay's display, which grows.
+/// The height of the two channels' columns, above Feedback and Freeze.
+const CHANNELS: f32 = BODY_HEIGHT - 51.0;
+
+/// The width of a channel's column: two grid cells and the gap between them.
+const CHANNEL: f32 = 2.0 * CELL_WIDTH + 3.0;
+
+/// One channel's column as Live draws it: its name over a Sync button, the
+/// grid of sixteenths (or, while Sync is off, the time in milliseconds in its
+/// place) and the offset.
+fn channel(
+    name: &str,
+    switch: ParamId,
+    (sixteenths, time, offset): (ParamId, ParamId, ParamId),
+) -> LayoutNode {
+    let at = Control::new;
+    let band = ControlBand::free(
+        CHANNEL + 2.0 * PADDING,
+        CHANNELS - PADDING - HEADING_HEIGHT,
+        vec![
+            at(switch, Widget::Toggle, PADDING, 0.0)
+                .sized(CHANNEL, BOX_HEIGHT)
+                .captioned("Sync"),
+            at(
+                sixteenths,
+                Widget::Grid {
+                    columns: 2,
+                    rows: 4,
+                },
+                PADDING,
+                15.0,
+            )
+            .with_steps(&SYNC_STEPS)
+            .hidden_while(switch, 0),
+            at(time, Widget::Number, PADDING, 15.0)
+                .unnamed()
+                .sized(CHANNEL, BOX_HEIGHT)
+                .hidden_while(switch, 1),
+            at(offset, Widget::Number, PADDING, 75.0)
+                .unnamed()
+                .sized(CHANNEL, BOX_HEIGHT),
+        ],
+    );
+    LayoutNode::Column(vec![
+        LayoutNode::Band(ControlBand::free(
+            CHANNEL + 2.0 * PADDING,
+            PADDING,
+            Vec::new(),
+        )),
+        LayoutNode::Heading(Heading::new(name, CHANNEL + 2.0 * PADDING)),
+        LayoutNode::Band(band),
+    ])
+}
+
+/// Delay as Live draws it: the two channels' sync buttons, grids and offsets
+/// with the link between them and Feedback with Freeze under them, the
+/// display with the filter's and the LFO's amounts along its foot, and
+/// Smoothing, Ping Pong and Dry/Wet at the right. The rest of the LFO is the
+/// expanded part the title bar's toggle shows (Spec: delay R13).
 fn layout() -> DeviceLayout {
-    let toggles = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (SYNC, Widget::Toggle),
-            (LINK, Widget::Toggle),
-            (FREEZE, Widget::Toggle),
-            (FILTER, Widget::Toggle),
-            (PING_PONG, Widget::Toggle),
+    let at = Control::new;
+    let left = channel("Left", SYNC, (L_SYNC, L_TIME, L_OFFSET));
+    let right = channel("Right", R_SYNC_ON, (R_SYNC, R_TIME, R_OFFSET));
+    let link = ControlBand::free(
+        18.0,
+        CHANNELS,
+        vec![
+            at(LINK, Widget::IconToggle, 2.0, 52.0)
+                .sized(14.0, BOX_HEIGHT)
+                .with_glyph(Glyph::Link),
         ],
     );
-    let main = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (FEEDBACK, Widget::Knob),
-            (DRY_WET, Widget::Knob),
-            (FREQ, Widget::Knob),
-            (WIDTH, Widget::Knob),
+    let feedback = ControlBand::free(
+        2.0 * (CHANNEL + 2.0 * PADDING) + 18.0,
+        51.0,
+        vec![
+            at(FEEDBACK, Widget::SmallKnob, 44.0, 5.0),
+            at(FREEZE, Widget::IconToggle, 87.0, 21.0)
+                .sized(14.0, BOX_HEIGHT)
+                .with_glyph(Glyph::Freeze),
         ],
     );
-    let times = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (L_SYNC, Widget::Number),
-            (L_TIME, Widget::Knob),
-            (R_SYNC, Widget::Number),
-            (R_TIME, Widget::Knob),
-            (L_OFFSET, Widget::Knob),
-            (R_OFFSET, Widget::Knob),
+    let channels = LayoutNode::Column(vec![
+        LayoutNode::Row(vec![left, LayoutNode::Band(link), right]),
+        LayoutNode::Band(feedback),
+    ]);
+    let foot = ControlBand::free(
+        196.0,
+        39.0,
+        vec![
+            at(FILTER, Widget::Tick, 4.0, 4.0).sized(46.0, BOX_HEIGHT),
+            at(FREQ, Widget::Inline, 58.0, 4.0).sized(70.0, BOX_HEIGHT),
+            at(WIDTH, Widget::Inline, 136.0, 4.0).sized(56.0, BOX_HEIGHT),
+            at(LFO_DELAY, Widget::Inline, 50.0, 23.0)
+                .sized(70.0, BOX_HEIGHT)
+                .captioned("Delay"),
+            at(LFO_FILTER, Widget::Inline, 128.0, 23.0)
+                .sized(64.0, BOX_HEIGHT)
+                .captioned("Filter"),
         ],
     );
-    // The two amounts stay in the body; the rest of the LFO is the expanded
-    // part the LFO Controls toggle shows (Spec: delay R13).
-    let amounts = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[(LFO_DELAY, Widget::Knob), (LFO_FILTER, Widget::Knob)],
-    );
+    let display = DisplayCell::new("Delay", 196.0, BODY_HEIGHT, 1.0).with_bottom(foot);
+    let smoothing = LayoutNode::Column(vec![
+        LayoutNode::Band(ControlBand::free(55.0, PADDING, Vec::new())),
+        LayoutNode::Heading(Heading::new("Smoothing", 55.0)),
+        LayoutNode::Band(ControlBand::free(
+            55.0,
+            BODY_HEIGHT - PADDING - HEADING_HEIGHT,
+            vec![
+                at(TIME_MODE, Widget::Stack(3), PADDING, 0.0).sized(36.0, 42.0),
+                at(PING_PONG, Widget::Toggle, PADDING, 75.0).sized(48.0, BOX_HEIGHT),
+                at(DRY_WET, Widget::SmallKnob, 10.0, 96.0),
+            ],
+        )),
+    ]);
+    // The rest of the LFO, which Live's panel shows once its section opens.
     let lfo = ControlBand::stacked(
         BODY_HEIGHT,
         &[
@@ -327,14 +442,10 @@ fn layout() -> DeviceLayout {
             (LFO_MORPH, Widget::Knob),
         ],
     );
-    let display = DisplayCell::new("Delay", 160.0, BODY_HEIGHT, 1.0)
-        .with_top(ControlBand::stacked(40.0, &[(TIME_MODE, Widget::Chooser)]));
     DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Band(toggles),
-        LayoutNode::Band(main),
+        channels,
         LayoutNode::Cell(display),
-        LayoutNode::Band(times),
-        LayoutNode::Band(amounts),
+        smoothing,
     ]))
     .with_expanded(LayoutNode::Band(lfo))
 }
@@ -420,7 +531,7 @@ impl NativeDevice for Delay {
         self.lfo
             .set(audio, settings.lfo_rate, Stereo::Phase(0.0), 0.0);
         let tempo = audio.tempo();
-        if settings.sync {
+        if settings.sync || settings.sync_right {
             for (frame, sixteenth) in self.sixteenths[..audio.frames()].iter_mut().enumerate() {
                 *sixteenth = sixteenth_frames_at(audio, frame);
             }
@@ -526,6 +637,7 @@ pub(crate) fn sixteenth_frames_at(audio: &Audio<'_, '_>, frame: usize) -> f64 {
 /// doesn't smooth and each parameter's place in the bank.
 struct Settings {
     sync: bool,
+    sync_right: bool,
     link: bool,
     freeze: bool,
     filter_on: bool,
@@ -548,6 +660,7 @@ impl Settings {
         });
         Self {
             sync: params.value(index[SYNC.0 as usize]) >= 0.5,
+            sync_right: params.value(index[R_SYNC_ON.0 as usize]) >= 0.5,
             link: params.value(index[LINK.0 as usize]) >= 0.5,
             freeze: params.value(index[FREEZE.0 as usize]) >= 0.5,
             filter_on: params.value(index[FILTER.0 as usize]) >= 0.5,
@@ -581,7 +694,13 @@ impl Settings {
     /// the parameter's target rather than its smoothed value: the time
     /// change modes (Repitch, Fade, Jump) do the smoothing themselves.
     fn base_delay(&self, params: &ParamBank, sixteenth: f64, right: bool) -> f64 {
-        if self.sync {
+        // With Link on the right channel takes the left's setting, Sync included.
+        let sync = if right && !self.link {
+            self.sync_right
+        } else {
+            self.sync
+        };
+        if sync {
             let division = if right && !self.link {
                 self.value(params, R_SYNC)
             } else {

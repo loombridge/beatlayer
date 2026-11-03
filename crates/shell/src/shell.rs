@@ -64,6 +64,7 @@ use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::envelope_keys as envelope_key_ids;
 use bl_shell_spec::export as export_ids;
+use bl_shell_spec::extensions as extension_ids;
 use bl_shell_spec::file_manager as file_manager_ids;
 use bl_shell_spec::freeze as freeze_ids;
 use bl_shell_spec::locator as locator_ids;
@@ -133,6 +134,7 @@ mod control_surface;
 mod convert;
 mod device_commands;
 mod document_edits;
+mod extensions;
 mod focus;
 mod gestures;
 mod info_text;
@@ -801,6 +803,8 @@ pub struct Shell {
     audio_to_midi: audio_to_midi::AudioToMidiState,
     /// The Packages manager: the installer thread and its queue (WP-9.1).
     packages: packages::PackagesState,
+    /// The extension host, once an extension command has run (WP-9.29).
+    extensions: Option<extensions::ExtensionState>,
     /// The Export Audio/Video dialog and the export under way (WP-6.71).
     export: export_dialog::ExportState,
     packs: packs::PackState,
@@ -1362,6 +1366,7 @@ impl Shell {
             stems: stems::StemsState::default(),
             audio_to_midi: audio_to_midi::AudioToMidiState::default(),
             packages: packages::PackagesState::default(),
+            extensions: None,
             export: export_dialog::ExportState::default(),
             packs: packs::PackState::default(),
             mpe_dialog: None,
@@ -2337,6 +2342,9 @@ impl Shell {
         }
         if packages_ids::handles(id) {
             return self.run_packages(id, args);
+        }
+        if extension_ids::handles(id) {
+            return self.run_extensions(id, args);
         }
         if slice_ids::handles(id) {
             return self.run_slice(id, args);

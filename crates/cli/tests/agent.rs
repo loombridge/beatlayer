@@ -3984,14 +3984,14 @@ fn an_agent_inserts_sets_and_reads_the_three_delays_by_command_id() {
             param.0
         );
     }
-    assert_eq!(read(&mut client, "trident").as_array().unwrap().len(), 32);
+    assert_eq!(read(&mut client, "trident").as_array().unwrap().len(), 34);
     assert_eq!(read(&mut client, "scatter").as_array().unwrap().len(), 12);
     assert_eq!(read(&mut client, "plumb").as_array().unwrap().len(), 14);
 
     // The X–Y axis is a parameter: one undo step puts it back.
     let axis =
         |client: &mut Client<InProcess>| value_of(&read(client, "scatter"), grain_delay::X_AXIS);
-    assert_eq!(axis(&mut client), json!(0.0), "Delay Time to start");
+    assert_eq!(axis(&mut client), json!(2.0), "Pitch to start");
     call(
         &mut client,
         "run",
@@ -4004,7 +4004,7 @@ fn an_agent_inserts_sets_and_reads_the_three_delays_by_command_id() {
         "run",
         json!({ "commands": [{ "command": "edit.undo", "args": {} }] }),
     );
-    assert_eq!(axis(&mut client), json!(0.0), "one undo step");
+    assert_eq!(axis(&mut client), json!(2.0), "one undo step");
     call(
         &mut client,
         "run",

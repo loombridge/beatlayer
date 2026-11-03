@@ -589,7 +589,15 @@ fn a_frozen_return_keeps_its_tail() {
     // Echoes 40 ms apart, so the render's 100 ms quiet rule doesn't end the
     // tail between them.
     let delay = insert_device(&mut shell, ret, "bl.device.reprise");
-    for (param, value) in [(0, 0.0), (12, 40.0), (13, 40.0), (6, 0.5), (9, 1.0)] {
+    // The filter off (Live's panel starts it on at Q 8).
+    for (param, value) in [
+        (0, 0.0),
+        (3, 0.0),
+        (12, 40.0),
+        (13, 40.0),
+        (6, 0.5),
+        (9, 1.0),
+    ] {
         shell
             .run(
                 "device.set_param",

@@ -31,6 +31,8 @@ pub enum VideoError {
     Decode(String),
     /// The movie's audio failed to decode.
     Audio(MediaError),
+    /// An encoder failed, or this computer has none that takes the job.
+    Encode(String),
 }
 
 impl fmt::Display for VideoError {
@@ -46,6 +48,7 @@ impl fmt::Display for VideoError {
             }
             Self::Decode(what) => write!(f, "couldn't decode a frame: {what}"),
             Self::Audio(e) => write!(f, "the movie's sound: {e}"),
+            Self::Encode(what) => write!(f, "couldn't encode the movie: {what}"),
         }
     }
 }

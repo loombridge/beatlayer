@@ -26,24 +26,36 @@ mod boxes;
 mod convert;
 mod decoder;
 mod edits;
+mod encoder;
 mod error;
 #[cfg(unix)]
 pub mod ffmpeg;
+mod jpeg;
 mod markers;
 #[cfg(windows)]
 mod mediafoundation;
+#[cfg(windows)]
+mod mfencode;
 mod mjpeg;
 mod movie;
 mod player;
 mod rational;
 #[cfg(target_os = "macos")]
 mod videotoolbox;
+#[cfg(target_os = "macos")]
+mod vtencode;
+mod writer;
 
 pub use audio::MovieAudio;
 pub use decoder::{CodedSample, Frame, VideoDecoder, open_decoder};
 pub use edits::{Edit, EditList};
+pub use encoder::{
+    CodedFrame, EncoderKind, EncoderSettings, SampleEntry, VideoEncoder, available_encoders,
+    encoded_size, frame_rate_of, open_encoder, scale,
+};
 pub use error::VideoError;
 pub use markers::Marker;
 pub use movie::{AudioTrack, MAX_DIMENSION, MAX_PIXELS, Movie, ReadSeek, Sample, VideoTrack};
 pub use player::{FrameSource, Picture, VideoThread};
 pub use rational::Rational;
+pub use writer::{AudioFormat, MovieWriter, VideoFormat};

@@ -71,6 +71,7 @@ mod envelope_keys;
 mod eqs_and_dynamics;
 mod export;
 mod export_dialog;
+mod export_video;
 mod external_devices;
 mod external_sync;
 mod fades;

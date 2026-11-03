@@ -55,7 +55,7 @@ thread_local! {
 }
 
 /// Starts COM on this thread, once, and Media Foundation in the process.
-fn start() -> Result<(), String> {
+pub(crate) fn start() -> Result<(), String> {
     static MEDIA_FOUNDATION: OnceLock<Result<(), String>> = OnceLock::new();
     COM.with(|started| {
         if !started.get() {

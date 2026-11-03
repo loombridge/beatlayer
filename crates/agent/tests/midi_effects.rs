@@ -290,7 +290,7 @@ fn an_agent_chooses_the_arpeggiators_groove_by_id() {
             .cloned()
             .expect("the Groove chooser")
     };
-    assert_eq!(read(&mut client)["text"], json!("None"));
+    assert_eq!(read(&mut client)["text"], json!("Straight"));
     run(
         &mut client,
         "device.set_param",

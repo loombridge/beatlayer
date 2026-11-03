@@ -58,7 +58,8 @@ Tasks:
   device-shot    Draw one device's panel headless at 100% zoom to a PNG under
                  target/device-shots/, so a pull request can put Beatlayer's panel
                  beside Live's: `cargo xtask device-shot arpeggiator`, or with
-                 `--page <page>` for a device with pages
+                 `--page <page>` for a device with pages, `--expanded` for one
+                 with an expanded part
   transcribe-bench  Measure how accurately Convert Melody, Convert Harmony and Convert Drums
                  find notes, on seeded phrases through Drift and Simpler, and breaks through
                  Drum Samplers, clean, with a room and with noise, and fail below the
@@ -559,12 +560,14 @@ fn golden(root: &Path, options: &[String]) -> Result<(), String> {
 /// offscreen, and prints where the picture is: `target/device-shots/<device>`
 /// (and `-<page>`) `.png`.
 fn device_shot(root: &Path, options: &[String]) -> Result<(), String> {
-    let (device, page) = match options {
+    let expanded = options.iter().any(|option| option == "--expanded");
+    let options: Vec<&String> = options.iter().filter(|o| *o != "--expanded").collect();
+    let (device, page) = match options[..] {
         [device] => (device, None),
         [device, flag, page] if flag == "--page" => (device, Some(page)),
         _ => {
             return Err(format!(
-                "usage: cargo xtask device-shot <device> [--page <page>]\n\n{USAGE}"
+                "usage: cargo xtask device-shot <device> [--page <page>] [--expanded]\n\n{USAGE}"
             ));
         }
     };
@@ -572,10 +575,11 @@ fn device_shot(root: &Path, options: &[String]) -> Result<(), String> {
     let dir = root.join("target").join("device-shots");
     std::fs::create_dir_all(&dir).map_err(|e| format!("couldn't make {}: {e}", dir.display()))?;
     let file = dir.join(format!(
-        "{}{}.png",
+        "{}{}{}.png",
         slug(device),
         page.map(|page| format!("-{}", slug(page)))
-            .unwrap_or_default()
+            .unwrap_or_default(),
+        if expanded { "-expanded" } else { "" }
     ));
     let file = file
         .to_str()
@@ -593,6 +597,9 @@ fn device_shot(root: &Path, options: &[String]) -> Result<(), String> {
     ];
     if let Some(page) = page {
         args.extend(["--page", page]);
+    }
+    if expanded {
+        args.push("--expanded");
     }
     args.extend(["--screenshot", file]);
     cargo(root, &args)

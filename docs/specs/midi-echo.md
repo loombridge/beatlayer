@@ -11,7 +11,7 @@ Note Echo creates rhythmic repetitions of incoming MIDI notes. Delay time can be
 
 Each repetition applies a progressive pitch transposition in semitones (Pitch) and velocity attenuation (Velocity Decay). Feedback determines the recirculation of generated echoes until velocities fall to zero. When the MPE switch is enabled, per-note expression messages (Pressure, Slide, Bend) accompany the echoed notes and decay across repetitions according to dedicated feedback controls; with MPE disabled, expression data is omitted from echoes.
 
-The device takes Live's name, Note Echo; its appearance is the device framework's generic controls. Echoes wait in a preallocated internal queue; deactivating, moving, or deleting the device cleanly terminates sounding notes without hanging notes.
+The device takes Live's name, Note Echo; its panel is laid out as Live draws it (layout L-DEV-099). Echoes wait in a preallocated internal queue; deactivating, moving, or deleting the device cleanly terminates sounding notes without hanging notes.
 
 ## Sources
 
@@ -24,7 +24,7 @@ The device takes Live's name, Note Echo; its appearance is the device framework'
 
 ## Rules
 
-- **R1.** Delay time is configured either in sixteenth notes (1 to 16) with Swing percentage (-50 % to +50 %) when Sync is enabled, or in milliseconds (1 to 5000 ms) when Sync is disabled. (S1, S4)
+- **R1.** Delay time is configured either as one of the eight buttons of the grid, 1, 2, 3, 4, 5, 6, 8 and 16 sixteenth notes, with Swing percentage (-50 % to +50 %) when Sync is enabled, or in milliseconds (1 ms to 2 s) when Sync is disabled. (S1, S4)
 - **R2.** Input mode selects between Thru (original note is transmitted alongside generated echoes) and Mute (original incoming note is silenced and only echoes sound). (S1)
 - **R3.** Pitch sets the transposition in semitones applied to each consecutive echo repetition. (S1)
 - **R4.** Velocity Decay and Feedback scale the velocity of each repetition; echoes continue until velocity decays to zero or feedback recirculation ceases. (S1)
@@ -52,7 +52,8 @@ The device takes Live's name, Note Echo; its appearance is the device framework'
 
 ## Defaults, ranges and details
 
-- Default parameters: Sync on (true), Time Sync 4 (4 sixteenths = 1 quarter note), Swing 0 %, Time Free 250 ms, Input Thru (0), Pitch 0 semitones, Velocity Decay 80 %, Feedback 60 %, MPE off (false), Press Feedback 100 %, Slide Feedback 100 %, Pitch Bend Feedback 100 %.
+- Default parameters, as Live's panel reads in a new set (observed in Live 12.4.16, 2 November 2026): Sync on (the button reads Sync; off it reads Time), Delay Time 2 (the grid's second button, 2 sixteenths), Swing 0.00 %, Time Free 500 ms, Input Thru (0), Pitch 0 semitones, Delay 100 % (the velocity scaling of each repeat), Fback 50.0 %, MPE off (false), Press 100 %, Slide 100 %, Note PB 100 %. The parameters' names are the panel's: Delay, Fback, Press, Slide and Note PB.
+- Delay Time's choices are the grid's eight buttons: sixteenths 1, 2, 3, 4, 5, 6, 8 and 16.
 - Transposition range: -48 to +48 semitones.
-- Time Free range: 1.0 to 5000.0 ms.
+- Time Free range: 1.0 to 2000.0 ms. While Sync is off its box takes the place of Swing's beside the Sync button, and the grid of delay times is greyed.
 - Feedback range: 0 % to 100 %.

@@ -23,7 +23,13 @@ fn play(
     size: usize,
 ) -> Vec<(i64, NoteKind, u8, f32)> {
     let mut chain = Chain::new(4096);
-    chain.effect(NOTE_ECHO, params);
+    // The grid's fourth button, four sixteenths: what a new device had
+    // before Live's default of two.
+    let params: Vec<_> = [(TIME_SYNC, 3.0)]
+        .into_iter()
+        .chain(params.iter().copied())
+        .collect();
+    chain.effect(NOTE_ECHO, &params);
     chain.clip(8, notes);
     chain.sync();
     chain.play();
@@ -46,7 +52,7 @@ fn sync_and_free_delay_time_land_on_exact_frames() {
         // Sync mode: 4 sixteenths = 1 quarter beat = 24,000 frames at 120 BPM.
         // Single echo (FEEDBACK = 0).
         let sync_120 = play(
-            &[(SYNC, 1.0), (TIME_SYNC, 4.0), (FEEDBACK, 0.0)],
+            &[(SYNC, 1.0), (TIME_SYNC, 3.0), (FEEDBACK, 0.0)],
             [note(60, 0, 1)],
             size,
         );
@@ -59,7 +65,7 @@ fn sync_and_free_delay_time_land_on_exact_frames() {
         chain.apply(Command::SetTempo {
             tempo: bl_core::time::TempoMap::constant(Bpm::new(60.0).unwrap()),
         });
-        chain.effect(NOTE_ECHO, &[(SYNC, 1.0), (TIME_SYNC, 4.0), (FEEDBACK, 0.0)]);
+        chain.effect(NOTE_ECHO, &[(SYNC, 1.0), (TIME_SYNC, 3.0), (FEEDBACK, 0.0)]);
         chain.clip(8, [note(60, 0, 1)]);
         chain.sync();
         chain.play();
@@ -102,7 +108,7 @@ fn input_mode_thru_and_mute() {
 fn pitch_transposition_applies_per_repeat() {
     // Pitch +3 semitones per repeat, 2 echoes (FEEDBACK = 50.0).
     let heard = play(
-        &[(PITCH, 3.0), (FEEDBACK, 50.0), (TIME_SYNC, 4.0)],
+        &[(PITCH, 3.0), (FEEDBACK, 50.0), (TIME_SYNC, 3.0)],
         [note(60, 0, 1)],
         512,
     );
@@ -120,7 +126,7 @@ fn pitch_moves_by_keys_whatever_the_clip_s_scale() {
         let mut chain = Chain::new(4096);
         chain.effect(
             NOTE_ECHO,
-            &[(PITCH, 3.0), (FEEDBACK, 50.0), (TIME_SYNC, 4.0)],
+            &[(PITCH, 3.0), (FEEDBACK, 50.0), (TIME_SYNC, 3.0)],
         );
         chain.clip(8, [note(60, 0, 1)]);
         chain.scale_clips(bl_model::Scale::new(0, bl_model::ScaleName::Major));
@@ -138,7 +144,7 @@ fn pitch_moves_by_keys_whatever_the_clip_s_scale() {
 fn velocity_decay_and_feedback_diminish_repeats() {
     // Velocity Decay 50 %, Feedback 50 %: each repeat is scaled down.
     let heard = play(
-        &[(VELOCITY_DECAY, 50.0), (FEEDBACK, 50.0), (TIME_SYNC, 4.0)],
+        &[(VELOCITY_DECAY, 50.0), (FEEDBACK, 50.0), (TIME_SYNC, 3.0)],
         [note(60, 0, 1)],
         512,
     );
@@ -157,7 +163,7 @@ fn velocity_decay_and_feedback_diminish_repeats() {
 fn echoes_preserve_original_note_duration() {
     // Note lasts 1 beat (24,000 frames) from 0 to 24,000.
     // Echo starts at 24,000 and should end at 48,000 (lasting 24,000 frames).
-    let heard = play(&[(FEEDBACK, 0.0), (TIME_SYNC, 4.0)], [note(60, 0, 1)], 512);
+    let heard = play(&[(FEEDBACK, 0.0), (TIME_SYNC, 3.0)], [note(60, 0, 1)], 512);
     let ons = times(&heard, NoteKind::On);
     let offs = times(&heard, NoteKind::Off);
     assert_eq!(ons, [0, 24_000]);
@@ -205,7 +211,7 @@ fn stopping_transport_while_an_echo_sounds_leaves_no_hanging_notes() {
     // Time 2 sixteenths is half a beat: the echo at 12,000 frames has
     // sounded when the transport stops at 14,000, and the source note, two
     // beats long, never reaches its own end.
-    chain.effect(NOTE_ECHO, &[(SYNC, 1.0), (TIME_SYNC, 2.0), (FEEDBACK, 0.0)]);
+    chain.effect(NOTE_ECHO, &[(SYNC, 1.0), (TIME_SYNC, 1.0), (FEEDBACK, 0.0)]);
     chain.clip(8, [note(60, 0, 2)]);
     chain.sync();
     chain.play();
@@ -229,7 +235,7 @@ fn input_notes_without_an_id_keep_their_echoes() {
         registry.add_device(strip_ids_type(), |_, _| Box::new(StripIds));
     });
     chain.effect(STRIP_IDS, &[]);
-    chain.effect(NOTE_ECHO, &[(TIME_SYNC, 8.0), (FEEDBACK, 0.0)]);
+    chain.effect(NOTE_ECHO, &[(TIME_SYNC, 6.0), (FEEDBACK, 0.0)]);
     chain.clip(8, [note(60, 0, 1)]);
     chain.sync();
     chain.play();
@@ -274,7 +280,7 @@ fn switching_input_to_mute_while_a_note_is_held_still_ends_it() {
 #[test]
 fn more_than_64_overlapping_notes_leave_no_echo_hanging() {
     let mut chain = Chain::new(4096);
-    chain.effect(NOTE_ECHO, &[(SYNC, 1.0), (TIME_SYNC, 4.0), (FEEDBACK, 0.0)]);
+    chain.effect(NOTE_ECHO, &[(SYNC, 1.0), (TIME_SYNC, 3.0), (FEEDBACK, 0.0)]);
     chain.clip(8, (0u8..70).map(|k| note(k, 0, 1)));
     chain.sync();
     chain.play();

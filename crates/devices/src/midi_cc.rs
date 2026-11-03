@@ -11,10 +11,16 @@
 //! sending its message beside it (the MIDI controller data spec, R3): both
 //! reach the next device, and the one that arrives last wins.
 //!
-//! Its look is the framework's generic layout: Beatlayer's own.
+//! Its panel is laid out as Live draws it (layout L-DEV-069): two rows of
+//! four controls on each of the two pages its title-bar tabs show, with Learn
+//! and Send in the title bar.
 
 use bl_engine::{DeviceType, NoteEvent, NoteKind, Registry};
-use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
+use bl_model::device_layout::{
+    BODY_HEIGHT, Control as Placed, ControlBand, LayoutNode, Page, PageStyle, PagesNode, TitlePart,
+    Widget,
+};
+use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::midi_fx::value;
@@ -32,8 +38,9 @@ pub const PRESSURE: ParamId = ParamId(2);
 pub const CUSTOM_A: ParamId = ParamId(3);
 /// Custom A's controller, a CC Type.
 pub const CUSTOM_A_CC: ParamId = ParamId(4);
-/// The page shown: controls 1 to 8 or 9 to 16.
-pub const PAGE: ParamId = ParamId(5);
+/// The name of the pages node whose tabs show controls 1 to 8 or 9 to 16: the
+/// page shown is view state, not a parameter.
+pub const PAGES: &str = "Controls";
 /// Send: sends every assigned control's value once, on the frame it turns on.
 pub const SEND: ParamId = ParamId(6);
 /// Learn: hands an incoming controller to the next dial without one.
@@ -54,16 +61,59 @@ pub fn dial_cc(k: u32) -> ParamId {
     ParamId(9 + k * 2)
 }
 
-/// The CC Type list: `None` first, then the controllers 1 to 119. 0 and 32
-/// (bank select) and 120 to 127 (channel mode) are left out. The manual
-/// doesn't state Live's list.
+/// The name of controller `n` in a CC Type, as Live's chooser lists them
+/// (observed in Live 12.4.16 on 3 November 2026): the standard MIDI
+/// controller names, "Undefined" for those the standard leaves open, and for
+/// 32 to 63 the least significant byte of controller `n - 32`.
+fn cc_name(n: u8) -> String {
+    let name = match n {
+        1 => "Modulation Wheel",
+        2 => "Breath Controller",
+        4 => "Foot Controller",
+        5 => "Portamento Time",
+        6 => "Data Entry",
+        7 => "Channel Volume",
+        8 => "Balance",
+        10 => "Pan",
+        11 => "Expression Controller",
+        12 => "Effect Control 1",
+        13 => "Effect Control 2",
+        16..=19 => return format!("General Purpose {}", n - 15),
+        32..=63 => return format!("LSB for CC {} ({})", n - 32, cc_name(n - 32)),
+        64 => "Sustain Pedal",
+        65 => "Portamento On/Off",
+        66 => "Sostenuto",
+        67 => "Soft Pedal",
+        68 => "Legato Footswitch",
+        69 => "Hold 2",
+        74 => "MPE Slide (Sound Controller 5)",
+        70..=79 => return format!("Sound Controller {}", n - 69),
+        80..=83 => return format!("General Purpose {}", n - 75),
+        84 => "Portamento Control",
+        91 => "Reverb Send Level",
+        92 => "Effect 2 Depth",
+        93 => "Chorus Send Level",
+        94 => "Effect 4 Depth",
+        95 => "Effect 5 Depth",
+        96 => "Data Increment",
+        97 => "Data Decrement",
+        98 => "NRPN LSB",
+        99 => "NRPN MSB",
+        100 => "RPN LSB",
+        101 => "RPN MSB",
+        _ => "Undefined",
+    };
+    name.to_owned()
+}
+
+/// The CC Type list: `None` first, then the controllers 1 to 119 as "N:
+/// Name". 0 (bank select's most significant byte) and 120 to 127 (channel
+/// mode) are left out.
 #[must_use]
 pub fn cc_names() -> Vec<String> {
     let mut names = Vec::with_capacity(120);
     names.push("None".to_owned());
-    for controller in 1..=119 {
-        names.push(format!("CC {controller}"));
-    }
+    names.extend((1..=119u8).map(|n| format!("{n}: {}", cc_name(n))));
     names
 }
 
@@ -83,11 +133,61 @@ pub fn cc_type_for(controller: u8) -> f64 {
 }
 
 /// Whether a controller has a CC Type in [`cc_names`]: 1 to 119. Controllers
-/// 0 and 32 (bank select) and 120 to 127 (channel mode) aren't listed, so
-/// Learn leaves them alone.
+/// 0 and 120 to 127 (channel mode) aren't listed, so Learn leaves them alone.
 #[must_use]
 pub fn cc_is_listed(controller: u8) -> bool {
     (1..=119).contains(&controller)
+}
+
+/// CC Control's panel as Live draws it: on each page two rows of four cells,
+/// the first page's first row holding the three fixed controls and Custom A.
+fn layout() -> DeviceLayout {
+    let at = |param, widget, x, y| Placed::new(param, widget, x, y);
+    // The centres of a row's four cells, in points.
+    let centres = [33.0, 96.0, 159.0, 222.0];
+    let dial = |k: u32, column: usize, row_y: f32, chooser_y: f32| {
+        [
+            at(
+                dial_value(k),
+                Widget::SmallKnob,
+                centres[column] - 16.0,
+                row_y,
+            ),
+            at(
+                dial_cc(k),
+                Widget::Chooser,
+                centres[column] - 25.5,
+                chooser_y,
+            )
+            .sized(51.0, 12.0)
+            .unnamed(),
+        ]
+    };
+    let band =
+        |controls: Vec<Placed>| LayoutNode::Band(ControlBand::free(256.0, BODY_HEIGHT, controls));
+    let mut first: Vec<Placed> = vec![
+        at(MOD_WHEEL, Widget::Knob, centres[0] - 20.0, 7.0),
+        at(PITCH_BEND, Widget::Knob, centres[1] - 20.0, 7.0),
+        at(PRESSURE, Widget::Knob, centres[2] - 20.0, 7.0),
+        at(CUSTOM_A, Widget::Square, centres[3] - 25.5, 7.0).sized(51.0, 40.0),
+        at(CUSTOM_A_CC, Widget::Chooser, centres[3] - 25.5, 64.0)
+            .sized(51.0, 12.0)
+            .unnamed(),
+    ];
+    first.extend((0..4).flat_map(|k| dial(k, k as usize, 86.0, 142.0)));
+    let mut second: Vec<Placed> = (4..8)
+        .flat_map(|k| dial(k, k as usize - 4, 7.0, 64.0))
+        .collect();
+    second.extend((8..12).flat_map(|k| dial(k, k as usize - 8, 86.0, 142.0)));
+    DeviceLayout::new(LayoutNode::Pages(PagesNode::new(
+        PAGES,
+        PageStyle::TitleBar,
+        vec![
+            Page::new("1-8", band(first)),
+            Page::new("9-16", band(second)),
+        ],
+    )))
+    .with_title(vec![TitlePart::Button(LEARN), TitlePart::Button(SEND)])
 }
 
 /// CC Control's device type.
@@ -108,8 +208,6 @@ pub fn cc_control_type() -> DeviceType {
             64,
             "Custom A's controller. It starts on CC 64, the sustain pedal.",
         ),
-        ParamDescriptor::choice(PAGE, "Page", &["1-8", "9-16"], 0)
-            .describe("Which page of controls the device shows."),
         ParamDescriptor::toggle(SEND, "Send", false)
             .describe("Sends every assigned control's value once when it turns on."),
         ParamDescriptor::toggle(LEARN, "Learn", false).describe(
@@ -139,59 +237,54 @@ pub fn cc_control_type() -> DeviceType {
         ));
     }
     DeviceType::native(CC_CONTROL, "CC Control", DeviceRole::MidiEffect).with_description(
-        DeviceDescription::new(params).with_banks(&[
-            (
-                "Main",
-                &[
-                    "Mod Wheel",
-                    "Pitch Bend",
-                    "Pressure",
-                    "Page",
-                    "Send",
-                    "Learn",
-                ],
-            ),
-            (
-                "Custom A-D",
-                &[
-                    "Custom A",
-                    "Custom A CC",
-                    "Custom B",
-                    "Custom B CC",
-                    "Custom C",
-                    "Custom C CC",
-                    "Custom D",
-                    "Custom D CC",
-                ],
-            ),
-            (
-                "Custom E-H",
-                &[
-                    "Custom E",
-                    "Custom E CC",
-                    "Custom F",
-                    "Custom F CC",
-                    "Custom G",
-                    "Custom G CC",
-                    "Custom H",
-                    "Custom H CC",
-                ],
-            ),
-            (
-                "Custom I-L",
-                &[
-                    "Custom I",
-                    "Custom I CC",
-                    "Custom J",
-                    "Custom J CC",
-                    "Custom K",
-                    "Custom K CC",
-                    "Custom L",
-                    "Custom L CC",
-                ],
-            ),
-            ("Custom M", &["Custom M", "Custom M CC"]),
-        ]),
+        DeviceDescription::new(params)
+            .with_layout(layout())
+            .with_banks(&[
+                (
+                    "Main",
+                    &["Mod Wheel", "Pitch Bend", "Pressure", "Send", "Learn"],
+                ),
+                (
+                    "Custom A-D",
+                    &[
+                        "Custom A",
+                        "Custom A CC",
+                        "Custom B",
+                        "Custom B CC",
+                        "Custom C",
+                        "Custom C CC",
+                        "Custom D",
+                        "Custom D CC",
+                    ],
+                ),
+                (
+                    "Custom E-H",
+                    &[
+                        "Custom E",
+                        "Custom E CC",
+                        "Custom F",
+                        "Custom F CC",
+                        "Custom G",
+                        "Custom G CC",
+                        "Custom H",
+                        "Custom H CC",
+                    ],
+                ),
+                (
+                    "Custom I-L",
+                    &[
+                        "Custom I",
+                        "Custom I CC",
+                        "Custom J",
+                        "Custom J CC",
+                        "Custom K",
+                        "Custom K CC",
+                        "Custom L",
+                        "Custom L CC",
+                    ],
+                ),
+                ("Custom M", &["Custom M", "Custom M CC"]),
+            ]),
     )
 }
 

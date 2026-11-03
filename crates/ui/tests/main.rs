@@ -5,6 +5,7 @@
 
 mod accessibility;
 mod agent_settings;
+mod analog;
 mod arrangement;
 mod arranger;
 mod articulation_map;
@@ -68,6 +69,7 @@ mod main_window;
 mod map_modes;
 mod mapping_targets;
 mod meld_panel;
+mod midi_effect_panels;
 mod midi_input;
 mod midi_meters;
 mod midi_tools;

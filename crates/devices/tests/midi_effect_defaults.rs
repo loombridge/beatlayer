@@ -41,6 +41,7 @@ fn a_new_arpeggiator_starts_as_lives_does() {
             ("Steps", "0"),
             ("Gate", "50 %"),
             ("Retrigger", "Off"),
+            ("Interval", "1"),
             ("Repeats", "0"),
             ("Velocity", "Off"),
             ("Decay", "1.00 s"),
@@ -61,7 +62,7 @@ fn a_new_cc_control_starts_as_lives_does() {
             ("Pitch Bend", "0"),
             ("Pressure", "0"),
             ("Custom A", "0"),
-            ("Custom A CC", "64: Sustain"),
+            ("Custom A CC", "64: Sustain Pedal"),
             ("Custom B", "0"),
             ("Custom B CC", "None"),
             ("Custom E CC", "None"),
@@ -95,18 +96,36 @@ fn a_new_chord_adds_no_notes_and_shows_velocities() {
 #[test]
 fn a_new_mpe_control_starts_with_a_straight_curve_over_the_whole_range() {
     for source in ["Press", "Slide", "NotePB"] {
+        // NotePB starts with the S-shaped curve (observed 3 November 2026).
+        let curve = if source == "NotePB" {
+            "S-shaped"
+        } else {
+            "Linear"
+        };
         expect(
             "MPE Control",
             &[
-                (&format!("{source} Curve"), "Linear"),
+                (&format!("{source} Curve"), curve),
                 (&format!("{source} Curve A"), "0.00"),
+                (&format!("{source} Curve B"), "0.00"),
                 (&format!("{source} Min"), "0"),
                 (&format!("{source} Max"), "127"),
                 (&format!("{source} X"), "64"),
                 (&format!("{source} Y"), "64"),
+                (&format!("{source} Smooth"), "Off"),
+                (&format!("{source} Rise"), "15.0 ms"),
+                (&format!("{source} Fall"), "15.0 ms"),
             ],
         );
     }
+    expect(
+        "MPE Control",
+        &[
+            ("Press Default Value", "0"),
+            ("Slide Default Value", "0"),
+            ("Pitch Range", "1x"),
+        ],
+    );
 }
 
 #[test]
@@ -115,8 +134,9 @@ fn a_new_note_echo_starts_as_lives_does() {
         "Note Echo",
         &[
             ("Delay Time", "2"),
-            ("Sync", "On"),
+            ("Sync", "Sync"),
             ("Swing", "0.00 %"),
+            ("Time Free", "500 ms"),
             ("Input", "Thru"),
             ("Pitch", "0 st"),
             ("Delay", "100 %"),
@@ -135,6 +155,7 @@ fn a_new_note_length_starts_as_lives_does() {
         "Note Length",
         &[
             ("Trigger", "Note On"),
+            ("Latch", "Off"),
             ("Gate", "100 %"),
             ("Sync", "Off"),
             ("Length", "100 ms"),

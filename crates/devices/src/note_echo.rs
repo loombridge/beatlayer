@@ -18,13 +18,15 @@ use crate::midi_fx::{Key, Router, value};
 /// The Note Echo device type's ID.
 pub const NOTE_ECHO: &str = "beatlayer.note_echo";
 
-/// Sync delay time to beat divisions (true) vs free milliseconds (false).
+/// Sync delay time to beat divisions (1, Sync) vs free milliseconds (0,
+/// Time).
 pub const SYNC: ParamId = ParamId(0);
 /// Delay time in sixteenth notes: one of [`TIMES`], the button of the grid.
 pub const TIME_SYNC: ParamId = ParamId(1);
 /// Swing percentage altering delay timing.
 pub const SWING: ParamId = ParamId(2);
-/// Free delay time in milliseconds.
+/// Free delay time in milliseconds: the box beside the Sync button while it
+/// reads Time.
 pub const TIME_MS: ParamId = ParamId(3);
 /// Input playback mode: Thru (0) or Mute (1).
 pub const INPUT: ParamId = ParamId(4);
@@ -45,6 +47,9 @@ pub const PITCH_BEND_FEEDBACK: ParamId = ParamId(11);
 
 /// The delay times the grid's buttons set, in sixteenth notes, in order.
 pub const TIMES: [u8; 8] = [1, 2, 3, 4, 5, 6, 8, 16];
+
+/// The names of Sync's two states: the button reads Time while it is off.
+pub const SYNC_MODES: [&str; 2] = ["Time", "Sync"];
 
 /// The Input mode choices.
 pub const INPUT_MODES: [&str; 2] = ["Thru", "Mute"];
@@ -68,9 +73,11 @@ fn layout() -> DeviceLayout {
                 6.0,
                 5.5,
             )
-            .titled(),
-            at(SYNC, Widget::Toggle, 5.0, 45.0),
-            at(SWING, Widget::Number, 52.0, 45.0)
+            .titled()
+            .greyed_while(SYNC, 0),
+            at(SYNC, Widget::Mode, 5.0, 45.0),
+            // Swing's box is the delay time while Sync is off.
+            at(TIME_MS, Widget::Number, 52.0, 45.0)
                 .sized(45.0, 12.0)
                 .unnamed(),
             at(INPUT, Widget::Stack(2), 5.0, 63.0)
@@ -83,8 +90,6 @@ fn layout() -> DeviceLayout {
             at(PRESS_FEEDBACK, Widget::Number, 110.0, 34.0).sized(35.0, 21.0),
             at(SLIDE_FEEDBACK, Widget::Number, 110.0, 63.0).sized(35.0, 21.0),
             at(PITCH_BEND_FEEDBACK, Widget::Number, 110.0, 92.0).sized(35.0, 21.0),
-            // Where Time Free sits while Sync is off isn't recorded.
-            at(TIME_MS, Widget::Number, 110.0, 121.0).sized(35.0, 21.0),
         ],
     )))
 }
@@ -94,7 +99,7 @@ fn layout() -> DeviceLayout {
 pub fn note_echo_type() -> DeviceType {
     DeviceType::native(NOTE_ECHO, "Note Echo", DeviceRole::MidiEffect).with_description(
         DeviceDescription::new(vec![
-            ParamDescriptor::toggle(SYNC, "Sync", true)
+            ParamDescriptor::choice(SYNC, "Sync", &SYNC_MODES, 1)
                 .describe("Syncs delay time to beat divisions rather than milliseconds."),
             ParamDescriptor::choice(
                 TIME_SYNC,
@@ -109,8 +114,8 @@ pub fn note_echo_type() -> DeviceType {
             ParamDescriptor::continuous(
                 TIME_MS,
                 "Time Free",
-                (1.0, 5_000.0),
-                250.0,
+                (1.0, 2_000.0),
+                500.0,
                 ParamUnit::Milliseconds,
             )
             .logarithmic()
@@ -164,6 +169,7 @@ pub fn note_echo_type() -> DeviceType {
             .decimals(0)
             .describe("Feedback decay for per-note pitch bend expressions."),
         ])
+        .with_alternate_at((SYNC, 1), TIME_MS, SWING)
         .with_layout(layout())
         .with_banks(&[
             (

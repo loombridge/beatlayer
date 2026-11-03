@@ -98,6 +98,10 @@ pub const UNIT_ROW_GAP: f32 = 6.0;
 /// The side of a [`Widget::Check`]'s square, in points (observed).
 pub const CHECK_SIZE: f32 = 15.0;
 
+/// The width of a tick box with its name, in points at 100% (Beatlayer's own
+/// size; a control sets the width its name needs).
+pub const TICK_WIDTH: f32 = 70.0;
+
 /// The width of a stepper: a round button, a box and a round button, in
 /// points (observed on Pitch).
 pub const STEPPER_WIDTH: f32 = 66.0;
@@ -228,6 +232,9 @@ pub enum Widget {
     /// A row of that many icon buttons, one for each choice of a choice
     /// parameter (the filter types), the chosen one lit.
     IconSegments(u8),
+    /// A small square button with the parameter's name at its right, lit
+    /// while on (MPE Control's Smooth).
+    Tick,
     /// A box under the parameter's name that reads On or Off and turns the
     /// switch when pressed (Arpeggiator's Velocity).
     Switch,
@@ -261,6 +268,10 @@ pub enum Widget {
     /// which a press switches to the other (the Drum Sampler's modulation
     /// source).
     Cycle,
+    /// A text button holding the chosen name of a two-choice parameter, lit
+    /// while its second choice is chosen; a press switches to the other
+    /// (Note Echo's Sync, which reads Time while it is off).
+    Mode,
     /// The name and the value on one line, the value in the accent, dragged
     /// or typed (the Drum Sampler's Start, Length and Gain under its sample).
     Inline,
@@ -308,11 +319,12 @@ impl Widget {
             ),
             Self::Stepper => Size::new(STEPPER_WIDTH, BOX_HEIGHT),
             Self::Check => Size::new(CELL_WIDTH, LABEL_HEIGHT + CHECK_SIZE),
+            Self::Tick => Size::new(TICK_WIDTH, CHECK_SIZE),
             Self::Large => Size::new(LARGE_WIDTH, LARGE_HEIGHT),
             Self::Bare | Self::BareSlider | Self::Framed | Self::BareChooser => {
                 Size::new(FRAMED_WIDTH, BOX_HEIGHT)
             }
-            Self::Cycle | Self::Inline | Self::Abbreviated(_) => {
+            Self::Cycle | Self::Mode | Self::Inline | Self::Abbreviated(_) => {
                 Size::new(SEGMENT_WIDTH, BOX_HEIGHT)
             }
         }
@@ -375,6 +387,9 @@ pub enum Glyph {
     /// Headphones: a device's audition button (Boom Audition, Utility's
     /// Bass Mono, EQ Eight's Audition).
     Headphones,
+    /// Two joined links: a curve's two knobs moving together (MPE Control's
+    /// Curve Link).
+    Link,
 }
 
 /// A unit a knob's two parameters read in.
@@ -468,6 +483,10 @@ pub struct Control {
     /// The condition that greys the control.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grey: Option<GreyWhen>,
+    /// The condition that leaves the control out of the panel (MPE
+    /// Control's second curve knob while its curve is linear).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hidden: Option<GreyWhen>,
     /// Set for a row, stack or grid of buttons with its parameter's name above
     /// it, left-aligned (Note Echo's Delay Time).
     #[serde(default, skip_serializing_if = "is_false")]
@@ -498,6 +517,7 @@ impl Control {
             glyph: None,
             unit: None,
             grey: None,
+            hidden: None,
             titled: false,
             unnamed: false,
             target: None,
@@ -566,6 +586,14 @@ impl Control {
     #[must_use]
     pub const fn greyed_while(mut self, param: ParamId, value: i32) -> Self {
         self.grey = Some(GreyWhen { param, value });
+        self
+    }
+
+    /// The same control, left out of the panel while `param`'s value rounds
+    /// to `value`.
+    #[must_use]
+    pub const fn hidden_while(mut self, param: ParamId, value: i32) -> Self {
+        self.hidden = Some(GreyWhen { param, value });
         self
     }
 
@@ -892,6 +920,10 @@ pub enum PageStyle {
     /// wide), with the shown page's section under them, beside the area the
     /// shown page fills (MPE Control's Press, Slide and NotePB).
     Column,
+    /// No tabs of its own: the node shows the page its [`PagesNode::follows`]
+    /// node shows, by name (MPE Control's settings, which change with its
+    /// source).
+    Follower,
 }
 
 /// The name of a side strip's page while its section is hidden.
@@ -976,6 +1008,9 @@ pub struct PagesNode {
     /// The page shown, as an index; [`DeviceLayout::with_pages`] sets it.
     #[serde(default, skip_serializing_if = "is_first")]
     pub shown: usize,
+    /// For a [`PageStyle::Follower`], the node whose page it shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follows: Option<String>,
 }
 
 fn is_first(index: &usize) -> bool {
@@ -991,6 +1026,17 @@ impl PagesNode {
             style,
             pages,
             shown: 0,
+            follows: None,
+        }
+    }
+
+    /// A node of `pages` with no tabs of its own, which shows the one of
+    /// them named like the page shown by the node `leader`.
+    #[must_use]
+    pub fn following(name: &str, leader: &str, pages: Vec<Page>) -> Self {
+        Self {
+            follows: Some(leader.to_owned()),
+            ..Self::new(name, PageStyle::Follower, pages)
         }
     }
 
@@ -1044,7 +1090,7 @@ impl PagesNode {
             Size::new(s.width.max(n.width), s.height.max(n.height))
         });
         match self.style {
-            PageStyle::TitleBar => pages,
+            PageStyle::TitleBar | PageStyle::Follower => pages,
             PageStyle::Tabs => Size::new(
                 pages.width.max(self.pages.len() as f32 * TAB_WIDTH),
                 pages.height + TAB_HEIGHT,
@@ -1098,7 +1144,7 @@ impl PagesNode {
         };
         let mut buttons = Vec::new();
         let area = match self.style {
-            PageStyle::TitleBar => at,
+            PageStyle::TitleBar | PageStyle::Follower => at,
             PageStyle::Tabs => {
                 let width = at.width / self.pages.len() as f32;
                 buttons.extend(
@@ -1361,6 +1407,10 @@ fn place_band(band: &ControlBand, x: f32, y: f32, slot: u32, placed: &mut Placed
                 param: ParamId(grey.param.0 + offset),
                 ..grey
             }),
+            hidden: control.hidden.map(|hidden| GreyWhen {
+                param: ParamId(hidden.param.0 + offset),
+                ..hidden
+            }),
             titled: control.titled,
             unnamed: control.unnamed,
             target: control.target,
@@ -1448,6 +1498,16 @@ pub struct DeviceLayout {
     /// It places its parameters' controls like the rest of the layout.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expanded: Option<LayoutNode>,
+    /// Whether a new device shows its expanded part, as Arpeggiator does
+    /// (L-DEV-073).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub opens_expanded: bool,
+    /// Whether the expand toggle's triangle points right while the expanded
+    /// part shows and down while it is hidden, as Arpeggiator's and MPE
+    /// Control's do (L-DEV-072, L-DEV-073); otherwise it points right while
+    /// the part is hidden.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub points_right_when_shown: bool,
 }
 
 impl Default for DeviceLayout {
@@ -1474,6 +1534,9 @@ pub struct PlacedControl {
     /// What greys the control.
     #[serde(default)]
     pub grey: Option<GreyWhen>,
+    /// What leaves the control out of the panel.
+    #[serde(default)]
+    pub hidden: Option<GreyWhen>,
     /// Whether the buttons have their name above them.
     #[serde(default)]
     pub titled: bool,
@@ -1566,6 +1629,8 @@ impl DeviceLayout {
             root,
             title: Vec::new(),
             expanded: None,
+            opens_expanded: false,
+            points_right_when_shown: false,
         }
     }
 
@@ -1580,6 +1645,21 @@ impl DeviceLayout {
     #[must_use]
     pub fn with_expanded(mut self, part: LayoutNode) -> Self {
         self.expanded = Some(part);
+        self
+    }
+
+    /// The same, showing its expanded part until the user hides it.
+    #[must_use]
+    pub const fn opening_expanded(mut self) -> Self {
+        self.opens_expanded = true;
+        self
+    }
+
+    /// The same, with the expand toggle's triangle pointing right while the
+    /// expanded part shows.
+    #[must_use]
+    pub const fn with_triangle_right_when_shown(mut self) -> Self {
+        self.points_right_when_shown = true;
         self
     }
 
@@ -1615,7 +1695,7 @@ impl DeviceLayout {
         let mut layout = self.clone();
         let mut show = |node: &mut PagesNode| {
             node.shown = choice
-                .get(&node.name)
+                .get(node.follows.as_ref().unwrap_or(&node.name))
                 .and_then(|name| node.pages.iter().position(|p| &p.name == name))
                 .unwrap_or(0);
         };
@@ -2726,5 +2806,70 @@ mod tests {
             .with_title(vec![TitlePart::Button(ParamId(7))]);
         assert!(missing.check(&params(1)).is_err());
         assert_eq!(Maker::Cytomic.text(), "cytomic");
+    }
+
+    // Spec: device-framework R68
+    #[test]
+    fn a_follower_node_shows_the_page_its_leader_shows_and_draws_no_tabs() {
+        let page = |name: &str, param: u32| {
+            Page::new(
+                name,
+                LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, &knobs(param, 1))),
+            )
+        };
+        let layout = DeviceLayout::new(LayoutNode::Pages(PagesNode::new(
+            "Source",
+            PageStyle::Column,
+            vec![page("A", 0), page("B", 1)],
+        )))
+        .with_expanded(LayoutNode::Pages(PagesNode::following(
+            "Settings",
+            "Source",
+            vec![page("A", 2), page("B", 3)],
+        )));
+        layout.check(&params(4)).unwrap();
+        let choice: PageChoice = [("Source".to_owned(), "B".to_owned())].into();
+        let shown = layout.with_pages(&choice).shown(true);
+        let placed = shown.place(shown.docked_size());
+        let drawn: Vec<u32> = placed.controls.iter().map(|c| c.param.0).collect();
+        assert_eq!(drawn, [1, 3], "the second page of each");
+        let follower = placed.pages.iter().find(|p| p.name == "Settings").unwrap();
+        assert!(follower.buttons.is_empty() && follower.shown == 1);
+        // With no choice, both show their first page.
+        let first = layout.shown(true);
+        let first = first.place(first.docked_size());
+        let drawn: Vec<u32> = first.controls.iter().map(|c| c.param.0).collect();
+        assert_eq!(drawn, [0, 2]);
+    }
+
+    // Spec: device-framework R69
+    #[test]
+    fn a_hidden_control_is_placed_and_says_when_it_is_left_out() {
+        let layout = DeviceLayout::new(LayoutNode::Band(ControlBand::free(
+            200.0,
+            BODY_HEIGHT,
+            vec![
+                Control::new(ParamId(0), Widget::Knob, 0.0, 0.0),
+                Control::new(ParamId(1), Widget::Knob, 80.0, 0.0).hidden_while(ParamId(0), 0),
+            ],
+        )));
+        layout.check(&params(2)).unwrap();
+        let placed = layout.place(layout.docked_size());
+        assert_eq!(placed.controls[0].hidden, None);
+        assert_eq!(
+            placed.controls[1].hidden,
+            Some(GreyWhen {
+                param: ParamId(0),
+                value: 0
+            })
+        );
+    }
+
+    // Spec: device-framework R67
+    #[test]
+    fn a_layout_opens_expanded_only_when_it_says_so() {
+        let layout = DeviceLayout::new(LayoutNode::Row(Vec::new()));
+        assert!(!layout.opens_expanded);
+        assert!(layout.opening_expanded().opens_expanded);
     }
 }

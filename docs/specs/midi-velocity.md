@@ -9,7 +9,7 @@
 
 Velocity reshapes the velocity of the notes that reach it. A curve runs from an input window of velocities (Lowest and Range) to an output range (Out Low and Out Hi); Operation says whether it is applied to a note's velocity, its release velocity, or both. Mode says what happens to a velocity outside the window: Clip holds it at the window's edge, Gate drops the note, and Fixed gives every note the Out Hi velocity. Random moves each velocity by a random amount inside the output range; Drive bends the curve toward loud or soft; Compand pushes the output toward the ends of the output range or toward its middle.
 
-The device takes Live's name, Velocity; its panel is laid out as Live draws it (layout L-DEV-048); the curve's display cell is drawn black, since the engine publishes no state for it. Random choices come from a generator seeded from the device, so an offline render repeats. This spec covers the device only.
+The device takes Live's name, Velocity; its panel is laid out as Live draws it (layout L-DEV-063); the curve's display cell is drawn black, since the engine publishes no state for it. Random choices come from a generator seeded from the device, so an offline render repeats. This spec covers the device only.
 
 ## Sources
 

@@ -9,7 +9,7 @@
 
 Random moves some of the notes that reach it by a random number of steps. Chance says how often a note moves, as a dry/wet balance for the randomness. Choices is how many different distances a note may move by and Interval is the step between them, so together they set how far a note can go. Mode Random picks a distance with no fixed order; Mode Alt goes through the distances in turn. Sign says whether notes move up (Add), down (Sub), or either way (Bi). Each note ends on the key it was started on, and its expressions follow it.
 
-The device takes Live's name, Random; its panel is laid out as Live draws it (layout L-DEV-050). Random choices come from a generator seeded from the device, so an offline render repeats. The Use Current Scale switch in its title bar makes the distances count degrees of the device's current scale ([scales.md](scales.md)), so the notes Random moves land in the scale. This spec covers the device only.
+The device takes Live's name, Random; its panel is laid out as Live draws it (layout L-DEV-065). Random choices come from a generator seeded from the device, so an offline render repeats. The Use Current Scale switch in its title bar makes the distances count degrees of the device's current scale ([scales.md](scales.md)), so the notes Random moves land in the scale. This spec covers the device only.
 
 ## Sources
 

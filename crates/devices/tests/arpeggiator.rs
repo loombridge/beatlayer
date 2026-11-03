@@ -450,7 +450,7 @@ fn beat_retrigger_restarts_on_bar_lines_at_140_bpm() {
             (SYNC, 1.0),
             (RATE_SYNC, SIXTEENTHS),
             (RETRIGGER, 2.0),
-            (INTERVAL, 4.0),
+            (INTERVAL, 8.0),
             (STYLE, 0.0),
             (STEPS, 0.0),
         ],

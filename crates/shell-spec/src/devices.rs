@@ -959,6 +959,11 @@ pub struct DeviceFrame {
     /// Whether its expanded part is shown. Never while it has none.
     #[serde(default)]
     pub expanded: bool,
+    /// Whether its expand toggle's triangle points right while the expanded
+    /// part shows (it points down while it is hidden), instead of the other
+    /// way round.
+    #[serde(default)]
+    pub points_right_when_shown: bool,
     /// Whether it floats in a window of its own, its place in the chain a
     /// strip (WP-2.5b).
     #[serde(default)]

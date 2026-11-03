@@ -169,7 +169,7 @@ fn centered_slide_reads_distance_from_the_middle() {
 #[test]
 fn notepb_scales_the_bend_and_converts_to_pitch_bend() {
     let out = shape_run(
-        &[(PITCH_RANGE, 2.0), (NOTEPB_TO_PB, 1.0)],
+        &[(PITCH_RANGE, 1.0), (NOTEPB_TO_PB, 1.0)],
         &[expression(4, NoteExpression::Bend, 0.5)],
     );
     let value = out.iter().find_map(|event| match event.kind {
@@ -231,9 +231,9 @@ fn smoothing_moves_over_the_rise_time() {
 // its frame.
 #[test]
 fn press_default_gives_a_note_pressure() {
-    let out = shape_run(&[(PRESS_DEFAULT, 1.0), (PRESS_DEFAULT_VALUE, 0.5)], &[]);
+    let out = shape_run(&[(PRESS_DEFAULT, 1.0), (PRESS_DEFAULT_VALUE, 64.0)], &[]);
     assert!(
-        (pressure_value(&out).unwrap() - 0.5).abs() < 1e-6,
+        (pressure_value(&out).unwrap() - 64.0 / 127.0).abs() < 1e-6,
         "{out:?}"
     );
 }
@@ -246,7 +246,7 @@ fn slide_defaults_on_note_on() {
         &[
             (SLIDE_MODE, 2.0),
             (SLIDE_DEFAULT, 1.0),
-            (SLIDE_DEFAULT_VALUE, 0.75),
+            (SLIDE_DEFAULT_VALUE, 95.0),
         ],
         &[],
     );
@@ -257,7 +257,7 @@ fn slide_defaults_on_note_on() {
         } => Some(value),
         _ => None,
     });
-    assert!((value.unwrap() - 0.75).abs() < 1e-6, "{out:?}");
+    assert!((value.unwrap() - 95.0 / 127.0).abs() < 1e-6, "{out:?}");
 }
 
 // Spec: mpe-shaper R13. Slide's Ons mode sends the first slide a note
@@ -354,15 +354,11 @@ fn the_zero_to_one_parameters_read_and_parse_as_unitless_fractions() {
             .find(|d| d.name == name)
             .unwrap_or_else(|| panic!("{name} is described"))
     };
-    for name in [
-        "Press Default Value",
-        "Slide Default Value",
-        "Press Curve A",
-    ] {
+    for name in ["Press Curve A", "Press Curve B"] {
         let d = param(name);
         assert!(!d.format(d.default).ends_with('%'), "{name} has no unit");
         assert_eq!(d.parse("0.5"), Some(0.5), "{name} parses 0.5 as half");
     }
-    let d = param("Press Default Value");
-    assert_eq!(d.format(d.default), "0.50");
+    let d = param("Press Curve B");
+    assert_eq!(d.format(d.default), "0.00");
 }

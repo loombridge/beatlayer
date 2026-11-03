@@ -31,7 +31,7 @@ This spec covers the device only. Where a message goes on the wire is [midi I/O]
 - **R3.** Custom A starts on CC 64; every Custom dial starts with no controller. (S1; the manual doesn't state the defaults.)
 - **R4.** Pitch Bend's value runs from −8192 to 8191, 0 at the wheel's centre, and is sent as a pitch bend; Pressure's and the others' run from 0 to 127. (S1)
 - **R5.** When Send turns on, every assigned control sends its current value once, on that frame. (S1)
-- **R6.** While Learn is on, each control change an incoming MIDI source sends is handed to the next Custom dial without a controller, setting that dial's CC Type to the controller and its value to the message's; a control message also passes through unchanged. A controller the CC Type list leaves out (0, 32, and 120 to 127) is ignored. A device that already has every dial assigned takes nothing. (S1, S2, S6)
+- **R6.** While Learn is on, each control change an incoming MIDI source sends is handed to the next Custom dial without a controller, setting that dial's CC Type to the controller and its value to the message's; a control message also passes through unchanged. A controller the CC Type list leaves out (0 and 120 to 127) is ignored. A device that already has every dial assigned takes nothing. (S1, S2, S6)
 - **R7.** Each change Learn makes is one undo step named "Learn CC Control". (S1, S4)
 - **R8.** A control's message reaches the next device in the chain, on its frame, at block sizes 1, 100, 512 and 4,096 alike, allocating nothing. (S2, S3, S5)
 - **R9.** Every parameter is set by `device.set_param` and read by `device.parameters` through the agent API, a change is one undo step, and the device's preset is saved under `Presets/MIDI Effects/CC Control/`. (S4)
@@ -40,8 +40,8 @@ This spec covers the device only. Where a message goes on the wire is [midi I/O]
 ## Defaults, ranges and details
 
 - Every Custom control's value starts at 0.
-- The CC Type list starts with None, then controllers 1 to 119 by number; 0 and 32 (bank select) and 120 to 127 (channel mode) are left out. The manual doesn't state Live's list or its order (S6); entry 64 is named `64: Sustain`, as Live's chooser reads on Custom A's default (observed in Live 12.4.16, 2 November 2026), and the rest `CC n`.
-- The tabs 1-8 and 9-16 in the title bar show controls 1 to 8 (Mod Wheel, Pitch Bend, Pressure, Custom A, Custom B to E) or 9 to 16 (Custom F to M). The page shown is view state, as in Live (`device.set_page`, the pages node `Controls`); the device has no parameter for it, and the panel is laid out as Live draws it (layout L-DEV-054). Pitch Bend's knob reads whole numbers, where Live's reads 0.00.
+- The CC Type list starts with None, then controllers 1 to 119, each as `N: Name` as Live's chooser lists them (observed in Live 12.4.16, 3 November 2026): the standard controller names (S6), "Undefined" for the controllers the standard leaves open, `74: MPE Slide (Sound Controller 5)`, and for 32 to 63 `LSB for CC n (name)`. Controller 0 and 120 to 127 (channel mode) are left out.
+- The tabs 1-8 and 9-16 in the title bar show controls 1 to 8 (Mod Wheel, Pitch Bend, Pressure, Custom A, Custom B to E) or 9 to 16 (Custom F to M). The page shown is view state, as in Live (`device.set_page`, the pages node `Controls`); the device has no parameter for it, and the panel is laid out as Live draws it (layout L-DEV-069). Pitch Bend's knob reads whole numbers, where Live's reads 0.00.
 - Custom controls' custom names (S1) aren't built: the framework has no per-parameter name to set. A dial is named by its letter.
 
 ## What the manual leaves open

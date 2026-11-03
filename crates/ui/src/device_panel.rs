@@ -619,6 +619,12 @@ pub fn show(
     }
     for (at, (param, widget, whole)) in controls.into_iter().enumerate() {
         let extra = laid.controls.get(at);
+        // A control left out while another's value says so isn't drawn.
+        if let Some(hidden) = extra.and_then(|e| e.hidden)
+            && panel.read(hidden.param).round() as i32 == hidden.value
+        {
+            continue;
+        }
         // A knob with a unit pair beside it keeps the rest of its place.
         let rect = match extra.and_then(|e| e.unit) {
             Some(pair) if pair.below => Rect::from_min_max(
@@ -761,6 +767,7 @@ pub fn show(
                 control.choice_buttons(ui, theme, events, (&cells, true));
             }
             Widget::Check => control.check(ui, theme, events),
+            Widget::Tick => control.tick(ui, theme, events),
             Widget::Switch => control.switch(ui, theme, events),
             Widget::Stepper => {
                 let target = extra
@@ -775,7 +782,8 @@ pub fn show(
             Widget::Bare => control.boxed(ui, theme, events, (false, false)),
             Widget::BareSlider => control.boxed(ui, theme, events, (false, true)),
             Widget::Framed => control.boxed(ui, theme, events, (true, false)),
-            Widget::Cycle => control.cycle(ui, theme, events),
+            Widget::Cycle => control.cycle(ui, theme, events, false),
+            Widget::Mode => control.cycle(ui, theme, events, true),
             Widget::Inline => control.inline(ui, theme, events),
         };
         if locked {
@@ -959,13 +967,19 @@ fn pan_reading(kind: &bl_model::DeviceKind, param: &ParamDescriptor, value: f64)
 
 /// What a control's name above it reads: a sample slot's parameter drops the
 /// slot's number (`Slot 3 Start` reads `Start`), since the panel shows one
-/// slot's at a time, and MPE Control's Min, Max, X and Y drop their source's name
-/// (`Press Min` reads `Min`), which the tab beside them says.
+/// slot's at a time, and MPE Control's Min, Max, X, Y, Smooth, Rise, Fall,
+/// Default and Centered drop their source's name (`Press Min` reads `Min`),
+/// which the tab beside them says.
 fn short_name(name: &str) -> &str {
     let source = ["Press ", "Slide ", "NotePB "]
         .iter()
         .find_map(|source| name.strip_prefix(source))
-        .filter(|rest| ["Min", "Max", "X", "Y"].contains(rest));
+        .filter(|rest| {
+            [
+                "Min", "Max", "X", "Y", "Smooth", "Rise", "Fall", "Default", "Centered",
+            ]
+            .contains(rest)
+        });
     source.unwrap_or_else(|| {
         name.strip_prefix("Slot ")
             .and_then(|rest| rest.split_once(' '))

@@ -1,5 +1,5 @@
-//! The MIDI effects' panels as Live lays them out (layout L-DEV-048 to
-//! L-DEV-058): each device's panel holds Live's controls in Live's order and
+//! The MIDI effects' panels as Live lays them out (layout L-DEV-063 to
+//! L-DEV-073): each device's panel holds Live's controls in Live's order and
 //! kinds and none else, and the parts new with them (the stepper, Scale's grid,
 //! Chord's Velocity and Chance buttons, the switch box, MPE Control's tab
 //! column) do what they draw.
@@ -11,15 +11,15 @@ use bl_devices::{arpeggiator as arp, lift, remap, stack};
 use bl_model::device_layout::{PageChoice, Widget};
 use bl_model::{DeviceId, ParamId, TrackId};
 use bl_shell::device_commands::{DeviceAdded, TITLE_BAR_HEIGHT};
-use bl_ui::device_panel::{body_rect, place, place_with_pages};
+use bl_ui::device_panel::{body_rect, place, place_shown, place_with_pages};
 use bl_ui::device_view::layout;
 use common::{Harness, Window};
 use egui::{Rect, pos2};
 use serde_json::json;
 
 use Widget::{
-    Check, Chooser, Grid, IconSegments, Knob, Marked, Number, Outlined, Slider, SmallKnob, Stack,
-    Stepper, Switch, Toggle,
+    Bare, Check, Chooser, Cycle, Grid, IconSegments, IconToggle, Inline, Knob, Marked, Mode,
+    Number, Outlined, Segments, Slider, SmallKnob, Stack, Stepper, Switch, Tick, Toggle,
 };
 
 const GRID_4_2: Widget = Grid {
@@ -27,10 +27,20 @@ const GRID_4_2: Widget = Grid {
     rows: 2,
 };
 
-/// What `device`'s panel holds with its pages `shown` (by node, then page) and
-/// its expanded part closed: each control's parameter name and widget, in the
-/// order the layout places them.
+/// What `device`'s panel holds with its pages `shown` (by node, then page): each
+/// control's parameter name and widget, in the order the layout places them, as
+/// a new device shows it (its expanded part open where it opens that way, and a
+/// control hidden at the defaults left out).
 fn panel(device: &str, shown: &[(&str, &str)]) -> Vec<(String, Widget)> {
+    panel_with(device, shown, None)
+}
+
+/// [`panel`] with the expanded part shown (`Some(true)`) or closed.
+fn panel_with(
+    device: &str,
+    shown: &[(&str, &str)],
+    expanded: Option<bool>,
+) -> Vec<(String, Widget)> {
     let kind = bl_devices::device_types()
         .into_iter()
         .find(|t| t.name == device)
@@ -40,11 +50,19 @@ fn panel(device: &str, shown: &[(&str, &str)]) -> Vec<(String, Widget)> {
         .iter()
         .map(|(node, page)| ((*node).to_owned(), (*page).to_owned()))
         .collect();
-    let layout = description.layout.with_pages(&choice).shown(false);
+    let layout = description
+        .layout
+        .with_pages(&choice)
+        .shown(expanded.unwrap_or(description.layout.opens_expanded));
     layout
         .place(layout.docked_size())
         .controls
         .iter()
+        .filter(|c| {
+            c.hidden.is_none_or(|h| {
+                description.param(h.param).unwrap().default.round() as i32 != h.value
+            })
+        })
         .map(|c| (description.param(c.param).unwrap().name.clone(), c.widget))
         .collect()
 }
@@ -139,7 +157,8 @@ fn the_other_midi_effects_panels_hold_lives_controls_in_lives_order() {
         "Note Length",
         &[],
         &[
-            ("Trigger", Stack(2)),
+            ("Trigger", Cycle),
+            ("Latch", Toggle),
             ("Gate", SmallKnob),
             ("Length", SmallKnob),
             ("Rel Vel", SmallKnob),
@@ -208,18 +227,72 @@ fn cc_controls_two_pages_hold_eight_cells_each() {
 #[test]
 fn mpe_controls_three_tabs_each_show_a_sources_curve_and_range() {
     for source in ["Press", "Slide", "NotePB"] {
-        expect(
-            "MPE Control",
-            &[("Source", source)],
-            &[
-                (&format!("{source} Curve A"), SmallKnob),
-                (&format!("{source} Curve"), IconSegments(2)),
-                (&format!("{source} Min"), Number),
-                (&format!("{source} Max"), Number),
-                (&format!("{source} X"), Number),
-                (&format!("{source} Y"), Number),
-            ],
+        // NotePB starts with the S-shaped curve, which has a second knob and
+        // the link between the two.
+        let second: &[(&str, Widget)] = if source == "NotePB" {
+            &[("Curve Link", IconToggle), ("Curve B", SmallKnob)]
+        } else {
+            &[]
+        };
+        let mut live = vec![(format!("{source} Curve A"), SmallKnob)];
+        live.extend(second.iter().map(|(n, w)| (format!("{source} {n}"), *w)));
+        live.extend(
+            [
+                ("Curve", IconSegments(2)),
+                ("Min", Number),
+                ("Max", Number),
+                ("X", Number),
+                ("Y", Number),
+            ]
+            .map(|(n, w)| (format!("{source} {n}"), w)),
         );
+        assert_eq!(
+            panel_with("MPE Control", &[("Source", source)], Some(false)),
+            live,
+            "{source}'s tab"
+        );
+    }
+}
+
+// Spec: device-framework R68. What MPE Control's settings hold follows its
+// source's tab.
+#[test]
+fn mpe_controls_settings_follow_the_source_tab() {
+    let own: [(&str, &[(&str, Widget)]); 3] = [
+        (
+            "Press",
+            &[
+                ("Press Default", Tick),
+                ("Press Default Value", Bare),
+                ("Swap to Slide", Tick),
+                ("Press to AT", Tick),
+            ],
+        ),
+        (
+            "Slide",
+            &[
+                ("Slide Default", Tick),
+                ("Slide Default Value", Bare),
+                ("Slide Centered", Tick),
+                ("Slide Mode", Segments(3)),
+                ("Slide to Mod", Tick),
+            ],
+        ),
+        (
+            "NotePB",
+            &[("Pitch Range", Segments(4)), ("NotePB to PB", Tick)],
+        ),
+    ];
+    for (source, own) in own {
+        let with = panel_with("MPE Control", &[("Source", source)], Some(true));
+        let without = panel_with("MPE Control", &[("Source", source)], Some(false));
+        let mut live = vec![
+            (format!("{source} Smooth"), Tick),
+            (format!("{source} Rise"), Inline),
+            (format!("{source} Fall"), Inline),
+        ];
+        live.extend(own.iter().map(|(n, w)| ((*n).to_owned(), *w)));
+        assert_eq!(&with[without.len()..], &live[..], "{source}'s settings");
     }
 }
 
@@ -229,8 +302,8 @@ fn note_echos_delay_time_is_a_grid_of_eight_buttons() {
     let found = panel("Note Echo", &[]);
     let live: Vec<(&str, Widget)> = vec![
         ("Delay Time", GRID_4_2),
-        ("Sync", Toggle),
-        ("Swing", Number),
+        ("Sync", Mode),
+        ("Time Free", Number),
         ("Input", Stack(2)),
         ("Pitch", Number),
         ("Delay", SmallKnob),
@@ -240,12 +313,12 @@ fn note_echos_delay_time_is_a_grid_of_eight_buttons() {
         ("Slide", Number),
         ("Note PB", Number),
     ];
-    // Time Free, which Live shows only while Sync is off, follows these.
+    // Swing takes the place of Time Free's box while Sync is on.
     assert_eq!(
-        found[..live.len()],
+        found,
         live.iter()
             .map(|(n, w)| ((*n).to_owned(), *w))
-            .collect::<Vec<_>>()[..]
+            .collect::<Vec<_>>()
     );
 }
 
@@ -441,7 +514,8 @@ fn arpeggiators_velocity_box_turns_on_when_pressed() {
     let mut h = harness();
     let device = add(&mut h, "Arpeggiator");
     let (panel, area) = body(&mut h, device);
-    let (controls, _) = place(&panel, area);
+    // A new Arpeggiator shows its right part.
+    let (controls, _) = place_shown(&panel, true, area);
     let rect = controls
         .iter()
         .find(|(p, _, _)| *p == arp::VELOCITY_ON)
@@ -485,4 +559,87 @@ fn a_tab_in_mpe_controls_column_shows_its_source() {
         names.contains(&"Slide Min") && !names.contains(&"Press Min"),
         "{names:?}"
     );
+}
+
+/// Whether `device`'s expanded part shows, as its view state says.
+fn expanded(h: &Harness, device: DeviceId) -> bool {
+    h.shell
+        .device_view_state()
+        .devices
+        .iter()
+        .find(|d| d.id == device)
+        .unwrap()
+        .expanded
+}
+
+// Spec: device-framework R67. A new Arpeggiator shows its right part; the expand
+// toggle hides it and shows it again.
+#[test]
+fn arpeggiator_opens_expanded_and_its_toggle_hides_the_right_part() {
+    let mut h = harness();
+    let device = add(&mut h, "Arpeggiator");
+    assert!(expanded(&h, device), "open in a new device");
+    h.shell
+        .invoke("device.expand", json!({ "device": device }))
+        .unwrap();
+    h.settle();
+    assert!(!expanded(&h, device), "hidden");
+    h.shell
+        .invoke("device.expand", json!({ "device": device }))
+        .unwrap();
+    h.settle();
+    assert!(expanded(&h, device), "shown again");
+    // A device that opens closed still does.
+    let other = add(&mut h, "MPE Control");
+    assert!(!expanded(&h, other));
+}
+
+// Spec: device-framework R70. Note Echo's Sync button reads Time and the
+// delay-time box takes Swing's place while Sync is off.
+#[test]
+fn note_echos_sync_button_switches_between_sync_and_time() {
+    use bl_devices::note_echo::{SWING, SYNC, TIME_MS};
+    let mut h = harness();
+    let device = add(&mut h, "Note Echo");
+    let (panel, area) = body(&mut h, device);
+    let (controls, _) = place(&panel, area);
+    let sync = controls.iter().find(|(p, _, _)| *p == SYNC).unwrap().2;
+    assert_eq!(value(&h, device, SYNC, 1.0), 1.0);
+    h.click(sync.center());
+    h.settle();
+    assert_eq!(value(&h, device, SYNC, 1.0), 0.0, "the button reads Time");
+    // Time Free is what the box beside the button shows now; Swing, before.
+    let shown = |h: &Harness, param| {
+        let device = h.shell.editor().document().device(device).unwrap().clone();
+        let description = bl_devices::device_types()
+            .into_iter()
+            .find(|t| t.name == "Note Echo")
+            .unwrap()
+            .description;
+        description.shown(&device.params, param)
+    };
+    assert!(shown(&h, TIME_MS) && !shown(&h, SWING));
+    set(&mut h, device, SYNC, 1.0);
+    assert!(shown(&h, SWING) && !shown(&h, TIME_MS));
+}
+
+// Spec: device-framework R70. Note Length's Trigger button switches between
+// Note On and Note Off, which wakes the release knobs; Latch is a button of
+// its own.
+#[test]
+fn note_lengths_trigger_button_switches_and_latch_is_its_own_button() {
+    use bl_devices::hold::{LATCH, TRIGGER};
+    let mut h = harness();
+    let device = add(&mut h, "Note Length");
+    let (panel, area) = body(&mut h, device);
+    let (controls, _) = place(&panel, area);
+    let rect = |param| controls.iter().find(|(p, _, _)| *p == param).unwrap().2;
+    h.click(rect(TRIGGER).center());
+    h.settle();
+    assert_eq!(value(&h, device, TRIGGER, 0.0), 1.0, "Note Off");
+    assert_eq!(value(&h, device, LATCH, 0.0), 0.0, "Latch stays off");
+    h.click(rect(LATCH).center());
+    h.settle();
+    assert_eq!(value(&h, device, LATCH, 0.0), 1.0);
+    assert_eq!(value(&h, device, TRIGGER, 0.0), 1.0, "Trigger stays");
 }

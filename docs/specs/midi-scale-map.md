@@ -9,7 +9,7 @@
 
 Scale sends each note of an octave to a note of your choosing. A grid has a column for each note that can come in, counted from Base, and a row for each note that can go out; a column sends its note to its row, in every octave, and a column with no row sends its note nowhere, so it plays nothing. Transpose then moves every note that comes out. Fold keeps a mapped note within half an octave of the note that came in. Lowest and Range limit which notes are remapped; the rest pass through.
 
-The device takes Live's name, Scale; its panel is laid out as Live draws it (layout L-DEV-051), with each column of the grid a parameter. A Scale Name chooser picks User, the grid a person edits, or a named scale from the list ([scales.md](scales.md)), whose grid sends each note to the scale note nearest it. Use Current Scale, a switch in its title bar, takes Base and Scale Name from the device's current scale and shows them. This spec covers the device only.
+The device takes Live's name, Scale; its panel is laid out as Live draws it (layout L-DEV-066), with each column of the grid a parameter. A Scale Name chooser picks User, the grid a person edits, or a named scale from the list ([scales.md](scales.md)), whose grid sends each note to the scale note nearest it. Use Current Scale, a switch in its title bar, takes Base and Scale Name from the device's current scale and shows them. This spec covers the device only.
 
 ## Sources
 

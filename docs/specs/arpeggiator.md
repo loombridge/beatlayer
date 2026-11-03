@@ -11,7 +11,7 @@ Arpeggiator turns held chords and notes into rhythmic sequences. The sequence fo
 
 Offset shifts pattern sequence starting positions. Retrigger restarts the pattern on note arrivals or beat grid intervals. Repeats sets the number of pattern cycles before playback ceases. Pitch transposition can cycle through multiple Steps spaced by Distance, in semitones, or in degrees of a scale: the one its own Root and Scale choosers name, or, with Use Current Scale on in its title bar, the device's current scale ([scales.md](scales.md)). Velocity controls decay notes toward a Target level over time, optionally restarting with pattern retriggering.
 
-The device takes Live's name, Arpeggiator; its panel is laid out as Live draws it (layout L-DEV-058). Notes held for playback wait in an internal queue made with the device; when the device is deactivated, moved, or deleted, sounding notes terminate cleanly without hanging.
+The device takes Live's name, Arpeggiator; its panel is laid out as Live draws it (layout L-DEV-073). Notes held for playback wait in an internal queue made with the device; when the device is deactivated, moved, or deleted, sounding notes terminate cleanly without hanging.
 
 ## Sources
 
@@ -77,7 +77,9 @@ The device takes Live's name, Arpeggiator; its panel is laid out as Live draws i
 
 ## Defaults, ranges and details
 
-- Default parameters, as Live's panel reads in a new set (observed in Live 12.4.16, 2 November 2026; Interval's are not recorded): Style Up (0), Sync on (true), Rate Sync 1/8 (index 5), Rate Free 200 ms, Gate 50 %, Hold off (false), Offset 0, Retrigger Off (0), Interval 1 bar (4.0 beats), Repeats 0 (∞), Steps 0, Distance 12 semitones, Velocity off (false), Decay 1000 ms, Target 64, Retrigger Velocity off (false), Use Scale off (false), Groove Straight (0); Root C and Scale Chromatic (R15).
+- Default parameters, as Live's panel reads in a new set (observed in Live 12.4.16, 2 and 3 November 2026): Style Up (0), Sync on (true), Rate Sync 1/8 (index 5), Rate Free 200 ms, Gate 50 %, Hold off (false), Offset 0, Retrigger Off (0), Interval 1 (one bar, 4 beats), Repeats 0 (∞), Steps 0, Distance 12 semitones, Velocity off (false), Decay 1000 ms, Target 64, Retrigger Velocity off (false), Use Scale off (false), Groove Straight (0); Root C and Scale Chromatic (R15).
+- Interval counts in bars and offers 1/16, 1/8, 3/16, 1/4, 3/8, 1/2, 3/4, 7/8, 1, 9/8, 5/4, 1.5, 2, 3 and 4. It is greyed while Retrigger is Off, and applies while Retrigger is Beat.
+- The panel's right part (Retrigger, Interval, Repeats, Velocity, Decay, Target, Retrig Vel, Root and Scale) is the device's expanded part, shown in a new device and hidden by the round triangle at the left of the title bar, which points right while the part shows and down while it is hidden.
 - Free rate ranges from 1 ms to 2000 ms.
 - Beat divisions for Rate Sync match standard division choices: 1/32, 1/16T, 1/16, 1/16., 1/8T, 1/8, 1/8., 1/4T, 1/4, 1/4., 1/2T, 1/2, 1/2., 1 bar, 2 bars, 4 bars, 8 bars.
 - While transport is stopped, synced rate steps using the current song tempo map on the device's own continuous clock.

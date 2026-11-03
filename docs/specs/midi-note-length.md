@@ -9,7 +9,7 @@
 
 Note Length changes how long notes sound, and can start notes when keys come up instead of when they go down. In Note On mode each note starts when its key goes down and lasts Length times Gate, in milliseconds or in beat divisions at the tempo of the moment; the key coming up is ignored. In Note Off mode a note starts when its key comes up and then lasts Length times Gate, with its velocity worked out from how long the key was held (Decay Time) and mixed with the key's release velocity (Release Velocity). Key Scale makes notes shorter or longer by pitch around middle C. Latch keeps a note sounding until the next one starts.
 
-The device takes Live's name, Note Length; its panel is laid out as Live draws it (layout L-DEV-052). Notes held for later wait in a queue made with the device, and every one ends: when the device is switched off, moved or deleted, its sounding notes end at once and nothing waits. This spec covers the device only.
+The device takes Live's name, Note Length; its panel is laid out as Live draws it (layout L-DEV-067). Notes held for later wait in a queue made with the device, and every one ends: when the device is switched off, moved or deleted, its sounding notes end at once and nothing waits. This spec covers the device only.
 
 ## Sources
 
@@ -50,7 +50,7 @@ The device takes Live's name, Note Length; its panel is laid out as Live draws i
 
 ## Defaults, ranges and details
 
-- A new Note Length starts in Note On mode with Sync off, Length 100 ms, Length Division 1/8, Gate 100 %, Release Velocity 0 %, Decay Time 60 s, Key Scale 0.00 (a plain number, as Live's box reads) and Latch off, as Live's panel reads in a new set (observed in Live 12.4.16, 2 November 2026; Decay Time runs from 0 to 60 s, and 0 still turns the decay off). Latch is a switch among the device's parameters, listed in its context menu; the panel has no button for it. The panel's names are the parameters': Release Velocity is `Rel Vel` and Decay Time is `Decay`. The manual states no ranges or defaults for Length or Gate; Length runs from 1 ms to 10 s, logarithmically, and Gate from 1 to 200 per cent.
+- A new Note Length starts in Note On mode with Sync off, Length 100 ms, Length Division 1/8, Gate 100 %, Release Velocity 0 %, Decay Time 60 s, Key Scale 0.00 (a plain number, as Live's box reads) and Latch off, as Live's panel reads in a new set (observed in Live 12.4.16, 2 November 2026; Decay Time runs from 0 to 60 s, and 0 still turns the decay off). Trigger is one button that reads Note On or Note Off, with a Latch button under it; Rel Vel, Decay and Key Scale are greyed while Trigger is Note On, and act in Note Off (observed in Live 12.4.16, 3 November 2026). The panel's names are the parameters': Release Velocity is `Rel Vel` and Decay Time is `Decay`. The manual states no ranges or defaults for Length or Gate; Length runs from 1 ms to 10 s, logarithmically, and Gate from 1 to 200 per cent.
 - The manual doesn't say what Note Length does to a note that is sounding when the transport stops. Here it ends at its own time, as a note does anywhere else; a stop doesn't cut it. The clip player's own note-offs at a stop are ignored in Note On mode.
 - A latched Note Off trigger fires when the last held key comes up; the sustain pedal isn't read.
 - Release velocity of the notes Note Length ends in Note On mode is 64 of 127.

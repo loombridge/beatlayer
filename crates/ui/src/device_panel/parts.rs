@@ -270,7 +270,9 @@ impl Control<'_> {
         let c = &theme.colors;
         let painter = ui.painter();
         painter.rect_filled(field, BOX_CORNER, c.window.0);
-        painter.text(
+        // A name too long for the box is cut short before the arrow.
+        let text = Rect::from_min_max(field.min, pos2(field.right() - 11.0, field.bottom()));
+        painter.with_clip_rect(text).text(
             pos2(field.left() + 3.0, field.center().y),
             Align2::LEFT_CENTER,
             self.descriptor.format(self.value),
@@ -425,6 +427,34 @@ impl Control<'_> {
             let d = self.descriptor;
             self.change(if on { d.min() } else { d.max() }, events);
         }
+        self.describe_switch(ui, &response);
+    }
+
+    /// A small square button with the name at its right, lit while on.
+    pub(super) fn tick(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
+        let side = vec2(CHECK_SIZE, CHECK_SIZE);
+        let square = Rect::from_min_size(
+            pos2(self.rect.left(), self.rect.center().y - side.y / 2.0),
+            side,
+        );
+        let on = self.on();
+        let response = self.button(
+            ui,
+            theme,
+            (square, self.id()),
+            (Look::Dark, on),
+            Face::Text(""),
+        );
+        if Self::chosen(ui, &response) {
+            self.change(if on { 0.0 } else { 1.0 }, events);
+        }
+        ui.painter().text(
+            pos2(square.right() + 4.0, self.rect.center().y),
+            Align2::LEFT_CENTER,
+            short_name(&self.descriptor.name),
+            font(),
+            theme.colors.text.0,
+        );
         self.describe_switch(ui, &response);
     }
 
@@ -597,15 +627,22 @@ impl Control<'_> {
         self.describe(ui, &response, Role::SpinButton);
     }
 
-    /// A lit text button holding the chosen name of a two-choice parameter:
-    /// a press switches to the other.
-    pub(super) fn cycle(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
+    /// A text button holding the chosen name of a two-choice parameter: a
+    /// press switches to the other. It is lit always, or with `by_choice`
+    /// while the second choice is chosen.
+    pub(super) fn cycle(
+        &self,
+        ui: &mut Ui,
+        theme: &Theme,
+        events: &mut Vec<UiEvent>,
+        by_choice: bool,
+    ) {
         let text = self.descriptor.format(self.value);
         let response = self.button(
             ui,
             theme,
             (self.rect, self.id()),
-            (Look::Dark, true),
+            (Look::Dark, !by_choice || self.value >= 0.5),
             Face::Text(&text),
         );
         if Self::chosen(ui, &response) {
@@ -901,6 +938,19 @@ pub fn paint_glyph(painter: &Painter, rect: Rect, glyph: Glyph, ink: Color32) {
             line(&[(0.8, 0.1), (0.8, 0.5)]);
             fill(&[(-1.0, 0.1), (-0.6, 0.1), (-0.6, 0.7), (-1.0, 0.7)]);
             fill(&[(0.6, 0.1), (1.0, 0.1), (1.0, 0.7), (0.6, 0.7)]);
+        }
+        Glyph::Link => {
+            // Two rounded links, side by side, overlapping in the middle.
+            let ring = |centre: f32| -> Vec<(f32, f32)> {
+                (0..=12)
+                    .map(|i| {
+                        let angle = std::f32::consts::TAU * i as f32 / 12.0;
+                        (centre + 0.55 * angle.cos(), 0.4 * angle.sin())
+                    })
+                    .collect()
+            };
+            line(&ring(-0.4));
+            line(&ring(0.4));
         }
     }
 }

@@ -61,22 +61,59 @@ pub fn dial_cc(k: u32) -> ParamId {
     ParamId(9 + k * 2)
 }
 
-/// The CC Type list: `None` first, then the controllers 1 to 119. 0 and 32
-/// (bank select) and 120 to 127 (channel mode) are left out. The manual
-/// doesn't state Live's list.
+/// The name of controller `n` in a CC Type, as Live's chooser lists them
+/// (observed in Live 12.4.16 on 3 November 2026): the standard MIDI
+/// controller names, "Undefined" for those the standard leaves open, and for
+/// 32 to 63 the least significant byte of controller `n - 32`.
+fn cc_name(n: u8) -> String {
+    let name = match n {
+        1 => "Modulation Wheel",
+        2 => "Breath Controller",
+        4 => "Foot Controller",
+        5 => "Portamento Time",
+        6 => "Data Entry",
+        7 => "Channel Volume",
+        8 => "Balance",
+        10 => "Pan",
+        11 => "Expression Controller",
+        12 => "Effect Control 1",
+        13 => "Effect Control 2",
+        16..=19 => return format!("General Purpose {}", n - 15),
+        32..=63 => return format!("LSB for CC {} ({})", n - 32, cc_name(n - 32)),
+        64 => "Sustain Pedal",
+        65 => "Portamento On/Off",
+        66 => "Sostenuto",
+        67 => "Soft Pedal",
+        68 => "Legato Footswitch",
+        69 => "Hold 2",
+        74 => "MPE Slide (Sound Controller 5)",
+        70..=79 => return format!("Sound Controller {}", n - 69),
+        80..=83 => return format!("General Purpose {}", n - 75),
+        84 => "Portamento Control",
+        91 => "Reverb Send Level",
+        92 => "Effect 2 Depth",
+        93 => "Chorus Send Level",
+        94 => "Effect 4 Depth",
+        95 => "Effect 5 Depth",
+        96 => "Data Increment",
+        97 => "Data Decrement",
+        98 => "NRPN LSB",
+        99 => "NRPN MSB",
+        100 => "RPN LSB",
+        101 => "RPN MSB",
+        _ => "Undefined",
+    };
+    name.to_owned()
+}
+
+/// The CC Type list: `None` first, then the controllers 1 to 119 as "N:
+/// Name". 0 (bank select's most significant byte) and 120 to 127 (channel
+/// mode) are left out.
 #[must_use]
 pub fn cc_names() -> Vec<String> {
     let mut names = Vec::with_capacity(120);
     names.push("None".to_owned());
-    for controller in 1..=119 {
-        // Observed on Custom A's default, as Live's chooser reads it; the
-        // rest of Live's names are not recorded.
-        names.push(if controller == 64 {
-            "64: Sustain".to_owned()
-        } else {
-            format!("CC {controller}")
-        });
-    }
+    names.extend((1..=119u8).map(|n| format!("{n}: {}", cc_name(n))));
     names
 }
 
@@ -96,8 +133,7 @@ pub fn cc_type_for(controller: u8) -> f64 {
 }
 
 /// Whether a controller has a CC Type in [`cc_names`]: 1 to 119. Controllers
-/// 0 and 32 (bank select) and 120 to 127 (channel mode) aren't listed, so
-/// Learn leaves them alone.
+/// 0 and 120 to 127 (channel mode) aren't listed, so Learn leaves them alone.
 #[must_use]
 pub fn cc_is_listed(controller: u8) -> bool {
     (1..=119).contains(&controller)

@@ -104,15 +104,24 @@ pub const DIVISIONS: [(&str, f64); 17] = [
     ("8 bars", 32.0),
 ];
 
-/// Retrigger intervals on the beat grid.
-pub const INTERVALS: [(&str, f64); 7] = [
+/// Retrigger intervals: their names, in bars, and beat counts (in quarter
+/// notes).
+pub const INTERVALS: [(&str, f64); 15] = [
     ("1/16", 0.25),
     ("1/8", 0.5),
+    ("3/16", 0.75),
     ("1/4", 1.0),
+    ("3/8", 1.5),
     ("1/2", 2.0),
-    ("1 bar", 4.0),
-    ("2 bars", 8.0),
-    ("4 bars", 16.0),
+    ("3/4", 3.0),
+    ("7/8", 3.5),
+    ("1", 4.0),
+    ("9/8", 4.5),
+    ("5/4", 5.0),
+    ("1.5", 6.0),
+    ("2", 8.0),
+    ("3", 12.0),
+    ("4", 16.0),
 ];
 
 /// The Groove choices: None, then the bundled swing grooves in order (the
@@ -159,12 +168,12 @@ fn layout() -> DeviceLayout {
             at(GATE, Widget::SmallKnob, 172.0, 13.0),
         ],
     );
-    let right = ControlBand::free(
+    let expanded = ControlBand::free(
         129.0,
         BODY_HEIGHT,
         vec![
             at(RETRIGGER, Widget::Chooser, 8.0, 4.5).sized(53.0, 21.0),
-            at(INTERVAL, Widget::SmallKnob, 19.0, 34.0),
+            at(INTERVAL, Widget::SmallKnob, 19.0, 34.0).greyed_while(RETRIGGER, 0),
             at(REPEATS, Widget::Number, 8.0, 101.5).sized(53.0, 21.0),
             at(VELOCITY_ON, Widget::Switch, 72.0, 4.5).sized(53.0, 21.0),
             at(DECAY, Widget::Number, 72.0, 34.5).sized(53.0, 21.0),
@@ -178,16 +187,16 @@ fn layout() -> DeviceLayout {
             at(SCALE, Widget::Chooser, 51.0, 133.5).sized(74.0, 21.0),
         ],
     );
-    DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Column(vec![
-            LayoutNode::Row(vec![
-                crate::panel::spacer(4.0, 0.0),
-                LayoutNode::Column(vec![crate::panel::spacer(0.0, 4.0), LayoutNode::Cell(cell)]),
-            ]),
-            LayoutNode::Band(rates),
+    DeviceLayout::new(LayoutNode::Column(vec![
+        LayoutNode::Row(vec![
+            crate::panel::spacer(4.0, 0.0),
+            LayoutNode::Column(vec![crate::panel::spacer(0.0, 4.0), LayoutNode::Cell(cell)]),
         ]),
-        LayoutNode::Band(right),
+        LayoutNode::Band(rates),
     ]))
+    .with_expanded(LayoutNode::Band(expanded))
+    .opening_expanded()
+    .with_triangle_right_when_shown()
 }
 
 /// Arpeggiator's device type.
@@ -229,8 +238,9 @@ pub fn arpeggiator_type() -> DeviceType {
                 "When the pattern restarts: Off (never), Note (when a new key is pressed), or \
                  Beat (at beat intervals).",
             ),
-            ParamDescriptor::choice(INTERVAL, "Interval", &interval_names, 4).describe(
-                "The bar or beat interval on the song grid at which Beat retriggering occurs.",
+            ParamDescriptor::choice(INTERVAL, "Interval", &interval_names, 8).describe(
+                "The interval in bars on the song grid at which Beat retriggering occurs; it \
+                 applies only while Retrigger is Note or Beat.",
             ),
             ParamDescriptor::integer(REPEATS, "Repeats", (0, 64), 0, ParamUnit::None).describe(
                 "How many times the pattern repeats before stopping; 0 plays indefinitely (∞).",

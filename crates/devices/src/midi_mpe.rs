@@ -12,16 +12,15 @@
 //!
 //! What the manual leaves open — the exact curve laws, the smoothing's time
 //! constants, and what Default does to a note that carries no expression — is
-//! Beatlayer's own, written into the spec. Its panel is laid out as Live draws
-//! it while its extra section is closed (layout L-DEV-072): a column of tabs
-//! for the three sources with the shown source's curve knob under them, and a
-//! transfer curve whose foot holds the curve type, Min, Max, X and Y. What
-//! Live's ▼ at the foot opens isn't recorded; the rest of Beatlayer's
-//! parameters are in the expanded part, under Beatlayer's own look.
+//! Beatlayer's own, written into the spec. Its panel is laid out as Live
+//! draws it (layout L-DEV-072): a column of tabs for the three sources with
+//! the shown source's curve knobs under them, a transfer curve whose foot
+//! holds the curve type, Min, Max, X and Y, and, in the expanded part, the
+//! shown source's settings.
 
 use bl_engine::{DeviceType, NoteEvent, NoteExpression, NoteKind, Registry};
 use bl_model::device_layout::{
-    BODY_HEIGHT, Control, ControlBand, DisplayCell, LayoutNode, Page, PageStyle, PagesNode,
+    BODY_HEIGHT, Control, ControlBand, DisplayCell, Glyph, LayoutNode, Page, PageStyle, PagesNode,
     TitlePart, Widget,
 };
 use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
@@ -130,6 +129,8 @@ pub const NOTEPB_TO_PB: ParamId = ParamId(46);
 
 /// The curve type choices.
 pub const CURVES: [&str; 2] = ["Linear", "S-shaped"];
+/// The Pitch Range choices: the factors the bend is scaled by.
+pub const PITCH_RANGES: [&str; 4] = ["1x", "2x", "4x", "8x"];
 /// The slide mode choices.
 pub const SLIDE_MODES: [&str; 3] = ["Abs", "Rel", "Ons"];
 
@@ -138,9 +139,17 @@ fn source_params(s: u32, label: &str) -> Vec<ParamDescriptor> {
         ParamDescriptor::toggle(source_on(s), label, true).describe(&format!(
             "Whether {label} is shaped. Off, its data passes through."
         )),
-        ParamDescriptor::choice(source_curve(s), &format!("{label} Curve"), &CURVES, 0).describe(
-            &format!("{label}'s curve: a linear ramp or an S-shaped one."),
-        ),
+        ParamDescriptor::choice(
+            source_curve(s),
+            &format!("{label} Curve"),
+            &CURVES,
+            // NotePB starts with the S-shaped curve, whose breakpoint is
+            // its centre.
+            usize::from(s == NOTE_PB as u32),
+        )
+        .describe(&format!(
+            "{label}'s curve: a linear ramp or an S-shaped one."
+        )),
         ParamDescriptor::continuous(
             source_curve_a(s),
             &format!("{label} Curve A"),
@@ -153,13 +162,14 @@ fn source_params(s: u32, label: &str) -> Vec<ParamDescriptor> {
         ParamDescriptor::continuous(
             source_curve_b(s),
             &format!("{label} Curve B"),
-            (0.0, 1.0),
-            0.5,
+            (-1.0, 1.0),
+            0.0,
             ParamUnit::None,
         )
         .decimals(2)
         .describe(&format!(
-            "{label}'s second S-shaped segment's bend, when the segments aren't linked."
+            "{label}'s second S-shaped segment's bend, 0 leaving it straight, when the \
+             segments aren't linked."
         )),
         ParamDescriptor::toggle(source_link(s), &format!("{label} Curve Link"), true).describe(
             &format!("Whether {label}'s two S-shaped segments move together."),
@@ -204,17 +214,19 @@ fn source_params(s: u32, label: &str) -> Vec<ParamDescriptor> {
             source_rise(s),
             &format!("{label} Rise"),
             (0.0, 1000.0),
-            50.0,
+            15.0,
             ParamUnit::Milliseconds,
         )
+        .decimals(1)
         .describe(&format!("How long {label} takes to rise to a new value.")),
         ParamDescriptor::continuous(
             source_fall(s),
             &format!("{label} Fall"),
             (0.0, 1000.0),
-            50.0,
+            15.0,
             ParamUnit::Milliseconds,
         )
+        .decimals(1)
         .describe(&format!("How long {label} takes to fall to a new value.")),
     ]
 }
@@ -225,8 +237,16 @@ pub const SOURCE_PAGES: &str = "Source";
 /// The source tabs' names, in order.
 pub const SOURCE_NAMES: [&str; 3] = ["Press", "Slide", "NotePB"];
 
-/// MPE Control's panel as Live draws it with its extra section closed, and
-/// every other parameter in the expanded part.
+/// The name of the pages node of the settings, which follows the source tabs.
+pub const SETTINGS_PAGES: &str = "Source Settings";
+
+/// The width of the settings part, in points.
+const SETTINGS_WIDTH: f32 = 88.0;
+
+/// MPE Control's panel as Live draws it: the source tabs with the shown
+/// source's curve knobs under them, the transfer curve with its curve type,
+/// Min, Max, X and Y at its foot, and, in the expanded part, the settings of
+/// the shown source.
 fn layout() -> DeviceLayout {
     let at = |param, widget, x, y| Control::new(param, widget, x, y);
     let pages = (0..SOURCES)
@@ -242,10 +262,19 @@ fn layout() -> DeviceLayout {
                     at(source_y(s), Widget::Number, 132.0, 2.0).sized(24.0, 21.0),
                 ],
             );
-            let knob = ControlBand::free(
+            // The second knob and the link between the two show with the
+            // S-shaped curve, whose two segments they bend.
+            let s_only = |control: Control| control.hidden_while(source_curve(s), 0);
+            let knobs = ControlBand::free(
                 52.0,
                 BODY_HEIGHT - 48.0,
-                vec![at(source_curve_a(s), Widget::SmallKnob, 10.0, 40.0).unnamed()],
+                vec![
+                    at(source_curve_a(s), Widget::SmallKnob, 10.0, 8.0).unnamed(),
+                    s_only(at(source_link(s), Widget::IconToggle, 17.0, 52.0))
+                        .with_glyph(Glyph::Link)
+                        .sized(18.0, 12.0),
+                    s_only(at(source_curve_b(s), Widget::SmallKnob, 10.0, 70.0).unnamed()),
+                ],
             );
             Page::new(
                 SOURCE_NAMES[s as usize],
@@ -253,40 +282,56 @@ fn layout() -> DeviceLayout {
                     DisplayCell::new("Transfer Curve", 160.0, BODY_HEIGHT, 1.0).with_bottom(foot),
                 ),
             )
-            .with_section(LayoutNode::Band(knob))
+            .with_section(LayoutNode::Band(knobs))
         })
         .collect();
-    let mut rest: Vec<(ParamId, Widget)> = Vec::new();
-    for s in 0..SOURCES {
-        rest.extend([
-            (source_on(s), Widget::Toggle),
-            (source_curve_b(s), Widget::Knob),
-            (source_link(s), Widget::Toggle),
-            (source_smooth(s), Widget::Toggle),
-            (source_rise(s), Widget::Knob),
-            (source_fall(s), Widget::Knob),
-        ]);
-    }
-    rest.extend([
-        (PRESS_DEFAULT, Widget::Toggle),
-        (PRESS_DEFAULT_VALUE, Widget::Knob),
-        (SWAP_TO_SLIDE, Widget::Toggle),
-        (PRESS_TO_AT, Widget::Toggle),
-        (SLIDE_DEFAULT, Widget::Toggle),
-        (SLIDE_DEFAULT_VALUE, Widget::Knob),
-        (SLIDE_CENTERED, Widget::Toggle),
-        (SLIDE_MODE, Widget::Chooser),
-        (SLIDE_TO_MOD, Widget::Toggle),
-        (PITCH_RANGE, Widget::Knob),
-        (NOTEPB_TO_PB, Widget::Toggle),
-    ]);
     DeviceLayout::new(LayoutNode::Pages(PagesNode::new(
         SOURCE_PAGES,
         PageStyle::Column,
         pages,
     )))
-    .with_expanded(LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, &rest)))
+    .with_expanded(LayoutNode::Pages(PagesNode::following(
+        SETTINGS_PAGES,
+        SOURCE_PAGES,
+        (0..SOURCES)
+            .map(|s| Page::new(SOURCE_NAMES[s as usize], LayoutNode::Band(settings(s))))
+            .collect(),
+    )))
+    .with_triangle_right_when_shown()
     .with_title(vec![TitlePart::Mpe])
+}
+
+/// What the settings show for source `s`: Smooth, Rise and Fall, then what
+/// the source has of its own, then its conversion.
+fn settings(s: u32) -> ControlBand {
+    let at = |param, widget, y| Control::new(param, widget, 6.0, y).sized(76.0, 12.0);
+    let tick = |param, y| at(param, Widget::Tick, y);
+    let mut controls = vec![
+        tick(source_smooth(s), 3.0),
+        at(source_rise(s), Widget::Inline, 18.0),
+        at(source_fall(s), Widget::Inline, 33.0),
+    ];
+    let own = |param, widget, y, height| Control::new(param, widget, 6.0, y).sized(76.0, height);
+    match s as usize {
+        PRESS => controls.extend([
+            tick(PRESS_DEFAULT, 62.0).sized(50.0, 12.0),
+            Control::new(PRESS_DEFAULT_VALUE, Widget::Bare, 58.0, 62.0).sized(26.0, 12.0),
+            tick(SWAP_TO_SLIDE, 79.0),
+            tick(PRESS_TO_AT, 130.0),
+        ]),
+        SLIDE => controls.extend([
+            tick(SLIDE_DEFAULT, 62.0).sized(50.0, 12.0),
+            Control::new(SLIDE_DEFAULT_VALUE, Widget::Bare, 58.0, 62.0).sized(26.0, 12.0),
+            tick(SLIDE_CENTERED, 79.0),
+            own(SLIDE_MODE, Widget::Segments(3), 98.0, 21.0).titled(),
+            tick(SLIDE_TO_MOD, 130.0),
+        ]),
+        _ => controls.extend([
+            own(PITCH_RANGE, Widget::Segments(4), 65.0, 21.0).titled(),
+            tick(NOTEPB_TO_PB, 130.0),
+        ]),
+    }
+    ControlBand::free(SETTINGS_WIDTH, BODY_HEIGHT, controls)
 }
 
 /// MPE Control's device type.
@@ -298,14 +343,13 @@ pub fn mpe_control_type() -> DeviceType {
     params.extend([
         ParamDescriptor::toggle(PRESS_DEFAULT, "Press Default", false)
             .describe("Gives a note that carries no pressure the Press default value."),
-        ParamDescriptor::continuous(
+        ParamDescriptor::integer(
             PRESS_DEFAULT_VALUE,
             "Press Default Value",
-            (0.0, 1.0),
-            0.5,
+            (0, 127),
+            0,
             ParamUnit::None,
         )
-        .decimals(2)
         .describe("The pressure a note without one gets, while Press Default is on."),
         ParamDescriptor::toggle(SWAP_TO_SLIDE, "Swap to Slide", false)
             .describe("Sends what pressure carried as slide instead."),
@@ -313,14 +357,13 @@ pub fn mpe_control_type() -> DeviceType {
             .describe("Converts per-note pressure to channel pressure."),
         ParamDescriptor::toggle(SLIDE_DEFAULT, "Slide Default", false)
             .describe("Gives a note that carries no slide the Slide default value."),
-        ParamDescriptor::continuous(
+        ParamDescriptor::integer(
             SLIDE_DEFAULT_VALUE,
             "Slide Default Value",
-            (0.0, 1.0),
-            0.5,
+            (0, 127),
+            0,
             ParamUnit::None,
         )
-        .decimals(2)
         .describe("The slide a note without one gets, while Slide Default is on."),
         ParamDescriptor::toggle(SLIDE_CENTERED, "Slide Centered", false).describe(
             "Reads slide as distance from the middle: the centre is zero and the ends are one.",
@@ -331,21 +374,21 @@ pub fn mpe_control_type() -> DeviceType {
         ),
         ParamDescriptor::toggle(SLIDE_TO_MOD, "Slide to Mod", false)
             .describe("Converts slide to the mod wheel, CC 1."),
-        ParamDescriptor::continuous(PITCH_RANGE, "Pitch Range", (0.1, 4.0), 1.0, ParamUnit::None)
-            .describe(
-                "Scales per-note pitch bend, for a controller and instrument whose ranges differ.",
-            ),
+        ParamDescriptor::choice(PITCH_RANGE, "Pitch Range", &PITCH_RANGES, 0).describe(
+            "Scales per-note pitch bend by 1, 2, 4 or 8, for a controller and instrument whose \
+             ranges differ.",
+        ),
         ParamDescriptor::toggle(NOTEPB_TO_PB, "NotePB to PB", false)
             .describe("Converts per-note pitch bend to a channel pitch bend."),
     ]);
     DeviceType::native(MPE_CONTROL, "MPE Control", DeviceRole::MidiEffect).with_description(
         DeviceDescription::new(params)
+            .with_menu_options(&[source_on(0), source_on(1), source_on(2)])
             .with_layout(layout())
             .with_banks(&[
                 (
                     "Pressure",
                     &[
-                        "Press",
                         "Press Min",
                         "Press Max",
                         "Press Smooth",
@@ -369,7 +412,6 @@ pub fn mpe_control_type() -> DeviceType {
                 (
                     "Slide",
                     &[
-                        "Slide",
                         "Slide Min",
                         "Slide Max",
                         "Slide Smooth",
@@ -395,7 +437,6 @@ pub fn mpe_control_type() -> DeviceType {
                 (
                     "Note Pitch Bend",
                     &[
-                        "NotePB",
                         "NotePB Min",
                         "NotePB Max",
                         "NotePB Smooth",
@@ -504,7 +545,7 @@ impl Source {
             curved: value(params, source_curve(s)) >= 0.5,
             // The curve laws take a bend from 0 to 1, 0.5 straight.
             a: (value(params, source_curve_a(s)) + 1.0) / 2.0,
-            b: value(params, source_curve_b(s)),
+            b: (value(params, source_curve_b(s)) + 1.0) / 2.0,
             link: value(params, source_link(s)) >= 0.5,
             min: value(params, source_min(s)) / 127.0,
             max: value(params, source_max(s)) / 127.0,
@@ -578,12 +619,12 @@ impl NativeDevice for MpeControl {
         let press_to_at = value(params, PRESS_TO_AT) >= 0.5;
         let slide_to_mod = value(params, SLIDE_TO_MOD) >= 0.5;
         let notepb_to_pb = value(params, NOTEPB_TO_PB) >= 0.5;
-        let range = value(params, PITCH_RANGE);
+        let range = 2f64.powf(value(params, PITCH_RANGE).round());
         let press_default = value(params, PRESS_DEFAULT) >= 0.5;
         let slide_default_on = value(params, SLIDE_DEFAULT) >= 0.5;
         let default_value = [
-            value(params, PRESS_DEFAULT_VALUE),
-            value(params, SLIDE_DEFAULT_VALUE),
+            value(params, PRESS_DEFAULT_VALUE) / 127.0,
+            value(params, SLIDE_DEFAULT_VALUE) / 127.0,
         ];
         for note in audio.notes() {
             let (channel, key) = (note.channel, note.key);

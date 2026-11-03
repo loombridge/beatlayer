@@ -3,12 +3,14 @@
 //! notes when keys are released instead of when they are pressed, or
 //! latches them.
 //!
-//! Its panel is laid out as Live draws it (layout L-DEV-067): Trigger over
-//! Gate and Length, and the three release controls greyed while Trigger is
-//! Note On.
+//! Its panel is laid out as Live draws it (layout L-DEV-067): Trigger, a
+//! button that reads Note On or Note Off, over Latch, Gate and Length, and the
+//! three release controls greyed while Trigger is Note On.
 
 use bl_engine::{DeviceType, NoteBuffer, NoteEvent, NoteKind, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, Control, ControlBand, LayoutNode, Unit, Widget};
+use bl_model::device_layout::{
+    BODY_HEIGHT, BandLabel, Control, ControlBand, LayoutNode, Unit, Widget,
+};
 use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
@@ -61,12 +63,14 @@ fn layout() -> DeviceLayout {
         62.0,
         BODY_HEIGHT,
         vec![
-            at(TRIGGER, Widget::Stack(2), 9.0, 6.0).titled(),
+            at(TRIGGER, Widget::Cycle, 9.0, 15.0).sized(45.0, 12.0),
+            at(LATCH, Widget::Toggle, 9.0, 30.0).sized(45.0, 12.0),
             at(GATE, Widget::SmallKnob, 15.0, 48.0),
             at(LENGTH_MS, Widget::SmallKnob, 9.0, 95.0)
                 .with_unit_below(SYNC, [Unit::Ms, Unit::Sync]),
         ],
-    );
+    )
+    .with_labels(vec![BandLabel::new("Trigger", 9.0, 6.0, 45.0)]);
     let release = |param, y| at(param, Widget::SmallKnob, 70.0, y).greyed_while(TRIGGER, 0);
     let right = ControlBand::free(
         108.0,
@@ -150,12 +154,18 @@ pub fn hold_type() -> DeviceType {
             ),
         ])
         .with_alternate(SYNC, LENGTH_MS, LENGTH_DIVISION)
-        .with_menu_options(&[LATCH])
         .with_layout(layout())
         .with_banks(&[
             (
                 "Length",
-                &["Trigger", "Sync", "Length", "Length Division", "Gate"],
+                &[
+                    "Trigger",
+                    "Latch",
+                    "Sync",
+                    "Length",
+                    "Length Division",
+                    "Gate",
+                ],
             ),
             ("Release", &["Rel Vel", "Decay", "Key Scale"]),
         ]),

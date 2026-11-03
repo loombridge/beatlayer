@@ -9,7 +9,7 @@
 
 Pitch is a MIDI effect that moves every note that reaches it by a number of semitones, and keeps the result inside a window of keys. A note that would land outside the window is dropped (Block), moved by octaves into it (Fold), or moved to its nearest edge (Limit). The note's velocity, release velocity, channel and timing are untouched, and its per-note expressions (bend, pressure, slide) follow it to its new key. Pitch ends each note on the key it started it on, whatever changes while the note is held.
 
-The device takes Live's name, Pitch; its panel is laid out as Live draws it (layout L-DEV-049). Its parameters, ranges and units come from the manual's Pitch section. Step Up and Step Down in the manual are the round − and + beside the Step Width box, which move Pitch by it; the panel draws them as a stepper, and agents set Pitch directly. The Use Current Scale switch in its title bar makes Pitch and Step Width count degrees of the device's current scale ([scales.md](scales.md)) instead of semitones. This spec covers the device only.
+The device takes Live's name, Pitch; its panel is laid out as Live draws it (layout L-DEV-064). Its parameters, ranges and units come from the manual's Pitch section. Step Up and Step Down in the manual are the round − and + beside the Step Width box, which move Pitch by it; the panel draws them as a stepper, and agents set Pitch directly. The Use Current Scale switch in its title bar makes Pitch and Step Width count degrees of the device's current scale ([scales.md](scales.md)) instead of semitones. This spec covers the device only.
 
 ## Sources
 

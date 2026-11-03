@@ -741,11 +741,24 @@ fn a_synced_delay_under_a_tempo_ramp_plays_live_as_it_exports() {
         |host| {
             let (loop_track, _) = loop_track(host, "Loop", 0, None);
             let echo = track(host, "Echo", "return", 0, None);
-            let delay = insert(host, echo, 0, DELAY, "audio_effect");
-            // The filter off: Live's panel starts it on, and with it on the live
-            // and the exported renders differ at -273 dB from frame 17,947
-            // (a follow-up of this case's own).
-            set_param(host, delay, bl_devices::delay::FILTER.0, 0.0);
+            // The settings this case was written for, in the device as it is
+            // inserted (a change after it is smoothed live and not in the export,
+            // so the two differ by a hair): the filter off, four sixteenths a side
+            // and fully wet. Live's panel starts otherwise.
+            use bl_devices::delay as dl;
+            let settings = [
+                (dl::FILTER.0, 0.0),
+                (dl::WIDTH.0, 2.5),
+                (dl::DRY_WET.0, 100.0),
+                (dl::L_SYNC.0, 4.0),
+                (dl::R_SYNC.0, 4.0),
+            ];
+            host.batch_ok(
+                "Insert Delay",
+                vec![json!({ "command": "device.insert", "args": {
+                        "track": echo, "index": 0,
+                        "device": fixture::native_with("delay", DELAY, "audio_effect", &settings) } })],
+            );
             host.run_ok(
                 "mixer.set_send",
                 json!({ "track": loop_track, "to": echo, "level": 0.2 }),

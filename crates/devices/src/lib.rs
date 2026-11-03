@@ -96,6 +96,7 @@ mod multisampler_tabs;
 pub mod note_echo;
 pub mod operator;
 pub mod operator_envelope;
+pub mod operator_lfo;
 pub mod oscilloscope;
 pub mod overdrive;
 pub mod pedal;

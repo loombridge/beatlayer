@@ -7,7 +7,9 @@
 //! A device owns a [`Core`], writes its [`Settings`] each stretch, calls
 //! [`Core::begin`], plays its voices through [`Core::start`] and
 //! [`Core::render`], and takes the stretch's stereo output from
-//! [`Core::finish`].
+//! [`Core::finish`]. Each voice renders into a buffer of its own
+//! ([`Core::voices_mut`]) that a device may filter before `finish` sums
+//! them.
 //! Everything is made in [`Core::new`] and [`user_table`], off the audio
 //! thread; nothing here allocates, locks or blocks on it.
 
@@ -98,6 +100,12 @@ const FEEDBACK: f32 = 1.5;
 /// sample rate is silent.
 const FIXED_TOP: f64 = 0.45;
 
+/// Spec: operator R26. Spread plays a note as two copies, each 3 dB down.
+const COPY_GAIN: f32 = 0.707_945_8;
+
+/// Spec: operator R26. Each copy's detune at Spread 100 %, in semitones.
+const SPREAD_SEMITONES: f64 = 0.25;
+
 /// A phase in radians as [`CYCLE`] units, wrapped.
 const UNITS_PER_RADIAN: f32 = (4_294_967_296.0 / core::f64::consts::TAU) as f32;
 
@@ -152,12 +160,16 @@ impl OperatorSettings {
 
 /// What a device adds to one operator of one voice at one frame (operator
 /// R16): its amplitude on top of Level, a move of its pitch in semitones
-/// and an addition to its Feedback.
+/// and an addition to its Feedback; and, read from operator A's, what it
+/// adds to the voice's FM Drive (a factor on every index, 1 for none) and
+/// Tone (R25).
 #[derive(Clone, Copy, Debug)]
 pub struct Moves {
     pub gain: f32,
     pub semitones: f32,
     pub feedback: f32,
+    pub drive: f32,
+    pub tone: f32,
 }
 
 impl Moves {
@@ -168,6 +180,8 @@ impl Moves {
             gain,
             semitones: 0.0,
             feedback: 0.0,
+            drive: 1.0,
+            tone: 0.0,
         }
     }
 }
@@ -295,6 +309,16 @@ pub fn user_table(partials: &[f32], repeat: Option<f32>) -> SharedTable {
     Cache::global().share(self::partials(&levels))
 }
 
+/// What one frame of one voice's copy plays: FM Drive, and each operator's
+/// phase step, amplitude, Feedback and table level.
+struct Frame {
+    drive: f32,
+    steps: [u32; OPERATORS],
+    amps: [f32; OPERATORS],
+    feedbacks: [f32; OPERATORS],
+    levels: [usize; OPERATORS],
+}
+
 /// Voices' four operators and everything they share.
 pub struct Core {
     /// What the stretch plays: written by the device before [`Core::begin`].
@@ -306,12 +330,21 @@ pub struct Core {
     /// Noise Looped's 1-second loop (R6).
     looped: Vec<f32>,
     noise: Random,
-    /// Each voice's operators' phases and last two outputs.
-    phase: [[u32; OPERATORS]; MAX_VOICES],
-    history: [[[f32; 2]; OPERATORS]; MAX_VOICES],
-    /// Each voice's operators' last table level, by the increment it was
-    /// chosen for.
-    levels: [[(u32, usize); OPERATORS]; MAX_VOICES],
+    /// Each voice's copies' operators' phases and last two outputs: a voice
+    /// has a second copy while the Spread it started with is above 0 (R26).
+    phase: [[[u32; OPERATORS]; 2]; MAX_VOICES],
+    history: [[[[f32; 2]; OPERATORS]; 2]; MAX_VOICES],
+    /// Each voice's copies' operators' last table level, by the increment
+    /// it was chosen for.
+    levels: [[[(u32, usize); OPERATORS]; 2]; MAX_VOICES],
+    /// The Spread each voice's note started with, 0 to 1.
+    spread: [f32; MAX_VOICES],
+    /// The stretch's voices' stereo audio at the operators' rate: per frame,
+    /// then per channel, `stride` values for the voices; and how many of
+    /// them, from voice 0, any voice sounded in.
+    voice: Vec<f32>,
+    stride: usize,
+    hi: usize,
     /// The stretch's mix, left and right, at the operators' rate.
     mix: [Vec<f32>; 2],
     oversampler: Oversampler,
@@ -321,9 +354,10 @@ pub struct Core {
 
 impl Core {
     /// A core for a device at `rate` that plays blocks of up to
-    /// `max_frames`, with `seed` for its noise. Builds every table.
+    /// `max_frames`, with `seed` for its noise, whose per-voice buffers hold
+    /// `stride` voices a frame. Builds every table.
     #[must_use]
-    pub fn new(rate: f64, max_frames: usize, seed: u64) -> Self {
+    pub fn new(rate: f64, max_frames: usize, seed: u64, stride: usize) -> Self {
         let cache = Cache::global();
         let tables: Vec<Option<SharedTable>> = (0..WAVES.len())
             .map(|wave| built_in(wave).map(|table| cache.share(table)))
@@ -339,9 +373,13 @@ impl Core {
                 .map(|_| random.next_bipolar() as f32)
                 .collect(),
             noise: Random::seeded(seed),
-            phase: [[0; OPERATORS]; MAX_VOICES],
-            history: [[[0.0; 2]; OPERATORS]; MAX_VOICES],
-            levels: [[(0, 0); OPERATORS]; MAX_VOICES],
+            phase: [[[0; OPERATORS]; 2]; MAX_VOICES],
+            history: [[[[0.0; 2]; OPERATORS]; 2]; MAX_VOICES],
+            levels: [[[(0, 0); OPERATORS]; 2]; MAX_VOICES],
+            spread: [0.0; MAX_VOICES],
+            voice: vec![0.0; max_frames.max(1) * 2 * 2 * stride],
+            stride,
+            hi: 0,
             mix: [
                 vec![0.0; max_frames.max(1) * 2],
                 vec![0.0; max_frames.max(1) * 2],
@@ -353,8 +391,8 @@ impl Core {
 
     /// Frees every voice's state, as a switched-off device does.
     pub fn reset(&mut self) {
-        self.phase = [[0; OPERATORS]; MAX_VOICES];
-        self.history = [[[0.0; 2]; OPERATORS]; MAX_VOICES];
+        self.phase = [[[0; OPERATORS]; 2]; MAX_VOICES];
+        self.history = [[[[0.0; 2]; OPERATORS]; 2]; MAX_VOICES];
         self.oversampler.reset();
     }
 
@@ -391,12 +429,32 @@ impl Core {
         for mix in &mut self.mix {
             mix[..frames * factor].fill(0.0);
         }
+        self.voice[..frames * factor * 2 * self.stride].fill(0.0);
+        self.hi = 0;
+    }
+
+    /// The operators' rate as a multiple of the sample rate: 2 with
+    /// Antialias, else 1.
+    #[must_use]
+    pub fn factor(&self) -> usize {
+        self.factor
+    }
+
+    /// The stretch's voices' audio for `frames` frames, as rendered so far:
+    /// per frame at the operators' rate, then per channel, one value for
+    /// each of `stride` voices; with the voices from 0 that sounded. A
+    /// device filters it in place before [`finish`](Self::finish).
+    pub fn voices_mut(&mut self, frames: usize) -> (&mut [f32], usize) {
+        let used = frames * self.factor * 2 * self.stride;
+        (&mut self.voice[..used], self.hi)
     }
 
     /// A voice's note starts (R8): a fresh voice's operators start at their
     /// Phase where they Retrigger. A stolen, retriggered or legato voice
-    /// keeps its phases, so taking it never clicks.
-    pub fn start(&mut self, voice: usize, start: Start) {
+    /// keeps its phases, so taking it never clicks. `spread` (0 to 1) is
+    /// the Spread the note keeps until it ends (R26); a second copy starts
+    /// in the first's phase.
+    pub fn start(&mut self, voice: usize, start: Start, spread: f32) {
         if matches!(start, Start::Fresh) {
             for (op, settings) in self.settings.ops.iter().enumerate() {
                 if settings.retrigger {
@@ -406,10 +464,15 @@ impl Core {
                     } else {
                         CYCLE
                     };
-                    self.phase[voice][op] = (f64::from(settings.phase) * cycle) as u32;
+                    self.phase[voice][0][op] = (f64::from(settings.phase) * cycle) as u32;
                 }
             }
-            self.history[voice] = [[0.0; 2]; OPERATORS];
+            self.history[voice][0] = [[0.0; 2]; OPERATORS];
+        }
+        if !matches!(start, Start::Legato) {
+            self.spread[voice] = spread;
+            self.phase[voice][1] = self.phase[voice][0];
+            self.history[voice][1] = self.history[voice][0];
         }
     }
 
@@ -435,10 +498,6 @@ impl Core {
         let internal = self.rate * factor as f64;
         let algorithm = settings.algorithm.min(MODULATORS.len() - 1);
         let normal = 1.0 / carriers(algorithm).count_ones() as f32;
-        // Spec: operator R9. Each 25 % of Tone below 100 % halves the
-        // partials a table plays: a table level chosen for a note that
-        // many times higher.
-        let darker = (f64::from(1.0 - settings.tone.clamp(0.0, 1.0)) * 4.0).exp2();
         let sources = Sources::of(voices);
         // Spec: operator R4. Each voice's ratios, from its velocity.
         let mut ratios = [[0.0f64; OPERATORS]; MAX_VOICES];
@@ -456,14 +515,22 @@ impl Core {
                 *ratio = coarse + f64::from(op.fine) / 1000.0;
             }
         }
+        let stride = self.stride;
         for i in 0..frames.len() {
             for voice in voices.active_voices() {
+                self.hi = self.hi.max(voice + 1);
                 let note = 440.0 * ((state.pitch(voices, voice, &frames, i) - 69.0) / 12.0).exp2();
-                let mut steps = [0u32; OPERATORS];
+                let mut hzs = [0.0f64; OPERATORS];
                 let mut amps = [0.0f32; OPERATORS];
                 let mut feedbacks = [0.0f32; OPERATORS];
+                let first = operator(voice, 0, i);
+                // Spec: operator R9. Each 25 % of Tone below 100 % halves
+                // the partials a table plays: a table level chosen for a
+                // note that many times higher.
+                let tone = (settings.tone + first.tone).clamp(0.0, 1.0);
+                let darker = (f64::from(1.0 - tone) * 4.0).exp2();
                 for (op, s) in settings.ops.iter().enumerate() {
-                    let moves = operator(voice, op, i);
+                    let moves = if op == 0 { first } else { operator(voice, op, i) };
                     let fixed = f64::from(s.freq) * f64::from(s.multi);
                     let mut hz = if s.fixed {
                         fixed
@@ -473,7 +540,7 @@ impl Core {
                     if moves.semitones != 0.0 {
                         hz *= (f64::from(moves.semitones) / 12.0).exp2();
                     }
-                    steps[op] = increment(hz, internal);
+                    hzs[op] = hz;
                     let silent = s.fixed && hz >= FIXED_TOP * self.rate;
                     amps[op] = if s.on && !silent {
                         s.level * moves.gain
@@ -482,22 +549,49 @@ impl Core {
                     };
                     feedbacks[op] = (s.feedback + moves.feedback).clamp(0.0, 1.0);
                 }
-                let mut table_levels = [0usize; OPERATORS];
-                for (op, level) in table_levels.iter_mut().enumerate() {
-                    let scaled = (f64::from(steps[op]) * darker).min(f64::from(u32::MAX)) as u32;
-                    let cached = &mut self.levels[voice][op];
-                    if cached.0 != scaled {
-                        let table = self.tables[0].as_ref().expect("Sine is a table");
-                        *cached = (scaled, table.level_for(scaled));
-                    }
-                    *level = cached.1;
-                }
                 let place = pan(voice, i);
-                for sub in 0..factor {
-                    let out = self.step(voice, algorithm, &steps, &amps, &feedbacks, &table_levels);
-                    let at = (frames.start + i) * factor + sub;
-                    self.mix[0][at] += out * normal * place[0];
-                    self.mix[1][at] += out * normal * place[1];
+                let spread = f64::from(self.spread[voice]);
+                let copies = if spread > 0.0 { 2 } else { 1 };
+                for copy in 0..copies {
+                    // Spec: operator R26. The copies sit ±Spread × 0.25
+                    // semitones either side, hard left and right.
+                    let detune = if copies == 1 {
+                        1.0
+                    } else {
+                        (spread * SPREAD_SEMITONES * if copy == 0 { -1.0 } else { 1.0 } / 12.0)
+                            .exp2()
+                    };
+                    let mut steps = [0u32; OPERATORS];
+                    let mut table_levels = [0usize; OPERATORS];
+                    for op in 0..OPERATORS {
+                        steps[op] = increment(hzs[op] * detune, internal);
+                        let scaled =
+                            (f64::from(steps[op]) * darker).min(f64::from(u32::MAX)) as u32;
+                        let cached = &mut self.levels[voice][copy][op];
+                        if cached.0 != scaled {
+                            let table = self.tables[0].as_ref().expect("Sine is a table");
+                            *cached = (scaled, table.level_for(scaled));
+                        }
+                        table_levels[op] = cached.1;
+                    }
+                    let frame = Frame {
+                        drive: first.drive,
+                        steps,
+                        amps,
+                        feedbacks,
+                        levels: table_levels,
+                    };
+                    let gains = match (copies, copy) {
+                        (1, _) => place,
+                        (_, 0) => [place[0] * COPY_GAIN, 0.0],
+                        _ => [0.0, place[1] * COPY_GAIN],
+                    };
+                    for sub in 0..factor {
+                        let out = self.step(voice, copy, algorithm, &frame);
+                        let at = ((frames.start + i) * factor + sub) * 2 * stride + voice;
+                        self.voice[at] += out * normal * gains[0];
+                        self.voice[at + stride] += out * normal * gains[1];
+                    }
                 }
             }
         }
@@ -506,15 +600,14 @@ impl Core {
     /// One frame at the operators' rate for `voice`: D first and A last
     /// (R1, R2), each one's phase moved by its modulators' outputs and by
     /// its feedback if nothing modulates it (R3). Returns the carriers' sum.
-    fn step(
-        &mut self,
-        voice: usize,
-        algorithm: usize,
-        steps: &[u32; OPERATORS],
-        amps: &[f32; OPERATORS],
-        feedbacks: &[f32; OPERATORS],
-        levels: &[usize; OPERATORS],
-    ) -> f32 {
+    fn step(&mut self, voice: usize, copy: usize, algorithm: usize, f: &Frame) -> f32 {
+        let Frame {
+            drive,
+            steps,
+            amps,
+            feedbacks,
+            levels,
+        } = f;
         let carriers = carriers(algorithm);
         let mut outputs = [0.0f32; OPERATORS];
         let mut mix = 0.0;
@@ -522,11 +615,11 @@ impl Core {
             let s = self.settings.ops[op];
             let phase = if s.wave == NOISE_LOOPED {
                 // The loop's position, in samples at the operators' rate.
-                (self.phase[voice][op] + 1) % (self.looped.len() * self.factor) as u32
+                (self.phase[voice][copy][op] + 1) % (self.looped.len() * self.factor) as u32
             } else {
-                self.phase[voice][op].wrapping_add(steps[op])
+                self.phase[voice][copy][op].wrapping_add(steps[op])
             };
-            self.phase[voice][op] = phase;
+            self.phase[voice][copy][op] = phase;
             let modulators = MODULATORS[algorithm][op];
             let mut moved = 0.0;
             for (m, out) in outputs.iter().enumerate() {
@@ -534,8 +627,8 @@ impl Core {
                     moved += out;
                 }
             }
-            moved *= INDEX;
-            let [last, before] = self.history[voice][op];
+            moved *= INDEX * *drive;
+            let [last, before] = self.history[voice][copy][op];
             if modulators == 0 {
                 moved += feedbacks[op] * FEEDBACK * (last + before) * 0.5;
             }
@@ -545,7 +638,7 @@ impl Core {
                 let at = phase.wrapping_add((moved * UNITS_PER_RADIAN) as i64 as u32);
                 amps[op] * self.read(op, at, levels[op])
             };
-            self.history[voice][op] = [out, last];
+            self.history[voice][copy][op] = [out, last];
             outputs[op] = out;
             if carriers >> op & 1 == 1 {
                 mix += out;
@@ -605,6 +698,15 @@ impl Core {
     /// Ends a stretch of `frames`: the mix, decimated if it was made at
     /// twice the rate (R9), into `left` and `right`.
     pub fn finish(&mut self, frames: usize, left: &mut [f32], right: &mut [f32]) {
+        let (stride, hi) = (self.stride, self.hi);
+        for at in 0..frames * self.factor {
+            for (channel, mix) in self.mix.iter_mut().enumerate() {
+                let from = (at * 2 + channel) * stride;
+                for voice in &self.voice[from..from + hi] {
+                    mix[at] += voice;
+                }
+            }
+        }
         let outs = [&mut left[..frames], &mut right[..frames]];
         if self.factor == 1 {
             for (out, mix) in outs.into_iter().zip(&self.mix) {

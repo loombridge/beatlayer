@@ -1533,7 +1533,7 @@ impl FmInstrument {
                 0xF3,
             ),
             voices: FmVoices {
-                core: fm::Core::new(rate, frames, 0xF3),
+                core: fm::Core::new(rate, frames, 0xF3, MAX_VOICES),
                 envelopes: EnvelopeBank::new(MAX_VOICES, EnvelopeParams::AMP, Timing::new(rate)),
                 levels: vec![0.0; frames * STRIDE],
                 out: vec![0.0; frames],
@@ -1608,7 +1608,7 @@ impl Instrument for FmVoices {
         let voice = event.voice;
         match event.kind {
             VoiceEventKind::Start { start, .. } => {
-                self.core.start(voice, start);
+                self.core.start(voice, start, 0.0);
                 match start {
                     Start::Fresh => self
                         .envelopes

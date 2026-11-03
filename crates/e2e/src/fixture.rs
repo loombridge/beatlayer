@@ -351,6 +351,55 @@ pub fn build(driver: &mut impl Driver) -> Ids {
             .or_default()
             .push(id(&devices, name));
     }
+    // The settings the rich set's references were made with, where Live's
+    // panels start otherwise: Delay's filter off at Q 2.5, four sixteenths a
+    // side and fully wet, Reverb's old defaults and Auto Filter's 12 dB slope
+    // and LFO phase of 0.
+    {
+        use bl_devices::{auto_filter as af, delay as dl, reverb as rv};
+        let pin = |type_: &str, settings: &[(u32, f64)]| -> Vec<Value> {
+            settings
+                .iter()
+                .map(|(param, value)| {
+                    json!({ "command": "device.set_param", "args": {
+                            "device": ids.device(type_), "param": param, "value": value } })
+                })
+                .collect()
+        };
+        let mut pins = pin(
+            DELAY,
+            &[
+                (dl::FILTER.0, 0.0),
+                (dl::WIDTH.0, 2.5),
+                (dl::DRY_WET.0, 100.0),
+                (dl::L_SYNC.0, 4.0),
+                (dl::R_SYNC.0, 4.0),
+            ],
+        );
+        pins.extend(pin(
+            REVERB,
+            &[
+                (rv::HIGH_CUT.0, 0.0),
+                (rv::SPIN_RATE.0, 1.0),
+                (rv::DIFFUSION.0, 50.0),
+                (rv::SCALE.0, 50.0),
+                (rv::CHORUS_RATE.0, 0.5),
+                (rv::PREDELAY.0, 10.0),
+                (rv::SMOOTH.0, 0.0),
+                (rv::DECAY.0, 2.0),
+                (rv::FLAT.0, 0.0),
+                (rv::DENSITY.0, 1.0),
+                (rv::REFLECT.0, 1.0),
+                (rv::DIFFUSE.0, 1.0),
+                (rv::DRY_WET.0, 100.0),
+            ],
+        ));
+        pins.extend(pin(
+            AUTO_FILTER,
+            &[(af::SLOPE.0, 1.0), (af::LFO_PHASE.0, 0.0)],
+        ));
+        driver.batch_ok("Pin the settings the references were made with", pins);
+    }
     ids.chains = vec![id(&devices, "chain")];
     driver.run_ok(
         "device.load_sample",

@@ -797,6 +797,23 @@ fn auto_filter_holds_lives_controls_in_lives_order() {
             "Clip: Toggle",
             "Output: unnamed Slider",
             "Dry/Wet: SmallKnob",
+            // Beatlayer's own band: the other types' controls, the
+            // envelope's and the sidechain filter's.
+            "Morph: Knob",
+            "Control: Knob",
+            "Pitch: Knob",
+            "Formant: Knob",
+            "Env Attack: Knob",
+            "Env Release: Knob",
+            "Env Hold: Toggle",
+            "Env S&H: Toggle",
+            "Env S&H Rate: Chooser",
+            "SC Filter: Toggle",
+            "SC Type: Chooser",
+            "SC Freq: Knob",
+            "SC Q: Knob",
+            "SC Shelf Gain: Knob",
+            "SC Peak Gain: Knob",
         ]
     );
     // Live's new Auto Filter: a low-pass at 10.0 kHz, 24 dB, no resonance, the

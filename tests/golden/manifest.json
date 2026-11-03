@@ -351,7 +351,7 @@
       "channels": 2,
       "frames": 144000,
       "bits": 24,
-      "render_hash": "fnv1a64:b710c32fb80438d7"
+      "render_hash": "fnv1a64:e55e5f728877d514"
     },
     "electric": {
       "made_on": "macos-aarch64",

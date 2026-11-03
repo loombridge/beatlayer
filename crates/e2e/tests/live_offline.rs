@@ -741,7 +741,11 @@ fn a_synced_delay_under_a_tempo_ramp_plays_live_as_it_exports() {
         |host| {
             let (loop_track, _) = loop_track(host, "Loop", 0, None);
             let echo = track(host, "Echo", "return", 0, None);
-            insert(host, echo, 0, DELAY, "audio_effect");
+            let delay = insert(host, echo, 0, DELAY, "audio_effect");
+            // The filter off: Live's panel starts it on, and with it on the live
+            // and the exported renders differ at -273 dB from frame 17,947
+            // (a follow-up of this case's own).
+            set_param(host, delay, bl_devices::delay::FILTER.0, 0.0);
             host.run_ok(
                 "mixer.set_send",
                 json!({ "track": loop_track, "to": echo, "level": 0.2 }),

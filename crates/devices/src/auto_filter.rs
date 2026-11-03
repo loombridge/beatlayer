@@ -462,9 +462,9 @@ pub fn auto_filter_type() -> DeviceType {
 /// stereo mode, phase, offset and quantize along its foot; under it the LFO's
 /// Amount, Rate (one knob that reads the rate in the mode chosen), Wave, Morph
 /// and Mode, and the envelope's Amount; at the right Drive, the circuit, Clip,
-/// Output and Dry/Wet. What the other filter types and the envelope add is in
-/// the part the title bar's toggle shows, with the sidechain filter's controls
-/// (the Sidechain strip at the left is the framework's).
+/// Output and Dry/Wet. What the other filter types, the envelope and the
+/// sidechain filter add is in a band of its own at the far right (the Sidechain
+/// strip at the left is the framework's).
 fn layout() -> DeviceLayout {
     use Widget::{Chooser, Inline, Knob, Segments, Slider, SmallKnob, Toggle};
     const LEFT: f32 = 58.0;
@@ -569,8 +569,9 @@ fn layout() -> DeviceLayout {
             at(DRY_WET, SmallKnob, 10.0, 110.5),
         ],
     );
-    // What the other filter types and the envelope add (Live's panel shows
-    // these where its type, its envelope and its sidechain put them).
+    // What the other filter types, the envelope and the sidechain filter add,
+    // in a band of Beatlayer's own at the right: Live's places for them are not
+    // observed.
     let more = LayoutNode::Band(ControlBand::stacked(
         BODY_HEIGHT,
         &[
@@ -598,8 +599,8 @@ fn layout() -> DeviceLayout {
             LayoutNode::Band(under),
         ]),
         LayoutNode::Band(right),
+        more,
     ]))
-    .with_expanded(more)
 }
 
 pub fn register(registry: &mut Registry) {

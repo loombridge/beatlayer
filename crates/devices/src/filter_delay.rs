@@ -158,13 +158,13 @@ fn line_descriptors(line: usize) -> Vec<ParamDescriptor> {
 #[must_use]
 pub fn filter_delay_type() -> DeviceType {
     let mut params: Vec<ParamDescriptor> = (0..LINES).flat_map(line_descriptors).collect();
-    for line in 0..LINES {
+    for (line, defaults) in DEFAULTS.iter().enumerate() {
         params.push(
             ParamDescriptor::continuous(
                 feedback_param(line),
                 &format!("{} Feedback", line + 1),
                 (0.0, 100.0),
-                DEFAULTS[line].4,
+                defaults.4,
                 ParamUnit::Percent,
             )
             .describe("How much of the line's output feeds back into its own input."),

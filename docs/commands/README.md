@@ -338,6 +338,7 @@ Two parameters that share one control, which a switch turns between: while `swit
 | `switch` | [`ParamId`](#paramid) | yes | The switch. |
 | `off` | [`ParamId`](#paramid) | yes | The parameter the control is while the switch is off. |
 | `on` | [`ParamId`](#paramid) | yes | The parameter the control is while the switch is on. |
+| `at` | integer or null | no | For a switch that is a choice: the choice, by its number, that puts `on` in place (the Drum Sampler's Res is its Peak filter's gain while the type is Peak). Left out, `on` takes over while the switch is on: a toggle, or a choice past its first (Shifter's Freq and Ring modes). |
 
 <details><summary>JSON Schema</summary>
 
@@ -345,6 +346,15 @@ Two parameters that share one control, which a switch turns between: while `swit
 {
   "description": "Two parameters that share one control, which a switch turns between: while `switch` is on the control is `on`'s, and otherwise `off`'s. The layout places `off`'s control only (Limiter's Maximize turns Ceiling into Threshold).",
   "properties": {
+    "at": {
+      "description": "For a switch that is a choice: the choice, by its number, that puts `on` in place (the Drum Sampler's Res is its Peak filter's gain while the type is Peak). Left out, `on` takes over while the switch is on: a toggle, or a choice past its first (Shifter's Freq and Ring modes).",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "off": {
       "$ref": "#/$defs/ParamId",
       "description": "The parameter the control is while the switch is off."
@@ -3160,6 +3170,55 @@ What `set.backups` returns.
   },
   "required": [
     "backups"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `BandLabel`
+
+A line of text in a band that names a control or a pair of them: centred in `width` points from `x`, in a row of [`LABEL_HEIGHT`] at `y`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `text` | string | yes | The text. |
+| `x` | number | yes | Its left edge, from the band's. |
+| `y` | number | yes | Its top edge, from the band's. |
+| `width` | number | yes | The width it is centred in. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A line of text in a band that names a control or a pair of them: centred in `width` points from `x`, in a row of [`LABEL_HEIGHT`] at `y`.",
+  "properties": {
+    "text": {
+      "description": "The text.",
+      "type": "string"
+    },
+    "width": {
+      "description": "The width it is centred in.",
+      "format": "float",
+      "type": "number"
+    },
+    "x": {
+      "description": "Its left edge, from the band's.",
+      "format": "float",
+      "type": "number"
+    },
+    "y": {
+      "description": "Its top edge, from the band's.",
+      "format": "float",
+      "type": "number"
+    }
+  },
+  "required": [
+    "text",
+    "x",
+    "y",
+    "width"
   ],
   "type": "object"
 }
@@ -8048,6 +8107,7 @@ A band of controls, of a fixed size.
 | `width` | number | yes | Its width. |
 | `height` | number | yes | Its height. |
 | `controls` | array of [`Control`](#control) | yes | Its controls. |
+| `labels` | array of [`BandLabel`](#bandlabel) | no | Its text labels, drawn beside the controls they name. |
 | `slots` | [`SlotGroup`](#slotgroup) or null | no | Set for a band that shows the selected sample slot's controls: its controls name the first slot's parameters, and the band is placed for the selected slot ([`DeviceLayout::place_for`]). |
 
 <details><summary>JSON Schema</summary>
@@ -8067,6 +8127,13 @@ A band of controls, of a fixed size.
       "description": "Its height.",
       "format": "float",
       "type": "number"
+    },
+    "labels": {
+      "description": "Its text labels, drawn beside the controls they name.",
+      "items": {
+        "$ref": "#/$defs/BandLabel"
+      },
+      "type": "array"
     },
     "slots": {
       "anyOf": [
@@ -11166,7 +11233,7 @@ A display cell: a graph, a spectrum, a waveform, or an envelope editor, which gr
 | `height` | number | yes | Its docked height, the least it has. |
 | `weight` | number | yes | Its share of extra room, against the other cells it shares with. |
 | `bottom` | [`ControlBand`](#controlband) or null | no | Controls inside its bottom edge, from its left. |
-| `inset` | number | no | How far the black cell sits inside the space its size and weight claim, on every side, in points: Live's cells over a column of controls keep [`PADDING`] from the device's edge. |
+| `inset` | number | no | The space left clear around the cell inside the room it is given, as Live leaves round a Drum Synth's display (L-DEV-047): the cell's size and growth are inside it. |
 | `slot` | integer or null | no | The sample slot the cell stands for, if it does: it shows the slot and takes a click that selects it, and a sample dropped on it (WP-5.17). |
 | `top` | [`ControlBand`](#controlband) or null | no | Controls inside its top edge, from its left. |
 
@@ -11193,7 +11260,7 @@ A display cell: a graph, a spectrum, a waveform, or an envelope editor, which gr
       "type": "number"
     },
     "inset": {
-      "description": "How far the black cell sits inside the space its size and weight claim, on every side, in points: Live's cells over a column of controls keep [`PADDING`] from the device's edge.",
+      "description": "The space left clear around the cell inside the room it is given, as Live leaves round a Drum Synth's display (L-DEV-047): the cell's size and growth are inside it.",
       "format": "float",
       "type": "number"
     },
@@ -14949,6 +15016,9 @@ One of:
 - `"envelope"`: A rise and a fall: an envelope's shape.
 - `"phase"`: A circle cut by a line: a phase.
 - `"spin"`: A circle with an arrow round it: a spin.
+- `"low_pass24"`: A low-pass filter's response at 24 dB per octave.
+- `"high_pass24"`: A high-pass filter's response at 24 dB per octave.
+- `"peak"`: A peak filter's response.
 
 <details><summary>JSON Schema</summary>
 
@@ -15039,6 +15109,21 @@ One of:
     {
       "const": "spin",
       "description": "A circle with an arrow round it: a spin.",
+      "type": "string"
+    },
+    {
+      "const": "low_pass24",
+      "description": "A low-pass filter's response at 24 dB per octave.",
+      "type": "string"
+    },
+    {
+      "const": "high_pass24",
+      "description": "A high-pass filter's response at 24 dB per octave.",
+      "type": "string"
+    },
+    {
+      "const": "peak",
+      "description": "A peak filter's response.",
       "type": "string"
     }
   ]
@@ -17689,6 +17774,63 @@ A label as the sidebar lists it.
     "section",
     "available",
     "shown"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `LabelLaw`
+
+The range a [`ParamLabel`] reads a parameter's travel as: the Drum Sampler's FX1 is Stretch's Factor, 0.25 to 4 across its travel.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `min` | number | yes | The value at the bottom of the travel. |
+| `max` | number | yes | The value at the top of the travel. |
+| `logarithmic` | boolean | yes | Whether each doubling takes the same travel (the range is above 0). |
+| `decimals` | integer from 0 to 255 | yes | How many decimals the value shows. |
+| `unit` | string | yes | The text after it, with its space, or none. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The range a [`ParamLabel`] reads a parameter's travel as: the Drum Sampler's FX1 is Stretch's Factor, 0.25 to 4 across its travel.",
+  "properties": {
+    "decimals": {
+      "description": "How many decimals the value shows.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "logarithmic": {
+      "description": "Whether each doubling takes the same travel (the range is above 0).",
+      "type": "boolean"
+    },
+    "max": {
+      "description": "The value at the top of the travel.",
+      "format": "double",
+      "type": "number"
+    },
+    "min": {
+      "description": "The value at the bottom of the travel.",
+      "format": "double",
+      "type": "number"
+    },
+    "unit": {
+      "description": "The text after it, with its space, or none.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "min",
+    "max",
+    "logarithmic",
+    "decimals",
+    "unit"
   ],
   "type": "object"
 }
@@ -25229,6 +25371,7 @@ What a [`Relabel`] gives a parameter.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | yes | Its name. |
+| `law` | [`LabelLaw`](#labellaw) or null | no | The scale its number reads on instead of its own, where the label gives the parameter's travel a range of its own. |
 | `unit` | string or null | no | The unit its number reads in instead of its own, as text. |
 
 <details><summary>JSON Schema</summary>
@@ -25237,6 +25380,17 @@ What a [`Relabel`] gives a parameter.
 {
   "description": "What a [`Relabel`] gives a parameter.",
   "properties": {
+    "law": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LabelLaw"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The scale its number reads on instead of its own, where the label gives the parameter's travel a range of its own."
+    },
     "name": {
       "description": "Its name.",
       "type": "string"
@@ -42938,12 +43092,19 @@ One of:
 - an object with `beside_switch` (integer from 0 to 255): A button that reads On or Off, lit while on, with its name in dim text to its left (Spectral Resonator's MIDI Gate): the number is the points the name has before the button.
 - `"check"`: A small square that is filled while on, with the name after it (Spectral Resonator's Quantize).
 - `"pill"`: A small pill that shows which of a choice parameter's choices is chosen by where its dot sits, a click moving it on (Pedal's Mid frequency).
-- `"cycle"`: A single text button holding the chosen choice's name, lit in the accent, a click taking the next choice and the last going round to the first (Resonators' Mode).
 - an object with `icon_column` (integer from 0 to 255): A column of that many icon buttons, one for each choice of a choice parameter, the chosen one lit (Resonators' filter types).
 - `"lit_chooser"`: A chooser whose box is filled blue like a lit number box (Saturator's curve).
-- `"bare_chooser"`: A chooser with no box: the value in the blue text and a small ▼ after it, its name in dim text above (Vocoder's Bands) unless the control is [`unnamed`](Control::unnamed) (Saturator's Post Clip).
-- `"bare"`: A number with no box: the value in the accent colour from the left, its name in dim text above unless the control is [`unnamed`](Control::unnamed) (Vocoder's Range).
+- `"unboxed_chooser"`: A chooser with no box: the value in the blue text and a small ▼ after it, its name in dim text above (Vocoder's Bands) unless the control is [`unnamed`](Control::unnamed) (Saturator's Post Clip).
+- `"unboxed"`: A number with no box: the value in the accent colour from the left, its name in dim text above unless the control is [`unnamed`](Control::unnamed) (Vocoder's Range).
 - `"readout"`: A name in the dim text colour with the value after it in the accent, no box, dragged or typed (Saturator's Amt Lo along the display's foot).
+- `"large"`: The Drum Synths' large display numbers: the name above, the value in large figures in the accent, and its unit under them.
+- `"bare"`: A number box with no name row: the device's own label sits beside or above it ([`BandLabel`]).
+- `"bare_slider"`: A [`Bare`](Self::Bare) box whose blue fill shows the value's place in its range, as [`Slider`](Self::Slider)'s does.
+- `"framed"`: A [`Bare`](Self::Bare) box outlined in the accent: the Drum Synths' display boxes.
+- an object with `abbreviated` (integer from 0 to 255): A text button like [`Toggle`](Self::Toggle) that holds only the first that many characters of its parameter's name (Impulse's M, S and Sat).
+- `"bare_chooser"`: A [`Chooser`](Self::Chooser) with no name row: the device's own label is beside it, or it needs none (the Drum Sampler's effect type).
+- `"cycle"`: A lit text button holding the chosen choice's name, a press taking the next choice and the last going round to the first (the Drum Sampler's modulation source, Resonators' Mode).
+- `"inline"`: The name and the value on one line, the value in the accent, dragged or typed (the Drum Sampler's Start, Length and Gain under its sample).
 
 <details><summary>JSON Schema</summary>
 
@@ -43141,11 +43302,6 @@ One of:
       "type": "string"
     },
     {
-      "const": "cycle",
-      "description": "A single text button holding the chosen choice's name, lit in the accent, a click taking the next choice and the last going round to the first (Resonators' Mode).",
-      "type": "string"
-    },
-    {
       "additionalProperties": false,
       "description": "A column of that many icon buttons, one for each choice of a choice parameter, the chosen one lit (Resonators' filter types).",
       "properties": {
@@ -43167,18 +43323,69 @@ One of:
       "type": "string"
     },
     {
-      "const": "bare_chooser",
+      "const": "unboxed_chooser",
       "description": "A chooser with no box: the value in the blue text and a small ▼ after it, its name in dim text above (Vocoder's Bands) unless the control is [`unnamed`](Control::unnamed) (Saturator's Post Clip).",
       "type": "string"
     },
     {
-      "const": "bare",
+      "const": "unboxed",
       "description": "A number with no box: the value in the accent colour from the left, its name in dim text above unless the control is [`unnamed`](Control::unnamed) (Vocoder's Range).",
       "type": "string"
     },
     {
       "const": "readout",
       "description": "A name in the dim text colour with the value after it in the accent, no box, dragged or typed (Saturator's Amt Lo along the display's foot).",
+      "type": "string"
+    },
+    {
+      "const": "large",
+      "description": "The Drum Synths' large display numbers: the name above, the value in large figures in the accent, and its unit under them.",
+      "type": "string"
+    },
+    {
+      "const": "bare",
+      "description": "A number box with no name row: the device's own label sits beside or above it ([`BandLabel`]).",
+      "type": "string"
+    },
+    {
+      "const": "bare_slider",
+      "description": "A [`Bare`](Self::Bare) box whose blue fill shows the value's place in its range, as [`Slider`](Self::Slider)'s does.",
+      "type": "string"
+    },
+    {
+      "const": "framed",
+      "description": "A [`Bare`](Self::Bare) box outlined in the accent: the Drum Synths' display boxes.",
+      "type": "string"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A text button like [`Toggle`](Self::Toggle) that holds only the first that many characters of its parameter's name (Impulse's M, S and Sat).",
+      "properties": {
+        "abbreviated": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "abbreviated"
+      ],
+      "type": "object"
+    },
+    {
+      "const": "bare_chooser",
+      "description": "A [`Chooser`](Self::Chooser) with no name row: the device's own label is beside it, or it needs none (the Drum Sampler's effect type).",
+      "type": "string"
+    },
+    {
+      "const": "cycle",
+      "description": "A lit text button holding the chosen choice's name, a press taking the next choice and the last going round to the first (the Drum Sampler's modulation source, Resonators' Mode).",
+      "type": "string"
+    },
+    {
+      "const": "inline",
+      "description": "The name and the value on one line, the value in the accent, dragged or typed (the Drum Sampler's Start, Length and Gain under its sample).",
       "type": "string"
     }
   ]

@@ -317,7 +317,7 @@ fn layout() -> DeviceLayout {
                         .sized(82.6, 11.0),
                 ],
             )),
-            LayoutNode::Cell(DisplayCell::new("Carrier", 90.6, 74.5, 1.0).with_inset(4.0)),
+            LayoutNode::Cell(DisplayCell::new("Carrier", 82.6, 66.5, 1.0).with_inset(4.0)),
             LayoutNode::Band(ControlBand::free(
                 90.6,
                 53.0,
@@ -329,25 +329,25 @@ fn layout() -> DeviceLayout {
             )),
         ]),
         LayoutNode::Cell(
-            DisplayCell::new("Band Display", 224.6, BODY_HEIGHT, 1.0)
+            DisplayCell::new("Band Display", 216.6, BODY_HEIGHT - 8.0, 1.0)
                 .with_inset(4.0)
                 .with_bottom(ControlBand::free(
                     216.6,
                     40.0,
                     vec![
-                        Control::new(BANDS, Widget::BareChooser, 7.0, 1.0).sized(32.0, 21.0),
-                        Control::new(RANGE_HIGH, Widget::Bare, 47.7, 1.0)
+                        Control::new(BANDS, Widget::UnboxedChooser, 7.0, 1.0).sized(32.0, 21.0),
+                        Control::new(RANGE_HIGH, Widget::Unboxed, 47.7, 1.0)
                             .captioned("Range")
                             .sized(45.0, 21.0),
-                        Control::new(RANGE_LOW, Widget::Bare, 47.7, 25.0)
+                        Control::new(RANGE_LOW, Widget::Unboxed, 47.7, 25.0)
                             .unnamed()
                             .sized(45.0, BOX_HEIGHT),
-                        Control::new(BW, Widget::Bare, 93.6, 1.0)
+                        Control::new(BW, Widget::Unboxed, 93.6, 1.0)
                             .captioned("Width")
                             .sized(30.0, 21.0),
                         Control::new(FILTER_MODE, Widget::Cycle, 93.0, 26.0).sized(35.0, 11.0),
-                        Control::new(GATE, Widget::Bare, 134.0, 1.0).sized(38.0, 21.0),
-                        Control::new(LEVEL, Widget::Bare, 174.5, 1.0)
+                        Control::new(GATE, Widget::Unboxed, 134.0, 1.0).sized(38.0, 21.0),
+                        Control::new(LEVEL, Widget::Unboxed, 174.5, 1.0)
                             .captioned("Output")
                             .sized(36.0, 21.0),
                     ],

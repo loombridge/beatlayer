@@ -310,7 +310,7 @@ pub fn saturator_type() -> DeviceType {
     ];
     let layout = DeviceLayout::new(LayoutNode::Column(vec![
         LayoutNode::Cell(
-            DisplayCell::new("Shaper Curve", 210.0, 108.0, 1.0)
+            DisplayCell::new("Shaper Curve", 202.0, 100.0, 1.0)
                 .with_inset(4.0)
                 .with_top(ControlBand::free(
                     101.0,
@@ -321,7 +321,7 @@ pub fn saturator_type() -> DeviceType {
                     202.0,
                     17.0,
                     vec![
-                        Control::new(POST_CLIP, Widget::BareChooser, 16.0, 2.0)
+                        Control::new(POST_CLIP, Widget::UnboxedChooser, 16.0, 2.0)
                             .unnamed()
                             .sized(56.0, BOX_HEIGHT),
                         Control::new(COLOR, Widget::Toggle, 82.0, 2.0).sized(38.0, BOX_HEIGHT),

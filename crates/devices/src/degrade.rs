@@ -94,7 +94,7 @@ pub fn degrade_type() -> DeviceType {
     ];
     let layout = DeviceLayout::new(LayoutNode::Column(vec![
         LayoutNode::Cell(
-            DisplayCell::new("Spectrum", 190.0, 92.0, 1.0)
+            DisplayCell::new("Spectrum", 182.0, 84.0, 1.0)
                 .with_inset(4.0)
                 .with_bottom(ControlBand::free(
                     182.0,

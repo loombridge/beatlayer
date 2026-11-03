@@ -2008,7 +2008,7 @@ impl SampleEditorUi {
                     "WP-4.9 (tempo detection and auto-warp)",
                 );
             }
-            ui.separator();
+            crate::menus::separator(ui);
             run(
                 ui,
                 "Insert Warp Marker",
@@ -2029,16 +2029,16 @@ impl SampleEditorUi {
                 "clip.reset_transients",
                 json!({ "clip": clip }),
             );
-            ui.separator();
+            crate::menus::separator(ui);
             run(ui, "Quantize", "clip.quantize_audio", json!({}));
-            ui.separator();
+            crate::menus::separator(ui);
             // Spec: audio-clip-editing R14, R16. The Sample Editor's own
             // names for Crop Clip.
             run(ui, "Crop Clip Sample", "clip.crop", json!({ "clip": clip }));
             if let Some(span) = crop_selection.clone() {
                 run(ui, "Crop Clip Sample to Time Selection", "clip.crop", span);
             }
-            ui.separator();
+            crate::menus::separator(ui);
             run(
                 ui,
                 "Show in Browser",

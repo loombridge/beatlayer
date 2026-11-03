@@ -124,18 +124,47 @@ pub struct Colours {
     pub track_palette: Vec<Colour>,
 }
 
-/// The size tokens, in points.
+/// The size tokens, in points at 100 % zoom (the UI parity reference,
+/// layout rows L-CTRL, L-BRW, L-INFO and L-ARR). The font sizes are set so
+/// the bundled typeface's capitals stand as high as Live's text does.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Sizes {
-    /// Body text.
+    /// Body text: capitals 7 points high.
     pub text: f32,
-    /// Small text, such as the Status Bar's.
+    /// Small text, such as the Control Bar's and Status Bar's: capitals
+    /// 6.5 points high.
     pub small_text: f32,
-    /// Headings, such as the Settings window's sections.
+    /// Headings, such as the Info View's title: capitals 7.5 points high.
     pub heading: f32,
     /// Controls' corner radius.
     pub corner: f32,
+    /// A Control Bar field's height.
+    pub control_field: f32,
+    /// A chooser's height in an Arrangement View track header's In/Out
+    /// column, and the distance from one to the next.
+    pub header_chooser: f32,
+    pub header_chooser_pitch: f32,
+    /// The distance between the rows of a list: the browser's, the Undo
+    /// History's, the Groove Pool's and the other lists'.
+    pub list_row: f32,
+    /// The distance between the rows of a menu, and the space a separator
+    /// adds between two of them.
+    pub menu_row: f32,
+    pub menu_separator: f32,
+    /// The distance between the lines of the Info View.
+    pub info_line: f32,
+}
+
+impl Sizes {
+    /// The bundled theme's sizes, for layout that has no theme in hand. The
+    /// two bundled themes share them; a theme file's own sizes reach what
+    /// is drawn from a [`Theme`] only.
+    #[must_use]
+    pub fn bundled() -> &'static Self {
+        static BUNDLED: std::sync::OnceLock<Sizes> = std::sync::OnceLock::new();
+        BUNDLED.get_or_init(|| Theme::bundled(true).sizes)
+    }
 }
 
 /// A theme: its name, whether it's dark, and its tokens.
@@ -301,6 +330,9 @@ impl Theme {
         });
         ctx.set_visuals(self.visuals());
         ctx.all_styles_mut(|style| {
+            // A menu's rows are `menu_row` apart: its buttons are as tall as
+            // the pitch less the space between rows.
+            style.spacing.interact_size.y = self.sizes.menu_row - style.spacing.item_spacing.y;
             for (text_style, font) in &mut style.text_styles {
                 font.size = match text_style {
                     egui::TextStyle::Small => self.sizes.small_text,

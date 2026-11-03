@@ -1215,7 +1215,7 @@ fn clicking_a_slot_cell_shows_that_slots_controls() {
         .unwrap();
     h.settle();
     let nodes = Harness::nodes(&h.settle());
-    assert_eq!(Harness::node(&nodes, "Slot 1 Pan").value, "0");
+    assert_eq!(Harness::node(&nodes, "Slot 1 Pan").value, "C");
     let cell = Harness::node(&nodes, "Slot 4");
     assert_eq!(cell.role, Role::Button);
     assert!(
@@ -1235,7 +1235,7 @@ fn clicking_a_slot_cell_shows_that_slots_controls() {
     h.settle();
     assert_eq!(selected_slot(&h, device), 3);
     let nodes = Harness::nodes(&h.settle());
-    assert_eq!(Harness::node(&nodes, "Slot 4 Pan").value, "-20");
+    assert_eq!(Harness::node(&nodes, "Slot 4 Pan").value, "20L");
     assert!(
         nodes.iter().all(|n| n.label != "Slot 1 Pan"),
         "slot 1's controls are gone"

@@ -76,7 +76,14 @@ track_palette = [
 ]
 
 [sizes]
-text = 11.0
-small_text = 10.0
-heading = 12.0
+text = 9.6
+small_text = 8.9
+heading = 10.3
 corner = 2.0
+control_field = 16.0
+header_chooser = 12.0
+header_chooser_pitch = 17.0
+list_row = 19.0
+menu_row = 15.0
+menu_separator = 6.0
+info_line = 15.0

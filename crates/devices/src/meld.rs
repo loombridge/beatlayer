@@ -1,7 +1,8 @@
-//! Meld, parts 1 and 2 (spec: meld R1 to R39): two engines, each an oscillator
+//! Meld, parts 1 to 3 (spec: meld R1 to R58): two engines, each an oscillator
 //! of one of twenty-five types ([`meld_osc`]'s tables and lanes, the FM
-//! core's four FM types, [`meld_gen`]'s noise and texture types), a state-
-//! variable filter and an amplitude envelope, mixed per voice in the Mix
+//! core's four FM types, [`meld_gen`]'s noise and texture types), a filter
+//! of one of seventeen types ([`meld_filter`]) and an amplitude envelope,
+//! mixed per voice in the Mix
 //! section under the global Mixer Drive, Limit and Volume, on the voice
 //! section. The envelopes' other parts, the LFOs, the matrix and the
 //! panel's other tabs are Meld's next parts.
@@ -36,7 +37,8 @@ use crate::analogue::note_seed;
 use crate::fm;
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::instrument::{self, Instrument, Parts, Section, State};
-use crate::instrument_filter::{InstrumentFilter, Per, PerFrame, Setup};
+use crate::instrument_filter::{Per, PerFrame};
+use crate::meld_filter::{Controls, MeldFilter};
 use crate::meld_gen::{self, Gen, Pitch};
 use crate::meld_osc::{
     self, Bank, CHUNK, Context, Kind, LOOPS, MACROS, MAX_LANES, SWARM_COPIES, TYPES,
@@ -101,8 +103,7 @@ pub const MAX_VOICES: usize = 12;
 pub const MAX_STACK: usize = 4;
 const SLOTS: usize = MAX_VOICES * MAX_STACK;
 
-/// The filter types' names, in the manual's order (R40); the first two are
-/// built.
+/// The filter types' names, in the manual's order (R40).
 const FILTERS: [&str; 17] = [
     "SVF 12dB",
     "SVF 24dB",
@@ -462,6 +463,7 @@ pub fn meld_type() -> DeviceType {
                         ParamLabel {
                             name: "Semitones".to_owned(),
                             unit: Some("sd".to_owned()),
+                            law: None,
                         },
                     ],
                 },
@@ -734,6 +736,7 @@ struct Snapshot {
     phase_reset: bool,
     phase_spread: f32,
     osc_scale: bool,
+    filter_scale: bool,
     spread: f32,
 }
 
@@ -812,7 +815,7 @@ struct Voices {
     top: f32,
     envelopes: [EnvelopeBank; 2],
     levels: [Vec<f32>; 2],
-    filter: InstrumentFilter,
+    filter: MeldFilter,
     slots: [Slot; SLOTS],
     lanes: Vec<meld_osc::Lanes>,
     snap: Snapshot,
@@ -853,7 +856,7 @@ impl Voices {
         let envelope = || EnvelopeBank::new(MAX_VOICES, EnvelopeParams::AMP, Timing::new(rate));
         let envelopes = [envelope(), envelope()];
         let envelope_stride = envelopes[0].stride();
-        let filter = InstrumentFilter::new(rate as f32, SLOTS, frames);
+        let filter = MeldFilter::new(rate as f32, SLOTS, frames);
         let filter_stride = filter.stride();
         let ramp = || vec![0.0; frames];
         Self {
@@ -934,7 +937,7 @@ impl Voices {
         ramp(&mut self.pan[..frames], id(PAN), 0.01);
         ramp(&mut self.tone[..frames], id(TONE), 0.01);
         ramp(&mut self.cutoff[..frames], id(FILTER_FREQ), 1.0);
-        self.drive[..frames].fill(0.0);
+        ramp(&mut self.drive[..frames], id(FILTER_MACRO_2), 0.01);
         let snap = Snapshot {
             on: value(id(ON)) >= 0.5,
             kind: value(id(TYPE)) as usize,
@@ -947,6 +950,7 @@ impl Voices {
             phase_reset: value(id(PHASE_RESET)) >= 0.5,
             phase_spread: (value(id(PHASE_SPREAD)) / 100.0) as f32,
             osc_scale: value(id(OSC_SCALE)) >= 0.5,
+            filter_scale: value(id(FILTER_SCALE)) >= 0.5,
             spread: (value(SPREAD) / 100.0) as f32,
         };
         if snap.kind != self.snap.kind || self.current == usize::MAX {
@@ -966,8 +970,7 @@ impl Voices {
                 ..curve
             });
         }
-        self.filter
-            .set_setup(Setup::new(4, snap.filter_type == 1, 0));
+        self.filter.set_type(snap.filter_type);
         for k in 0..frames {
             self.cutoffs[k * self.filter_stride..(k + 1) * self.filter_stride]
                 .fill(pitch_of(self.cutoff[k], 440.0));
@@ -1167,7 +1170,7 @@ impl Voices {
             let s = &mut self.slots[slot];
             s.run = initial_run(self.current, s.noise_state);
             s.target[0] = s.run;
-            self.filter.reset_voice(slot, 0);
+            self.filter.reset_voice(slot);
             self.start_sound(slot, self.snap.phase_reset);
         }
     }
@@ -1243,9 +1246,7 @@ impl Voices {
                 at += n;
             }
         }
-        // The filter's first two types are built; the others pass the signal
-        // until Meld's next part.
-        if on && self.snap.filter_on && self.snap.filter_type < 2 {
+        if on && self.snap.filter_on {
             let stride = self.filter_stride;
             let (start, end) = (frames.start, frames.end);
             let per = PerFrame {
@@ -1254,8 +1255,22 @@ impl Voices {
                 morph: Per::Shared(&self.morph[start..end]),
                 drive: Per::Shared(&self.drive[start..end]),
             };
-            self.filter
-                .process(used, count, &per, &mut self.signal[..count * 2 * stride]);
+            // Spec: meld R52. The resonators snap to the current scale while
+            // both Use Current Scale and Filter Scale Awareness are on.
+            let scale = (self.snap.filter_scale && state.scale().enabled).then(|| *state.scale());
+            let controls = Controls {
+                frame: per,
+                hz: &self.cutoff[start..end],
+                macro_1: &self.res[start..end],
+                macro_2: &self.drive[start..end],
+                scale,
+            };
+            self.filter.process(
+                used,
+                count,
+                &controls,
+                &mut self.signal[..count * 2 * stride],
+            );
         }
         self.mix(frames, used);
     }

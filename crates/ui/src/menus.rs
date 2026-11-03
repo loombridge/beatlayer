@@ -333,7 +333,7 @@ fn items(
 ) {
     for item in shown(items_) {
         if item.is_separator() {
-            ui.separator();
+            separator(ui);
             continue;
         }
         if item.action == Action::Submenu {
@@ -434,6 +434,14 @@ pub(crate) fn item_in_with_args(
 /// the items after it. It is no item, so the arrow keys pass it by.
 pub(crate) fn heading(ui: &mut Ui, text: &str) -> egui::Response {
     ui.add_enabled(false, egui::Button::new(text))
+}
+
+/// Draws a menu's separator, which adds the theme's `menu_separator` between
+/// two rows.
+pub(crate) fn separator(ui: &mut Ui) {
+    let space = ui.spacing().item_spacing.y;
+    let gap = crate::theme::Sizes::bundled().menu_separator - space;
+    ui.add(egui::Separator::default().spacing(gap.max(0.0)));
 }
 
 /// Draws a menu item whose [`ItemState`] the caller has settled, as a

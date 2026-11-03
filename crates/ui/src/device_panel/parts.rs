@@ -10,7 +10,7 @@ use std::f32::consts::{FRAC_PI_2, PI};
 
 use bl_model::ParamId;
 use bl_model::device_layout::{
-    BOX_HEIGHT, Glyph, KNOB_DIAMETER, LABEL_HEIGHT, PlacedHeading, PlacedPages,
+    BOX_HEIGHT, Glyph, KNOB_DIAMETER, LABEL_HEIGHT, PlacedHeading, PlacedLabel, PlacedPages,
     SMALL_KNOB_DIAMETER, STRIP_HIDDEN, STRIP_SHOWN, STRIP_WIDTH, TitlePart, Unit, UnitPair,
 };
 use bl_shell::Invocation;
@@ -37,6 +37,14 @@ pub const BOX_CORNER: f32 = 1.0;
 /// The stroke of a knob's ring and its lit arc, in points (observed).
 const RING: f32 = 2.0;
 
+/// The size of the Drum Synths' large numbers, in points: Live's figures are
+/// 12.6 points tall (observed in Live 12.4.16, 2 November 2026).
+const LARGE_TEXT: f32 = 17.5;
+
+/// Where a large number's figures start under the top of its control, in
+/// points: the name's row and a gap (observed).
+const LARGE_NUMBER_TOP: f32 = 11.0;
+
 /// The font of a device's labels, values and buttons.
 #[must_use]
 pub fn font() -> FontId {
@@ -51,7 +59,9 @@ pub(super) enum ChooserStyle {
     /// Filled like a lit number box.
     Lit,
     /// No box: the value in the accent colour and a small ▼.
-    Bare,
+    Unboxed,
+    /// A dark box with no name row.
+    Nameless,
 }
 
 /// What a control's face is made of while lit and while not, by the look of
@@ -165,7 +175,9 @@ impl Control<'_> {
         painter.text(
             value_row.center(),
             Align2::CENTER_CENTER,
-            self.descriptor.format(self.shown()),
+            self.text
+                .clone()
+                .unwrap_or_else(|| self.descriptor.format(self.shown())),
             font(),
             c.text.0,
         );
@@ -454,10 +466,10 @@ impl Control<'_> {
         events: &mut Vec<UiEvent>,
         style: ChooserStyle,
     ) {
-        let below = if style == ChooserStyle::Bare {
-            self.dim_label(ui, theme)
-        } else {
-            self.label(ui, theme)
+        let below = match style {
+            ChooserStyle::Unboxed => self.dim_label(ui, theme),
+            ChooserStyle::Nameless => self.rect,
+            ChooserStyle::Plain | ChooserStyle::Lit => self.label(ui, theme),
         };
         let field = Rect::from_min_size(below.min, vec2(below.width(), BOX_HEIGHT));
         let response = ui.interact(field, self.id(), Sense::click());
@@ -465,15 +477,15 @@ impl Control<'_> {
         let c = &theme.colors;
         let painter = ui.painter();
         let (fill, ink) = match style {
-            ChooserStyle::Plain => (Some(c.window.0), c.text.0),
+            ChooserStyle::Plain | ChooserStyle::Nameless => (Some(c.window.0), c.text.0),
             ChooserStyle::Lit => (Some(c.value_fill.0), c.text.0),
-            ChooserStyle::Bare => (None, c.value_fill.0),
+            ChooserStyle::Unboxed => (None, c.value_fill.0),
         };
         if let Some(fill) = fill {
             painter.rect_filled(field, BOX_CORNER, fill);
         }
         let text = self.descriptor.format(self.value);
-        if style == ChooserStyle::Bare {
+        if style == ChooserStyle::Unboxed {
             // The value from the box's left, the ▼ after it.
             let used = painter
                 .text(
@@ -593,11 +605,16 @@ impl Control<'_> {
         ui: &mut Ui,
         theme: &Theme,
         events: &mut Vec<UiEvent>,
-        outlined: bool,
+        (outlined, chars): (bool, Option<usize>),
     ) {
         let look = if outlined { Look::Outlined } else { Look::Dark };
         let on = self.on();
         let name = self.name();
+        let name = chars.map_or(name, |n| {
+            name.char_indices()
+                .nth(n)
+                .map_or(name, |(end, _)| &name[..end])
+        });
         let response = self.button(
             ui,
             theme,
@@ -632,6 +649,8 @@ impl Control<'_> {
             };
             self.change(((self.value.round() as usize + 1) % count) as f64, events);
         }
+        let name = self.descriptor.name.clone();
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &name));
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_role(Role::Button);
             node.set_label(self.descriptor.name.clone());
@@ -673,6 +692,121 @@ impl Control<'_> {
         });
     }
 
+    /// The Drum Synths' large number: the name above, the value in large
+    /// figures in the accent, and its unit under them (or the device's own
+    /// line, [`Control::under`]).
+    pub(super) fn large(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
+        let below = self.label(ui, theme);
+        let response = ui.interact(self.rect, self.id(), Sense::click_and_drag());
+        crate::focus::register(ui.ctx(), self.id(), bl_shell::Area::Detail, None);
+        self.value_input(ui, &response, events);
+        let c = &theme.colors;
+        let text = self
+            .text
+            .clone()
+            .unwrap_or_else(|| self.descriptor.format(self.shown()));
+        let (number, unit) = text.rsplit_once(' ').unwrap_or((&text, ""));
+        let painter = ui.painter();
+        let x = below.center().x;
+        painter.text(
+            pos2(x, self.rect.top() + LARGE_NUMBER_TOP),
+            Align2::CENTER_TOP,
+            number,
+            FontId::proportional(LARGE_TEXT),
+            self.lit(theme),
+        );
+        painter.text(
+            pos2(x, self.rect.bottom()),
+            Align2::CENTER_BOTTOM,
+            self.under.as_deref().unwrap_or(unit),
+            font(),
+            c.text_dim.0,
+        );
+        focus_ring(ui, theme, self.rect, &response);
+        self.describe(ui, &response, Role::SpinButton);
+    }
+
+    /// A box with no name row, its value centred; outlined in the accent
+    /// where `outlined`, filled to the value's place in its range where
+    /// `lit`.
+    pub(super) fn boxed(
+        &self,
+        ui: &mut Ui,
+        theme: &Theme,
+        events: &mut Vec<UiEvent>,
+        (outlined, lit): (bool, bool),
+    ) {
+        let field = Rect::from_min_size(self.rect.min, vec2(self.rect.width(), BOX_HEIGHT));
+        let response = ui.interact(field, self.id(), Sense::click_and_drag());
+        crate::focus::register(ui.ctx(), self.id(), bl_shell::Area::Detail, None);
+        self.value_input(ui, &response, events);
+        let c = &theme.colors;
+        let painter = ui.painter();
+        painter.rect_filled(field, BOX_CORNER, c.window.0);
+        if lit {
+            let n = self.descriptor.normalize(self.value) as f32;
+            let fill = if self.enabled {
+                c.value_fill.0
+            } else {
+                super::highlight(theme, false)
+            };
+            painter.rect_filled(
+                Rect::from_min_size(field.min, vec2(field.width() * n, field.height())),
+                BOX_CORNER,
+                fill,
+            );
+        }
+        let ink = if outlined {
+            painter.rect_stroke(
+                field.shrink(0.5),
+                BOX_CORNER,
+                Stroke::new(1.0, self.lit(theme)),
+                StrokeKind::Inside,
+            );
+            self.lit(theme)
+        } else {
+            c.text.0
+        };
+        painter.text(
+            field.center(),
+            Align2::CENTER_CENTER,
+            self.text
+                .clone()
+                .unwrap_or_else(|| self.descriptor.format(self.shown())),
+            font(),
+            ink,
+        );
+        focus_ring(ui, theme, field, &response);
+        self.describe(ui, &response, Role::SpinButton);
+    }
+
+    /// The name and the value on one line, the value in the accent.
+    pub(super) fn inline(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
+        let response = ui.interact(self.rect, self.id(), Sense::click_and_drag());
+        crate::focus::register(ui.ctx(), self.id(), bl_shell::Area::Detail, None);
+        self.value_input(ui, &response, events);
+        let c = &theme.colors;
+        let painter = ui.painter();
+        let name = short_name(&self.descriptor.name);
+        let wide = text_width(painter, name, c.text_dim.0);
+        painter.text(
+            self.rect.left_center(),
+            Align2::LEFT_CENTER,
+            name,
+            font(),
+            c.text_dim.0,
+        );
+        painter.text(
+            self.rect.left_center() + vec2(wide + 4.0, 0.0),
+            Align2::LEFT_CENTER,
+            self.descriptor.format(self.shown()),
+            font(),
+            self.lit(theme),
+        );
+        focus_ring(ui, theme, self.rect, &response);
+        self.describe(ui, &response, Role::SpinButton);
+    }
+
     /// The choices of a choice parameter as buttons in `cells`, the chosen
     /// one lit: a row, a stack or a grid. `icons` draws each as the icon of
     /// its name.
@@ -688,7 +822,7 @@ impl Control<'_> {
         };
         for (index, (rect, choice)) in cells.iter().zip(choices).enumerate() {
             let chosen = index as f64 == self.value;
-            let glyph = icons.then(|| glyph_for(choice)).flatten();
+            let glyph = icons.then(|| filter_glyph(choice)).flatten();
             let id = self.id().with(index);
             let face = glyph.map_or(Face::Text(choice), Face::Glyph);
             let response = self.button(ui, theme, (*rect, id), (Look::Dark, chosen), face);
@@ -807,6 +941,20 @@ pub fn glyph_for(choice: &str) -> Option<Glyph> {
     }
 }
 
+/// The icon of a choice on a button of filter types: [`glyph_for`]'s, and the
+/// steeper 24 dB per octave slopes and the peak that the Drum Sampler's four
+/// types need.
+#[must_use]
+pub fn filter_glyph(choice: &str) -> Option<Glyph> {
+    let name = choice.to_ascii_lowercase();
+    match glyph_for(choice) {
+        Some(Glyph::LowPass) if name.contains("24") => Some(Glyph::LowPass24),
+        Some(Glyph::HighPass) if name.contains("24") => Some(Glyph::HighPass24),
+        None if name.contains("peak") => Some(Glyph::Peak),
+        found => found,
+    }
+}
+
 /// Draws `glyph` in `rect` in `ink`.
 pub fn paint_glyph(painter: &Painter, rect: Rect, glyph: Glyph, ink: Color32) {
     let c = rect.center();
@@ -842,6 +990,16 @@ pub fn paint_glyph(painter: &Painter, rect: Rect, glyph: Glyph, ink: Color32) {
         }
         Glyph::LowPass => line(&[(-0.9, -0.3), (0.0, -0.3), (0.5, -0.1), (0.9, 0.6)]),
         Glyph::HighPass => line(&[(0.9, -0.3), (0.0, -0.3), (-0.5, -0.1), (-0.9, 0.6)]),
+        Glyph::LowPass24 => line(&[(-0.9, -0.3), (0.1, -0.3), (0.4, -0.1), (0.55, 0.7)]),
+        Glyph::HighPass24 => line(&[(0.9, -0.3), (-0.1, -0.3), (-0.4, -0.1), (-0.55, 0.7)]),
+        Glyph::Peak => line(&[
+            (-0.9, 0.2),
+            (-0.3, 0.2),
+            (-0.1, -0.5),
+            (0.1, -0.5),
+            (0.3, 0.2),
+            (0.9, 0.2),
+        ]),
         Glyph::BandPass => line(&[
             (-0.9, 0.5),
             (-0.4, 0.4),
@@ -890,6 +1048,21 @@ pub fn paint_glyph(painter: &Painter, rect: Rect, glyph: Glyph, ink: Color32) {
             line(&[(0.1, 0.4), (1.0, 0.15)]);
         }
     }
+}
+
+/// A band's text label, centred in its place.
+pub(super) fn band_label(ui: &Ui, theme: &Theme, placed: &PlacedLabel, origin: Pos2) {
+    let rect = Rect::from_min_size(
+        origin + vec2(placed.rect.x, placed.rect.y),
+        vec2(placed.rect.width, placed.rect.height),
+    );
+    ui.painter().text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        &placed.text,
+        font(),
+        theme.colors.text.0,
+    );
 }
 
 /// A section heading over a group of controls.
@@ -1140,6 +1313,7 @@ pub(super) fn plain_control<'a>(
         knob: None,
         configured: &[],
         text: None,
+        under: None,
         automation: None,
         coarse: 1,
         unnamed: false,

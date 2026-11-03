@@ -126,7 +126,7 @@ pub fn tube_type() -> DeviceType {
             ],
         )),
         LayoutNode::Column(vec![
-            LayoutNode::Cell(DisplayCell::new("Tube Curve", 84.0, 80.0, 1.0).with_inset(4.0)),
+            LayoutNode::Cell(DisplayCell::new("Tube Curve", 76.0, 72.0, 1.0).with_inset(4.0)),
             LayoutNode::Band(ControlBand::free(
                 84.0,
                 78.0,

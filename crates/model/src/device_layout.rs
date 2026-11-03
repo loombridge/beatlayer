@@ -68,6 +68,14 @@ pub const CELL_WIDTH: f32 = 22.0;
 /// The width of a segment in a row of text buttons, in points (observed).
 pub const SEGMENT_WIDTH: f32 = 36.0;
 
+/// The size of a large display number with its name and unit, in points
+/// (observed in Live 12.4.16, 2 November 2026; layout L-DEV-047).
+pub const LARGE_WIDTH: f32 = 40.0;
+pub const LARGE_HEIGHT: f32 = 38.0;
+
+/// The width of a box in a Drum Synth's display, in points (observed).
+pub const FRAMED_WIDTH: f32 = 41.0;
+
 /// The width of the unit pair beside a knob (`ms` over `sync`), in points
 /// (observed), and the space between it and the knob.
 pub const UNIT_PAIR_WIDTH: f32 = 18.0;
@@ -217,10 +225,6 @@ pub enum Widget {
     /// chosen by where its dot sits, a click moving it on (Pedal's Mid
     /// frequency).
     Pill,
-    /// A single text button holding the chosen choice's name, lit in the
-    /// accent, a click taking the next choice and the last going round to the
-    /// first (Resonators' Mode).
-    Cycle,
     /// A column of that many icon buttons, one for each choice of a choice
     /// parameter, the chosen one lit (Resonators' filter types).
     IconColumn(u8),
@@ -230,14 +234,39 @@ pub enum Widget {
     /// A chooser with no box: the value in the blue text and a small ▼ after
     /// it, its name in dim text above (Vocoder's Bands) unless the control is
     /// [`unnamed`](Control::unnamed) (Saturator's Post Clip).
-    BareChooser,
+    UnboxedChooser,
     /// A number with no box: the value in the accent colour from the left,
     /// its name in dim text above unless the control is
     /// [`unnamed`](Control::unnamed) (Vocoder's Range).
-    Bare,
+    Unboxed,
     /// A name in the dim text colour with the value after it in the accent,
     /// no box, dragged or typed (Saturator's Amt Lo along the display's foot).
     Readout,
+    /// The Drum Synths' large display numbers: the name above, the value in
+    /// large figures in the accent, and its unit under them.
+    Large,
+    /// A number box with no name row: the device's own label sits beside or
+    /// above it ([`BandLabel`]).
+    Bare,
+    /// A [`Bare`](Self::Bare) box whose blue fill shows the value's place in
+    /// its range, as [`Slider`](Self::Slider)'s does.
+    BareSlider,
+    /// A [`Bare`](Self::Bare) box outlined in the accent: the Drum Synths'
+    /// display boxes.
+    Framed,
+    /// A text button like [`Toggle`](Self::Toggle) that holds only the first
+    /// that many characters of its parameter's name (Impulse's M, S and Sat).
+    Abbreviated(u8),
+    /// A [`Chooser`](Self::Chooser) with no name row: the device's own label
+    /// is beside it, or it needs none (the Drum Sampler's effect type).
+    BareChooser,
+    /// A lit text button holding the chosen choice's name, a press taking
+    /// the next choice and the last going round to the first (the Drum
+    /// Sampler's modulation source, Resonators' Mode).
+    Cycle,
+    /// The name and the value on one line, the value in the accent, dragged
+    /// or typed (the Drum Sampler's Start, Length and Gain under its sample).
+    Inline,
 }
 
 impl Widget {
@@ -264,10 +293,9 @@ impl Widget {
             Self::Number | Self::Slider | Self::Marked | Self::Chooser => {
                 Size::new(53.0, LABEL_HEIGHT + BOX_HEIGHT)
             }
-            Self::LitChooser | Self::BareChooser | Self::Bare => {
+            Self::LitChooser | Self::UnboxedChooser | Self::Unboxed => {
                 Size::new(53.0, LABEL_HEIGHT + BOX_HEIGHT)
             }
-            Self::Cycle => Size::new(CELL_WIDTH, BOX_HEIGHT),
             Self::IconColumn(n) => Size::new(CELL_WIDTH, rows(n)),
             Self::Toggle | Self::Outlined => Size::new(SEGMENT_WIDTH, BOX_HEIGHT),
             Self::IconToggle => Size::new(CELL_WIDTH, BOX_HEIGHT),
@@ -291,6 +319,13 @@ impl Widget {
             Self::Check => Size::new(60.0, BOX_HEIGHT),
             Self::Readout => Size::new(90.0, BOX_HEIGHT),
             Self::Pill => Size::new(26.0, 10.0),
+            Self::Large => Size::new(LARGE_WIDTH, LARGE_HEIGHT),
+            Self::Bare | Self::BareSlider | Self::Framed | Self::BareChooser => {
+                Size::new(FRAMED_WIDTH, BOX_HEIGHT)
+            }
+            Self::Cycle | Self::Inline | Self::Abbreviated(_) => {
+                Size::new(SEGMENT_WIDTH, BOX_HEIGHT)
+            }
         }
     }
 
@@ -347,6 +382,12 @@ pub enum Glyph {
     Phase,
     /// A circle with an arrow round it: a spin.
     Spin,
+    /// A low-pass filter's response at 24 dB per octave.
+    LowPass24,
+    /// A high-pass filter's response at 24 dB per octave.
+    HighPass24,
+    /// A peak filter's response.
+    Peak,
 }
 
 /// A unit a knob's two parameters read in.
@@ -552,6 +593,39 @@ pub struct SlotGroup {
     pub count: u32,
 }
 
+/// A line of text in a band that names a control or a pair of them: centred
+/// in `width` points from `x`, in a row of [`LABEL_HEIGHT`] at `y`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct BandLabel {
+    /// The text.
+    pub text: String,
+    /// Its left edge, from the band's.
+    pub x: f32,
+    /// Its top edge, from the band's.
+    pub y: f32,
+    /// The width it is centred in.
+    pub width: f32,
+}
+
+impl BandLabel {
+    /// `text`, centred in `width` points at `x`, `y`.
+    #[must_use]
+    pub fn new(text: &str, x: f32, y: f32, width: f32) -> Self {
+        Self {
+            text: text.to_owned(),
+            x,
+            y,
+            width,
+        }
+    }
+
+    /// Its rectangle in its band.
+    #[must_use]
+    pub fn rect(&self) -> Rect {
+        Rect::new(self.x, self.y, self.width, LABEL_HEIGHT)
+    }
+}
+
 /// A band of controls, of a fixed size.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ControlBand {
@@ -566,6 +640,9 @@ pub struct ControlBand {
     /// for the selected slot ([`DeviceLayout::place_for`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slots: Option<SlotGroup>,
+    /// Its text labels, drawn beside the controls they name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<BandLabel>,
 }
 
 impl ControlBand {
@@ -593,6 +670,7 @@ impl ControlBand {
             height,
             controls: placed,
             slots: None,
+            labels: Vec::new(),
         }
     }
 
@@ -606,7 +684,15 @@ impl ControlBand {
             height,
             controls,
             slots: None,
+            labels: Vec::new(),
         }
+    }
+
+    /// The same band with `labels` drawn in it.
+    #[must_use]
+    pub fn with_labels(mut self, labels: Vec<BandLabel>) -> Self {
+        self.labels = labels;
+        self
     }
 
     /// The same band, showing the selected slot's controls: its controls
@@ -639,21 +725,17 @@ pub struct DisplayCell {
     /// (WP-5.17).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slot: Option<u32>,
+    /// The space left clear around the cell inside the room it is given, as
+    /// Live leaves round a Drum Synth's display (L-DEV-047): the cell's
+    /// size and growth are inside it.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub inset: f32,
     /// Controls inside its top edge, from its left.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub top: Option<ControlBand>,
     /// Controls inside its bottom edge, from its left.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bottom: Option<ControlBand>,
-    /// How far the black cell sits inside the space its size and weight
-    /// claim, on every side, in points: Live's cells over a column of
-    /// controls keep [`PADDING`] from the device's edge.
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub inset: f32,
-}
-
-fn is_zero(value: &f32) -> bool {
-    *value == 0.0
 }
 
 impl DisplayCell {
@@ -667,15 +749,15 @@ impl DisplayCell {
             height,
             weight,
             slot: None,
+            inset: 0.0,
             top: None,
             bottom: None,
-            inset: 0.0,
         }
     }
 
-    /// The same cell, drawn `inset` points inside its space on every side.
+    /// The same cell, with `inset` points clear round it.
     #[must_use]
-    pub const fn with_inset(mut self, inset: f32) -> Self {
+    pub fn with_inset(mut self, inset: f32) -> Self {
         self.inset = inset;
         self
     }
@@ -700,6 +782,11 @@ impl DisplayCell {
         self.bottom = Some(band);
         self
     }
+}
+
+/// Whether `n` is 0, for leaving a default out of a saved layout.
+fn is_zero(n: &f32) -> bool {
+    *n == 0.0
 }
 
 /// A part of a device's layout.
@@ -1015,7 +1102,10 @@ impl LayoutNode {
     fn natural(&self) -> Size {
         match self {
             Self::Band(band) => Size::new(band.width, band.height),
-            Self::Cell(cell) => Size::new(cell.width, cell.height),
+            Self::Cell(cell) => Size::new(
+                cell.width + 2.0 * cell.inset,
+                cell.height + 2.0 * cell.inset,
+            ),
             Self::Heading(heading) => Size::new(heading.width, HEADING_HEIGHT),
             Self::Row(children) => children.iter().fold(Size::default(), |s, c| {
                 let n = c.natural();
@@ -1066,21 +1156,22 @@ impl LayoutNode {
             }
             Self::Cell(cell) => {
                 // A cell grows only where its weight earns it room.
+                let inset = cell.inset;
                 let width = if cell.weight > 0.0 {
-                    at.width
+                    at.width - 2.0 * inset
                 } else {
                     cell.width
                 };
                 let height = if cell.weight > 0.0 {
-                    at.height
+                    at.height - 2.0 * inset
                 } else {
                     cell.height
                 };
                 let rect = Rect::new(
-                    at.x + cell.inset,
-                    at.y + cell.inset,
-                    width.max(cell.width) - 2.0 * cell.inset,
-                    height.max(cell.height) - 2.0 * cell.inset,
+                    at.x + inset,
+                    at.y + inset,
+                    width.max(cell.width),
+                    height.max(cell.height),
                 );
                 placed.cells.push(PlacedCell {
                     name: cell.name.clone(),
@@ -1196,9 +1287,24 @@ fn place_band(band: &ControlBand, x: f32, y: f32, slot: u32, placed: &mut Placed
             ),
             glyph: control.glyph,
             unit: control.unit,
-            grey: control.grey,
+            // A slot's control is greyed by the same slot's switch.
+            grey: control.grey.map(|grey| GreyWhen {
+                param: ParamId(grey.param.0 + offset),
+                ..grey
+            }),
             unnamed: control.unnamed,
             caption: control.caption.clone(),
+        }));
+    placed
+        .labels
+        .extend(band.labels.iter().map(|label| PlacedLabel {
+            text: label.text.clone(),
+            rect: Rect::new(
+                rect.x + label.x,
+                rect.y + label.y,
+                label.width,
+                LABEL_HEIGHT,
+            ),
         }));
 }
 
@@ -1318,6 +1424,15 @@ pub struct PlacedHeading {
     pub rect: Rect,
 }
 
+/// A band's text label where a layout placed it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PlacedLabel {
+    /// Its text.
+    pub text: String,
+    /// Where, from the body's top-left corner; the text is centred in it.
+    pub rect: Rect,
+}
+
 /// A display cell where a layout placed it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PlacedCell {
@@ -1368,6 +1483,9 @@ pub struct Placed {
     /// Its section headings, in the layout's order.
     #[serde(default)]
     pub headings: Vec<PlacedHeading>,
+    /// Its bands' text labels, in the layout's order.
+    #[serde(default)]
+    pub labels: Vec<PlacedLabel>,
 }
 
 impl DeviceLayout {
@@ -1590,7 +1708,7 @@ impl DeviceLayout {
                         .into_iter()
                         .flatten()
                         .map(|band| {
-                            if band.width > cell.width - 2.0 * cell.inset {
+                            if band.width > cell.width {
                                 problem.get_or_insert_with(|| {
                                     format!("a band is wider than display cell {}", cell.name)
                                 });
@@ -1599,7 +1717,7 @@ impl DeviceLayout {
                             band.height
                         })
                         .sum();
-                    if inside > cell.height - 2.0 * cell.inset {
+                    if inside > cell.height {
                         problem.get_or_insert_with(|| {
                             format!("display cell {}'s bands don't fit inside it", cell.name)
                         });
@@ -1649,6 +1767,13 @@ fn check_band(
     problem: &mut Option<String>,
 ) {
     let whole = Rect::new(0.0, 0.0, band.width, band.height);
+    if let Some(label) = band.labels.iter().find(|l| !whole.contains(&l.rect())) {
+        *problem = Some(format!(
+            "the label \"{}\" lies outside its band",
+            label.text
+        ));
+        return;
+    }
     // A band of slot controls places each slot's copy of its parameters.
     let (stride, count) = band
         .slots
@@ -2345,7 +2470,7 @@ mod tests {
     // Spec: device-framework R71
     #[test]
     fn a_cell_can_sit_inside_its_space() {
-        let cell = DisplayCell::new("Display", 100.0, 80.0, 1.0).with_inset(4.0);
+        let cell = DisplayCell::new("Display", 92.0, 72.0, 1.0).with_inset(4.0);
         let layout = DeviceLayout::new(LayoutNode::Cell(cell));
         assert_eq!(layout.docked_size(), Size::new(100.0, 80.0));
         let placed = layout.place(layout.docked_size());
@@ -2436,6 +2561,55 @@ mod tests {
         assert_eq!(placed.headings[0].rect.width, docked.width);
         assert_eq!(placed.headings[0].rect.height, HEADING_HEIGHT);
         assert_eq!(placed.bands[0].y, HEADING_HEIGHT, "the group sits under it");
+    }
+
+    // Spec: device-framework R60
+    #[test]
+    fn a_cell_with_an_inset_is_clear_all_round_and_its_labels_are_placed() {
+        let inside = ControlBand::free(
+            100.0,
+            50.0,
+            vec![Control::new(ParamId(0), Widget::Large, 5.0, 6.0)],
+        )
+        .with_labels(vec![BandLabel::new("Name", 10.0, 20.0, 40.0)]);
+        let cell = DisplayCell::new("Display", 100.0, 50.0, 1.0)
+            .with_inset(4.0)
+            .with_top(inside);
+        let layout = DeviceLayout::new(LayoutNode::Cell(cell));
+        layout.check(&params(1)).unwrap();
+        assert_eq!(layout.docked_size(), Size::new(108.0, 58.0));
+        let placed = layout.place(layout.docked_size());
+        assert_eq!(placed.cells[0].rect, Rect::new(4.0, 4.0, 100.0, 50.0));
+        // The control and the label sit from the cell's corner.
+        assert_eq!(placed.controls[0].rect.x, 9.0);
+        assert_eq!(placed.controls[0].rect.y, 10.0);
+        assert_eq!(placed.labels[0].text, "Name");
+        assert_eq!(
+            placed.labels[0].rect,
+            Rect::new(14.0, 24.0, 40.0, LABEL_HEIGHT)
+        );
+        // Given more room, the cell keeps its clear space and takes the rest.
+        let grown = layout.place(Size::new(200.0, 100.0));
+        assert_eq!(grown.cells[0].rect, Rect::new(4.0, 4.0, 192.0, 92.0));
+        // A label outside its band is refused.
+        let outside = ControlBand::free(20.0, 20.0, Vec::new())
+            .with_labels(vec![BandLabel::new("Far", 15.0, 0.0, 10.0)]);
+        let bad = DeviceLayout::new(LayoutNode::Band(outside));
+        assert!(bad.check(&[]).is_err());
+    }
+
+    // Spec: device-framework R60
+    #[test]
+    fn a_slot_controls_grey_switch_is_its_own_slots() {
+        let control = Control::new(ParamId(1), Widget::Knob, 0.0, 0.0).greyed_while(ParamId(0), 0);
+        let band = ControlBand::free(60.0, 60.0, vec![control]).for_slots(SlotGroup {
+            stride: 32,
+            count: 3,
+        });
+        let layout = DeviceLayout::new(LayoutNode::Band(band));
+        let third = layout.place_for(layout.docked_size(), 2);
+        assert_eq!(third.controls[0].param, ParamId(65));
+        assert_eq!(third.controls[0].grey.unwrap().param, ParamId(64));
     }
 
     // Spec: device-framework R57

@@ -166,7 +166,7 @@ pub fn wax_type() -> DeviceType {
         LayoutNode::Band(ControlBand::free(2.5, 158.0, Vec::new())),
         LayoutNode::Column(vec![
             LayoutNode::Heading(Heading::new("Tracing Model", 80.0)),
-            LayoutNode::Cell(DisplayCell::new("Tracing", 169.0, 53.0, 1.0).with_inset(4.0)),
+            LayoutNode::Cell(DisplayCell::new("Tracing", 161.0, 45.0, 1.0).with_inset(4.0)),
             LayoutNode::Band(ControlBand::free(
                 169.0,
                 16.0,
@@ -185,7 +185,7 @@ pub fn wax_type() -> DeviceType {
                     ],
                 )),
             ]),
-            LayoutNode::Cell(DisplayCell::new("Pinch", 169.0, 52.0, 1.0).with_inset(4.0)),
+            LayoutNode::Cell(DisplayCell::new("Pinch", 161.0, 44.0, 1.0).with_inset(4.0)),
             LayoutNode::Band(ControlBand::free(
                 169.0,
                 13.0,

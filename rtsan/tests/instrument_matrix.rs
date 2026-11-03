@@ -20,8 +20,8 @@ use bl_devices::testing::{
     INSTRUMENT_FREE_AMOUNTS, INSTRUMENT_HI_QUALITY, INSTRUMENT_MATRIX_AMOUNT,
 };
 use bl_devices::wavetable::{
-    self, HI_QUALITY, LFO_RETRIGGER, LFO_SYNC, MATRIX_AMOUNT, MATRIX_TIME, UNISON_MODE, WAVETABLE,
-    envelope, lfo, slot_amount,
+    self, LFO_RETRIGGER, LFO_SYNC, MATRIX_AMOUNT, MATRIX_TIME, UNISON_MODE, WAVETABLE, envelope,
+    lfo, slot_amount,
 };
 use bl_engine::{Collector, Compiler, EngineConfig, TransportCommand, channel};
 use bl_model::{
@@ -252,7 +252,7 @@ fn wavetable_routes_modulators_unison_modes_and_hi_quality_changing_during_playb
                 slot: ((step + 7) % 64) as u8,
             }),
             4 => Some(set(UNISON_MODE, (step % 7) as f64)),
-            5 => Some(set(HI_QUALITY, (step % 2) as f64)),
+            5 => Some(set(wavetable::HI_QUALITY, (step % 2) as f64)),
             6 => Some(set(lfo(1, LFO_SYNC), (step % 2) as f64)),
             7 => Some(set(lfo(2, LFO_RETRIGGER), (step % 2) as f64)),
             8 => Some(set(envelope(1, wavetable::ENV_MODE), (step % 3) as f64)),

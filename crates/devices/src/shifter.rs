@@ -476,7 +476,7 @@ fn layout() -> DeviceLayout {
         LayoutNode::Column(vec![
             LayoutNode::Row(vec![
                 LayoutNode::Cell(
-                    DisplayCell::new("LFO", 141.6, 106.5, 1.0)
+                    DisplayCell::new("LFO", 137.6, 102.5, 1.0)
                         .with_inset(2.0)
                         .with_bottom(ControlBand::free(
                             137.6,
@@ -484,20 +484,20 @@ fn layout() -> DeviceLayout {
                             vec![
                                 Control::new(LFO_STEREO, Widget::Cycle, 50.0, 4.0)
                                     .sized(39.6, 11.0),
-                                Control::new(LFO_PHASE, Widget::Bare, 50.0, 18.0)
+                                Control::new(LFO_PHASE, Widget::Unboxed, 50.0, 18.0)
                                     .unnamed()
                                     .sized(45.0, BOX_HEIGHT),
                             ],
                         )),
                 ),
                 LayoutNode::Cell(
-                    DisplayCell::new("Envelope", 54.7, 106.5, 1.0)
+                    DisplayCell::new("Envelope", 50.7, 102.5, 1.0)
                         .with_inset(2.0)
                         .with_top(ControlBand::free(
                             50.7,
                             45.0,
                             vec![
-                                Control::new(ENV_ATTACK, Widget::Bare, 6.0, 8.0)
+                                Control::new(ENV_ATTACK, Widget::Unboxed, 6.0, 8.0)
                                     .captioned("Attack")
                                     .sized(40.0, 21.0),
                             ],
@@ -506,7 +506,7 @@ fn layout() -> DeviceLayout {
                             50.7,
                             30.0,
                             vec![
-                                Control::new(ENV_RELEASE, Widget::Bare, 6.0, 4.0)
+                                Control::new(ENV_RELEASE, Widget::Unboxed, 6.0, 4.0)
                                     .captioned("Release")
                                     .sized(40.0, 21.0),
                             ],

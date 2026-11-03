@@ -106,7 +106,7 @@ pub fn overdrive_type() -> DeviceType {
             .describe("The balance between the dry signal and the distorted one."),
     ];
     let layout = DeviceLayout::new(LayoutNode::Column(vec![
-        LayoutNode::Cell(DisplayCell::new("Drive Curve", 111.0, 64.0, 1.0).with_inset(4.0)),
+        LayoutNode::Cell(DisplayCell::new("Drive Curve", 103.0, 56.0, 1.0).with_inset(4.0)),
         LayoutNode::Band(ControlBand::free(
             111.0,
             94.0,

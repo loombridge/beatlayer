@@ -340,7 +340,7 @@ pub fn corpus_type() -> DeviceType {
 /// sidechain's controls sit in the expanded part, as Live's panel doesn't
 /// show them for a beam.
 fn layout() -> DeviceLayout {
-    use Widget::{Bare, Chooser, Knob, Number, SmallKnob, Toggle};
+    use Widget::{Chooser, Knob, Number, SmallKnob, Toggle, Unboxed};
     let band = |controls: &[(ParamId, Widget)]| {
         LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, controls))
     };
@@ -351,18 +351,18 @@ fn layout() -> DeviceLayout {
                     206.3,
                     107.0,
                     vec![
-                        Control::new(TYPE, Widget::BareChooser, 4.4, 4.5)
+                        Control::new(TYPE, Widget::UnboxedChooser, 4.4, 4.5)
                             .unnamed()
                             .sized(60.0, 11.0),
-                        Control::new(QUALITY, Widget::BareChooser, 109.0, 4.5)
+                        Control::new(QUALITY, Widget::UnboxedChooser, 109.0, 4.5)
                             .unnamed()
                             .sized(45.0, 11.0),
                         Control::new(DECAY, Widget::Readout, 4.4, 90.0).sized(60.0, BOX_HEIGHT),
                         Control::new(MATERIAL, Widget::Readout, 75.3, 90.0)
                             .sized(70.0, BOX_HEIGHT),
-                        Control::new(WIDTH, Bare, 167.8, 4.4).sized(35.0, 21.0),
-                        Control::new(POS_L, Bare, 167.8, 41.0).sized(35.0, 21.0),
-                        Control::new(POS_R, Bare, 167.8, 78.6).sized(35.0, 21.0),
+                        Control::new(WIDTH, Unboxed, 167.8, 4.4).sized(35.0, 21.0),
+                        Control::new(POS_L, Unboxed, 167.8, 41.0).sized(35.0, 21.0),
+                        Control::new(POS_R, Unboxed, 167.8, 78.6).sized(35.0, 21.0),
                     ],
                 ),
             )),

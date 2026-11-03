@@ -169,7 +169,7 @@ fn grid_menu(
     let platform = crate::keymap::Platform::current();
     for item in bl_shell::menus::shown(&bl_shell::context_menus::clip_envelope()) {
         if item.is_separator() {
-            ui.separator();
+            crate::menus::separator(ui);
         } else if item.action == bl_shell::menus::Action::Heading {
             crate::menus::heading(ui, item.label);
         } else if crate::arrangement::context_menu::grid_row(ui, shell, item.row, events) {
@@ -860,7 +860,7 @@ impl EnvelopeEditor {
                     ui.close();
                 }
                 if let Some(at) = add {
-                    ui.separator();
+                    crate::menus::separator(ui);
                     add_value(ui, at);
                 }
             }

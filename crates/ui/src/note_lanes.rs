@@ -1031,7 +1031,7 @@ impl LaneUi {
                                 ui.close();
                             }
                         }
-                        ui.separator();
+                        crate::menus::separator(ui);
                         let item = ui.button("Ungroup Notes");
                         crate::menus::register_item(ui.ctx(), &item);
                         if item.clicked() {
@@ -1081,7 +1081,7 @@ impl LaneUi {
                         ui.close();
                     }
                 }
-                ui.separator();
+                crate::menus::separator(ui);
                 let response = ui.button("Hide Lane");
                 crate::menus::register_item(ui.ctx(), &response);
                 if response.clicked() {

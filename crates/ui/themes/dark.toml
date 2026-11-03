@@ -101,9 +101,21 @@ track_palette = [
 ]
 
 [sizes]
-# Text sizes in points.
-text = 11.0
-small_text = 10.0
-heading = 12.0
+# Text sizes in points, set so the typeface's capitals stand 7, 6.5 and 7.5
+# points high.
+text = 9.6
+small_text = 8.9
+heading = 10.3
 # Corner radius of controls.
 corner = 2.0
+# A Control Bar field's height.
+control_field = 16.0
+# A chooser in a track header's In/Out column, and its pitch.
+header_chooser = 12.0
+header_chooser_pitch = 17.0
+# The distance between the rows of every list, and of a menu; what a menu
+# separator adds; the distance between the Info View's lines.
+list_row = 19.0
+menu_row = 15.0
+menu_separator = 6.0
+info_line = 15.0

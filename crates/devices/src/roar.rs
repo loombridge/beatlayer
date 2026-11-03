@@ -559,7 +559,7 @@ pub fn roar_type() -> DeviceType {
         band(&amounts)
     };
     let layout = {
-        use Widget::{Bare, BareChooser, Chooser, Knob, Slider, SmallKnob, Toggle};
+        use Widget::{Chooser, Knob, Slider, SmallKnob, Toggle, Unboxed, UnboxedChooser};
         // A stage's page, as Live lays it out (observed in Live 12.4.16, 2
         // November 2026; layout L-DEV-084): Amount, Bias and Frequency with
         // Pre along the top, the shaper's cell and the filter's under them.
@@ -587,10 +587,10 @@ pub fn roar_type() -> DeviceType {
                                 Control::new(id(ON), Widget::Check, 5.5, 60.0)
                                     .captioned("Shaper")
                                     .sized(60.0, BOX_HEIGHT),
-                                Control::new(id(SHAPER), BareChooser, 5.5, 73.0)
+                                Control::new(id(SHAPER), UnboxedChooser, 5.5, 73.0)
                                     .unnamed()
                                     .sized(60.0, 11.0),
-                                Control::new(id(LEVEL), Bare, 74.5, 61.0)
+                                Control::new(id(LEVEL), Unboxed, 74.5, 61.0)
                                     .captioned("Level")
                                     .sized(40.0, 21.0),
                             ],
@@ -601,10 +601,10 @@ pub fn roar_type() -> DeviceType {
                             131.0,
                             89.4,
                             vec![
-                                Control::new(id(FILTER), BareChooser, 5.5, 73.0)
+                                Control::new(id(FILTER), UnboxedChooser, 5.5, 73.0)
                                     .unnamed()
                                     .sized(50.0, 11.0),
-                                Control::new(id(RESONANCE), Bare, 55.0, 61.0)
+                                Control::new(id(RESONANCE), Unboxed, 55.0, 61.0)
                                     .captioned("Res")
                                     .sized(40.0, 21.0),
                             ],
@@ -645,13 +645,13 @@ pub fn roar_type() -> DeviceType {
                         115.0,
                         89.4,
                         vec![
-                            Control::new(ROUTING_MODE, BareChooser, 7.7, 26.7)
+                            Control::new(ROUTING_MODE, UnboxedChooser, 7.7, 26.7)
                                 .captioned("Routing")
                                 .sized(70.0, 21.0),
-                            Control::new(LOW_CROSSOVER, Bare, 7.7, 61.7)
+                            Control::new(LOW_CROSSOVER, Unboxed, 7.7, 61.7)
                                 .captioned("Low")
                                 .sized(40.0, 21.0),
-                            Control::new(HIGH_CROSSOVER, Bare, 52.5, 61.7)
+                            Control::new(HIGH_CROSSOVER, Unboxed, 52.5, 61.7)
                                 .captioned("High")
                                 .sized(40.0, 21.0),
                         ],

@@ -9,7 +9,7 @@
 
 Pitch is a MIDI effect that moves every note that reaches it by a number of semitones, and keeps the result inside a window of keys. A note that would land outside the window is dropped (Block), moved by octaves into it (Fold), or moved to its nearest edge (Limit). The note's velocity, release velocity, channel and timing are untouched, and its per-note expressions (bend, pressure, slide) follow it to its new key. Pitch ends each note on the key it started it on, whatever changes while the note is held.
 
-The device takes Live's name, Pitch; its look is the device framework's generic controls. Its parameters, ranges and units come from the manual's Pitch section. Step Up and Step Down in the manual are two buttons that move Pitch by Step Width; the generic layout has no momentary buttons, so Beatlayer carries Step Width as a parameter and agents and people set Pitch directly. The Use Current Scale switch in its title bar makes Pitch and Step Width count degrees of the device's current scale ([scales.md](scales.md)) instead of semitones. This spec covers the device only.
+The device takes Live's name, Pitch; its panel is laid out as Live draws it (layout L-DEV-064). Its parameters, ranges and units come from the manual's Pitch section. Step Up and Step Down in the manual are the round − and + beside the Step Width box, which move Pitch by it; the panel draws them as a stepper, and agents set Pitch directly. The Use Current Scale switch in its title bar makes Pitch and Step Width count degrees of the device's current scale ([scales.md](scales.md)) instead of semitones. This spec covers the device only.
 
 ## Sources
 
@@ -35,7 +35,7 @@ The device takes Live's name, Pitch; its look is the device framework's generic 
 - **R8.** A note Pitch dropped takes its expressions with it. (S2)
 - **R9.** Every parameter is set by `device.set_param` and read by `device.parameters` through the agent API, a change is one undo step, and the device's preset is saved under `Presets/MIDI Effects/Pitch/`. (S3)
 - **R10.** Every parameter is automatable and has a description, and nothing Pitch does on the audio thread allocates, locks, or blocks. (S3, S4)
-- **R11.** Step Width is a value that nothing reads until the Step Up and Step Down buttons exist; Use Current Scale is in R12 to R14. (S1)
+- **R11.** The stepper's − and + move Pitch down and up by Step Width, as one undo step each, and stop at the end of Pitch's range (−128 to +128, or −30 to +30 with Use Current Scale); nothing else reads Step Width. Use Current Scale is in R12 to R14. (S1)
 - **R12.** Use Current Scale, a switch in Pitch's title bar ([scales.md](scales.md) R16), off in a new Pitch: with it on, Pitch counts degrees of the device's current scale ([scales.md](scales.md) R15), from −30 to +30, and every note moves by that many degrees ([scales.md](scales.md) R2), a note outside the scale moving as the scale note below it does; a value beyond ±30 when the switch goes on acts as ±30 (Beatlayer's own). Step Width counts degrees too, from 1 to 30. (S1, S5, S7)
 - **R13.** With Use Current Scale on, Lowest and Range are still keys, and the window (R3 to R5) applies to the key a note's move gives it (Beatlayer's own). (S1, S7)
 - **R14.** With Use Current Scale on, the per-note bend of a note Pitch moved is carried in degrees, as [scales.md](scales.md) R18 says, and a change of the current scale while the note is held doesn't move it (R6). (S6, S7)
@@ -54,13 +54,13 @@ The device takes Live's name, Pitch; its look is the device framework's generic 
 | R8 | `crates/devices/tests/lift.rs`, `a_blocked_note_takes_its_expressions_with_it` | real-time trap |
 | R9 | `crates/agent/tests/midi_effects.rs`, `an_agent_reaches_every_parameter_of_every_midi_effect` | MCP script |
 | R10 | `crates/devices/tests/rules.rs`, `every_parameter_is_automatable_to_the_frame`, `every_parameter_has_a_description`; every test in `crates/devices/tests/lift.rs` runs its blocks as real-time sections under the allocation trap; `rtsan/tests/midi_effects.rs` | real-time trap |
-| R11 | `crates/agent/tests/midi_effects.rs`, `an_agent_reaches_every_parameter_of_every_midi_effect` (both exist and read back) | MCP script |
+| R11 | `crates/agent/tests/midi_effects.rs`, `an_agent_reaches_every_parameter_of_every_midi_effect` (both exist and read back); `crates/ui/tests/midi_effect_panels.rs`, `pitchs_buttons_step_it_by_step_width` | MCP script; UI script |
 | R12 | `crates/devices/tests/lift.rs`, `use_current_scale_moves_notes_by_degrees`, `use_current_scale_holds_pitch_at_thirty_degrees`; `crates/devices/tests/scales.rs`, `a_device_s_scale_switches_on_the_frame_the_playhead_enters_a_clip`; `crates/ui/tests/device_view.rs`, `the_use_current_scale_switch_is_drawn_in_the_title_bar_and_not_the_panel` | real-time trap; unit |
 | R13 | `crates/devices/tests/lift.rs`, `the_window_takes_the_key_the_degrees_give` | real-time trap |
 | R14 | `crates/devices/tests/lift.rs`, `a_bend_is_carried_in_degrees`, `a_scale_change_while_a_note_is_held_does_not_move_it`; `crates/devices/tests/scales.rs`, `a_note_held_across_a_scale_change_ends_on_its_own_key` | real-time trap |
 
 ## Defaults, ranges and details
 
-- A new Pitch starts at Pitch 0, Step Width 1, Lowest 0, Range 127 (the whole keyboard), Mode Block, Use Current Scale off. The manual doesn't state the defaults; these leave notes alone.
+- A new Pitch starts at Pitch 0, Step Width 12, Lowest C-2 (key 0), Range 127 semitones (the whole keyboard), Mode Block, Use Current Scale off, as Live's panel reads in a new set (observed in Live 12.4.16, 2 November 2026). Lowest is a chooser of the 128 keys, named as Live names them (C-2 for key 0, C3 for middle C), which the panel draws as a box.
 - The window applies to the key after Pitch. Pitch and Step Width are whole numbers of semitones.
 - The blocked-note light is not drawn: it needs the engine to publish a device's display state.

@@ -112,6 +112,7 @@ pub mod operator_envelope;
 pub mod operator_lfo;
 pub mod oscilloscope;
 pub mod overdrive;
+mod panel;
 pub mod pedal;
 pub mod phaser_flanger;
 pub mod pitch_hack;

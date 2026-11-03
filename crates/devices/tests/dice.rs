@@ -60,12 +60,22 @@ fn add_moves_notes_up_by_choices_of_the_interval() {
 #[test]
 fn sub_moves_down_and_bi_either_way() {
     let down = ons(&render(
-        &[(CHOICES, 2.0), (INTERVAL, 5.0), (SIGN, 1.0)],
+        &[
+            (CHANCE, 100.0),
+            (CHOICES, 2.0),
+            (INTERVAL, 5.0),
+            (SIGN, 1.0),
+        ],
         512,
     ));
     assert!(down.iter().all(|m| [-5, -10].contains(m)), "{down:?}");
     let both = ons(&render(
-        &[(CHOICES, 2.0), (INTERVAL, 5.0), (SIGN, 2.0)],
+        &[
+            (CHANCE, 100.0),
+            (CHOICES, 2.0),
+            (INTERVAL, 5.0),
+            (SIGN, 2.0),
+        ],
         512,
     ));
     assert!(
@@ -83,13 +93,24 @@ fn sub_moves_down_and_bi_either_way() {
 #[test]
 fn alt_goes_through_the_choices_in_turn() {
     let moves = ons(&render(
-        &[(CHOICES, 3.0), (INTERVAL, 2.0), (MODE, 1.0)],
+        &[
+            (CHANCE, 100.0),
+            (CHOICES, 3.0),
+            (INTERVAL, 2.0),
+            (MODE, 1.0),
+        ],
         512,
     ));
     assert_eq!(&moves[..7], [2, 4, 6, 2, 4, 6, 2]);
     // Bi alternates up and down.
     let bi = ons(&render(
-        &[(CHOICES, 2.0), (INTERVAL, 1.0), (MODE, 1.0), (SIGN, 2.0)],
+        &[
+            (CHANCE, 100.0),
+            (CHOICES, 2.0),
+            (INTERVAL, 1.0),
+            (MODE, 1.0),
+            (SIGN, 2.0),
+        ],
         512,
     ));
     assert_eq!(&bi[..5], [1, -1, 2, -2, 1]);

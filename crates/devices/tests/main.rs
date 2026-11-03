@@ -73,6 +73,7 @@ mod meld_filters;
 mod meld_modulation;
 mod meld_types;
 mod midi_cc;
+mod midi_effect_defaults;
 mod midi_monitor;
 mod midi_mpe;
 mod modulation;

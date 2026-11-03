@@ -8250,6 +8250,7 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
 | `only` | [`GreyWhen`](#greywhen) or null | no | The condition that puts the control away unless it holds: the control shows only while the parameter's value, rounded, is the value (one of three modes' boxes in the same place). |
 | `size` | [`Size`](#size) or null | no | Its size where the device sets it, in place of the widget's: the width of a box, a row of buttons or a unit pair's control. |
 | `steps` | array or null | no | For a grid, row or stack of buttons over a whole-number parameter, the values its buttons set, in order (Delay's 1 2 3 4 5 6 8 16 of the sixteen steps its time takes): the button for the value the parameter has is lit, and none is while it has another. Over a choice parameter, the indexes of the choices that have a button, in order. |
+| `target` | [`ParamId`](#paramid) or null | no | The parameter a [`Widget::Stepper`]'s buttons move. |
 | `titled` | boolean | no | Set for a row, stack or grid of buttons with its parameter's name above it, left-aligned (Chorus-Ensemble's Taps). |
 | `unit` | [`UnitPair`](#unitpair) or null | no | The unit pair beside a knob, which makes the knob show one of two parameters. |
 | `unnamed` | boolean | no | Set for a box drawn without its name above it: its place says what it is (Delay's offset under its grid), and the control is its box alone. |
@@ -8337,6 +8338,17 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
         "array",
         "null"
       ]
+    },
+    "target": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ParamId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The parameter a [`Widget::Stepper`]'s buttons move."
     },
     "titled": {
       "description": "Set for a row, stack or grid of buttons with its parameter's name above it, left-aligned (Chorus-Ensemble's Taps).",
@@ -10380,6 +10392,7 @@ One device as the Device View shows it.
 | `folded` | boolean | yes | Whether it's folded to its title bar. |
 | `expandable` | boolean | yes | Whether it has an expanded part, which its title bar's expand toggle shows and hides (L-DEV-004; WP-5.42). |
 | `expanded` | boolean | yes | Whether its expanded part is shown. Never while it has none. |
+| `points_right_when_shown` | boolean | yes | Whether its expand toggle's triangle points right while the expanded part shows (it points down while it is hidden), instead of the other way round. |
 | `floating` | boolean | yes | Whether it floats in a window of its own, its place in the chain a strip (WP-2.5b). |
 | `b_active` | boolean | yes | Whether its B state is the active one, which the title bar marks "(B)" (device compare R5). |
 | `configure` | boolean | yes | Whether the device is in Plug-In Configure Mode (clap-hosting R5, WP-5.40): its title bar's Configure switch is lit. View state, never saved with the set. False for a device that isn't a plug-in. |
@@ -10532,6 +10545,11 @@ One device as the Device View shows it.
       ],
       "description": "Its parameters and layout, for the generic UI; left out for a device whose type doesn't describe them."
     },
+    "points_right_when_shown": {
+      "default": false,
+      "description": "Whether its expand toggle's triangle points right while the expanded part shows (it points down while it is hidden), instead of the other way round.",
+      "type": "boolean"
+    },
     "rack": {
       "anyOf": [
         {
@@ -10599,6 +10617,7 @@ One device as the Device View shows it.
     "folded",
     "expandable",
     "expanded",
+    "points_right_when_shown",
     "floating",
     "b_active",
     "configure",
@@ -10733,6 +10752,8 @@ A device's layout (IMP-14): bands of controls and display cells in rows and colu
 |---|---|---|---|
 | `root` | [`LayoutNode`](#layoutnode) | yes | The whole body. |
 | `expanded` | [`LayoutNode`](#layoutnode) or null | no | The part the device adds to its body while it is expanded (L-DEV-004, L-DEV-007), if it has one: placed to the right of [`root`](Self::root). It places its parameters' controls like the rest of the layout. |
+| `opens_expanded` | boolean | no | Whether a new device shows its expanded part, as Arpeggiator does (L-DEV-101). |
+| `points_right_when_shown` | boolean | no | Whether the expand toggle's triangle points right while the expanded part shows and down while it is hidden, as Arpeggiator's and MPE Control's do (L-DEV-100, L-DEV-101); otherwise it points right while the part is hidden. |
 | `title` | array of [`TitlePart`](#titlepart) | no | What the device adds to its title bar. |
 
 <details><summary>JSON Schema</summary>
@@ -10751,6 +10772,14 @@ A device's layout (IMP-14): bands of controls and display cells in rows and colu
         }
       ],
       "description": "The part the device adds to its body while it is expanded (L-DEV-004, L-DEV-007), if it has one: placed to the right of [`root`](Self::root). It places its parameters' controls like the rest of the layout."
+    },
+    "opens_expanded": {
+      "description": "Whether a new device shows its expanded part, as Arpeggiator does (L-DEV-101).",
+      "type": "boolean"
+    },
+    "points_right_when_shown": {
+      "description": "Whether the expand toggle's triangle points right while the expanded part shows and down while it is hidden, as Arpeggiator's and MPE Control's do (L-DEV-100, L-DEV-101); otherwise it points right while the part is hidden.",
+      "type": "boolean"
     },
     "root": {
       "$ref": "#/$defs/LayoutNode",
@@ -11728,6 +11757,7 @@ A display cell: a graph, a spectrum, a waveform, or an envelope editor, which gr
 | `weight` | number | yes | Its share of extra room, against the other cells it shares with. |
 | `bottom` | [`ControlBand`](#controlband) or null | no | Controls inside its bottom edge, from its left. |
 | `inset` | number | no | The space left clear around the cell inside the room it is given, as Live leaves round a Drum Synth's display (L-DEV-047): the cell's size and growth are inside it. |
+| `params` | array of [`ParamId`](#paramid) | no | The parameters the cell's own drawing sets, which need no control of their own (Scale's grid sets its twelve notes' targets). |
 | `slot` | integer or null | no | The sample slot the cell stands for, if it does: it shows the slot and takes a click that selects it, and a sample dropped on it (WP-5.17). |
 | `top` | [`ControlBand`](#controlband) or null | no | Controls inside its top edge, from its left. |
 
@@ -11761,6 +11791,13 @@ A display cell: a graph, a spectrum, a waveform, or an envelope editor, which gr
     "name": {
       "description": "What it shows, for the device that draws it and for screen readers.",
       "type": "string"
+    },
+    "params": {
+      "description": "The parameters the cell's own drawing sets, which need no control of their own (Scale's grid sets its twelve notes' targets).",
+      "items": {
+        "$ref": "#/$defs/ParamId"
+      },
+      "type": "array"
     },
     "slot": {
       "description": "The sample slot the cell stands for, if it does: it shows the slot and takes a click that selects it, and a sample dropped on it (WP-5.17).",
@@ -15778,7 +15815,9 @@ One of:
 - `"plus"`: A plus sign.
 - `"minus"`: A minus sign.
 - `"flat_sharp"`: A flat and a sharp: Use Current Scale.
-- `"link"`: Two linked rings: the link between a device's two channels.
+- `"line"`: A straight line rising to the right: a linear curve.
+- `"s_curve"`: A line rising in an S: an S-shaped curve.
+- `"link"`: Two linked rings: the link between a device's two channels, or a curve's two knobs moving together (MPE Control's Curve Link).
 - `"freeze"`: An asterisk: Freeze.
 - `"phase_invert"`: A circle struck through: invert the phase.
 - `"record"`: A filled circle: record.
@@ -15864,8 +15903,18 @@ One of:
       "type": "string"
     },
     {
+      "const": "line",
+      "description": "A straight line rising to the right: a linear curve.",
+      "type": "string"
+    },
+    {
+      "const": "s_curve",
+      "description": "A line rising in an S: an S-shaped curve.",
+      "type": "string"
+    },
+    {
       "const": "link",
-      "description": "Two linked rings: the link between a device's two channels.",
+      "description": "Two linked rings: the link between a device's two channels, or a curve's two knobs moving together (MPE Control's Curve Link).",
       "type": "string"
     },
     {
@@ -26045,6 +26094,8 @@ One of:
 - `"title_bar"`: Tabs in the device's title bar, after its name, that the device's title bar draws: the node's area is the shown page's alone.
 - `"shell"`: A strip of sections, each its page's main controls under a section button, beside a display area the shown page fills.
 - `"strip"`: A strip down the node's left edge ([`STRIP_WIDTH`] wide) with a ▼ toggle at its top and the node's name written up it; the node's area right of it holds the second page while it is shown and the first, which is empty, while it isn't ([`PagesNode::side_strip`]).
+- `"column"`: A column of tabs down the node's left edge ([`COLUMN_TAB_WIDTH`] wide), with the shown page's section under them, beside the area the shown page fills (MPE Control's Press, Slide and NotePB).
+- `"follower"`: No tabs of its own: the node shows the page its [`PagesNode::follows`] node shows, by name (MPE Control's settings, which change with its source).
 
 <details><summary>JSON Schema</summary>
 
@@ -26070,6 +26121,16 @@ One of:
     {
       "const": "strip",
       "description": "A strip down the node's left edge ([`STRIP_WIDTH`] wide) with a ▼ toggle at its top and the node's name written up it; the node's area right of it holds the second page while it is shown and the first, which is empty, while it isn't ([`PagesNode::side_strip`]).",
+      "type": "string"
+    },
+    {
+      "const": "column",
+      "description": "A column of tabs down the node's left edge ([`COLUMN_TAB_WIDTH`] wide), with the shown page's section under them, beside the area the shown page fills (MPE Control's Press, Slide and NotePB).",
+      "type": "string"
+    },
+    {
+      "const": "follower",
+      "description": "No tabs of its own: the node shows the page its [`PagesNode::follows`] node shows, by name (MPE Control's settings, which change with its source).",
       "type": "string"
     }
   ]
@@ -26136,6 +26197,7 @@ Pages of a device's body, one shown at a time (device framework R41).
 | `name` | string | yes | The node's name, which `device.set_page` and the page choice use; it is unique in the layout. |
 | `style` | [`PageStyle`](#pagestyle) | yes | How the pages show. |
 | `pages` | array of [`Page`](#page) | yes | The pages, in order; the first shows in a new device. |
+| `follows` | string or null | no | For a [`PageStyle::Follower`], the node whose page it shows. |
 | `shown` | integer, at least 0 | no | The page shown, as an index; [`DeviceLayout::with_pages`] sets it. |
 
 <details><summary>JSON Schema</summary>
@@ -26144,6 +26206,13 @@ Pages of a device's body, one shown at a time (device framework R41).
 {
   "description": "Pages of a device's body, one shown at a time (device framework R41).",
   "properties": {
+    "follows": {
+      "description": "For a [`PageStyle::Follower`], the node whose page it shows.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "name": {
       "description": "The node's name, which `device.set_page` and the page choice use; it is unique in the layout.",
       "type": "string"
@@ -43279,6 +43348,7 @@ A pair of unit buttons beside a knob that switch which of two parameters the kno
 |---|---|---|---|
 | `mode` | [`ParamId`](#paramid) | yes | The switch that picks the unit: off, the first unit's parameter (the control's own) shows and the first button is lit. |
 | `units` | array of [`Unit`](#unit), at least 2 | yes | The two units, in the order of `mode`'s values. |
+| `below` | boolean | no | Set for a pair drawn side by side in a row under the knob rather than stacked at its left (Note Length's). |
 
 <details><summary>JSON Schema</summary>
 
@@ -43286,6 +43356,10 @@ A pair of unit buttons beside a knob that switch which of two parameters the kno
 {
   "description": "A pair of unit buttons beside a knob that switch which of two parameters the knob shows: Arpeggiator's Rate (ms or sync), Envelope Follower's Delay, LFO's Rate. The knob shows one parameter, never both: the device's description says which two, as an [`Alternate`](crate::param::Alternate) whose switch is `mode`.",
   "properties": {
+    "below": {
+      "description": "Set for a pair drawn side by side in a row under the knob rather than stacked at its left (Note Length's).",
+      "type": "boolean"
+    },
     "mode": {
       "$ref": "#/$defs/ParamId",
       "description": "The switch that picks the unit: off, the first unit's parameter (the control's own) shows and the first button is lit."
@@ -44708,6 +44782,9 @@ One of:
 - an object with `stack` (integer from 0 to 255): The same as a column of that many buttons.
 - an object with `grid` (object with `columns` (integer from 0 to 255), `rows` (integer from 0 to 255)): The choices of a choice parameter as a grid of small buttons, filled by rows (Note Echo's 1 2 3 4 over 5 6 8 16).
 - an object with `icon_segments` (integer from 0 to 255): A row of that many icon buttons, one for each choice of a choice parameter (the filter types), the chosen one lit.
+- `"switch"`: A box under the parameter's name that reads On or Off and turns the switch when pressed (Arpeggiator's Velocity).
+- `"square"`: A small square button under the parameter's name, lit while on (CC Control's Custom A).
+- `"stepper"`: A number box with a round − at its left and a round + at its right: the box is the control's parameter, the amount the buttons step, and the buttons move the parameter its [`Control::target`] names by it (Pitch's Step Width).
 - `"inline"`: A name and the value after it on one line, the value in blue, dragged or typed (Freq and Width along the foot of Delay's display).
 - `"tick"`: A small box that is filled while the switch is on, with the name after it (the Filter switch along the foot of a display).
 - `"stacked"`: The name over the value, both centred, the value in blue and dragged or typed, with no box (Reverb's Amount and Rate).
@@ -44730,6 +44807,7 @@ One of:
 - an object with `abbreviated` (integer from 0 to 255): A text button like [`Toggle`](Self::Toggle) that holds only the first that many characters of its parameter's name (Impulse's M, S and Sat).
 - `"bare_chooser"`: A [`Chooser`](Self::Chooser) with no name row: the device's own label is beside it, or it needs none (the Drum Sampler's effect type).
 - `"cycle"`: A lit text button holding the chosen choice's name, a press taking the next choice and the last going round to the first (the Drum Sampler's modulation source, Resonators' Mode).
+- `"mode"`: A text button holding the chosen name of a two-choice parameter, lit while its second choice is chosen; a press switches to the other (Note Echo's Sync, which reads Time while it is off).
 
 <details><summary>JSON Schema</summary>
 
@@ -44867,6 +44945,21 @@ One of:
         "icon_segments"
       ],
       "type": "object"
+    },
+    {
+      "const": "switch",
+      "description": "A box under the parameter's name that reads On or Off and turns the switch when pressed (Arpeggiator's Velocity).",
+      "type": "string"
+    },
+    {
+      "const": "square",
+      "description": "A small square button under the parameter's name, lit while on (CC Control's Custom A).",
+      "type": "string"
+    },
+    {
+      "const": "stepper",
+      "description": "A number box with a round − at its left and a round + at its right: the box is the control's parameter, the amount the buttons step, and the buttons move the parameter its [`Control::target`] names by it (Pitch's Step Width).",
+      "type": "string"
     },
     {
       "const": "inline",
@@ -45042,6 +45135,11 @@ One of:
     {
       "const": "cycle",
       "description": "A lit text button holding the chosen choice's name, a press taking the next choice and the last going round to the first (the Drum Sampler's modulation source, Resonators' Mode).",
+      "type": "string"
+    },
+    {
+      "const": "mode",
+      "description": "A text button holding the chosen name of a two-choice parameter, lit while its second choice is chosen; a press switches to the other (Note Echo's Sync, which reads Time while it is off).",
       "type": "string"
     }
   ]

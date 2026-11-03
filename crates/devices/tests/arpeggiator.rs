@@ -240,14 +240,14 @@ const SWING_16THS_60: f64 = 7.0;
 /// 6,000 frames: a 1/16 step at 120 BPM and 48 kHz.
 const STEP: i64 = 6_000;
 
-// Spec: arpeggiator R10, R18. The chooser lists None and the ten swing
-// grooves in order, and a new Arpeggiator chooses None.
+// Spec: arpeggiator R10, R18. The chooser lists Straight and the ten swing
+// grooves in order, and a new Arpeggiator chooses Straight.
 #[test]
 fn the_groove_chooser_lists_none_and_the_ten_swing_grooves() {
     let description = bl_devices::arpeggiator::arpeggiator_type().description;
     let groove = description.param(GROOVE).expect("the chooser exists");
-    assert_eq!(groove.default, 0.0, "None");
-    assert_eq!(GROOVE_CHOICES[0], "None");
+    assert_eq!(groove.default, 0.0, "Straight");
+    assert_eq!(GROOVE_CHOICES[0], "Straight");
     let names = [
         "Swing 8ths 55",
         "Swing 8ths 60",
@@ -450,7 +450,7 @@ fn beat_retrigger_restarts_on_bar_lines_at_140_bpm() {
             (SYNC, 1.0),
             (RATE_SYNC, SIXTEENTHS),
             (RETRIGGER, 2.0),
-            (INTERVAL, 4.0),
+            (INTERVAL, 8.0),
             (STYLE, 0.0),
             (STEPS, 0.0),
         ],

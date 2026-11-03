@@ -12,6 +12,10 @@
 
 <!-- Each acceptance criterion, with the test or command that shows it and the output. Include the summary from `cargo xtask check`. -->
 
+## Parity with Live
+
+<!-- For a change to anything Live shows (a view, panel, device panel, control, menu or gesture): the layout, menu and interaction rows it implements (L-, M-, C-, I-, S-); which of them aren't observed in Live (source "obs") and why you went ahead; Beatlayer's render of each changed view beside the observation for its row (`cargo xtask device-shot <device>` for a device panel; never commit Live's screenshots); and the differences that remain. Otherwise write "Not a UI change". -->
+
 ## Deviations
 
 <!-- Each deviation from the architecture or the build plan, with its reason. Write "None" if there are none. -->

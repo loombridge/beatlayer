@@ -9,7 +9,9 @@
 
 use bl_dsp::Random;
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, LayoutNode, Widget};
+use bl_model::device_layout::{
+    BOX_HEIGHT, Control, ControlBand, DisplayCell, Heading, LayoutNode, Widget,
+};
 use bl_model::{
     Device, DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit,
 };
@@ -21,28 +23,33 @@ use crate::framework::{Audio, NativeDevice, ParamBank, add};
 /// Vinyl Distortion's device type.
 pub const WAX: &str = "beatlayer.wax";
 
-/// Tracing Drive: how much even-harmonic distortion the tracing model adds.
+/// Tracing Drive, from 0 to 1: how much even-harmonic distortion the
+/// tracing model adds.
 pub const TRACING_DRIVE: ParamId = ParamId(0);
 /// Tracing Freq: the centre of the band the tracing model distorts.
 pub const TRACING_FREQ: ParamId = ParamId(1);
 /// Tracing Width: that band's width, in octaves.
 pub const TRACING_WIDTH: ParamId = ParamId(2);
-/// Pinch Drive: how much odd-harmonic distortion the pinch adds.
+/// Pinch Drive, from 0 to 1: how much odd-harmonic distortion the pinch adds.
 pub const PINCH_DRIVE: ParamId = ParamId(3);
 /// Pinch Freq: the centre of the band the pinch distorts.
 pub const PINCH_FREQ: ParamId = ParamId(4);
 /// Pinch Width: that band's width, in octaves.
 pub const PINCH_WIDTH: ParamId = ParamId(5);
-/// Drive: the overall distortion, from both models.
+/// Drive, from 0 to 1: the overall distortion, from both models.
 pub const DRIVE: ParamId = ParamId(6);
 /// Soft or Hard: a dub plate or a standard record.
 pub const SOFT_HARD: ParamId = ParamId(7);
 /// Pinch Stereo or Mono.
 pub const PINCH_MODE: ParamId = ParamId(8);
-/// Crackle Density: clicks per second.
+/// Crackle Density: clicks per second, unitless.
 pub const CRACKLE_DENSITY: ParamId = ParamId(9);
-/// Crackle Volume.
+/// Crackle Volume, from 0 to 1.
 pub const CRACKLE_VOLUME: ParamId = ParamId(10);
+/// Tracing On: whether the tracing model adds its distortion.
+pub const TRACING_ON: ParamId = ParamId(11);
+/// Pinch On: whether the pinch adds its distortion.
+pub const PINCH_ON: ParamId = ParamId(12);
 
 const TRACING_DRIVE_INDEX: usize = 0;
 const TRACING_FREQ_INDEX: usize = 1;
@@ -55,6 +62,8 @@ const SOFT_HARD_INDEX: usize = 7;
 const PINCH_MODE_INDEX: usize = 8;
 const DENSITY_INDEX: usize = 9;
 const VOLUME_INDEX: usize = 10;
+const TRACING_ON_INDEX: usize = 11;
+const PINCH_ON_INDEX: usize = 12;
 
 /// The distortion added at full drive, against the band's amplitude: the
 /// tracing model adds `TRACING_GAIN * band^2`, the pinch `PINCH_GAIN * band^3`.
@@ -80,13 +89,13 @@ const REFRESH_FRAMES: u64 = 16;
 /// The Vinyl Distortion device type.
 #[must_use]
 pub fn wax_type() -> DeviceType {
-    let width = |id, name: &str| {
-        ParamDescriptor::continuous(id, name, (0.25, 4.0), 1.0, ParamUnit::None)
+    let width = |id, name: &str, default| {
+        ParamDescriptor::continuous(id, name, (0.25, 4.0), default, ParamUnit::None)
             .logarithmic()
             .describe("The width of the band that is distorted, in octaves.")
     };
     let drive = |id, name: &str, text: &str| {
-        ParamDescriptor::continuous(id, name, (0.0, 100.0), 50.0, ParamUnit::Percent).describe(text)
+        ParamDescriptor::continuous(id, name, (0.0, 1.0), 0.0, ParamUnit::None).describe(text)
     };
     let freq = |id, name: &str, default| {
         ParamDescriptor::continuous(id, name, (20.0, 20_000.0), default, ParamUnit::Hertz)
@@ -99,18 +108,18 @@ pub fn wax_type() -> DeviceType {
             "Tracing Drive",
             "How much even-harmonic distortion the tracing model adds.",
         ),
-        freq(TRACING_FREQ, "Tracing Freq", 3_000.0),
-        width(TRACING_WIDTH, "Tracing Width"),
+        freq(TRACING_FREQ, "Tracing Freq", 684.0),
+        width(TRACING_WIDTH, "Tracing Width", 0.32),
         drive(
             PINCH_DRIVE,
             "Pinch Drive",
             "How much odd-harmonic distortion the pinch adds.",
         ),
-        freq(PINCH_FREQ, "Pinch Freq", 6_000.0),
-        width(PINCH_WIDTH, "Pinch Width"),
-        ParamDescriptor::continuous(DRIVE, "Drive", (0.0, 100.0), 100.0, ParamUnit::Percent)
+        freq(PINCH_FREQ, "Pinch Freq", 7_500.0),
+        width(PINCH_WIDTH, "Pinch Width", 3.0),
+        ParamDescriptor::continuous(DRIVE, "Drive", (0.0, 1.0), 1.0, ParamUnit::None)
             .describe("Raises or lowers the distortion of both models together."),
-        ParamDescriptor::choice(SOFT_HARD, "Soft/Hard", &["Soft", "Hard"], 1).describe(
+        ParamDescriptor::choice(SOFT_HARD, "Soft/Hard", &["Soft", "Hard"], 0).describe(
             "Soft is a duller, gentler distortion, like a dub plate; Hard is a standard record.",
         ),
         ParamDescriptor::choice(PINCH_MODE, "Pinch Mode", &["Stereo", "Mono"], 0).describe(
@@ -120,32 +129,81 @@ pub fn wax_type() -> DeviceType {
             CRACKLE_DENSITY,
             "Crackle Density",
             (0.0, MAX_DENSITY),
-            0.0,
-            ParamUnit::Hertz,
+            10.0,
+            ParamUnit::None,
         )
         .describe("How many clicks of crackle there are each second."),
-        ParamDescriptor::gain(CRACKLE_VOLUME, "Crackle Volume", 6.0, -24.0)
-            .describe("How loud the crackle is, down to silence."),
+        ParamDescriptor::continuous(
+            CRACKLE_VOLUME,
+            "Crackle Volume",
+            (0.0, 1.0),
+            0.0,
+            ParamUnit::None,
+        )
+        .describe("How loud the crackle is, down to silence."),
+        ParamDescriptor::toggle(TRACING_ON, "Tracing On", true)
+            .describe("Whether the tracing model distorts."),
+        ParamDescriptor::toggle(PINCH_ON, "Pinch On", true).describe("Whether the pinch distorts."),
     ];
-    let band = |controls: &[(ParamId, Widget)]| {
-        LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, controls))
+    // A model's row of controls under its display: On, Drive, Freq and B.
+    let model = |on, drive, freq, width| {
+        vec![
+            Control::new(on, Widget::Toggle, 4.0, 0.0)
+                .captioned("On")
+                .sized(20.0, BOX_HEIGHT),
+            Control::new(drive, Widget::Number, 29.0, 0.0)
+                .unnamed()
+                .sized(27.0, BOX_HEIGHT),
+            Control::new(freq, Widget::Beside(24), 59.5, 0.0)
+                .captioned("Freq")
+                .sized(67.5, BOX_HEIGHT),
+            Control::new(width, Widget::Beside(9), 131.5, 0.0)
+                .captioned("B")
+                .sized(36.0, BOX_HEIGHT),
+        ]
     };
     let layout = DeviceLayout::new(LayoutNode::Row(vec![
-        band(&[
-            (TRACING_DRIVE, Widget::Knob),
-            (TRACING_FREQ, Widget::Knob),
-            (TRACING_WIDTH, Widget::Knob),
+        LayoutNode::Band(ControlBand::free(2.5, 158.0, Vec::new())),
+        LayoutNode::Column(vec![
+            LayoutNode::Heading(Heading::new("Tracing Model", 80.0)),
+            LayoutNode::Cell(DisplayCell::new("Tracing", 161.0, 45.0, 1.0).with_inset(4.0)),
+            LayoutNode::Band(ControlBand::free(
+                169.0,
+                16.0,
+                model(TRACING_ON, TRACING_DRIVE, TRACING_FREQ, TRACING_WIDTH),
+            )),
+            LayoutNode::Row(vec![
+                LayoutNode::Heading(Heading::new("Pinch", 34.5)),
+                LayoutNode::Band(ControlBand::free(
+                    134.5,
+                    12.0,
+                    vec![
+                        Control::new(SOFT_HARD, Widget::Segments(2), 0.0, 0.0)
+                            .sized(56.0, BOX_HEIGHT),
+                        Control::new(PINCH_MODE, Widget::Segments(2), 62.0, 0.0)
+                            .sized(70.0, BOX_HEIGHT),
+                    ],
+                )),
+            ]),
+            LayoutNode::Cell(DisplayCell::new("Pinch", 161.0, 44.0, 1.0).with_inset(4.0)),
+            LayoutNode::Band(ControlBand::free(
+                169.0,
+                13.0,
+                model(PINCH_ON, PINCH_DRIVE, PINCH_FREQ, PINCH_WIDTH),
+            )),
         ]),
-        band(&[
-            (PINCH_DRIVE, Widget::Knob),
-            (PINCH_FREQ, Widget::Knob),
-            (PINCH_WIDTH, Widget::Knob),
-            (PINCH_MODE, Widget::Chooser),
-        ]),
-        band(&[(DRIVE, Widget::Knob), (SOFT_HARD, Widget::Chooser)]),
-        band(&[
-            (CRACKLE_DENSITY, Widget::Knob),
-            (CRACKLE_VOLUME, Widget::Knob),
+        LayoutNode::Column(vec![
+            LayoutNode::Heading(Heading::new("Crackle", 44.0)),
+            LayoutNode::Band(ControlBand::free(
+                45.5,
+                146.0,
+                vec![
+                    Control::new(CRACKLE_VOLUME, Widget::SmallKnob, 7.5, 4.0).captioned("Volume"),
+                    Control::new(CRACKLE_DENSITY, Widget::SmallKnob, 7.5, 50.5)
+                        .captioned("Density"),
+                    Control::new(DRIVE, Widget::SmallKnob, 7.5, 99.5),
+                ],
+            )),
         ]),
     ]));
     DeviceType::native(WAX, "Vinyl Distortion", DeviceRole::AudioEffect).with_description(
@@ -161,6 +219,7 @@ pub fn wax_type() -> DeviceType {
                     "Pinch",
                     &["Pinch Drive", "Pinch Freq", "Pinch Width", "Pinch Mode"],
                 ),
+                ("On", &["Tracing On", "Pinch On"]),
                 ("Crackle", &["Crackle Density", "Crackle Volume"]),
             ]),
     )
@@ -239,6 +298,8 @@ impl NativeDevice for Wax {
         let (pinch_freq, pinch_width) = (ramp(PINCH_FREQ_INDEX), ramp(PINCH_WIDTH_INDEX));
         let (density, volume) = (ramp(DENSITY_INDEX), ramp(VOLUME_INDEX));
         let soft = params.value(SOFT_HARD_INDEX) < 0.5;
+        let tracing_on = f32::from(u8::from(params.value(TRACING_ON_INDEX) >= 0.5));
+        let pinch_on = f32::from(u8::from(params.value(PINCH_ON_INDEX) >= 0.5));
         let mono = params.value(PINCH_MODE_INDEX) >= 0.5;
         let max_corner = rate * 0.45;
         for (index, channel) in self.channels.iter_mut().enumerate() {
@@ -262,15 +323,15 @@ impl NativeDevice for Wax {
                     channel.pinch.set(f, q, rate);
                 }
                 let x = *sample;
-                let overall = drive[i] / 100.0;
+                let overall = drive[i];
                 let even = channel.tracing.process(x);
                 let even = even * even;
                 // The high-pass: out = in - last in + pole * last out.
                 let blocked = even - channel.dc.0 + self.dc_pole * channel.dc.1;
                 channel.dc = (even, blocked);
                 let odd = channel.pinch.process(x);
-                let mut added = TRACING_GAIN * tracing_drive[i] / 100.0 * overall * blocked
-                    + sign * PINCH_GAIN * pinch_drive[i] / 100.0 * overall * odd.powi(3);
+                let mut added = tracing_on * TRACING_GAIN * tracing_drive[i] * overall * blocked
+                    + pinch_on * sign * PINCH_GAIN * pinch_drive[i] * overall * odd.powi(3);
                 if soft {
                     channel.soft += (added - channel.soft) * self.soft_step;
                     added = channel.soft * SOFT_SCALE;

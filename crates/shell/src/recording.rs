@@ -223,6 +223,13 @@ pub struct Track {
 /// name replaced by `-`. The label is the track's own (`5-Guitar`).
 #[must_use]
 pub fn file_name(label: &str, take: u32, stamp: &str) -> String {
+    format!("{} {take:04} [{stamp}].wav", clean_label(label))
+}
+
+/// A label as a file name's start: characters that can't be in a file name
+/// replaced by `-`, and `Audio` for a label with nothing in it.
+#[must_use]
+pub fn clean_label(label: &str) -> String {
     let clean: String = label
         .chars()
         .map(|c| {
@@ -234,8 +241,7 @@ pub fn file_name(label: &str, take: u32, stamp: &str) -> String {
         })
         .collect();
     let clean = clean.trim().trim_end_matches(['.', ' ']);
-    let clean = if clean.is_empty() { "Audio" } else { clean };
-    format!("{clean} {take:04} [{stamp}].wav")
+    if clean.is_empty() { "Audio" } else { clean }.to_owned()
 }
 
 /// The stamp recording file names carry, now, in UTC.

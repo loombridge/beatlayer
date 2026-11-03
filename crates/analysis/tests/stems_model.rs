@@ -9,7 +9,6 @@
 use std::path::PathBuf;
 
 use bl_analysis::stems::generated::{self, Generated};
-#[cfg(target_os = "macos")]
 use bl_analysis::stems::onnx::Provider;
 use bl_analysis::stems::onnx::{Demucs, Options};
 use bl_analysis::stems::{Quality, RATE, Stem, separate};
@@ -184,4 +183,44 @@ fn a_refused_provider_falls_back_to_the_cpu_and_says_why() {
     let stems = separate(left, right, &mut network, Quality::HighSpeed, &mut |_| true).unwrap();
     assert!(stems.get(Stem::Bass)[0].iter().all(|x| x.is_finite()));
     let _ = std::fs::remove_file(blocker);
+}
+
+// Spec: stem-separation R39, R40 and R41. On Windows DirectML, and on Linux
+// CUDA, runs the model where it loads and gives the CPU's stems within the
+// same tolerance; where it doesn't, the CPU runs it and the report names the
+// provider that was refused and why, as a computer with the CPU build of
+// ONNX Runtime, or no NVIDIA libraries, gets.
+#[test]
+#[cfg(any(windows, target_os = "linux"))]
+fn the_platforms_gpu_gives_the_cpus_stems_or_the_cpu_says_why() {
+    let Some((runtime, model)) = packages("BL_STEMS_MODEL") else {
+        return;
+    };
+    let generated = generated::mix(12.0, 5);
+    let mut cpu = load(&runtime, &model, false);
+    assert_eq!(cpu.report().provider, Provider::Cpu);
+    assert_eq!(cpu.report().fallback, None);
+    let mut accelerated = load(&runtime, &model, true);
+    let report = accelerated.report().clone();
+    let name = if cfg!(windows) { "DirectML" } else { "CUDA" };
+    eprintln!("{}", report.describe());
+    if report.provider == Provider::Cpu {
+        let why = report
+            .fallback
+            .as_deref()
+            .expect("a reason for the fallback");
+        assert!(why.contains(name), "{why}");
+        assert!(report.describe().contains(why));
+    } else {
+        assert_eq!(report.provider.name(), name);
+    }
+    for quality in [Quality::HighSpeed, Quality::HighQuality] {
+        let (want, got) = (
+            scores(&mut cpu, &generated, quality),
+            scores(&mut accelerated, &generated, quality),
+        );
+        for (want, got) in want.iter().zip(&got) {
+            assert!(got >= &(want - 0.2), "{name} {got} cpu {want}");
+        }
+    }
 }

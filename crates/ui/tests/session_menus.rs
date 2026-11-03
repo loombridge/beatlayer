@@ -402,9 +402,52 @@ fn an_audio_clips_menu_adds_the_audio_rows_after_crop_clip() {
         assert!(has(&output, row), "{row}");
     }
     assert!(!item(&output, "Slice to New MIDI Track").disabled);
+    // Spec: audio-to-midi R1. Built in WP-9.7: the three Convert items are
+    // enabled with the one audio clip selected.
+    for row in [
+        "Convert Harmony to New MIDI Track",
+        "Convert Melody to New MIDI Track",
+        "Convert Drums to New MIDI Track",
+    ] {
+        assert!(!item(&output, row).disabled, "{row}");
+    }
     // Spec: stem-separation R22. Built: enabled wherever stem separation is.
     let stems = item(&output, "Separate Stems to New Audio Tracks");
     assert_eq!(stems.disabled, bl_shell::stems::packages().is_empty());
+}
+
+// Spec: audio-to-midi R1, R5, R6 (C-CLIP-SES-019b to 019d). Each Convert item
+// of a Session audio clip's menu converts that clip: the new track follows the
+// clip's, and its clip is in the clip's scene.
+#[test]
+fn the_convert_items_make_a_track_with_a_clip_in_the_source_scene() {
+    for (label, suffix) in [
+        ("Convert Harmony to New MIDI Track", "Harmony"),
+        ("Convert Melody to New MIDI Track", "Melody"),
+        ("Convert Drums to New MIDI Track", "Drums"),
+    ] {
+        let mut h = harness();
+        let g = Grid::new(&h);
+        let track = track_of(&h, TrackKind::Audio);
+        let scene = g.scenes[1];
+        let clip = audio_clip(&mut h, track, scene);
+        h.shell
+            .use_transcription_notes(&[(36, 0.01, 0.02), (38, 0.05, 0.06)]);
+        right_click(&mut h, g.slot(track, 1));
+        choose(&mut h, label);
+        h.shell.wait_audio_to_midi();
+        h.settle();
+        let status = h.shell.audio_to_midi_status();
+        assert_eq!(status.clip, Some(clip), "{label}");
+        let made = status.created_track.expect("the track landed");
+        let doc = h.shell.editor().document();
+        let order: Vec<TrackId> = doc.top_level().collect();
+        let at = order.iter().position(|t| *t == track).unwrap();
+        assert_eq!(order[at + 1], made, "{label}");
+        assert_eq!(doc.slot(made, scene).map(|c| c.id), status.created_clip);
+        assert!(doc.track(made).unwrap().name().ends_with(suffix));
+        assert_eq!(doc.track(made).unwrap().clips().count(), 0);
+    }
 }
 
 // Spec: stem-separation R22, R23. Separate Stems to New Audio Tracks in a

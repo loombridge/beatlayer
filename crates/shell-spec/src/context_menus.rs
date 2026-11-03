@@ -15,6 +15,7 @@
 
 use crate::arrangement::{SET_GRID, SHOW_TAKE_LANES};
 use crate::audio_editing::CONSOLIDATE_TO_SCENE;
+use crate::audio_to_midi::CONVERT;
 use crate::automation::{INSERT_SHAPE, SIMPLIFY};
 use crate::clip_envelope_editing::INSERT_SHAPE as CLIP_ENVELOPE_INSERT_SHAPE;
 use crate::clip_properties::{ARRANGE_PANELS, FOLD_PANELS};
@@ -1006,17 +1007,17 @@ const CLIP_SES_AUDIO: &[Row] = &[
     (
         "C-CLIP-SES-019b",
         "Convert Harmony to New MIDI Track",
-        Pending(None),
+        Choice(CONVERT, r#"{"kind":"harmony"}"#),
     ),
     (
         "C-CLIP-SES-019c",
         "Convert Melody to New MIDI Track",
-        Pending(None),
+        Choice(CONVERT, r#"{"kind":"melody"}"#),
     ),
     (
         "C-CLIP-SES-019d",
         "Convert Drums to New MIDI Track",
-        Pending(None),
+        Choice(CONVERT, r#"{"kind":"drums"}"#),
     ),
     (
         "C-CLIP-SES-020",
@@ -1396,13 +1397,7 @@ pub fn keys() -> Vec<MenuItem> {
 #[must_use]
 pub fn pending_package(row: &str) -> Option<&'static str> {
     match row {
-        "C-CLIP-SES-019b" | "C-CLIP-SES-019c" | "C-CLIP-SES-019d" => {
-            Some("Phase 9 (audio to MIDI, IMP-06)")
-        }
         "C-TRACK-013" | "C-TRACK-014" => Some("a package not planned yet"),
-        "C-CLIP-ARR-027a" | "C-CLIP-ARR-027b" | "C-CLIP-ARR-027c" => {
-            Some("Phase 9 (audio to MIDI, IMP-06)")
-        }
         // The MIDI Note Editor's and the take lanes' items that Live has and
         // Beatlayer doesn't yet.
         "C-NOTE-011" | "C-MPE-003" | "C-TAKE-004" | "C-CHAIN-005" | "C-MAIN-005"
@@ -1577,17 +1572,17 @@ const AUDIO_CLIP: &[Row] = &[
     (
         "C-CLIP-ARR-027a",
         "Convert Harmony to New MIDI Track",
-        Pending(None),
+        Choice(CONVERT, r#"{"kind":"harmony"}"#),
     ),
     (
         "C-CLIP-ARR-027b",
         "Convert Melody to New MIDI Track",
-        Pending(None),
+        Choice(CONVERT, r#"{"kind":"melody"}"#),
     ),
     (
         "C-CLIP-ARR-027c",
         "Convert Drums to New MIDI Track",
-        Pending(None),
+        Choice(CONVERT, r#"{"kind":"drums"}"#),
     ),
     (
         "C-CLIP-ARR-027d",
@@ -2150,11 +2145,41 @@ mod tests {
                 pending.push(item.row);
             }
         }
-        // Only the items whose commands still wait for a package.
-        assert_eq!(
-            pending,
-            ["C-CLIP-SES-019b", "C-CLIP-SES-019c", "C-CLIP-SES-019d",]
-        );
+        // Only the items whose commands still wait for a package: WP-9.7
+        // built the last, the Convert items.
+        assert!(pending.is_empty(), "{pending:?}");
+    }
+
+    // Spec: audio-to-midi R1; session-context-menus R13. The Convert items of
+    // an audio clip's menu in either view run `audio_to_midi.convert` with
+    // their kind, after Slice to New MIDI Track.
+    #[test]
+    fn the_convert_rows_run_audio_to_midi_with_their_kind() {
+        let session = session_clip(SessionClipMenu {
+            audio: true,
+            ..SessionClipMenu::default()
+        });
+        let arrangement = arrangement_audio_clip();
+        for (menu, rows) in [
+            (
+                &session,
+                ["C-CLIP-SES-019b", "C-CLIP-SES-019c", "C-CLIP-SES-019d"],
+            ),
+            (
+                &arrangement,
+                ["C-CLIP-ARR-027a", "C-CLIP-ARR-027b", "C-CLIP-ARR-027c"],
+            ),
+        ] {
+            for (row, kind) in rows.into_iter().zip(["harmony", "melody", "drums"]) {
+                let item = menu.iter().find(|i| i.row == row).expect(row);
+                assert_eq!(
+                    item.action,
+                    Choice(CONVERT, ["{\"kind\":\"", kind, "\"}"].concat().leak()),
+                    "{row}"
+                );
+                assert!(pending_package(row).is_none(), "{row}");
+            }
+        }
     }
 
     // Spec: stem-separation R22

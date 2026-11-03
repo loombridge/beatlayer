@@ -286,6 +286,50 @@ fn set_sample_with_no_file_clears_the_slot_as_one_named_step() {
     assert_eq!(responses(&mut shell, device)["slots"][0]["state"], "ready");
 }
 
+// Spec: impulse-responses R2; freeze-and-bounce R8
+#[test]
+fn a_frozen_tracks_slot_is_not_cleared() {
+    let scratch = Scratch::new("frozen");
+    let (mut shell, device, _) = shell_with_device(&scratch);
+    let file = scratch.path("A.wav");
+    write(&file, &[burst(2000, 1)], 48_000);
+    load(&mut shell, device, &file);
+    shell
+        .run(
+            "set.save_as",
+            json!({ "path": text(&scratch.path("Song.blset")) }),
+        )
+        .unwrap();
+    let track = shell.editor().document().device_track(device).unwrap();
+    shell
+        .run(
+            "browser.add_to_arrangement",
+            json!({ "paths": [text(&file)], "track": track, "at": 0 }),
+        )
+        .unwrap();
+    shell
+        .run("track.freeze", json!({ "tracks": [track] }))
+        .unwrap();
+    assert!(
+        shell
+            .run(
+                "device.set_sample",
+                json!({ "device": device, "media": null, "slot": 0 }),
+            )
+            .is_err(),
+        "a frozen track's devices are locked"
+    );
+    assert!(
+        shell
+            .editor()
+            .document()
+            .device(device)
+            .unwrap()
+            .media_at(0)
+            .is_some()
+    );
+}
+
 /// The engine's registry for `shell`'s set: the test devices, and the shell's
 /// media store for the files they name.
 fn registry_for(shell: &Shell) -> bl_engine::Registry {

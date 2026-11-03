@@ -1829,12 +1829,6 @@ impl Shell {
             // the app's own recovery.
             return self.run_recovery(id, args);
         }
-        if id == "device.set_sample"
-            && let Some(result) = self.set_impulse_sample(id, &args)
-        {
-            // Spec: impulse-responses R2.
-            return result;
-        }
         if let Some(track) = self.frozen_blocks(id, &args) {
             return Err(ShellError::Unavailable {
                 command: id.to_owned(),
@@ -1843,6 +1837,12 @@ impl Shell {
                     track.0
                 ),
             });
+        }
+        if id == "device.set_sample"
+            && let Some(result) = self.set_impulse_sample(id, &args)
+        {
+            // Spec: impulse-responses R2.
+            return result;
         }
         if id == bl_shell_spec::transport::SET_RECORD_QUANTIZATION
             && let Some(reason) = self.record_quantization_locked()

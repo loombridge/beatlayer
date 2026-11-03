@@ -282,6 +282,19 @@ impl InstrumentFilter {
         self.stages[self.current].start(setup);
     }
 
+    /// Starts afresh as `setup` with nothing fading and nothing played: the
+    /// way a structure that has been idle begins again.
+    pub fn restart(&mut self, setup: Setup) {
+        self.setup = setup;
+        self.current = 0;
+        self.fade_left = 0;
+        self.played = false;
+        self.fresh.clear();
+        for stage in &mut self.stages {
+            stage.start(setup);
+        }
+    }
+
     /// Starts slot `slot`'s voice afresh: its state clears and its settings
     /// take their values at `frame`, where its sound starts, without
     /// gliding.
@@ -598,12 +611,12 @@ impl Coef {
     }
 }
 
-fn soft(x: f64, a: f64) -> f64 {
+pub(crate) fn soft(x: f64, a: f64) -> f64 {
     a * (x / a).tanh()
 }
 
 /// `x` held below `bound`: left alone up to half of it, then rounded off.
-fn limit(x: f64, bound: f64) -> f64 {
+pub(crate) fn limit(x: f64, bound: f64) -> f64 {
     let knee = bound / 2.0;
     if x.abs() <= knee {
         x
@@ -612,7 +625,7 @@ fn limit(x: f64, bound: f64) -> f64 {
     }
 }
 
-fn flush(x: f64) -> f64 {
+pub(crate) fn flush(x: f64) -> f64 {
     if x.abs() < FLOOR { 0.0 } else { x }
 }
 

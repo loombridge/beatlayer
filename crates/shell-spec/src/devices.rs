@@ -329,6 +329,10 @@ pub const RACK_LIST_HEADER_HEIGHT: f32 = 34.0;
 /// (racks spec, R18; to observe).
 pub const RACK_END_BRACKET_WIDTH: f32 = 8.0;
 
+/// The same for a drum rack, which Live draws wider (observed in Live
+/// 12.4.16, 2 November 2026; layout L-DEV-049).
+pub const DRUM_END_BRACKET_WIDTH: f32 = 13.0;
+
 /// The width at 100% of a track's chain: its devices left to right with the
 /// gap before each and after the last.
 #[must_use]
@@ -341,6 +345,29 @@ pub fn chain_width(devices: &[DeviceFrame]) -> f32 {
 /// The width at 100% of a rack's devices view while the chain holds no
 /// device, or none is shown (to observe).
 pub const RACK_EMPTY_DEVICES_WIDTH: f32 = 96.0;
+
+/// The same for a drum rack (observed).
+pub const DRUM_EMPTY_DEVICES_WIDTH: f32 = 82.0;
+
+/// The width at 100% of an empty devices view in `rack`.
+#[must_use]
+pub fn rack_empty_width(rack: &RackFrame) -> f32 {
+    if rack.pads.is_some() {
+        DRUM_EMPTY_DEVICES_WIDTH
+    } else {
+        RACK_EMPTY_DEVICES_WIDTH
+    }
+}
+
+/// The width at 100% of the end bracket of `rack`.
+#[must_use]
+pub fn rack_bracket_width(rack: &RackFrame) -> f32 {
+    if rack.pads.is_some() {
+        DRUM_END_BRACKET_WIDTH
+    } else {
+        RACK_END_BRACKET_WIDTH
+    }
+}
 
 /// The height at 100% of a row of the chain list: the chain's name,
 /// activator, Solo and Hot-Swap on the first line, and Volume and Pan on
@@ -355,13 +382,13 @@ pub const CHAIN_DROP_AREA_HEIGHT: f32 = 26.0;
 #[must_use]
 pub fn rack_devices_width(rack: &RackFrame) -> f32 {
     let inside = if rack.devices.is_empty() {
-        RACK_EMPTY_DEVICES_WIDTH
+        rack_empty_width(rack)
     } else {
         rack.devices
             .iter()
             .fold(DEVICE_GAP, |w, d| w + frame_width(d) + DEVICE_GAP)
     };
-    inside + RACK_END_BRACKET_WIDTH
+    inside + rack_bracket_width(rack)
 }
 
 /// The width at 100% of a rack's chain list: a drum rack's grows with the
@@ -656,7 +683,7 @@ impl DevicePanel {
                         .params
                         .iter()
                         .position(|p| p.id == a.switch)
-                        .is_some_and(|i| self.value(i) >= 0.5)
+                        .is_some_and(|i| a.is_on(self.value(i)))
             })
             .map_or(param, |a| a.on)
     }

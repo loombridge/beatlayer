@@ -8,13 +8,14 @@ use std::f64::consts::TAU;
 use bl_dsp::random::Random;
 use bl_engine::{DeviceType, Registry};
 use bl_model::ParamUnit;
-use bl_model::device_layout::Widget;
+use bl_model::device_layout::{Control, Widget};
 use bl_model::{
     DeviceDescription, DeviceDisplay, DeviceId, DeviceRole, OrdMap, ParamDescriptor, ParamId,
 };
 
 use crate::drum_synth::{
-    DECAY, DrumSynth, Filter, Hit, Pass, Preset, decay, layout, master_at, percent, volume,
+    DECAY, DrumSynth, Filter, Hit, Pass, Preset, VOLUME, decay, decay_ms, framed, label, large,
+    master_at, note_reading, panel, percent, volume,
 };
 use crate::framework::{ParamBank, add};
 
@@ -33,6 +34,9 @@ pub const OT: ParamId = ParamId(5);
 pub const DRIVE: ParamId = ParamId(6);
 /// Whether a click is added.
 pub const CLICK: ParamId = ParamId(7);
+/// Whether the sound's polarity is inverted. Live's panel reads this button
+/// Ø and gives it no other name.
+pub const PHASE: ParamId = ParamId(8);
 
 /// How many octaves above its pitch the sine starts at Env 100 %.
 const ENV_OCTAVES: f64 = 4.0;
@@ -57,54 +61,67 @@ const CLICK_GAIN: f64 = 2.0;
 #[must_use]
 pub fn ds_kick_type() -> DeviceType {
     let params = vec![
-        decay(400.0),
+        decay(48.2),
         volume(),
-        ParamDescriptor::continuous(PITCH, "Pitch", (30.0, 120.0), 50.0, ParamUnit::Hertz)
+        ParamDescriptor::continuous(PITCH, "Pitch", (30.0, 120.0), 43.3, ParamUnit::Hertz)
             .logarithmic()
             .describe("The kick's tuning in hertz, whatever key plays it."),
         percent(
             ENV,
             "Env",
-            50.0,
+            47.4,
             "How far above its pitch the sine starts: at 100 % four octaves, falling to the \
              pitch over about 30 ms.",
-        ),
+        )
+        .decimals(1),
         percent(
             ATTACK,
             "Attack",
             0.0,
             "Fades the sine in over up to 10 ms, smoothing its start.",
-        ),
+        )
+        .decimals(2),
         percent(
             OT,
             "OT",
             0.0,
             "Adds the sine's second and third harmonics, up to 6 and 12 dB below it.",
-        ),
+        )
+        .decimals(2),
         percent(
             DRIVE,
             "Drive",
             0.0,
             "Drives the sound through a soft clipper by up to 24 dB, with the output scaled \
              back.",
-        ),
+        )
+        .decimals(2),
         ParamDescriptor::toggle(CLICK, "Click", false)
             .describe("Adds a 1 ms band-passed click at 4 kHz for a sharper start."),
+        ParamDescriptor::toggle(PHASE, "Ø", false)
+            .describe("Inverts the sound's polarity, for lining it up with another sound."),
     ];
     DeviceType::native(DS_KICK, "DS Kick", DeviceRole::Instrument).with_description(
         DeviceDescription::new(params)
-            .with_layout(layout(&[
-                (PITCH, Widget::Knob),
-                (ENV, Widget::Knob),
-                (ATTACK, Widget::Knob),
-                (OT, Widget::Knob),
-                (DRIVE, Widget::Knob),
-                (CLICK, Widget::Toggle),
-                (DECAY, Widget::Knob),
-                (crate::drum_synth::VOLUME, Widget::Knob),
-            ]))
+            .with_layout(panel(
+                (
+                    vec![
+                        large(PITCH, 0),
+                        framed(DRIVE, 1, 0),
+                        framed(OT, 1, 1),
+                        framed(ATTACK, 2, 0),
+                        Control::new(CLICK, Widget::Toggle, 92.0, 85.0).sized(26.0, 12.0),
+                        Control::new(PHASE, Widget::Toggle, 121.0, 85.0).sized(12.0, 12.0),
+                    ],
+                    vec![label("Drive/OT", 1), label("Attack", 2)],
+                ),
+                [DECAY, ENV, VOLUME],
+            ))
             .with_banks(&[
-                ("Tone", &["Pitch", "Env", "Attack", "OT", "Drive", "Click"]),
+                (
+                    "Tone",
+                    &["Pitch", "Env", "Attack", "OT", "Drive", "Click", "Ø"],
+                ),
                 ("Level", &["Decay", "Volume"]),
             ]),
     )
@@ -114,7 +131,7 @@ pub fn ds_kick_type() -> DeviceType {
 pub const PRESETS: [Preset; 3] = [
     Preset {
         name: "Deep Sub",
-        params: &[(PITCH, 40.0), (ENV, 30.0), (ATTACK, 20.0), (DECAY, 900.0)],
+        params: &[(PITCH, 40.0), (ENV, 30.0), (ATTACK, 20.0), (DECAY, 75.1)],
     },
     Preset {
         name: "Punch",
@@ -124,7 +141,7 @@ pub const PRESETS: [Preset; 3] = [
             (OT, 30.0),
             (DRIVE, 25.0),
             (CLICK, 1.0),
-            (DECAY, 350.0),
+            (DECAY, 59.3),
         ],
     },
     Preset {
@@ -134,7 +151,7 @@ pub const PRESETS: [Preset; 3] = [
             (ENV, 60.0),
             (OT, 60.0),
             (DRIVE, 80.0),
-            (DECAY, 250.0),
+            (DECAY, 53.7),
         ],
     },
 ];
@@ -155,15 +172,21 @@ pub fn display(
     description: &DeviceDescription,
     values: &OrdMap<ParamId, f64>,
 ) -> DeviceDisplay {
-    crate::drum_synth::display(device, description, values, |value, ms| {
-        let attack = value(ATTACK) / 100.0 * ATTACK_MAX_MS;
-        let fade = if attack > 0.0 {
-            (ms / attack).min(1.0)
-        } else {
-            1.0
-        };
-        fade * master_at(ms, value(DECAY))
-    })
+    crate::drum_synth::display(
+        device,
+        description,
+        values,
+        |value| vec![note_reading(value(PITCH))],
+        |value, ms| {
+            let attack = value(ATTACK) / 100.0 * ATTACK_MAX_MS;
+            let fade = if attack > 0.0 {
+                (ms / attack).min(1.0)
+            } else {
+                1.0
+            };
+            fade * master_at(ms, decay_ms(value(DECAY)))
+        },
+    )
 }
 
 /// One kick hit.
@@ -229,6 +252,9 @@ impl Hit for Kick {
             sound += CLICK_GAIN * window * band;
         }
         self.age = self.age.saturating_add(1);
+        if bank.value(PHASE.0 as usize) >= 0.5 {
+            sound = -sound;
+        }
         let out = (sound * f64::from(master)) as f32;
         (out, out)
     }

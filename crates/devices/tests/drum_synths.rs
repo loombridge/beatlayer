@@ -16,6 +16,21 @@ use common::{CHANNELS, RATE, device, node, set};
 
 const HZ: f64 = 48_000.0;
 
+/// The Pitch that tunes DS Tom to `hz`, as its control reads.
+fn tom_pitch(hz: f64) -> f64 {
+    100.0 * (hz / 43.1).log10()
+}
+
+/// The Tune that moves a pitch `semitones`, as its control reads.
+fn tune_for(semitones: f64) -> f64 {
+    50.0 + semitones / 24.0 * 50.0
+}
+
+/// The Decay that is `milliseconds` long, in the per cent its control reads.
+fn decay_for(milliseconds: f64) -> f64 {
+    bl_devices::drum_synth::decay_percent(milliseconds)
+}
+
 /// The block sizes every render is checked at.
 const BLOCKS: [usize; 4] = [1, 64, 512, 4096];
 
@@ -58,7 +73,11 @@ const KINDS: [Kind; 8] = [
         id: ds_clap::DS_CLAP,
         device_type: ds_clap::ds_clap_type,
         register: ds_clap::register,
-        tail: &[(ds_clap::TAIL, 100.0)],
+        tail: &[
+            (ds_clap::TAIL, 100.0),
+            (ds_clap::TUNE, 50.0),
+            (ds_clap::TONE, 50.0),
+        ],
     },
     Kind {
         name: "DS HH",
@@ -269,9 +288,9 @@ fn each_device_is_an_instrument_with_its_own_type_id_and_a_description_that_chec
 #[test]
 fn a_note_starts_a_hit_that_runs_its_own_length_whatever_the_notes_length() {
     for kind in KINDS {
-        let mut held = synth(kind, &[(DECAY, 100.0)]);
+        let mut held = synth(kind, &[(DECAY, decay_for(100.0))]);
         let long = render(held.as_mut(), 12_000, 512, &[(0, on(0, 60, 1.0))], &[]);
-        let mut released = synth(kind, &[(DECAY, 100.0)]);
+        let mut released = synth(kind, &[(DECAY, decay_for(100.0))]);
         let short = render(
             released.as_mut(),
             12_000,
@@ -294,7 +313,7 @@ fn a_note_starts_a_hit_that_runs_its_own_length_whatever_the_notes_length() {
 #[test]
 fn a_new_hit_cuts_the_old_one_over_two_milliseconds() {
     for kind in KINDS {
-        let params = [(VOLUME, 1.0), (DECAY, 2_000.0)];
+        let params = [(VOLUME, 1.0), (DECAY, decay_for(2_000.0))];
         let second = 6_000;
         let mut twice = synth(kind, &params);
         let both = render(
@@ -377,7 +396,7 @@ fn a_hits_level_is_volume_times_velocity_and_never_above_volume() {
 fn decay_is_the_time_to_fall_60_db_within_five_percent() {
     for kind in KINDS {
         for decay in [300.0, 1_000.0] {
-            let mut params = vec![(DECAY, decay)];
+            let mut params = vec![(DECAY, decay_for(decay))];
             params.extend_from_slice(kind.tail);
             let signal = hit(kind, &params, (decay * 1.6 / 1000.0 * HZ) as usize + 2_000);
             let measured = decay_ms(&signal[0], 10.0, 30.0);
@@ -394,7 +413,7 @@ fn decay_is_the_time_to_fall_60_db_within_five_percent() {
 #[test]
 fn a_hit_ends_below_minus_90_db() {
     for kind in KINDS {
-        let signal = hit(kind, &[(DECAY, 1_000.0)], 90_000);
+        let signal = hit(kind, &[(DECAY, decay_for(1_000.0))], 90_000);
         // 1.5 x Decay is 72,000 frames.
         assert_eq!(peak(&signal[0][72_100..]), 0.0, "{}", kind.name);
         assert!(peak(&signal[0][60_000..72_000]) > 0.0, "{}", kind.name);
@@ -428,7 +447,7 @@ fn every_hit_sounds_the_same_and_two_renders_are_identical() {
         (KINDS[7], &[(ds_clang::NOISE, 50.0)]),
     ];
     for (kind, params) in settings {
-        let mut all = vec![(DECAY, 100.0)];
+        let mut all = vec![(DECAY, decay_for(100.0))];
         all.extend_from_slice(params);
         let play = || {
             let mut node = synth(kind, &all);
@@ -473,13 +492,16 @@ fn renders_are_identical_at_any_block_size_with_a_parameter_moving() {
     ];
     for (kind, param, value) in moves {
         let run = |block: usize| {
-            let mut node = synth(kind, &[(DECAY, 200.0), (VOLUME, 0.8)]);
+            let mut node = synth(kind, &[(DECAY, decay_for(200.0)), (VOLUME, 0.8)]);
             render(
                 node.as_mut(),
                 30_000,
                 block,
                 &[(0, on(100, 60, 0.9)), (7_000, on(333, 61, 0.6))],
-                &[(2_000, set(0, param, value)), (9_000, set(0, DECAY, 400.0))],
+                &[
+                    (2_000, set(0, param, value)),
+                    (9_000, set(0, DECAY, decay_for(400.0))),
+                ],
             )
         };
         let golden = run(512);
@@ -496,7 +518,7 @@ fn renders_are_identical_at_any_block_size_with_a_parameter_moving() {
 fn the_display_draws_the_hits_envelope_from_its_parameters() {
     for kind in KINDS {
         let device_type = (kind.device_type)();
-        let values = device(&device_type, &[(DECAY, 400.0)]).params;
+        let values = device(&device_type, &[(DECAY, decay_for(400.0))]).params;
         let display = bl_devices::display_for_view(
             kind.id,
             bl_model::DeviceId(bl_core::id::Id::new(1).unwrap()),
@@ -543,7 +565,11 @@ fn a_preview_plays_a_hit_at_velocity_100() {
 fn ds_kick_sweeps_from_above_down_to_its_pitch() {
     let flat = hit(
         KINDS[0],
-        &[(ds_kick::PITCH, 80.0), (ds_kick::ENV, 0.0)],
+        &[
+            (ds_kick::PITCH, 80.0),
+            (ds_kick::ENV, 0.0),
+            (DECAY, decay_for(400.0)),
+        ],
         24_000,
     );
     let at_rest = crossings_hz(&flat[0], 2_000, 20_000);
@@ -553,7 +579,7 @@ fn ds_kick_sweeps_from_above_down_to_its_pitch() {
         &[
             (ds_kick::PITCH, 50.0),
             (ds_kick::ENV, 100.0),
-            (DECAY, 2_000.0),
+            (DECAY, decay_for(2_000.0)),
         ],
         48_000,
     );
@@ -591,7 +617,12 @@ fn ds_kick_attack_ot_drive_and_click() {
     // OT adds the second and third harmonics, 6 dB and 12 dB below it.
     let rich = hit(
         KINDS[0],
-        &[base[0], base[1], (ds_kick::OT, 100.0), (DECAY, 4_000.0)],
+        &[
+            base[0],
+            base[1],
+            (ds_kick::OT, 100.0),
+            (DECAY, decay_for(4_000.0)),
+        ],
         24_000,
     );
     let window = &rich[0][2_000..18_000];
@@ -602,13 +633,22 @@ fn ds_kick_attack_ot_drive_and_click() {
     );
     assert!((db(f2 / f1) + 6.0).abs() < 0.5, "second: {}", db(f2 / f1));
     assert!((db(f3 / f1) + 12.0).abs() < 0.5, "third: {}", db(f3 / f1));
-    let plain = hit(KINDS[0], &[base[0], base[1], (DECAY, 4_000.0)], 24_000);
+    let plain = hit(
+        KINDS[0],
+        &[base[0], base[1], (DECAY, decay_for(4_000.0))],
+        24_000,
+    );
     assert!(amplitude_at(&plain[0][2_000..18_000], 100.0) < f1 * 0.01);
 
     // Drive adds odd harmonics, and never raises the peak past Volume.
     let driven = hit(
         KINDS[0],
-        &[base[0], base[1], (ds_kick::DRIVE, 100.0), (DECAY, 4_000.0)],
+        &[
+            base[0],
+            base[1],
+            (ds_kick::DRIVE, 100.0),
+            (DECAY, decay_for(4_000.0)),
+        ],
         24_000,
     );
     let window = &driven[0][2_000..18_000];
@@ -638,10 +678,14 @@ fn ds_kick_attack_ot_drive_and_click() {
 // Spec: drum-synths R12
 #[test]
 fn ds_snare_body_pitch_color_and_noise_filter_types() {
-    let body = [(ds_snare::TONE, 0.0), (DECAY, 4_000.0)];
+    let body = [
+        (ds_snare::TONE, 0.0),
+        (DECAY, decay_for(4_000.0)),
+        (ds_snare::TUNE, tune_for(0.0)),
+    ];
     let sines = hit(
         KINDS[1],
-        &[body[0], body[1], (ds_snare::COLOR, 0.0)],
+        &[body[0], body[1], body[2], (ds_snare::COLOR, 0.0)],
         24_000,
     );
     let late = &sines[0][4_800..16_800];
@@ -658,7 +702,7 @@ fn ds_snare_body_pitch_color_and_noise_filter_types() {
             body[0],
             body[1],
             (ds_snare::COLOR, 0.0),
-            (ds_snare::TUNE, 12.0),
+            (ds_snare::TUNE, tune_for(12.0)),
         ],
         24_000,
     );
@@ -669,7 +713,7 @@ fn ds_snare_body_pitch_color_and_noise_filter_types() {
     // ninth.
     let triangles = hit(
         KINDS[1],
-        &[body[0], body[1], (ds_snare::COLOR, 100.0)],
+        &[body[0], body[1], body[2], (ds_snare::COLOR, 100.0)],
         24_000,
     );
     let late = &triangles[0][4_800..16_800];
@@ -679,7 +723,12 @@ fn ds_snare_body_pitch_color_and_noise_filter_types() {
     // The body falls four times faster than Decay.
     let quick = hit(
         KINDS[1],
-        &[body[0], (DECAY, 1_000.0), (ds_snare::COLOR, 0.0)],
+        &[
+            body[0],
+            (DECAY, decay_for(1_000.0)),
+            body[2],
+            (ds_snare::COLOR, 0.0),
+        ],
         24_000,
     );
     let measured = decay_ms(&quick[0], 10.0, 30.0);
@@ -696,7 +745,7 @@ fn ds_snare_body_pitch_color_and_noise_filter_types() {
                 (ds_snare::TONE, 100.0),
                 (ds_snare::COLOR, 0.0),
                 (ds_snare::FILTER, filter),
-                (DECAY, 1_000.0),
+                (DECAY, decay_for(1_000.0)),
             ],
             12_000,
         );
@@ -721,7 +770,7 @@ fn ds_snare_body_pitch_color_and_noise_filter_types() {
             (ds_snare::TONE, 100.0),
             (ds_snare::COLOR, 100.0),
             (ds_snare::FILTER, 0.0),
-            (DECAY, 1_000.0),
+            (DECAY, decay_for(1_000.0)),
         ],
         12_000,
     );
@@ -734,11 +783,12 @@ fn ds_tom_bends_down_to_its_pitch_and_rings_the_membrane_modes() {
     let sine = [
         (ds_tom::TONE, 0.0),
         (ds_tom::COLOR, 100.0),
-        (ds_tom::PITCH, 110.0),
+        (ds_tom::PITCH, tom_pitch(110.0)),
+        (DECAY, decay_for(500.0)),
     ];
     let flat = hit(
         KINDS[2],
-        &[sine[0], sine[1], sine[2], (ds_tom::BEND, 0.0)],
+        &[sine[0], sine[1], sine[2], sine[3], (ds_tom::BEND, 0.0)],
         24_000,
     );
     let at_rest = crossings_hz(&flat[0], 1_000, 20_000);
@@ -747,7 +797,7 @@ fn ds_tom_bends_down_to_its_pitch_and_rings_the_membrane_modes() {
     // Decay (250 ms at 500 ms).
     let bent = hit(
         KINDS[2],
-        &[sine[0], sine[1], sine[2], (ds_tom::BEND, 100.0)],
+        &[sine[0], sine[1], sine[2], sine[3], (ds_tom::BEND, 100.0)],
         36_000,
     );
     let start = crossings_hz(&bent[0], 0, 480);
@@ -770,7 +820,8 @@ fn ds_tom_bends_down_to_its_pitch_and_rings_the_membrane_modes() {
             (ds_tom::TONE, 100.0),
             (ds_tom::COLOR, 100.0),
             (ds_tom::BEND, 0.0),
-            (DECAY, 1_000.0),
+            (ds_tom::PITCH, tom_pitch(110.0)),
+            (DECAY, decay_for(1_000.0)),
         ],
         12_000,
     );
@@ -780,7 +831,8 @@ fn ds_tom_bends_down_to_its_pitch_and_rings_the_membrane_modes() {
             (ds_tom::TONE, 0.0),
             (ds_tom::COLOR, 100.0),
             (ds_tom::BEND, 0.0),
-            (DECAY, 1_000.0),
+            (ds_tom::PITCH, tom_pitch(110.0)),
+            (DECAY, decay_for(1_000.0)),
         ],
         12_000,
     );
@@ -802,8 +854,8 @@ fn ds_tom_bends_down_to_its_pitch_and_rings_the_membrane_modes() {
                 (ds_tom::TONE, 100.0),
                 (ds_tom::COLOR, color),
                 (ds_tom::BEND, 0.0),
-                (ds_tom::PITCH, 400.0),
-                (DECAY, 1_000.0),
+                (ds_tom::PITCH, tom_pitch(400.0)),
+                (DECAY, decay_for(1_000.0)),
             ],
             12_000,
         );
@@ -824,7 +876,9 @@ fn ds_clap_has_four_bursts_a_tail_a_spread_and_a_sloppy() {
         (ds_clap::TAIL, 0.0),
         (ds_clap::SPREAD, 0.0),
         (ds_clap::SLOPPY, 0.0),
-        (DECAY, 300.0),
+        (DECAY, decay_for(300.0)),
+        (ds_clap::TUNE, tune_for(0.0)),
+        (ds_clap::TONE, 50.0),
     ];
     let bursts = hit(KINDS[3], &mono, 4_800);
     let ms = |from: f64, to: f64| rms(&bursts[0][(from * 48.0) as usize..(to * 48.0) as usize]);
@@ -843,7 +897,14 @@ fn ds_clap_has_four_bursts_a_tail_a_spread_and_a_sloppy() {
     // Tail adds noise that carries on and decays over Decay.
     let tailed = hit(
         KINDS[3],
-        &[mono[1], mono[2], (ds_clap::TAIL, 100.0), (DECAY, 300.0)],
+        &[
+            mono[1],
+            mono[2],
+            mono[4],
+            mono[5],
+            (ds_clap::TAIL, 100.0),
+            (DECAY, decay_for(300.0)),
+        ],
         4_800,
     );
     assert!(rms(&tailed[0][2_400..2_900]) > rms(&bursts[0][2_400..2_900]) * 20.0 + 0.01);
@@ -856,7 +917,9 @@ fn ds_clap_has_four_bursts_a_tail_a_spread_and_a_sloppy() {
             &[
                 (ds_clap::TAIL, 0.0),
                 (ds_clap::SPREAD, spread),
-                (ds_clap::SLOPPY, sloppy),
+                (ds_clap::SLOPPY, sloppy / 30.0 * 100.0),
+                (ds_clap::TUNE, tune_for(0.0)),
+                (ds_clap::TONE, 50.0),
             ],
             4_800,
         )
@@ -895,7 +958,7 @@ fn ds_clap_has_four_bursts_a_tail_a_spread_and_a_sloppy() {
             &[
                 (ds_clap::TAIL, 0.0),
                 (ds_clap::SPREAD, 0.0),
-                (ds_clap::TUNE, tune),
+                (ds_clap::TUNE, tune_for(tune)),
                 (ds_clap::TONE, tone),
             ],
             2_400,
@@ -1376,13 +1439,29 @@ fn each_device_renders_its_golden_hit() {
             (ds_kick::OT, 40.0),
             (ds_kick::DRIVE, 30.0),
             (ds_kick::CLICK, 1.0),
+            (ds_kick::PITCH, 50.0),
+            (DECAY, decay_for(400.0)),
         ],
-        &[(ds_snare::TONE, 60.0), (ds_snare::COLOR, 40.0)],
-        &[(ds_tom::TONE, 60.0), (ds_tom::BEND, 80.0)],
+        &[
+            (ds_snare::TONE, 60.0),
+            (ds_snare::COLOR, 40.0),
+            (ds_snare::TUNE, tune_for(0.0)),
+            (DECAY, decay_for(250.0)),
+        ],
+        &[
+            (ds_tom::TONE, 60.0),
+            (ds_tom::BEND, 80.0),
+            (ds_tom::COLOR, 50.0),
+            (ds_tom::PITCH, tom_pitch(110.0)),
+            (DECAY, decay_for(500.0)),
+        ],
         &[
             (ds_clap::TAIL, 70.0),
-            (ds_clap::SLOPPY, 12.0),
+            (ds_clap::SLOPPY, 40.0),
             (ds_clap::SPREAD, 80.0),
+            (ds_clap::TUNE, tune_for(0.0)),
+            (ds_clap::TONE, 50.0),
+            (DECAY, decay_for(300.0)),
         ],
         &[
             (ds_hh::NOISE, 1.0),
@@ -1454,5 +1533,96 @@ fn each_device_has_factory_presets_within_its_ranges_that_all_sound() {
                 preset.name
             );
         }
+    }
+}
+
+// Spec: drum-synths R4, R16
+#[test]
+fn each_device_opens_at_the_values_live_shows_in_per_cent() {
+    use bl_devices::drum_synth::{decay_ms, decay_percent};
+    let defaults = |kind: Kind| {
+        let description = (kind.device_type)().description;
+        move |id: ParamId| description.param(id).expect("a parameter").default
+    };
+    let kick = defaults(KINDS[0]);
+    assert_eq!(kick(DECAY), 48.2);
+    assert_eq!(kick(ds_kick::PITCH), 43.3);
+    assert_eq!(kick(ds_kick::ENV), 47.4);
+    for zero in [ds_kick::ATTACK, ds_kick::DRIVE, ds_kick::OT] {
+        assert_eq!(kick(zero), 0.0);
+    }
+    assert_eq!((kick(ds_kick::CLICK), kick(ds_kick::PHASE)), (0.0, 0.0));
+    let snare = defaults(KINDS[1]);
+    assert_eq!(
+        [snare(ds_snare::COLOR), snare(ds_snare::TONE), snare(DECAY)],
+        [81.0, 51.0, 25.0]
+    );
+    assert_eq!(snare(ds_snare::TUNE), 41.0);
+    assert_eq!(ds_snare::FILTERS[snare(ds_snare::FILTER) as usize], "HP");
+    let tom = defaults(KINDS[2]);
+    assert_eq!(
+        [tom(ds_tom::PITCH), tom(ds_tom::COLOR), tom(ds_tom::TONE)],
+        [29.0, 43.0, 100.0]
+    );
+    assert_eq!((tom(ds_tom::BEND), tom(DECAY)), (31.0, 56.0));
+    let clap = defaults(KINDS[3]);
+    assert_eq!([clap(ds_clap::SLOPPY), clap(ds_clap::TAIL)], [24.0, 65.0]);
+    assert_eq!([clap(ds_clap::SPREAD), clap(ds_clap::TONE)], [76.0, 32.0]);
+    assert_eq!((clap(ds_clap::TUNE), clap(DECAY)), (18.0, 30.0));
+    for kind in KINDS {
+        let volume = (kind.device_type)()
+            .description
+            .param(VOLUME)
+            .unwrap()
+            .format(defaults(kind)(VOLUME));
+        assert_eq!(volume, "-6.0 dB", "{}", kind.name);
+    }
+    // Decay's per cent runs from 10 ms to 4 s, and Tom's Pitch reads
+    // 84.0 Hz at its 29.
+    assert!((decay_ms(0.0) - 10.0).abs() < 1e-9 && (decay_ms(100.0) - 4_000.0).abs() < 1e-6);
+    assert!((decay_percent(decay_ms(37.0)) - 37.0).abs() < 1e-9);
+    assert_eq!(format!("{:.1}", ds_tom::pitch_hz(29.0)), "84.0");
+}
+
+// Spec: drum-synths R6, R11, R13
+#[test]
+fn a_display_reads_the_note_nearest_its_pitch_and_toms_hertz() {
+    let read = |kind: Kind, params: &[(ParamId, f64)]| {
+        let device_type = (kind.device_type)();
+        let values = device(&device_type, params).params;
+        bl_devices::display_for_view(
+            kind.id,
+            bl_model::DeviceId(bl_core::id::Id::new(1).unwrap()),
+            &device_type.description,
+            &values,
+            None,
+            None,
+        )
+        .expect("a display")
+    };
+    let kick = read(KINDS[0], &[]);
+    assert_eq!(kick.reading("Note").unwrap().text, "F0");
+    let tom = read(KINDS[2], &[]);
+    assert_eq!(tom.reading("Note").unwrap().text, "E1");
+    assert_eq!(tom.reading("Pitch").unwrap().text, "84.0 Hz");
+    assert!(read(KINDS[1], &[]).reading("Note").is_none());
+    assert!(read(KINDS[3], &[]).reading("Note").is_none());
+}
+
+// Spec: drum-synths R11
+#[test]
+fn ds_kick_phase_inverts_the_whole_sound() {
+    let settings = [
+        (ds_kick::CLICK, 1.0),
+        (ds_kick::DRIVE, 40.0),
+        (ds_kick::OT, 30.0),
+    ];
+    let plain = hit(KINDS[0], &settings, 12_000);
+    let mut inverted_settings = settings.to_vec();
+    inverted_settings.push((ds_kick::PHASE, 1.0));
+    let inverted = hit(KINDS[0], &inverted_settings, 12_000);
+    assert!(peak(&plain[0]) > 0.1);
+    for (a, b) in plain[0].iter().zip(&inverted[0]) {
+        assert_eq!(*a, -*b);
     }
 }

@@ -266,12 +266,15 @@ fn plot(painter: &Painter, theme: &Theme, area: Rect, ink: Color32, display: &De
     for series in display.series.iter().filter(|s| !s.values.is_empty()) {
         let at = |i: usize, v: f32| point(area, series, series.x_at(i), v);
         if series.name == PARTIALS {
+            // Each bar fills its own slot of the width, where a drag picks
+            // it (`partials`).
             let wide = area.width() / series.values.len().max(1) as f32;
             for (i, &v) in series.values.iter().enumerate() {
-                let top = at(i, v);
+                let x = area.left() + wide * (i as f32 + 0.5);
+                let top = at(i, v).y;
                 let bar = Rect::from_min_max(
-                    pos2(top.x - wide * 0.4, top.y),
-                    pos2(top.x + wide * 0.4, area.bottom()),
+                    pos2(x - wide * 0.4, top),
+                    pos2(x + wide * 0.4, area.bottom()),
                 );
                 painter.rect_filled(bar, 0.0, ink);
             }

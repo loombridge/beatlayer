@@ -65,6 +65,7 @@ mod live_panels;
 mod looper;
 mod meld;
 mod midi_cc;
+mod midi_effect_defaults;
 mod midi_monitor;
 mod midi_mpe;
 mod modulation;

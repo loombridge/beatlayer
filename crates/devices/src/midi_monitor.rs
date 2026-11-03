@@ -5,11 +5,12 @@
 //!
 //! The display's data is published after each block through the device
 //! framework's path (R35 to R37), so the cell draws it and an agent reads
-//! the same data with `device.display`. Its look is Beatlayer's own: a
-//! display cell beside the Freeze and Clear switches.
+//! the same data with `device.display`. Its panel is laid out as Live draws
+//! it (layout L-DEV-055): one display cell under an MPE label in the title bar;
+//! Freeze and Clear are items of its options menu.
 
 use bl_engine::{DeviceType, NoteExpression, NoteKind, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{DisplayCell, LayoutNode, TitlePart};
 use bl_model::{
     DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, OrdMap, ParamDescriptor,
     ParamId,
@@ -18,6 +19,7 @@ use bl_model::{DisplayReading, DisplaySeries};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::midi_fx::value;
+use crate::panel::{inset, spacer};
 
 /// The MIDI Monitor device type's id.
 pub const MIDI_MONITOR: &str = "beatlayer.midi_monitor";
@@ -57,13 +59,11 @@ pub const VIEWS: [&str; 3] = ["Note", "Flow", "MPE"];
 /// MIDI Monitor's device type.
 #[must_use]
 pub fn midi_monitor_type() -> DeviceType {
-    let layout = DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Cell(DisplayCell::new("MIDI Monitor", 260.0, BODY_HEIGHT, 1.0)),
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[(FREEZE, Widget::Toggle), (CLEAR, Widget::Toggle)],
-        )),
-    ]));
+    let layout = DeviceLayout::new(LayoutNode::Column(vec![
+        spacer(0.0, 4.0),
+        inset(DisplayCell::new("MIDI Monitor", 291.0, 150.0, 1.0)),
+    ]))
+    .with_title(vec![TitlePart::Mpe]);
     DeviceType::native(MIDI_MONITOR, "MIDI Monitor", DeviceRole::MidiEffect).with_description(
         DeviceDescription::new(vec![
             ParamDescriptor::toggle(FREEZE, "Freeze", false)
@@ -71,9 +71,9 @@ pub fn midi_monitor_type() -> DeviceType {
             ParamDescriptor::toggle(CLEAR, "Clear", false)
                 .describe("Empties the display on the frame it turns on."),
         ])
+        .with_menu_options(&[FREEZE, CLEAR])
         .with_layout(layout)
-        .with_views(&VIEWS)
-        .with_banks(&[("Monitor", &["Freeze", "Clear"])]),
+        .with_views(&VIEWS),
     )
 }
 

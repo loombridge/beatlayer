@@ -3,10 +3,13 @@
 //! notes when keys are released instead of when they are pressed, or
 //! latches them.
 //!
-//! Its look is the framework's generic layout: Beatlayer's own.
+//! Its panel is laid out as Live draws it (layout L-DEV-052): Trigger over
+//! Gate and Length, and the three release controls greyed while Trigger is
+//! Note On.
 
 use bl_engine::{DeviceType, NoteBuffer, NoteEvent, NoteKind, Registry};
-use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
+use bl_model::device_layout::{BODY_HEIGHT, Control, ControlBand, LayoutNode, Unit, Widget};
+use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::midi_fx::{Key, Router, value};
@@ -51,6 +54,35 @@ const DEFAULT_RELEASE: f32 = 64.0 / 127.0;
 /// How many held keys Note Off mode follows.
 const HELD_ROOM: usize = 128;
 
+/// Note Length's panel as Live draws it.
+fn layout() -> DeviceLayout {
+    let at = |param, widget, x, y| Control::new(param, widget, x, y);
+    let left = ControlBand::free(
+        62.0,
+        BODY_HEIGHT,
+        vec![
+            at(TRIGGER, Widget::Stack(2), 9.0, 6.0).titled(),
+            at(GATE, Widget::SmallKnob, 15.0, 48.0),
+            at(LENGTH_MS, Widget::SmallKnob, 9.0, 95.0)
+                .with_unit_below(SYNC, [Unit::Ms, Unit::Sync]),
+        ],
+    );
+    let release = |param, y| at(param, Widget::SmallKnob, 70.0, y).greyed_while(TRIGGER, 0);
+    let right = ControlBand::free(
+        108.0,
+        BODY_HEIGHT,
+        vec![
+            release(RELEASE_VELOCITY, 4.0),
+            release(DECAY_TIME, 54.0),
+            release(KEY_SCALE, 104.0),
+        ],
+    );
+    DeviceLayout::new(LayoutNode::Row(vec![
+        LayoutNode::Band(left),
+        LayoutNode::Band(right),
+    ]))
+}
+
 /// Note Length's device type.
 #[must_use]
 pub fn hold_type() -> DeviceType {
@@ -66,7 +98,7 @@ pub fn hold_type() -> DeviceType {
                 LENGTH_MS,
                 "Length",
                 (1.0, 10_000.0),
-                200.0,
+                100.0,
                 ParamUnit::Milliseconds,
             )
             .logarithmic()
@@ -79,7 +111,7 @@ pub fn hold_type() -> DeviceType {
                 .describe("Scales Length: 100 % is exactly Length, 200 % twice as long."),
             ParamDescriptor::continuous(
                 RELEASE_VELOCITY,
-                "Release Velocity",
+                "Rel Vel",
                 (0.0, 100.0),
                 0.0,
                 ParamUnit::Percent,
@@ -91,12 +123,11 @@ pub fn hold_type() -> DeviceType {
             ),
             ParamDescriptor::continuous(
                 DECAY_TIME,
-                "Decay Time",
-                (0.0, 10_000.0),
-                0.0,
+                "Decay",
+                (0.0, 60_000.0),
+                60_000.0,
                 ParamUnit::Milliseconds,
             )
-            .decimals(0)
             .describe(
                 "In Note Off mode, how long a key's velocity takes to fall to nothing while it \
                  is held; 0 turns the decay off.",
@@ -106,9 +137,9 @@ pub fn hold_type() -> DeviceType {
                 "Key Scale",
                 (-100.0, 100.0),
                 0.0,
-                ParamUnit::Percent,
+                ParamUnit::None,
             )
-            .decimals(0)
+            .decimals(2)
             .describe(
                 "Makes notes below middle C longer and notes above it shorter (positive), or \
                  the opposite (negative).",
@@ -118,19 +149,15 @@ pub fn hold_type() -> DeviceType {
                  nothing.",
             ),
         ])
+        .with_alternate(SYNC, LENGTH_MS, LENGTH_DIVISION)
+        .with_menu_options(&[LATCH])
+        .with_layout(layout())
         .with_banks(&[
             (
                 "Length",
-                &[
-                    "Trigger",
-                    "Sync",
-                    "Length",
-                    "Length Division",
-                    "Gate",
-                    "Latch",
-                ],
+                &["Trigger", "Sync", "Length", "Length Division", "Gate"],
             ),
-            ("Release", &["Release Velocity", "Decay Time", "Key Scale"]),
+            ("Release", &["Rel Vel", "Decay", "Key Scale"]),
         ]),
     )
 }

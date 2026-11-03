@@ -3,15 +3,20 @@
 //! styles, with synced or free rate, gate, hold, offset, retrigger, repeats,
 //! progressive transposition steps, and velocity decay.
 //!
-//! Its look is the framework's generic layout: Beatlayer's own.
+//! Its panel is laid out as Live draws it (layout L-DEV-058): the pattern's
+//! display cell over Rate, Distance, Steps and Gate, then Retrigger,
+//! Interval and Repeats, Velocity's Decay and Target, and Root and Scale.
 
 use bl_core::id::IdAllocator;
 use bl_core::time::{Frames, SampleRate, TICKS_PER_QUARTER, TempoMap, Ticks};
 use bl_engine::scales::OFF;
 use bl_engine::{DeviceType, NoteBuffer, NoteEvent, NoteKind, Registry};
+use bl_model::device_layout::{
+    BODY_HEIGHT, Control, ControlBand, DisplayCell, LayoutNode, Unit, Widget,
+};
 use bl_model::{
-    Device, DeviceDescription, DeviceRole, Groove, GrooveBase, GrooveId, GrooveNote, GroovePlay,
-    ParamDescriptor, ParamId, ParamUnit, Scale,
+    Device, DeviceDescription, DeviceLayout, DeviceRole, Groove, GrooveBase, GrooveId, GrooveNote,
+    GroovePlay, ParamDescriptor, ParamId, ParamUnit, Scale,
 };
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
@@ -113,7 +118,7 @@ pub const INTERVALS: [(&str, f64); 7] = [
 /// The Groove choices: None, then the bundled swing grooves in order (the
 /// grooves spec, R36).
 pub const GROOVE_CHOICES: [&str; 11] = [
-    "None",
+    "Straight",
     "Swing 8ths 55",
     "Swing 8ths 60",
     "Swing 8ths 65",
@@ -127,6 +132,63 @@ pub const GROOVE_CHOICES: [&str; 11] = [
 ];
 
 const MAX_HELD: usize = 128;
+
+/// The name of the pattern's display cell.
+pub const PATTERN_CELL: &str = "Arpeggiator Pattern";
+
+/// Arpeggiator's panel as Live draws it.
+fn layout() -> DeviceLayout {
+    let at = |param, widget, x, y| Control::new(param, widget, x, y);
+    let cell = DisplayCell::new(PATTERN_CELL, 207.0, 87.0, 1.0).with_top(ControlBand::free(
+        207.0,
+        87.0,
+        vec![
+            at(STYLE, Widget::Chooser, 34.0, 0.0).sized(104.0, 21.0),
+            at(HOLD, Widget::Outlined, 144.0, 5.0).sized(57.0, 12.0),
+            at(OFFSET, Widget::Number, 144.0, 25.0).sized(57.0, 21.0),
+            at(GROOVE, Widget::Chooser, 144.0, 58.0).sized(57.0, 21.0),
+        ],
+    ));
+    let rates = ControlBand::free(
+        212.0,
+        BODY_HEIGHT - 91.0,
+        vec![
+            at(RATE_MS, Widget::Knob, 13.0, 7.0).with_unit(SYNC, [Unit::Ms, Unit::Sync]),
+            at(DISTANCE, Widget::Knob, 83.0, 7.0),
+            at(STEPS, Widget::SmallKnob, 133.0, 13.0),
+            at(GATE, Widget::SmallKnob, 172.0, 13.0),
+        ],
+    );
+    let right = ControlBand::free(
+        129.0,
+        BODY_HEIGHT,
+        vec![
+            at(RETRIGGER, Widget::Chooser, 8.0, 4.5).sized(53.0, 21.0),
+            at(INTERVAL, Widget::SmallKnob, 19.0, 34.0),
+            at(REPEATS, Widget::Number, 8.0, 101.5).sized(53.0, 21.0),
+            at(VELOCITY_ON, Widget::Switch, 72.0, 4.5).sized(53.0, 21.0),
+            at(DECAY, Widget::Number, 72.0, 34.5).sized(53.0, 21.0),
+            at(TARGET, Widget::Number, 72.0, 64.5).sized(53.0, 21.0),
+            at(RETRIGGER_VELOCITY, Widget::Toggle, 72.0, 92.7)
+                .sized(53.0, 12.0)
+                .greyed_while(VELOCITY_ON, 0),
+            at(ROOT, Widget::Chooser, 8.0, 133.5)
+                .sized(37.0, 21.0)
+                .greyed_while(SCALE, 0),
+            at(SCALE, Widget::Chooser, 51.0, 133.5).sized(74.0, 21.0),
+        ],
+    );
+    DeviceLayout::new(LayoutNode::Row(vec![
+        LayoutNode::Column(vec![
+            LayoutNode::Row(vec![
+                crate::panel::spacer(4.0, 0.0),
+                LayoutNode::Column(vec![crate::panel::spacer(0.0, 4.0), LayoutNode::Cell(cell)]),
+            ]),
+            LayoutNode::Band(rates),
+        ]),
+        LayoutNode::Band(right),
+    ]))
+}
 
 /// Arpeggiator's device type.
 #[must_use]
@@ -151,7 +213,7 @@ pub fn arpeggiator_type() -> DeviceType {
             .logarithmic()
             .decimals(0)
             .describe("The arpeggio step duration in milliseconds."),
-            ParamDescriptor::continuous(GATE, "Gate", (1.0, 200.0), 100.0, ParamUnit::Percent)
+            ParamDescriptor::continuous(GATE, "Gate", (1.0, 200.0), 50.0, ParamUnit::Percent)
                 .decimals(0)
                 .describe(
                     "Length of each note as a percentage of the step rate; values above 100 % \
@@ -163,7 +225,7 @@ pub fn arpeggiator_type() -> DeviceType {
             ),
             ParamDescriptor::integer(OFFSET, "Offset", (0, 64), 0, ParamUnit::None)
                 .describe("Shifts the starting position of the note pattern."),
-            ParamDescriptor::choice(RETRIGGER, "Retrigger", &RETRIGGERS, 1).describe(
+            ParamDescriptor::choice(RETRIGGER, "Retrigger", &RETRIGGERS, 0).describe(
                 "When the pattern restarts: Off (never), Note (when a new key is pressed), or \
                  Beat (at beat intervals).",
             ),
@@ -175,7 +237,7 @@ pub fn arpeggiator_type() -> DeviceType {
             ),
             ParamDescriptor::integer(DISTANCE, "Distance", (-48, 48), 12, ParamUnit::Semitones)
                 .describe("The transposition interval in semitones per transposition step."),
-            ParamDescriptor::integer(STEPS, "Steps", (0, 8), 1, ParamUnit::None).describe(
+            ParamDescriptor::integer(STEPS, "Steps", (0, 8), 0, ParamUnit::None).describe(
                 "How many times the pattern is transposed before cycling back to the original \
                  pitch.",
             ),
@@ -189,11 +251,10 @@ pub fn arpeggiator_type() -> DeviceType {
                 ParamUnit::Milliseconds,
             )
             .logarithmic()
-            .decimals(0)
             .describe("Time taken for velocity to ramp towards the Target value."),
             ParamDescriptor::integer(TARGET, "Target", (1, 127), 64, ParamUnit::None)
                 .describe("Target velocity reached at the end of the decay time."),
-            ParamDescriptor::toggle(RETRIGGER_VELOCITY, "Retrig Vel", true)
+            ParamDescriptor::toggle(RETRIGGER_VELOCITY, "Retrig Vel", false)
                 .describe("Restarts the velocity decay slope when the pattern retriggers."),
             ParamDescriptor::toggle(USE_SCALE, "Use Current Scale", false).describe(
                 "Counts Distance in degrees of the current scale instead of the Root and Scale \
@@ -213,6 +274,8 @@ pub fn arpeggiator_type() -> DeviceType {
             ),
         ])
         .with_title_switch(USE_SCALE)
+        .with_alternate(SYNC, RATE_MS, RATE_SYNC)
+        .with_layout(layout())
         .with_banks(&[
             (
                 "Rhythm",

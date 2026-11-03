@@ -2,11 +2,17 @@
 //! notes above or below each note that comes in, each with its own velocity
 //! and chance, and can strum them.
 //!
-//! Its look is the framework's generic layout: Beatlayer's own.
+//! Its panel is laid out as Live draws it (layout L-DEV-053): six small knobs
+//! with an amount box under each, which the Velocity and Chance buttons turn
+//! between the shifts' velocities and their chances, and Strum, Tension and
+//! Crescendo at the right.
 
 use bl_engine::midi_clips::Rng;
 use bl_engine::{DeviceType, NoteBuffer, NoteEvent, NoteKind, Registry};
-use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit, Scale};
+use bl_model::device_layout::{BODY_HEIGHT, Control, ControlBand, LayoutNode, TitlePart, Widget};
+use bl_model::{
+    DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit, Scale,
+};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::midi_fx::{Key, Router, scale_in_use, seed, value};
@@ -50,18 +56,52 @@ pub const DUPLICATES: ParamId = ParamId(3 * SHIFTS + 5);
 /// Gives each added note its own ID and its source's expressions.
 pub const PER_NOTE: ParamId = ParamId(3 * SHIFTS + 6);
 
+/// Whether the boxes under the knobs show the shifts' velocities (0) or their
+/// chances (1): the Velocity and Chance buttons.
+pub const AMOUNTS: ParamId = ParamId(3 * SHIFTS + 7);
+
+/// The Amounts choices.
+pub const AMOUNT_CHOICES: [&str; 2] = ["Velocity", "Chance"];
+
+/// Chord's panel as Live draws it.
+fn layout() -> DeviceLayout {
+    let at = |param, widget, x, y| Control::new(param, widget, x, y);
+    let mut controls = Vec::new();
+    for n in 0..SHIFTS {
+        let (column, row) = (f32::from((n % 3) as u8), f32::from((n / 3) as u8));
+        let (x, y) = (7.0 + 54.5 * column, 6.0 + 76.0 * row);
+        controls.push(at(shift(n), Widget::SmallKnob, x + 8.5, y));
+        controls.push(
+            at(velocity(n), Widget::Marked, x, y + 53.0)
+                .sized(49.0, 12.0)
+                .unnamed(),
+        );
+    }
+    controls.extend([
+        at(STRUM, Widget::SmallKnob, 194.0, 6.0),
+        at(TENSION, Widget::Marked, 185.0, 60.0).sized(49.0, 21.0),
+        at(CRESCENDO, Widget::Marked, 185.0, 88.0).sized(49.0, 21.0),
+        at(AMOUNTS, Widget::Stack(2), 185.0, 127.5).sized(49.0, 27.0),
+    ]);
+    DeviceLayout::new(LayoutNode::Band(ControlBand::free(
+        240.0,
+        BODY_HEIGHT,
+        controls,
+    )))
+    .with_title(vec![TitlePart::Button(LEARN)])
+}
+
 /// Chord's device type.
 #[must_use]
 pub fn stack_type() -> DeviceType {
     let mut params = Vec::new();
     for n in 0..SHIFTS {
-        let default = [4, 7, 0, 0, 0, 0][n as usize];
         params.push(
             ParamDescriptor::integer(
                 shift(n),
                 &format!("Shift {}", n + 1),
                 (-36, 36),
-                default,
+                0,
                 ParamUnit::Semitones,
             )
             .describe(
@@ -137,41 +177,46 @@ pub fn stack_type() -> DeviceType {
             "Gives each added note its own ID, and sends it the expressions of the note that \
              made it.",
         ),
+        ParamDescriptor::choice(AMOUNTS, "Amounts", &AMOUNT_CHOICES, 0).describe(
+            "Which amounts the boxes under the knobs show and set: the shifts' velocities, or \
+             their chances.",
+        ),
     ]);
+    let mut description = DeviceDescription::new(params)
+        .with_title_switch(USE_SCALE)
+        .with_menu_options(&[DUPLICATES, PER_NOTE]);
+    for n in 0..SHIFTS {
+        description = description.with_alternate(AMOUNTS, velocity(n), chance(n));
+    }
     DeviceType::native(STACK, "Chord", DeviceRole::MidiEffect).with_description(
-        DeviceDescription::new(params)
-            .with_title_switch(USE_SCALE)
-            .with_banks(&[
-                (
-                    "Shift",
-                    &[
-                        "Shift 1", "Shift 2", "Shift 3", "Shift 4", "Shift 5", "Shift 6", "Strum",
-                        "Tension",
-                    ],
-                ),
-                (
-                    "Velocity",
-                    &[
-                        "Velocity 1",
-                        "Velocity 2",
-                        "Velocity 3",
-                        "Velocity 4",
-                        "Velocity 5",
-                        "Velocity 6",
-                        "Crescendo",
-                    ],
-                ),
-                (
-                    "Chance",
-                    &[
-                        "Chance 1", "Chance 2", "Chance 3", "Chance 4", "Chance 5", "Chance 6",
-                    ],
-                ),
-                (
-                    "Playing",
-                    &["Learn", "Play Duplicate Notes", "Per-Note Events"],
-                ),
-            ]),
+        description.with_layout(layout()).with_banks(&[
+            (
+                "Shift",
+                &[
+                    "Shift 1", "Shift 2", "Shift 3", "Shift 4", "Shift 5", "Shift 6", "Strum",
+                    "Tension",
+                ],
+            ),
+            (
+                "Velocity",
+                &[
+                    "Velocity 1",
+                    "Velocity 2",
+                    "Velocity 3",
+                    "Velocity 4",
+                    "Velocity 5",
+                    "Velocity 6",
+                    "Crescendo",
+                ],
+            ),
+            (
+                "Chance",
+                &[
+                    "Chance 1", "Chance 2", "Chance 3", "Chance 4", "Chance 5", "Chance 6",
+                ],
+            ),
+            ("Playing", &["Learn", "Amounts"]),
+        ]),
     )
 }
 

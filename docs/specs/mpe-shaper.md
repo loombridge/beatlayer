@@ -25,9 +25,9 @@ This spec covers the device only. What MPE expressions are is [editing MPE](http
 
 ## Rules
 
-- **R1.** With its default curve (linear, Curve A 0.5, Min 0, Max 1, no smoothing), a source shapes a value to itself: pressure 0.25 comes out 0.25. A source that is switched off passes its data through unchanged (R10). (S1)
+- **R1.** With its default curve (linear, Curve A 0, Min 0, Max 127, no smoothing), a source shapes a value to itself: pressure 0.25 comes out 0.25. A source that is switched off passes its data through unchanged (R10). (S1)
 - **R2.** Min and Max place the output range: an input at the bottom comes out Min, at the top Max. (S1)
-- **R3.** The linear curve bends by Curve A: the output is the input raised to `2^(2 × (0.5 − Curve A))`, so 0.5 is straight. (S1; the manual states no law, so this is Beatlayer's own.)
+- **R3.** The linear curve bends by Curve A: the output is the input raised to `2^(−2 × Curve A)`, Curve A running from −1 to +1, so 0 is straight. (S1; the manual states no law, so this is Beatlayer's own.)
 - **R4.** The S-shaped curve joins two segments at its breakpoint (X, Y), each segment bent like the linear curve by Curve A, or by Curve B when the segments aren't linked: an input below X maps into 0 to Y, one above into Y to 1. (S1; the law is Beatlayer's own.)
 - **R5.** With Press to AT on, shaped pressure is sent as channel pressure instead of a per-note expression. (S1)
 - **R6.** With Swap to Slide on, shaped pressure is sent as a slide expression instead of pressure. (S1)
@@ -45,7 +45,8 @@ This spec covers the device only. What MPE expressions are is [editing MPE](http
 
 ## Defaults, ranges and details
 
-- All three sources start switched on, with the linear curve, Curve A and Curve B 0.5, linked, Min 0, Max 1, X and Y 0.5, smoothing off, Rise and Fall 50 ms — the manual states no defaults, so these are Beatlayer's own.
+- All three sources start switched on, with the linear curve, Curve A 0.00, Curve B 0.5, linked, Min 0, Max 127, X and Y 64, smoothing off, Rise and Fall 50 ms. Curve A, Min, Max, X and Y are as Live's panel reads in a new set (observed in Live 12.4.16, 2 November 2026): Min, Max, X and Y are whole numbers from 0 to 127, and the laws above take them as shares of 127; the rest are Beatlayer's own.
+- The panel is laid out as Live draws it with its extra section closed (layout L-DEV-057): the tabs for the sources, the shown source's curve knob, and the curve's buttons, Min, Max, X and Y. What Live's ▼ opens isn't recorded, so every other parameter is in the device's expanded part, in Beatlayer's own look.
 - Press's and Slide's default value starts at 0.5; Pitch Range starts at 1. Every conversion and Default switch starts off; Slide's mode starts Abs.
 - Smoothing is applied to the value at each message, using the frames since the last one; the first message of a note takes its value at once. Rise and Fall run from 0 to 1000 ms; 0 means no smoothing.
 - A note that gets a default and then carries its own expression takes the expression's value from then on.

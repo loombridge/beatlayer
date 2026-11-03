@@ -466,9 +466,13 @@ impl DeviceDescription {
             ));
         }
         for a in &self.alternates {
-            let toggle = self
-                .param(a.switch)
-                .is_some_and(|p| matches!(p.kind, ParamKind::Toggle));
+            // A switch is a toggle, or a choice of two (Chord's Velocity and
+            // Chance buttons).
+            let toggle = self.param(a.switch).is_some_and(|p| match &p.kind {
+                ParamKind::Toggle => true,
+                ParamKind::Choice { choices } => choices.len() == 2,
+                _ => false,
+            });
             if !toggle
                 || a.off == a.on
                 || self.param(a.off).is_none()

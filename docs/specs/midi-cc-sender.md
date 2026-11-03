@@ -40,8 +40,8 @@ This spec covers the device only. Where a message goes on the wire is [midi I/O]
 ## Defaults, ranges and details
 
 - Every Custom control's value starts at 0.
-- The CC Type list starts with None, then controllers 1 to 119 by number; 0 and 32 (bank select) and 120 to 127 (channel mode) are left out. The manual doesn't state Live's list or its order (S6).
-- The page switch shows controls 1 to 8 (Mod Wheel, Pitch Bend, Pressure, Custom A, Custom B to E) or 9 to 16 (Custom F to M). It is view state in Live; here it is a parameter among the others, since the generic layout has no paging.
+- The CC Type list starts with None, then controllers 1 to 119 by number; 0 and 32 (bank select) and 120 to 127 (channel mode) are left out. The manual doesn't state Live's list or its order (S6); entry 64 is named `64: Sustain`, as Live's chooser reads on Custom A's default (observed in Live 12.4.16, 2 November 2026), and the rest `CC n`.
+- The tabs 1-8 and 9-16 in the title bar show controls 1 to 8 (Mod Wheel, Pitch Bend, Pressure, Custom A, Custom B to E) or 9 to 16 (Custom F to M). The page shown is view state, as in Live (`device.set_page`, the pages node `Controls`); the device has no parameter for it, and the panel is laid out as Live draws it (layout L-DEV-054). Pitch Bend's knob reads whole numbers, where Live's reads 0.00.
 - Custom controls' custom names (S1) aren't built: the framework has no per-parameter name to set. A dial is named by its letter.
 
 ## What the manual leaves open

@@ -60,13 +60,13 @@ fn pressure_passes_the_identity_curve_unchanged() {
 #[test]
 fn min_and_max_place_the_output_range() {
     let params = &[
-        (source_min(PRESS as u32), 0.2),
-        (source_max(PRESS as u32), 0.8),
+        (source_min(PRESS as u32), 25.0),
+        (source_max(PRESS as u32), 102.0),
     ];
     let low = shape_run(params, &[expression(4, NoteExpression::Pressure, 0.0)]);
     let high = shape_run(params, &[expression(4, NoteExpression::Pressure, 1.0)]);
-    assert!((pressure_value(&low).unwrap() - 0.2).abs() < 1e-6);
-    assert!((pressure_value(&high).unwrap() - 0.8).abs() < 1e-6);
+    assert!((pressure_value(&low).unwrap() - 25.0 / 127.0).abs() < 1e-6);
+    assert!((pressure_value(&high).unwrap() - 102.0 / 127.0).abs() < 1e-6);
 }
 
 // Spec: mpe-shaper R3. Curve A bends the linear curve.
@@ -87,8 +87,8 @@ fn curve_a_bends_the_linear_curve() {
 fn the_s_curve_joins_two_segments() {
     let params = &[
         (source_curve(PRESS as u32), 1.0),
-        (source_x(PRESS as u32), 0.5),
-        (source_y(PRESS as u32), 0.25),
+        (source_x(PRESS as u32), 64.0),
+        (source_y(PRESS as u32), 32.0),
     ];
     let out = shape_run(params, &[expression(4, NoteExpression::Pressure, 0.25)]);
     // The first segment runs from 0 to (X, Y): 0.25 of the way is half of Y.
@@ -357,7 +357,6 @@ fn the_zero_to_one_parameters_read_and_parse_as_unitless_fractions() {
     for name in [
         "Press Default Value",
         "Slide Default Value",
-        "Press Max",
         "Press Curve A",
     ] {
         let d = param(name);

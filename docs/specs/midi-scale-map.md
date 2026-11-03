@@ -9,7 +9,7 @@
 
 Scale sends each note of an octave to a note of your choosing. A grid has a column for each note that can come in, counted from Base, and a row for each note that can go out; a column sends its note to its row, in every octave, and a column with no row sends its note nowhere, so it plays nothing. Transpose then moves every note that comes out. Fold keeps a mapped note within half an octave of the note that came in. Lowest and Range limit which notes are remapped; the rest pass through.
 
-The device takes Live's name, Scale; its look is the device framework's generic controls, with each column of the grid a parameter. A Scale Name chooser picks User, the grid a person edits, or a named scale from the list ([scales.md](scales.md)), whose grid sends each note to the scale note nearest it. Use Current Scale, a switch in its title bar, takes Base and Scale Name from the device's current scale and shows them. This spec covers the device only.
+The device takes Live's name, Scale; its panel is laid out as Live draws it (layout L-DEV-051), with each column of the grid a parameter. A Scale Name chooser picks User, the grid a person edits, or a named scale from the list ([scales.md](scales.md)), whose grid sends each note to the scale note nearest it. Use Current Scale, a switch in its title bar, takes Base and Scale Name from the device's current scale and shows them. This spec covers the device only.
 
 ## Sources
 
@@ -37,6 +37,7 @@ The device takes Live's name, Scale; its look is the device framework's generic 
 - **R10.** Scale Name, a parameter, chooses User or a scale from the list ([scales.md](scales.md) R1), User first and the list after it in its order; a new Scale, and one saved before the chooser, is User (Beatlayer's own). With User the grid is the twelve Map columns (R2, R3). With a named scale each column sends its note to the scale note nearest it, counted from Base ([scales.md](scales.md) R2), and the grid shows that mapping; the Map columns keep their values for when User is chosen again (Beatlayer's own). Base and Scale Name can be automated, modulated and mapped to a rack's macros like any parameter. (S1, S6, S7)
 - **R11.** Fold (R6) works only while Scale Name is User; with a named scale it is drawn disabled and acts as off. (S1)
 - **R12.** Use Current Scale, a switch in Scale's title bar ([scales.md](scales.md) R16), off in a new Scale: with it on, Base and Scale Name follow the device's current scale ([scales.md](scales.md) R15), its root and its scale name, and are drawn disabled showing the scale they follow; a current scale with Scale Mode off leaves every note as it came (Beatlayer's own). A change of the current scale, Base or Scale Name while a note is held doesn't move it ([scales.md](scales.md) R17). (S1, S5, S6, S7)
+- **R13.** The panel draws the grid as 13 columns for the notes that come in, counted from Base, and 13 rows for the notes that go out, the root at the bottom left; each of the twelve columns has its mapped cell lit (the thirteenth repeats the first an octave up), and the cells of black keys are darker. With User chosen, a click on a cell sends that column's note to that row, and a click on the lit cell sends it nowhere (−1); with a named scale the grid shows the scale's mapping and takes no click. (S1)
 
 ## Tests
 
@@ -54,10 +55,11 @@ The device takes Live's name, Scale; its look is the device framework's generic 
 | R10 | `crates/devices/tests/remap.rs`, `a_named_scale_sends_each_note_to_the_nearest_scale_note`; `crates/agent/tests/midi_effects.rs`, `an_agent_sets_the_use_current_scale_switches_and_the_new_choosers_by_id`; `crates/shell/tests/macros.rs`, `the_scale_choosers_map_to_macros`; `crates/cli/tests/older_sets.rs`, `a_set_saved_before_use_current_scale_loads_its_devices_unchanged` | real-time trap; MCP script; unit |
 | R11 | `crates/devices/tests/remap.rs`, `fold_acts_as_off_with_a_named_scale` | real-time trap |
 | R12 | `crates/devices/tests/remap.rs`, `use_current_scale_takes_base_and_scale_name_from_the_current_scale`, `a_scale_change_while_a_note_is_held_does_not_move_it`; `crates/ui/tests/device_view.rs`, `the_choosers_a_device_takes_from_the_current_scale_are_disabled` | real-time trap; unit |
+| R13 | `crates/ui/tests/midi_effect_panels.rs`, `a_click_on_scales_grid_sends_a_note_to_a_row_or_nowhere` | UI script |
 
 ## Defaults, ranges and details
 
-- A new Scale starts at Base C, Transpose 0, Fold off, Lowest 0, Range 127 and Use Current Scale off, with the identity grid.
+- A new Scale starts at Base C, Transpose 0, Fold off, Lowest C-2 (key 0), Range 128 semitones and Use Current Scale off, with the identity grid, as Live's panel reads in a new set (observed in Live 12.4.16, 2 November 2026). Lowest is a chooser of the 128 keys, named as Live names them, which the panel draws as a box; Range runs from 0 to 128.
 - The grid has twelve columns, one for each note of an octave, and thirteen rows, 0 to 12 semitones above Base (row 12 is the base an octave up). The manual draws thirteen columns; the thirteenth repeats the first an octave up and no note can come in on it, so it is not a parameter.
 - Each column is a whole number from −1 to 12 (`Map 1` to `Map 12`); an agent reads and sets them like any parameter.
 - The chooser of scale names is R10's: User and the scale list of [scales.md](scales.md) R1.

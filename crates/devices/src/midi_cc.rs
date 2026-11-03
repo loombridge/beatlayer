@@ -11,10 +11,16 @@
 //! sending its message beside it (the MIDI controller data spec, R3): both
 //! reach the next device, and the one that arrives last wins.
 //!
-//! Its look is the framework's generic layout: Beatlayer's own.
+//! Its panel is laid out as Live draws it (layout L-DEV-054): two rows of
+//! four controls on each of the two pages its title-bar tabs show, with Learn
+//! and Send in the title bar.
 
 use bl_engine::{DeviceType, NoteEvent, NoteKind, Registry};
-use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
+use bl_model::device_layout::{
+    BODY_HEIGHT, Control as Placed, ControlBand, LayoutNode, Page, PageStyle, PagesNode, TitlePart,
+    Widget,
+};
+use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::midi_fx::value;
@@ -32,8 +38,9 @@ pub const PRESSURE: ParamId = ParamId(2);
 pub const CUSTOM_A: ParamId = ParamId(3);
 /// Custom A's controller, a CC Type.
 pub const CUSTOM_A_CC: ParamId = ParamId(4);
-/// The page shown: controls 1 to 8 or 9 to 16.
-pub const PAGE: ParamId = ParamId(5);
+/// The name of the pages node whose tabs show controls 1 to 8 or 9 to 16: the
+/// page shown is view state, not a parameter.
+pub const PAGES: &str = "Controls";
 /// Send: sends every assigned control's value once, on the frame it turns on.
 pub const SEND: ParamId = ParamId(6);
 /// Learn: hands an incoming controller to the next dial without one.
@@ -62,7 +69,13 @@ pub fn cc_names() -> Vec<String> {
     let mut names = Vec::with_capacity(120);
     names.push("None".to_owned());
     for controller in 1..=119 {
-        names.push(format!("CC {controller}"));
+        // Observed on Custom A's default, as Live's chooser reads it; the
+        // rest of Live's names are not recorded.
+        names.push(if controller == 64 {
+            "64: Sustain".to_owned()
+        } else {
+            format!("CC {controller}")
+        });
     }
     names
 }
@@ -90,6 +103,57 @@ pub fn cc_is_listed(controller: u8) -> bool {
     (1..=119).contains(&controller)
 }
 
+/// CC Control's panel as Live draws it: on each page two rows of four cells,
+/// the first page's first row holding the three fixed controls and Custom A.
+fn layout() -> DeviceLayout {
+    let at = |param, widget, x, y| Placed::new(param, widget, x, y);
+    // The centres of a row's four cells, in points.
+    let centres = [33.0, 96.0, 159.0, 222.0];
+    let dial = |k: u32, column: usize, row_y: f32, chooser_y: f32| {
+        [
+            at(
+                dial_value(k),
+                Widget::SmallKnob,
+                centres[column] - 16.0,
+                row_y,
+            ),
+            at(
+                dial_cc(k),
+                Widget::Chooser,
+                centres[column] - 25.5,
+                chooser_y,
+            )
+            .sized(51.0, 12.0)
+            .unnamed(),
+        ]
+    };
+    let band =
+        |controls: Vec<Placed>| LayoutNode::Band(ControlBand::free(256.0, BODY_HEIGHT, controls));
+    let mut first: Vec<Placed> = vec![
+        at(MOD_WHEEL, Widget::Knob, centres[0] - 20.0, 7.0),
+        at(PITCH_BEND, Widget::Knob, centres[1] - 20.0, 7.0),
+        at(PRESSURE, Widget::Knob, centres[2] - 20.0, 7.0),
+        at(CUSTOM_A, Widget::Check, centres[3] - 25.5, 7.0).sized(51.0, 40.0),
+        at(CUSTOM_A_CC, Widget::Chooser, centres[3] - 25.5, 64.0)
+            .sized(51.0, 12.0)
+            .unnamed(),
+    ];
+    first.extend((0..4).flat_map(|k| dial(k, k as usize, 86.0, 142.0)));
+    let mut second: Vec<Placed> = (4..8)
+        .flat_map(|k| dial(k, k as usize - 4, 7.0, 64.0))
+        .collect();
+    second.extend((8..12).flat_map(|k| dial(k, k as usize - 8, 86.0, 142.0)));
+    DeviceLayout::new(LayoutNode::Pages(PagesNode::new(
+        PAGES,
+        PageStyle::TitleBar,
+        vec![
+            Page::new("1-8", band(first)),
+            Page::new("9-16", band(second)),
+        ],
+    )))
+    .with_title(vec![TitlePart::Button(LEARN), TitlePart::Button(SEND)])
+}
+
 /// CC Control's device type.
 #[must_use]
 pub fn cc_control_type() -> DeviceType {
@@ -108,8 +172,6 @@ pub fn cc_control_type() -> DeviceType {
             64,
             "Custom A's controller. It starts on CC 64, the sustain pedal.",
         ),
-        ParamDescriptor::choice(PAGE, "Page", &["1-8", "9-16"], 0)
-            .describe("Which page of controls the device shows."),
         ParamDescriptor::toggle(SEND, "Send", false)
             .describe("Sends every assigned control's value once when it turns on."),
         ParamDescriptor::toggle(LEARN, "Learn", false).describe(
@@ -139,59 +201,54 @@ pub fn cc_control_type() -> DeviceType {
         ));
     }
     DeviceType::native(CC_CONTROL, "CC Control", DeviceRole::MidiEffect).with_description(
-        DeviceDescription::new(params).with_banks(&[
-            (
-                "Main",
-                &[
-                    "Mod Wheel",
-                    "Pitch Bend",
-                    "Pressure",
-                    "Page",
-                    "Send",
-                    "Learn",
-                ],
-            ),
-            (
-                "Custom A-D",
-                &[
-                    "Custom A",
-                    "Custom A CC",
-                    "Custom B",
-                    "Custom B CC",
-                    "Custom C",
-                    "Custom C CC",
-                    "Custom D",
-                    "Custom D CC",
-                ],
-            ),
-            (
-                "Custom E-H",
-                &[
-                    "Custom E",
-                    "Custom E CC",
-                    "Custom F",
-                    "Custom F CC",
-                    "Custom G",
-                    "Custom G CC",
-                    "Custom H",
-                    "Custom H CC",
-                ],
-            ),
-            (
-                "Custom I-L",
-                &[
-                    "Custom I",
-                    "Custom I CC",
-                    "Custom J",
-                    "Custom J CC",
-                    "Custom K",
-                    "Custom K CC",
-                    "Custom L",
-                    "Custom L CC",
-                ],
-            ),
-            ("Custom M", &["Custom M", "Custom M CC"]),
-        ]),
+        DeviceDescription::new(params)
+            .with_layout(layout())
+            .with_banks(&[
+                (
+                    "Main",
+                    &["Mod Wheel", "Pitch Bend", "Pressure", "Send", "Learn"],
+                ),
+                (
+                    "Custom A-D",
+                    &[
+                        "Custom A",
+                        "Custom A CC",
+                        "Custom B",
+                        "Custom B CC",
+                        "Custom C",
+                        "Custom C CC",
+                        "Custom D",
+                        "Custom D CC",
+                    ],
+                ),
+                (
+                    "Custom E-H",
+                    &[
+                        "Custom E",
+                        "Custom E CC",
+                        "Custom F",
+                        "Custom F CC",
+                        "Custom G",
+                        "Custom G CC",
+                        "Custom H",
+                        "Custom H CC",
+                    ],
+                ),
+                (
+                    "Custom I-L",
+                    &[
+                        "Custom I",
+                        "Custom I CC",
+                        "Custom J",
+                        "Custom J CC",
+                        "Custom K",
+                        "Custom K CC",
+                        "Custom L",
+                        "Custom L CC",
+                    ],
+                ),
+                ("Custom M", &["Custom M", "Custom M CC"]),
+            ]),
     )
 }
 

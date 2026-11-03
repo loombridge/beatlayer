@@ -21,7 +21,8 @@
 //! Every change runs `device.set_param`, which an agent runs too.
 
 use bl_model::device_layout::{
-    BUTTON_GAP, PADDING, PageStyle, PlacedPages, Size, UNIT_PAIR_WIDTH, Widget,
+    BOX_HEIGHT, BUTTON_GAP, PADDING, PageStyle, PlacedPages, Size, UNIT_PAIR_WIDTH, UNIT_ROW_GAP,
+    Widget,
 };
 use bl_model::modulator::ModTarget;
 use bl_model::{DeviceDisplay, DeviceId, ParamDescriptor, ParamId};
@@ -42,6 +43,7 @@ use crate::theme::Theme;
 use crate::widgets::modulated_text;
 
 mod parts;
+mod scale_grid;
 pub use parts::{BOX_CORNER, DEVICE_TEXT, glyph_for, paint_glyph, title_parts, truncated};
 
 /// What the panel asks of the device view for each parameter: its base and
@@ -291,6 +293,10 @@ fn page_row(
 
 /// The width of a title-bar tab reading `name`.
 fn tab_width(name: &str) -> f32 {
+    // CC Control's 1-8 and 9-16 are 25 points each (L-DEV-045, observed).
+    if name.chars().all(|c| c.is_ascii_digit() || c == '-') {
+        return 25.0;
+    }
     name.chars().count() as f32 * 6.0 + 16.0
 }
 
@@ -442,6 +448,14 @@ pub fn show(
             corpus_xy(ui, theme, frame, (panel, display), (id, rect), events);
             continue;
         }
+        // Spec: midi-scale-map R13. Scale's grid is the twelve notes' targets.
+        if matches!(&frame.kind, bl_model::DeviceKind::Native { device_type }
+            if device_type == bl_devices::remap::REMAP)
+            && name == bl_devices::remap::GRID_CELL
+        {
+            scale_grid::show(ui, theme, frame, panel, (id, rect), events);
+            continue;
+        }
         let _ = ui.interact(rect, id, Sense::hover());
         // Spec: drum-synths R6. A click in the upper half of a Drum Synth's
         // display plays a hit.
@@ -555,13 +569,16 @@ pub fn show(
     for (at, (param, widget, whole)) in controls.into_iter().enumerate() {
         let extra = laid.controls.get(at);
         // A knob with a unit pair beside it keeps the rest of its place.
-        let rect = if extra.is_some_and(|e| e.unit.is_some()) {
-            Rect::from_min_max(
+        let rect = match extra.and_then(|e| e.unit) {
+            Some(pair) if pair.below => Rect::from_min_max(
+                whole.min,
+                pos2(whole.right(), whole.bottom() - UNIT_ROW_GAP - BOX_HEIGHT),
+            ),
+            Some(_) => Rect::from_min_max(
                 pos2(whole.left() + UNIT_PAIR_WIDTH + PADDING, whole.top()),
                 whole.max,
-            )
-        } else {
-            whole
+            ),
+            None => whole,
         };
         // A plug-in panel's controls are its knobs, in the panel's own order
         // (WP-5.40), so a control's place is its knob; any other device's
@@ -633,11 +650,26 @@ pub fn show(
             } else {
                 1
             },
+            unnamed: extra.is_some_and(|e| e.unnamed),
         };
         // Spec: scales R16. A parameter the device takes from its current
         // scale is drawn disabled.
         let locked = panel.locked.contains(&param);
         let glyph = extra.and_then(|e| e.glyph);
+        // A titled row, stack or grid of buttons has its name above it.
+        let titled = extra.is_some_and(|e| e.titled);
+        let buttons = if titled {
+            ui.painter().text(
+                pos2(rect.left() + 2.0, rect.top() + parts::LABEL_ROW / 2.0),
+                Align2::LEFT_CENTER,
+                short_name(&descriptor.name),
+                parts::font(),
+                theme.colors.text.0,
+            );
+            Rect::from_min_max(pos2(rect.left(), rect.top() + parts::LABEL_ROW), rect.max)
+        } else {
+            rect
+        };
         let mut draw = |ui: &mut Ui| match widget {
             Widget::Knob => control.knob(ui, theme, events, false),
             Widget::SmallKnob => control.knob(ui, theme, events, true),
@@ -649,21 +681,33 @@ pub fn show(
             Widget::IconToggle => control.icon_toggle(ui, theme, events, (glyph, false)),
             Widget::Round => control.icon_toggle(ui, theme, events, (glyph, true)),
             Widget::Chooser => control.chooser(ui, theme, events),
-            Widget::Segments(n) => {
-                let cells = button_cells(rect, usize::from(n), 1);
-                control.choice_buttons(ui, theme, events, (&cells, false));
-            }
-            Widget::IconSegments(n) => {
-                let cells = button_cells(rect, usize::from(n), 1);
-                control.choice_buttons(ui, theme, events, (&cells, true));
-            }
-            Widget::Stack(n) => {
-                let cells = button_cells(rect, 1, usize::from(n));
-                control.choice_buttons(ui, theme, events, (&cells, false));
+            Widget::Segments(n) | Widget::IconSegments(n) | Widget::Stack(n) => {
+                let (columns, rows) = match widget {
+                    Widget::Stack(_) => (1, usize::from(n)),
+                    _ => (usize::from(n), 1),
+                };
+                let cells = button_cells(buttons, columns, rows);
+                control.choice_buttons(
+                    ui,
+                    theme,
+                    events,
+                    (&cells, matches!(widget, Widget::IconSegments(_))),
+                );
             }
             Widget::Grid { columns, rows } => {
-                let cells = button_cells(rect, usize::from(columns), usize::from(rows));
+                let cells = button_cells(buttons, usize::from(columns), usize::from(rows));
                 control.choice_buttons(ui, theme, events, (&cells, false));
+            }
+            Widget::Check => control.check(ui, theme, events),
+            Widget::Switch => control.switch(ui, theme, events),
+            Widget::Stepper => {
+                let target = extra
+                    .and_then(|e| e.target)
+                    .and_then(|id| panel.description.params.iter().position(|p| p.id == id))
+                    .map(|at| (&panel.description.params[at], panel.value(at)));
+                if let Some(target) = target {
+                    control.stepper(ui, theme, events, target);
+                }
             }
         };
         if locked {
@@ -685,10 +729,14 @@ pub fn show(
                 .iter()
                 .position(|p| p.id == pair.mode)
         {
-            let pair_rect = Rect::from_min_max(
-                whole.min,
-                pos2(whole.left() + UNIT_PAIR_WIDTH, whole.bottom()),
-            );
+            let pair_rect = if pair.below {
+                Rect::from_min_max(pos2(whole.left(), whole.bottom() - BOX_HEIGHT), whole.max)
+            } else {
+                Rect::from_min_max(
+                    whole.min,
+                    pos2(whole.left() + UNIT_PAIR_WIDTH, whole.bottom()),
+                )
+            };
             let mode = parts::plain_control(frame, panel, mode_at, pair_rect);
             control.unit_pair(ui, theme, events, &pair, &mode);
         }
@@ -815,6 +863,7 @@ fn display_drag(
         text: None,
         automation: None,
         coarse: 1,
+        unnamed: false,
     };
     let response = ui.interact(rect, id.with("drag"), Sense::click_and_drag());
     control.value_input(ui, &response, events);
@@ -822,12 +871,19 @@ fn display_drag(
 
 /// What a control's name above it reads: a sample slot's parameter drops the
 /// slot's number (`Slot 3 Start` reads `Start`), since the panel shows one
-/// slot's at a time.
+/// slot's at a time, and MPE Control's Min, Max, X and Y drop their source's name
+/// (`Press Min` reads `Min`), which the tab beside them says.
 fn short_name(name: &str) -> &str {
-    name.strip_prefix("Slot ")
-        .and_then(|rest| rest.split_once(' '))
-        .filter(|(number, _)| number.chars().all(|c| c.is_ascii_digit()))
-        .map_or(name, |(_, rest)| rest)
+    let source = ["Press ", "Slide ", "NotePB "]
+        .iter()
+        .find_map(|source| name.strip_prefix(source))
+        .filter(|rest| ["Min", "Max", "X", "Y"].contains(rest));
+    source.unwrap_or_else(|| {
+        name.strip_prefix("Slot ")
+            .and_then(|rest| rest.split_once(' '))
+            .filter(|(number, _)| number.chars().all(|c| c.is_ascii_digit()))
+            .map_or(name, |(_, rest)| rest)
+    })
 }
 
 /// A display cell standing for a sample slot (WP-5.17): its number and key,
@@ -1055,6 +1111,8 @@ struct Control<'a> {
     /// How many steps Shift with Up or Down moves it: 12 for Roar's
     /// Feedback Note, an octave (the roar spec, R26), else 1.
     coarse: i32,
+    /// Whether the box has no name above it.
+    unnamed: bool,
 }
 
 impl Control<'_> {

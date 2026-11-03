@@ -7943,7 +7943,10 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
 | `glyph` | [`Glyph`](#glyph) or null | no | The icon of an icon button or a round button. |
 | `grey` | [`GreyWhen`](#greywhen) or null | no | The condition that greys the control. |
 | `size` | [`Size`](#size) or null | no | Its size where the device sets it, in place of the widget's: the width of a box, a row of buttons or a unit pair's control. |
+| `target` | [`ParamId`](#paramid) or null | no | The parameter a [`Widget::Stepper`]'s buttons move. |
+| `titled` | boolean | no | Set for a row, stack or grid of buttons with its parameter's name above it, left-aligned (Note Echo's Delay Time). |
 | `unit` | [`UnitPair`](#unitpair) or null | no | The unit pair beside a knob, which makes the knob show one of two parameters. |
+| `unnamed` | boolean | no | Set for a box drawn without its name above it (Chord's amounts under their knobs): the control is its box alone. |
 
 <details><summary>JSON Schema</summary>
 
@@ -7988,6 +7991,21 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
       ],
       "description": "Its size where the device sets it, in place of the widget's: the width of a box, a row of buttons or a unit pair's control."
     },
+    "target": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ParamId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The parameter a [`Widget::Stepper`]'s buttons move."
+    },
+    "titled": {
+      "description": "Set for a row, stack or grid of buttons with its parameter's name above it, left-aligned (Note Echo's Delay Time).",
+      "type": "boolean"
+    },
     "unit": {
       "anyOf": [
         {
@@ -7998,6 +8016,10 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
         }
       ],
       "description": "The unit pair beside a knob, which makes the knob show one of two parameters."
+    },
+    "unnamed": {
+      "description": "Set for a box drawn without its name above it (Chord's amounts under their knobs): the control is its box alone.",
+      "type": "boolean"
     },
     "widget": {
       "$ref": "#/$defs/Widget",
@@ -11153,6 +11175,7 @@ A display cell: a graph, a spectrum, a waveform, or an envelope editor, which gr
 | `height` | number | yes | Its docked height, the least it has. |
 | `weight` | number | yes | Its share of extra room, against the other cells it shares with. |
 | `bottom` | [`ControlBand`](#controlband) or null | no | Controls inside its bottom edge, from its left. |
+| `params` | array of [`ParamId`](#paramid) | no | The parameters the cell's own drawing sets, which need no control of their own (Scale's grid sets its twelve notes' targets). |
 | `slot` | integer or null | no | The sample slot the cell stands for, if it does: it shows the slot and takes a click that selects it, and a sample dropped on it (WP-5.17). |
 | `top` | [`ControlBand`](#controlband) or null | no | Controls inside its top edge, from its left. |
 
@@ -11181,6 +11204,13 @@ A display cell: a graph, a spectrum, a waveform, or an envelope editor, which gr
     "name": {
       "description": "What it shows, for the device that draws it and for screen readers.",
       "type": "string"
+    },
+    "params": {
+      "description": "The parameters the cell's own drawing sets, which need no control of their own (Scale's grid sets its twelve notes' targets).",
+      "items": {
+        "$ref": "#/$defs/ParamId"
+      },
+      "type": "array"
     },
     "slot": {
       "description": "The sample slot the cell stands for, if it does: it shows the slot and takes a click that selects it, and a sample dropped on it (WP-5.17).",
@@ -14926,6 +14956,8 @@ One of:
 - `"plus"`: A plus sign.
 - `"minus"`: A minus sign.
 - `"flat_sharp"`: A flat and a sharp: Use Current Scale.
+- `"line"`: A straight line rising to the right: a linear curve.
+- `"s_curve"`: A line rising in an S: an S-shaped curve.
 
 <details><summary>JSON Schema</summary>
 
@@ -14996,6 +15028,16 @@ One of:
     {
       "const": "flat_sharp",
       "description": "A flat and a sharp: Use Current Scale.",
+      "type": "string"
+    },
+    {
+      "const": "line",
+      "description": "A straight line rising to the right: a linear curve.",
+      "type": "string"
+    },
+    {
+      "const": "s_curve",
+      "description": "A line rising in an S: an S-shaped curve.",
       "type": "string"
     }
   ]
@@ -24581,6 +24623,7 @@ One of:
 - `"title_bar"`: Tabs in the device's title bar, after its name, that the device's title bar draws: the node's area is the shown page's alone.
 - `"shell"`: A strip of sections, each its page's main controls under a section button, beside a display area the shown page fills.
 - `"strip"`: A strip down the node's left edge ([`STRIP_WIDTH`] wide) with a ▼ toggle at its top and the node's name written up it; the node's area right of it holds the second page while it is shown and the first, which is empty, while it isn't ([`PagesNode::side_strip`]).
+- `"column"`: A column of tabs down the node's left edge ([`COLUMN_TAB_WIDTH`] wide), with the shown page's section under them, beside the area the shown page fills (MPE Control's Press, Slide and NotePB).
 
 <details><summary>JSON Schema</summary>
 
@@ -24606,6 +24649,11 @@ One of:
     {
       "const": "strip",
       "description": "A strip down the node's left edge ([`STRIP_WIDTH`] wide) with a ▼ toggle at its top and the node's name written up it; the node's area right of it holds the second page while it is shown and the first, which is empty, while it isn't ([`PagesNode::side_strip`]).",
+      "type": "string"
+    },
+    {
+      "const": "column",
+      "description": "A column of tabs down the node's left edge ([`COLUMN_TAB_WIDTH`] wide), with the shown page's section under them, beside the area the shown page fills (MPE Control's Press, Slide and NotePB).",
       "type": "string"
     }
   ]
@@ -41640,6 +41688,7 @@ A pair of unit buttons beside a knob that switch which of two parameters the kno
 |---|---|---|---|
 | `mode` | [`ParamId`](#paramid) | yes | The switch that picks the unit: off, the first unit's parameter (the control's own) shows and the first button is lit. |
 | `units` | array of [`Unit`](#unit), at least 2 | yes | The two units, in the order of `mode`'s values. |
+| `below` | boolean | no | Set for a pair drawn side by side in a row under the knob rather than stacked at its left (Note Length's). |
 
 <details><summary>JSON Schema</summary>
 
@@ -41647,6 +41696,10 @@ A pair of unit buttons beside a knob that switch which of two parameters the kno
 {
   "description": "A pair of unit buttons beside a knob that switch which of two parameters the knob shows: Arpeggiator's Rate (ms or sync), Envelope Follower's Delay, LFO's Rate. The knob shows one parameter, never both: the device's description says which two, as an [`Alternate`](crate::param::Alternate) whose switch is `mode`.",
   "properties": {
+    "below": {
+      "description": "Set for a pair drawn side by side in a row under the knob rather than stacked at its left (Note Length's).",
+      "type": "boolean"
+    },
     "mode": {
       "$ref": "#/$defs/ParamId",
       "description": "The switch that picks the unit: off, the first unit's parameter (the control's own) shows and the first button is lit."
@@ -42885,6 +42938,9 @@ One of:
 - an object with `stack` (integer from 0 to 255): The same as a column of that many buttons.
 - an object with `grid` (object with `columns` (integer from 0 to 255), `rows` (integer from 0 to 255)): The choices of a choice parameter as a grid of small buttons, filled by rows (Note Echo's 1 2 3 4 over 5 6 8 16).
 - an object with `icon_segments` (integer from 0 to 255): A row of that many icon buttons, one for each choice of a choice parameter (the filter types), the chosen one lit.
+- `"switch"`: A box under the parameter's name that reads On or Off and turns the switch when pressed (Arpeggiator's Velocity).
+- `"check"`: A small square button under the parameter's name, lit while on (CC Control's Custom A).
+- `"stepper"`: A number box with a round − at its left and a round + at its right: the box is the control's parameter, the amount the buttons step, and the buttons move the parameter its [`Control::target`] names by it (Pitch's Step Width).
 
 <details><summary>JSON Schema</summary>
 
@@ -43022,6 +43078,21 @@ One of:
         "icon_segments"
       ],
       "type": "object"
+    },
+    {
+      "const": "switch",
+      "description": "A box under the parameter's name that reads On or Off and turns the switch when pressed (Arpeggiator's Velocity).",
+      "type": "string"
+    },
+    {
+      "const": "check",
+      "description": "A small square button under the parameter's name, lit while on (CC Control's Custom A).",
+      "type": "string"
+    },
+    {
+      "const": "stepper",
+      "description": "A number box with a round − at its left and a round + at its right: the box is the control's parameter, the amount the buttons step, and the buttons move the parameter its [`Control::target`] names by it (Pitch's Step Width).",
+      "type": "string"
     }
   ]
 }

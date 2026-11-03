@@ -9,7 +9,7 @@
 
 Chord builds a chord from each note that reaches it by adding up to six notes, each a set number of semitones above or below it. Each added note has its own velocity, as a share of the note's, and its own chance of sounding. Strum spreads the chord over a time, the note first and then the shifts in order, or the other way round when negative; Tension makes the spread start slowly or quickly, and Crescendo ramps the velocity along it. A shift of 0, or one that an earlier shift already has, adds nothing. The context menu's two options in Live, to let a strum play a key that is already sounding and to send per-note events to the added notes, are two switches.
 
-Each note and the notes it made end together: when the key comes up, every added note that is sounding ends, and every one still waiting for the strum never sounds. The device takes Live's name, Chord; its look is the device framework's generic controls. Chance comes from a generator seeded from the device, so an offline render repeats. The Use Current Scale switch in its title bar makes the shifts count degrees of the device's current scale ([scales.md](scales.md)), so the chord stays in the scale, and a bent chord stays in it too. This spec covers the device only.
+Each note and the notes it made end together: when the key comes up, every added note that is sounding ends, and every one still waiting for the strum never sounds. The device takes Live's name, Chord; its panel is laid out as Live draws it (layout L-DEV-053). Chance comes from a generator seeded from the device, so an offline render repeats. The Use Current Scale switch in its title bar makes the shifts count degrees of the device's current scale ([scales.md](scales.md)), so the chord stays in the scale, and a bent chord stays in it too. This spec covers the device only.
 
 ## Sources
 
@@ -43,6 +43,7 @@ Each note and the notes it made end together: when the key comes up, every added
 - **R16.** Use Current Scale, a switch in Chord's title bar ([scales.md](scales.md) R16), off in a new Chord: with it on, each shift counts degrees of the device's current scale ([scales.md](scales.md) R15), from −36 to +36 (the semitone range read as degrees, Beatlayer's own), and each added note is that many degrees from the note ([scales.md](scales.md) R2). The added notes of a note outside the scale are counted from the scale note below it, so they land in the scale while the note itself sounds as it came (Beatlayer's own). R2 holds in degrees: a shift of 0, or one that lands where an earlier shift's note does, adds nothing; an added note off the keyboard isn't played. (S1, S5, S7)
 - **R17.** While Learn is on with Use Current Scale on, each learned key sets its shift to the number of degrees from the root to it, a key outside the scale counting as the scale note below it (Beatlayer's own). (S1, S7)
 - **R18.** With Use Current Scale and Per-Note Events on, the per-note bend sent to each added note is carried in degrees, as [scales.md](scales.md) R18 says, so a bent chord stays in the scale; a change of the current scale while a chord is held moves none of its notes (R8). A Chord switched off passes the bends it receives on unchanged ([device-chains.md](device-chains.md) R6). (S1, S6, S7)
+- **R19.** The boxes under the six knobs show and set the shifts' velocities or their chances, as the Velocity and Chance buttons (the parameter `Amounts`) say; Velocity is chosen in a new Chord. Both sets of parameters keep their values and their lanes whichever the boxes show. (S1)
 
 ## Tests
 
@@ -66,10 +67,11 @@ Each note and the notes it made end together: when the key comes up, every added
 | R16 | `crates/devices/tests/stack.rs`, `use_current_scale_counts_the_shifts_in_degrees` | real-time trap |
 | R17 | `crates/devices/tests/stack.rs`, `learn_counts_degrees_in_the_scale`; `crates/shell/tests/midi_io.rs`, `learn_counts_degrees_with_use_current_scale_on` | unit |
 | R18 | `crates/devices/tests/stack.rs`, `a_bent_chord_stays_in_the_scale`, `a_scale_change_while_a_chord_is_held_moves_none_of_its_notes` | real-time trap |
+| R19 | `crates/ui/tests/midi_effect_panels.rs`, `chords_buttons_turn_its_boxes_between_velocities_and_chances` | UI script |
 
 ## Defaults, ranges and details
 
-- A new Chord starts with Shift 1 at +4 and Shift 2 at +7 (a major triad) and the other shifts at 0, every Velocity 100 %, every Chance 100 %, Strum 0, Tension 0, Crescendo 0, and every switch off. The manual doesn't state the defaults.
+- A new Chord starts with every shift at 0 (it adds no note), every Velocity 100 %, every Chance 100 %, Strum 0, Tension 0, Crescendo 0, and every switch off, and the boxes under the knobs showing the velocities, as Live's panel reads in a new set (observed in Live 12.4.16, 2 November 2026).
 - Strum runs from −400 to +400 ms and is the time from the first note of the chord to the last. The manual says "up to 400 ms between the notes" without saying whether that is each gap or the whole; the whole is used here. Note k of n sounds at |Strum| times (1 − (1 − k/(n − 1))^q) after the first, with q = 2^(2 × Tension), Tension from −1 to 1.
 - Crescendo multiplies note k of n by 1 + Crescendo × (k/(n − 1) − ½), Crescendo from −1 to 1.
 - Learn is heard on the main thread, not in the device: the MIDI input queue copies note messages for the shell while any Chord device has Learn on (`bl_midi_io::InputSender::set_tap`), and the shell sets the shifts. The chord is learned from the keys the computer keyboard and the MIDI inputs send, whichever track they play.

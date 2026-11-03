@@ -2,11 +2,13 @@
 //! moves some notes by a random number of steps up, down or both, chosen
 //! from a fixed set, or cycling through the set in order.
 //!
-//! Its look is the framework's generic layout: Beatlayer's own.
+//! Its panel is laid out as Live draws it (layout L-DEV-050): three small
+//! knobs down the left, Mode and Sign as stacks of buttons at the right.
 
 use bl_engine::midi_clips::Rng;
 use bl_engine::{DeviceType, NoteBuffer, NoteEvent, NoteKind, Registry};
-use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
+use bl_model::device_layout::{BODY_HEIGHT, Control, ControlBand, LayoutNode, Widget};
+use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::midi_fx::{Key, Router, scale_in_use, seed, value};
@@ -33,19 +35,44 @@ pub const MODES: [&str; 2] = ["Random", "Alt"];
 /// The Sign choices.
 pub const SIGNS: [&str; 3] = ["Add", "Sub", "Bi"];
 
+/// Random's panel as Live draws it.
+fn layout() -> DeviceLayout {
+    let at = |param, widget, x, y| Control::new(param, widget, x, y);
+    let knobs = ControlBand::free(
+        52.0,
+        BODY_HEIGHT,
+        vec![
+            at(CHANCE, Widget::SmallKnob, 11.0, 4.0),
+            at(CHOICES, Widget::SmallKnob, 11.0, 57.0),
+            at(INTERVAL, Widget::SmallKnob, 11.0, 110.0),
+        ],
+    );
+    let stacks = ControlBand::free(
+        55.0,
+        BODY_HEIGHT,
+        vec![
+            at(MODE, Widget::Stack(2), 6.0, 58.0).titled(),
+            at(SIGN, Widget::Stack(3), 6.0, 101.0).titled(),
+        ],
+    );
+    DeviceLayout::new(LayoutNode::Row(vec![
+        LayoutNode::Band(knobs),
+        LayoutNode::Band(stacks),
+    ]))
+}
+
 /// Random's device type.
 #[must_use]
 pub fn dice_type() -> DeviceType {
     DeviceType::native(DICE, "Random", DeviceRole::MidiEffect).with_description(
         DeviceDescription::new(vec![
-            ParamDescriptor::continuous(CHANCE, "Chance", (0.0, 100.0), 100.0, ParamUnit::Percent)
-                .decimals(0)
+            ParamDescriptor::continuous(CHANCE, "Chance", (0.0, 100.0), 0.0, ParamUnit::Percent)
                 .describe("How likely each note is to move: 0 % leaves every note alone."),
-            ParamDescriptor::integer(CHOICES, "Choices", (1, 24), 24, ParamUnit::None).describe(
+            ParamDescriptor::integer(CHOICES, "Choices", (1, 24), 12, ParamUnit::None).describe(
                 "How many different distances a note may move by; with Interval, they set \
                  how far notes can go.",
             ),
-            ParamDescriptor::integer(INTERVAL, "Interval", (1, 24), 1, ParamUnit::Semitones)
+            ParamDescriptor::integer(INTERVAL, "Interval", (1, 24), 1, ParamUnit::None)
                 .describe("The step between the distances a note may move by."),
             ParamDescriptor::choice(MODE, "Mode", &MODES, 0).describe(
                 "Random picks a distance without a fixed order; Alt goes through the \
@@ -59,6 +86,7 @@ pub fn dice_type() -> DeviceType {
             ),
         ])
         .with_title_switch(USE_SCALE)
+        .with_layout(layout())
         .with_banks(&[("Random", &["Chance", "Choices", "Interval", "Mode", "Sign"])]),
     )
 }

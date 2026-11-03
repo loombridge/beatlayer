@@ -9,7 +9,7 @@
 
 MIDI Monitor shows what reaches it and changes nothing. Its Note display draws a keyboard with each key that is sounding, its velocity, and the root and chord the sounding notes make. Its Flow display lists the notes and messages — control changes, pitch bend, channel pressure — as they come. Its MPE display lists the per-note expressions — pressure, slide and per-note pitch bend — as they come. Freeze holds the display where it is while the notes carry on; Clear empties it.
 
-The display's data is published after each block through the device framework's path, so the generic UI draws it, a screen reader reads it, and an agent reads the same data headless with `device.display`. What Live names a chord, and how, isn't recorded; Beatlayer's own rule is below.
+The display's data is published after each block through the device framework's path, so the display cell draws it, a screen reader reads it, and an agent reads the same data headless with `device.display`. What Live names a chord, and how, isn't recorded; Beatlayer's own rule is below.
 
 This spec covers the device only. How a display's data reaches its cell and agents is device-framework R35 to R38.
 
@@ -37,7 +37,7 @@ This spec covers the device only. How a display's data reaches its cell and agen
 
 ## Defaults, ranges and details
 
-- Freeze and Clear start off.
+- Freeze and Clear start off. They are items of the device's context menu; the panel is laid out as Live draws it (layout L-DEV-055), one display cell under an MPE label, with no buttons for them.
 - The Flow and MPE lists hold their most recent 16 entries; the counts are of everything seen.
 - The display offers three views, Note, Flow and MPE, chosen with `device.set_display_view`; the first is the one it starts in. The cell draws the keyboard in every view and lists the readings; Live's three drawings differ more than this (S1).
 - A note whose key is still sounding is drawn with its note-on velocity; a key whose note-off has come is zero.

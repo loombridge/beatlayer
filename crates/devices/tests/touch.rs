@@ -28,7 +28,7 @@ fn velocities(params: &[(bl_model::ParamId, f64)], size: usize) -> Vec<(NoteKind
 fn the_curve_maps_the_input_window_to_the_output_range() {
     for size in SIZES {
         // 100 of 127 is 0.787 of the way up the window; 40 + 0.787 × 40 = 71.
-        let heard = velocities(&[(OUT_LOW, 40.0), (OUT_HIGH, 80.0)], size);
+        let heard = velocities(&[(OPERATION, 0.0), (OUT_LOW, 40.0), (OUT_HIGH, 80.0)], size);
         assert_eq!(heard[0], (NoteKind::On, 71.0 / 127.0), "size {size}");
         assert_eq!(heard[2], (NoteKind::On, 71.0 / 127.0));
         // The release velocity isn't touched by Note On.

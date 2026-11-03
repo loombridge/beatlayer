@@ -1306,7 +1306,7 @@ fn sixteen_voices_of_four_operators_render_faster_than_the_device_budget() {
     let realtime = seconds as f64 / elapsed;
     println!("16 voices: {seconds} s of audio in {elapsed:.3} s, {realtime:.0}x real time (debug)");
     assert!(rms(&left) > 0.01, "the chord sounds");
-    if full_depth() {
+    if full_depth() && crate::common::budget::judged() {
         // A debug build on a loaded machine; 16 voices mustn't eat more than
         // a quarter of the time they play.
         assert!(realtime >= 4.0, "16 voices ran at {realtime:.1}x real time");

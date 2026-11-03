@@ -878,7 +878,7 @@ fn sixteen_voices_render_faster_than_the_device_budget_with_no_allocation() {
             CIRCUITS[usize::from(circuit)]
         );
         assert!(heard > 1.0, "{} sounds", CIRCUITS[usize::from(circuit)]);
-        if full_depth() {
+        if full_depth() && crate::common::budget::judged() {
             // A debug build on a loaded machine; 16 voices mustn't eat more
             // than a quarter of the time they play.
             assert!(

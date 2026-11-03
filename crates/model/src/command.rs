@@ -2145,6 +2145,7 @@ pub enum Command {
         /// The device.
         device: DeviceId,
         /// The slot, counted from 0.
+        #[serde(default)]
         slot: u8,
         /// The response's file, or `null` to empty the slot.
         media: Option<ContentHash>,

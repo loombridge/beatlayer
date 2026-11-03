@@ -1422,7 +1422,7 @@ fn every_command_runs_by_id() {
     // Spec: impulse-responses R2.
     agent.run(
         "device.set_impulse_response",
-        json!({ "device": eq, "media": "0303030303030303030303030303030303030303030303030303030303030303" }),
+        json!({ "device": eq, "slot": 1, "media": "0404040404040404040404040404040404040404040404040404040404040404" }),
     );
     assert_eq!(
         agent.editor.undo_history().next(),

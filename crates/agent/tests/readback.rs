@@ -325,6 +325,25 @@ fn fixture() -> Project {
             .with_role(DeviceRole::Instrument),
         },
     );
+    // A convolution device with a response in its slot, so the slot reads
+    // back (impulse responses R12).
+    let convolution: DeviceId = editor.new_id();
+    let mut device = Device::new(
+        convolution,
+        "Room",
+        DeviceKind::Native {
+            device_type: bl_devices::testing::CONVOLUTION.to_owned(),
+        },
+    );
+    device.set_media(0, Some(ContentHash([7; 32])));
+    apply(
+        &mut editor,
+        Command::InsertDevice {
+            track: keys,
+            index: 1,
+            device,
+        },
+    );
     // An instrument with a modulation matrix, so its slots read back
     // (instrument modulation R11).
     let drift: DeviceId = editor.new_id();
@@ -1001,6 +1020,9 @@ fn open(project: &Project, name: &str) -> Client<InProcess> {
     let path = std::env::temp_dir().join(format!("{}-{name}.blset", std::process::id()));
     std::fs::write(&path, bl_project::encode(project, 1).unwrap()).unwrap();
     let mut shell = Shell::headless();
+    let mut types = bl_devices::device_types();
+    types.push(bl_devices::testing::convolution_type());
+    shell.set_device_types(types);
     shell
         .run("set.open", json!({ "path": path.to_string_lossy() }))
         .unwrap();

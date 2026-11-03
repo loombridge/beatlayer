@@ -99,6 +99,7 @@ use bl_shell_spec::tunings as tuning_ids;
 mod ara;
 pub(crate) mod audio_editing;
 mod audio_panel;
+mod audio_to_midi;
 pub mod autosample;
 mod bounce;
 mod capture;
@@ -110,6 +111,7 @@ pub use export_dialog::ExportPrefs;
 pub use info_text::InfoTarget;
 mod file_manager;
 mod freeze;
+mod granulator;
 mod grooves;
 mod keymap;
 mod link;
@@ -170,11 +172,13 @@ mod tempo_follower;
 mod track_commands;
 mod tunings;
 mod video;
+mod video_window;
 mod view_commands;
 mod warping;
 mod windows;
 
 use file_manager::FileManager;
+pub use video_window::VideoView;
 
 /// The argument a key in a range (F1 to F8) adds to a toggling mixer
 /// command for the track it numbers, counting the mixer's columns from 1;
@@ -215,6 +219,9 @@ pub enum WindowKind {
     Device(bl_model::DeviceId),
     /// The assistant's panel in a window of its own (WP-2.23, part 3; D24).
     Assistant,
+    /// The Video Window (WP-9.26): the frame at the playhead, floating above
+    /// the main window.
+    Video,
 }
 
 /// An area of the main window that can hold the keyboard focus.
@@ -357,6 +364,10 @@ pub enum Effect {
     SetFullScreen(bool),
     /// Enter or leave full-screen mode in the second window.
     SetSecondFullScreen(bool),
+    /// Enter or leave full-screen mode in the Video Window (video R20).
+    SetVideoFullScreen(bool),
+    /// Move and size the Video Window (video R17, R21).
+    PlaceVideoWindow(bl_model::WindowFrame),
     /// Move the keyboard focus to an area of the main window.
     FocusArea(Area),
     /// Move the keyboard focus to an area of the second window, and bring
@@ -781,11 +792,15 @@ pub struct Shell {
     media: Arc<MediaStore>,
     /// The movies the set's video clips name (WP-9.25).
     movies: video::Movies,
+    /// The Video Window (WP-9.26).
+    video_window: video_window::VideoWindow,
     /// Processed files being written, with the edits that land when each is
     /// whole (WP-4.20).
     processed: Vec<processed_files::Pending>,
     /// Stem separation's download, separation, and dialog (IMP-11).
     stems: stems::StemsState,
+    /// Convert Harmony, Melody and Drums to New MIDI Track's state.
+    audio_to_midi: audio_to_midi::AudioToMidiState,
     /// The Packages manager: the installer thread and its queue (WP-9.1).
     packages: packages::PackagesState,
     /// The Export Audio/Video dialog and the export under way (WP-6.71).
@@ -976,6 +991,10 @@ pub struct Shell {
     /// How many recordings this session has started: the take number in
     /// their files' names, so two in one second don't share a file.
     recorded_takes: u32,
+    /// The Granulator III captures under way or being written (WP-8.27),
+    /// and the file of each device's last one.
+    granulator_captures: BTreeMap<bl_model::DeviceId, granulator::Capture>,
+    granulator_files: BTreeMap<bl_model::DeviceId, PathBuf>,
     /// The Session recording under way, beside `recording` (WP-3.11).
     session_run: Option<session_recording::SessionRun>,
     /// The notes monitoring MIDI tracks received, for Capture MIDI
@@ -1340,8 +1359,10 @@ impl Shell {
             browser_view,
             media,
             movies: video::Movies::default(),
+            video_window: video_window::VideoWindow::default(),
             processed: Vec::new(),
             stems: stems::StemsState::default(),
+            audio_to_midi: audio_to_midi::AudioToMidiState::default(),
             packages: packages::PackagesState::default(),
             export: export_dialog::ExportState::default(),
             packs: packs::PackState::default(),
@@ -1486,6 +1507,8 @@ impl Shell {
             pending_recording: None,
             pending_param_changes: Vec::new(),
             recorded_takes: 0,
+            granulator_captures: BTreeMap::new(),
+            granulator_files: BTreeMap::new(),
             session_run: None,
             capture: bl_engine::capture::Buffer::default(),
             automation_take: crate::automation_record::Take::default(),
@@ -1760,6 +1783,7 @@ impl Shell {
         // Spec: control-surfaces R7. The same for a surface's gesture.
         self.surface_gesture_ends_for(id);
         self.poll_capture();
+        self.poll_granulator_captures();
         self.sync_panels_height();
         // Spec: automation-editing R23. The edit a selected breakpoint
         // opens ends when another command edits the set.
@@ -2259,6 +2283,9 @@ impl Shell {
         if bl_shell_spec::cv::handles(id) {
             return self.run_cv(id, args);
         }
+        if bl_shell_spec::granulator::handles(id) {
+            return self.run_granulator(id, args);
+        }
         if device_ids::handles(id) {
             return self.run_devices(id, args);
         }
@@ -2280,7 +2307,10 @@ impl Shell {
             return self.run_warping(id, args);
         }
         if bl_shell_spec::video::handles(id) {
-            return self.run_video(id, args);
+            return match id {
+                bl_shell_spec::video::FRAME_AT => self.run_video(id, args),
+                _ => self.run_video_window(id, args),
+            };
         }
         if bl_shell_spec::groove::handles(id) {
             return self.run_grooves(id, args);
@@ -2303,6 +2333,9 @@ impl Shell {
         }
         if stems_ids::handles(id) {
             return self.run_stems(id, args);
+        }
+        if bl_shell_spec::audio_to_midi::handles(id) {
+            return self.run_audio_to_midi(id, args);
         }
         if packages_ids::handles(id) {
             return self.run_packages(id, args);

@@ -317,6 +317,12 @@ fn roars_strip_has_one_toggle_and_two_columns_the_audio_one_first() {
 fn up_and_down_step_the_note_by_a_semitone_and_shift_by_an_octave_each_one_undo_step() {
     let mut h = harness();
     let roar = add_roar(&mut h);
+    // The Note control is in the expanded part, which the title bar's toggle
+    // opens.
+    h.shell
+        .run("device.expand", json!({ "device": roar }))
+        .unwrap();
+    h.settle();
     let view = view_of(&mut h);
     let frame = layout(&h.shell, view)
         .into_iter()
@@ -334,7 +340,7 @@ fn up_and_down_step_the_note_by_a_semitone_and_shift_by_an_octave_each_one_undo_
         .clone()
         .unwrap();
     let body = bl_ui::device_panel::body_rect(frame, bl_shell::device_commands::TITLE_BAR_HEIGHT);
-    let note = place_shown(&panel, false, body)
+    let note = place_shown(&panel, true, body)
         .0
         .into_iter()
         .find(|(param, _, _)| *param == FB_NOTE)
@@ -396,6 +402,13 @@ fn each_source_has_a_display_on_its_page() {
     };
     let nodes = Harness::nodes(&h.settle());
     assert_eq!(displays(&nodes, "LFO 1"), 0, "a page of its own");
+    // The sources are in the Modulation strip, which opens with its toggle.
+    h.shell
+        .run(
+            "device.set_page",
+            json!({ "device": roar, "node": "Modulation", "page": "Shown" }),
+        )
+        .unwrap();
     for (page, cell) in [
         ("LFO 1", "LFO 1"),
         ("LFO 2", "LFO 2"),
@@ -411,11 +424,11 @@ fn each_source_has_a_display_on_its_page() {
         let nodes = Harness::nodes(&h.settle());
         assert_eq!(displays(&nodes, cell), 1, "{page}'s display is drawn");
     }
-    // The first page has the shaper's display again.
+    // With the strip closed the shaper's display is drawn again.
     h.shell
         .run(
             "device.set_page",
-            json!({ "device": roar, "node": bl_devices::roar::PAGES, "page": "Roar" }),
+            json!({ "device": roar, "node": "Modulation", "page": "Hidden" }),
         )
         .unwrap();
     let nodes = Harness::nodes(&h.settle());

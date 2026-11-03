@@ -32,6 +32,26 @@
       ]
     },
     {
+      "id": "onnxruntime-directml",
+      "name": "ONNX Runtime (DirectML)",
+      "version": "1.24.4",
+      "project": "https://github.com/microsoft/onnxruntime",
+      "purpose": "Runs the separation model on this computer, on its graphics card",
+      "platform": "windows-x86_64",
+      "role": "onnx-runtime",
+      "url": "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime.directml/1.24.4/microsoft.ml.onnxruntime.directml.1.24.4.nupkg",
+      "size": 12458649,
+      "sha256": "57e9f11b73437bef7a309496135d4c1f96b1a8e9ddba60013fa27bfc1d788681",
+      "unpack": "zip",
+      "folder": "onnxruntime-directml-1.24.4",
+      "files": [
+        { "name": "onnxruntime.dll", "path": "runtimes/win-x64/native/onnxruntime.dll" },
+        { "name": "onnxruntime_providers_shared.dll", "path": "runtimes/win-x64/native/onnxruntime_providers_shared.dll" },
+        { "name": "LICENSE" },
+        { "name": "ThirdPartyNotices.txt" }
+      ]
+    },
+    {
       "id": "onnxruntime",
       "name": "ONNX Runtime",
       "version": "1.28.3",
@@ -49,6 +69,50 @@
         { "name": "LICENSE" },
         { "name": "ThirdPartyNotices.txt" }
       ]
+    },
+    {
+      "id": "onnxruntime-cuda13",
+      "name": "ONNX Runtime (CUDA 13)",
+      "version": "1.28.3",
+      "project": "https://github.com/microsoft/onnxruntime",
+      "purpose": "Runs the separation model on this computer, on its NVIDIA graphics card",
+      "platform": "linux-x86_64",
+      "role": "onnx-runtime",
+      "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.28.3/onnxruntime-linux-x64-gpu_cuda13-1.28.3.tgz",
+      "size": 240886111,
+      "sha256": "33e91f819324449bede2d1e853c8d46bb6253fa8890bac98ae676f041c8f73a6",
+      "unpack": "tar_gz",
+      "folder": "onnxruntime-cuda13-1.28.3",
+      "files": [
+        { "name": "libonnxruntime.so", "path": "lib/libonnxruntime.so.1.28.3" },
+        { "name": "libonnxruntime_providers_shared.so" },
+        { "name": "libonnxruntime_providers_cuda.so" },
+        { "name": "LICENSE" },
+        { "name": "ThirdPartyNotices.txt" }
+      ],
+      "needs": "nvidia-cuda-13"
+    },
+    {
+      "id": "onnxruntime-cuda12",
+      "name": "ONNX Runtime (CUDA 12)",
+      "version": "1.28.3",
+      "project": "https://github.com/microsoft/onnxruntime",
+      "purpose": "Runs the separation model on this computer, on its NVIDIA graphics card",
+      "platform": "linux-x86_64",
+      "role": "onnx-runtime",
+      "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.28.3/onnxruntime-linux-x64-gpu_cuda12-1.28.3.tgz",
+      "size": 423745424,
+      "sha256": "4e16d2ec66521a24fe917bd848eb8ae3a9107cb8b4aec978fb2b3ab1a640fcb7",
+      "unpack": "tar_gz",
+      "folder": "onnxruntime-cuda12-1.28.3",
+      "files": [
+        { "name": "libonnxruntime.so", "path": "lib/libonnxruntime.so.1.28.3" },
+        { "name": "libonnxruntime_providers_shared.so" },
+        { "name": "libonnxruntime_providers_cuda.so" },
+        { "name": "LICENSE" },
+        { "name": "ThirdPartyNotices.txt" }
+      ],
+      "needs": "nvidia-cuda-12"
     },
     {
       "id": "onnxruntime",
@@ -95,6 +159,38 @@
       "project": "https://github.com/adefossez/demucs",
       "purpose": "The separation model without its transform, which runs on the GPU",
       "platform": "macos-aarch64",
+      "role": "stems-model",
+      "url": "",
+      "size": 177081443,
+      "sha256": "b91c5bf733f0353a5ba6e9150593d0774b7a6db90cf27917790f9541a37dab44",
+      "unpack": "file",
+      "folder": "demucs-split-4.1.0",
+      "files": [{ "name": "htdemucs-split.onnx" }],
+      "disabled": true
+    },
+    {
+      "id": "htdemucs-split",
+      "name": "Demucs (HTDemucs), split for the GPU",
+      "version": "4.1.0",
+      "project": "https://github.com/adefossez/demucs",
+      "purpose": "The separation model without its transform, which runs on the GPU",
+      "platform": "windows-x86_64",
+      "role": "stems-model",
+      "url": "",
+      "size": 177081443,
+      "sha256": "b91c5bf733f0353a5ba6e9150593d0774b7a6db90cf27917790f9541a37dab44",
+      "unpack": "file",
+      "folder": "demucs-split-4.1.0",
+      "files": [{ "name": "htdemucs-split.onnx" }],
+      "disabled": true
+    },
+    {
+      "id": "htdemucs-split",
+      "name": "Demucs (HTDemucs), split for the GPU",
+      "version": "4.1.0",
+      "project": "https://github.com/adefossez/demucs",
+      "purpose": "The separation model without its transform, which runs on the GPU",
+      "platform": "linux-x86_64",
       "role": "stems-model",
       "url": "",
       "size": 177081443,

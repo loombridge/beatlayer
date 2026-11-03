@@ -66,6 +66,13 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             "stems.close",
             Exception(Equivalent("the Separate Stems dialog's Cancel, or Esc")),
         ),
+        // Convert Harmony, Melody and Drums to New MIDI Track's window
+        // (IMP-06).
+        ("audio_to_midi.status", Exception(Query)),
+        (
+            "audio_to_midi.cancel",
+            Exception(Equivalent("the window's Cancel, which Tab reaches, or Esc")),
+        ),
         // The Packages manager (WP-9.1).
         ("packages.list", Exception(Query)),
         (

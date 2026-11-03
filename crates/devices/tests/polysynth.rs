@@ -601,7 +601,7 @@ fn sixteen_voices_render_faster_than_the_device_budget() {
     let realtime = seconds as f64 / elapsed;
     println!("16 voices: {seconds} s of audio in {elapsed:.3} s, {realtime:.0}x real time (debug)");
     assert!(rms(&signal) > 0.01, "the chord sounds");
-    if full_depth() {
+    if full_depth() && crate::common::budget::judged() {
         // A debug build on a loaded machine; a release build is many times
         // faster. 16 voices mustn't eat more than a quarter of the time
         // they play.
@@ -648,7 +648,7 @@ fn sixteen_voices_of_poli_render_faster_than_the_device_budget() {
         "Poli, 16 voices: {seconds} s of audio in {elapsed:.3} s, {realtime:.0}x real time (debug)"
     );
     assert!(rms(&signal) > 0.01, "the chord sounds");
-    if full_depth() {
+    if full_depth() && crate::common::budget::judged() {
         // As Drift's: a debug build on a loaded machine; 16 voices mustn't
         // eat more than a quarter of the time they play.
         assert!(

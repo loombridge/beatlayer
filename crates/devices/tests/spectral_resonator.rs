@@ -324,7 +324,7 @@ fn the_description_has_a_midi_sidechain_the_switch_in_the_title_bar_and_banks_of
     for param in &description.params {
         assert!(banked.contains(&param.id), "{}", param.name);
     }
-    for (param, name) in [(FREQ, "Freq"), (TRANSP, "Transp."), (PCH_MOD, "Pch. Mod")] {
+    for (param, name) in [(FREQ, "Freq"), (TRANSP, "Transp."), (PCH_MOD, "Pch.Mod")] {
         assert_eq!(description.param(param).unwrap().name, name);
     }
     // Voices come from a pool of 16, Unison's copies are 8 to a partial.
@@ -336,7 +336,7 @@ fn the_description_has_a_midi_sidechain_the_switch_in_the_title_bar_and_banks_of
 #[test]
 fn every_partial_rings_within_5_cents_of_its_frequency() {
     for f0 in [55.0, 110.0, 220.0, 440.0, 1_760.0] {
-        let mut rig = Rig::new(&[(FREQ, f0), (HARMONICS, 6.0), (DECAY, 3.0)]);
+        let mut rig = Rig::new(&[(FREQ, f0), (HARMONICS, 6.0), (DECAY, 3000.0)]);
         let ir = rig.impulse(3 * 48_000);
         let ring = &ir[8_000..];
         for k in 1..=6 {
@@ -362,7 +362,7 @@ fn stretch_moves_the_partials_by_its_law_and_leaves_the_odd_ones_at_100_percent(
         let mut rig = Rig::new(&[
             (FREQ, f0),
             (HARMONICS, 4.0),
-            (DECAY, 3.0),
+            (DECAY, 3000.0),
             (STRETCH, stretch),
         ]);
         rig.impulse(3 * 48_000)[8_000..].to_vec()
@@ -400,7 +400,7 @@ fn stretch_moves_the_partials_by_its_law_and_leaves_the_odd_ones_at_100_percent(
 #[test]
 fn squeezing_the_partials_together_keeps_the_level() {
     let level = |stretch: f64| {
-        let mut rig = Rig::new(&[(FREQ, 110.0), (STRETCH, stretch), (DECAY, 1.0)]);
+        let mut rig = Rig::new(&[(FREQ, 110.0), (STRETCH, stretch), (DECAY, 1000.0)]);
         rms(&rig.play(&common::noise(3 * 48_000), 512)[0][48_000..])
     };
     let (open, squeezed) = (level(0.0), level(-100.0));
@@ -413,7 +413,7 @@ fn squeezing_the_partials_together_keeps_the_level() {
 #[test]
 fn harmonics_limits_the_number_of_partials() {
     for count in [1usize, 3, 7] {
-        let mut rig = Rig::new(&[(FREQ, 110.0), (HARMONICS, count as f64), (DECAY, 3.0)]);
+        let mut rig = Rig::new(&[(FREQ, 110.0), (HARMONICS, count as f64), (DECAY, 3000.0)]);
         let ring = rig.impulse(3 * 48_000)[8_000..].to_vec();
         let first = amplitude(&ring, 110.0);
         assert!(first > 1e-5);
@@ -435,7 +435,7 @@ fn harmonics_limits_the_number_of_partials() {
 // dropped: it doesn't fold back below it.
 #[test]
 fn partials_above_nyquist_are_dropped() {
-    let mut rig = Rig::new(&[(FREQ, 5_000.0), (HARMONICS, 8.0), (DECAY, 1.0)]);
+    let mut rig = Rig::new(&[(FREQ, 5_000.0), (HARMONICS, 8.0), (DECAY, 1000.0)]);
     let ring = rig.impulse(2 * 48_000)[8_000..].to_vec();
     // 5 kHz and 10, 15, 20 kHz sound; 25 kHz would fold to 23 kHz.
     let first = amplitude(&ring, 5_000.0);
@@ -459,7 +459,7 @@ fn partials_above_nyquist_are_dropped() {
 #[test]
 fn decay_and_the_damps_set_the_ring_time_within_10_percent() {
     let time = |f0: f64, decay: f64, rest: &[(ParamId, f64)]| {
-        let params = with(&ONE, &[(FREQ, f0), (DECAY, decay)]);
+        let params = with(&ONE, &[(FREQ, f0), (DECAY, decay * 1_000.0)]);
         let ir = Rig::new(&with(&params, rest)).impulse(4 * 48_000);
         ring_time(&ir[1_024..], 1_024)
     };
@@ -486,9 +486,12 @@ fn decay_and_the_damps_set_the_ring_time_within_10_percent() {
 fn shift_moves_the_input_spectrum_and_not_the_partials() {
     let input = sine(220.0, 0.5, 2 * 48_000);
     let ring = |shift: f64| {
-        Rig::new(&with(&ONE, &[(FREQ, 440.0), (SHIFT, shift), (DECAY, 0.3)]))
-            .play(&input, 512)
-            .swap_remove(0)[24_000..]
+        Rig::new(&with(
+            &ONE,
+            &[(FREQ, 440.0), (SHIFT, shift), (DECAY, 300.0)],
+        ))
+        .play(&input, 512)
+        .swap_remove(0)[24_000..]
             .to_vec()
     };
     let unshifted = ring(0.0);
@@ -506,7 +509,7 @@ fn shift_moves_the_input_spectrum_and_not_the_partials() {
 #[test]
 fn internal_pitch_is_freq_and_transp_or_a_scale_degree_with_use_current_scale() {
     let ring = |params: &[(ParamId, f64)], scale: Scale| {
-        let mut rig = Rig::new(&with(&with(&ONE, &[(DECAY, 3.0)]), params));
+        let mut rig = Rig::new(&with(&with(&ONE, &[(DECAY, 3000.0)]), params));
         let input = impulse(3 * 48_000);
         rig.render(&input, 512, &[], &[], |_| scale, false)
             .swap_remove(0)[8_000..]
@@ -567,7 +570,7 @@ fn notes_tune_the_resonance_on_their_frames_at_every_block_size() {
         off(50_000, 64),
         off(60_000, 57),
     ];
-    let params = [(MIDI_GATE, 0.0), (DECAY, 5.0)];
+    let params = [(MIDI_GATE, 0.0), (DECAY, 5000.0)];
     let golden = midi(&params, &notes, &[], 70_000, 512);
     let at = |from: usize, to: usize| crossing_hz(&golden[from..to]);
     // Before the first note nothing sounds.
@@ -595,7 +598,7 @@ fn notes_tune_the_resonance_on_their_frames_at_every_block_size() {
 #[test]
 fn mono_returns_to_the_older_note_that_is_still_held() {
     let notes = [on(2_000, 57), on(20_000, 64), off(40_000, 64)];
-    let params = [(MIDI_GATE, 1.0), (DECAY, 5.0)];
+    let params = [(MIDI_GATE, 1.0), (DECAY, 5000.0)];
     let signal = midi(&params, &notes, &[], 70_000, 512);
     assert!(cents(crossing_hz(&signal[10_000..19_990]), hz(57.0)).abs() < 5.0);
     assert!(cents(crossing_hz(&signal[30_000..39_990]), hz(64.0)).abs() < 5.0);
@@ -607,7 +610,7 @@ fn mono_returns_to_the_older_note_that_is_still_held() {
 #[test]
 fn polyphony_leaves_mono_alone() {
     let notes = [on(2_000, 57), on(20_000, 60), on(40_000, 64)];
-    let params = |voices: f64| [(MIDI_GATE, 1.0), (DECAY, 5.0), (POLYPHONY, voices)];
+    let params = |voices: f64| [(MIDI_GATE, 1.0), (DECAY, 5000.0), (POLYPHONY, voices)];
     let two = midi(&params(2.0), &notes, &[], 60_000, 512);
     let sixteen = midi(&params(16.0), &notes, &[], 60_000, 512);
     assert_eq!(two, sixteen);
@@ -619,8 +622,20 @@ fn polyphony_leaves_mono_alone() {
 #[test]
 fn midi_gate_makes_the_resonances_sound_only_while_a_note_is_held() {
     let notes = [on(10_000, 57), off(40_000, 57)];
-    let gated = midi(&[(MIDI_GATE, 1.0), (DECAY, 0.2)], &notes, &[], 100_000, 512);
-    let open = midi(&[(MIDI_GATE, 0.0), (DECAY, 0.2)], &notes, &[], 100_000, 512);
+    let gated = midi(
+        &[(MIDI_GATE, 1.0), (DECAY, 200.0)],
+        &notes,
+        &[],
+        100_000,
+        512,
+    );
+    let open = midi(
+        &[(MIDI_GATE, 0.0), (DECAY, 200.0)],
+        &notes,
+        &[],
+        100_000,
+        512,
+    );
     assert!(rms(&gated[..9_000]) < 1e-6, "silent before the note");
     let held = rms(&gated[20_000..39_000]);
     assert!(held > 1e-3, "it sounds while held: {held}");
@@ -637,7 +652,7 @@ fn midi_gate_makes_the_resonances_sound_only_while_a_note_is_held() {
 #[test]
 fn glide_slides_mono_to_the_next_note() {
     let notes = [on(2_000, 48), on(30_000, 60)];
-    let params = [(MIDI_GATE, 0.0), (GLIDE, 1_000.0), (DECAY, 5.0)];
+    let params = [(MIDI_GATE, 0.0), (GLIDE, 1_000.0), (DECAY, 5000.0)];
     let signal = midi(&params, &notes, &[], 100_000, 512);
     // Before the second note the first plays; halfway through the glide the
     // pitch is halfway between them; a second after, it is there.
@@ -657,11 +672,11 @@ fn glide_slides_mono_to_the_next_note() {
 #[test]
 fn pb_scales_the_pitch_bend() {
     let notes = [on(2_000, 57), bend(30_000, 0.5)];
-    let signal = midi(&[(PB, 4.0), (DECAY, 5.0)], &notes, &[], 60_000, 512);
+    let signal = midi(&[(PB, 4.0), (DECAY, 5000.0)], &notes, &[], 60_000, 512);
     assert!(cents(crossing_hz(&signal[20_000..29_990]), hz(57.0)).abs() < 5.0);
     // Half the wheel at a range of 4 semitones is 2 semitones.
     assert!(cents(crossing_hz(&signal[40_000..59_000]), hz(59.0)).abs() < 5.0);
-    let flat = midi(&[(PB, 0.0), (DECAY, 5.0)], &notes, &[], 60_000, 512);
+    let flat = midi(&[(PB, 0.0), (DECAY, 5000.0)], &notes, &[], 60_000, 512);
     assert!(cents(crossing_hz(&flat[40_000..59_000]), hz(57.0)).abs() < 5.0);
 }
 
@@ -682,7 +697,7 @@ fn poly_rings_every_held_note_and_a_note_past_polyphony_takes_the_oldest_voice()
                 (PITCH_MODE, 1.0),
                 (MONO_POLY, 1.0),
                 (POLYPHONY, polyphony),
-                (DECAY, 5.0),
+                (DECAY, 5000.0),
             ],
         ));
         let out = rig
@@ -730,7 +745,7 @@ fn a_released_voice_rings_out_and_is_taken_before_a_held_one() {
             (PITCH_MODE, 1.0),
             (MONO_POLY, 1.0),
             (POLYPHONY, 2.0),
-            (DECAY, 5.0),
+            (DECAY, 5000.0),
         ],
     ));
     let out = rig
@@ -759,7 +774,7 @@ fn quantize_moves_partials_to_the_nearest_note_of_the_scale_or_the_semitone() {
     let ring = |quantize: f64, scale: Scale| {
         let mut rig = Rig::new(&with(
             &ONE,
-            &[(FREQ, f0), (QUANTIZE, quantize), (DECAY, 3.0)],
+            &[(FREQ, f0), (QUANTIZE, quantize), (DECAY, 3000.0)],
         ));
         rig.render(&impulse(3 * 48_000), 512, &[], &[], |_| scale, false)
             .swap_remove(0)[8_000..]
@@ -786,7 +801,7 @@ fn under_a_19_note_tuning_quantize_and_the_notes_follow_the_tuning() {
     let between = a + (b - a) * 0.4;
     let mut rig = Rig::new(&with(
         &ONE,
-        &[(FREQ, hz(between)), (QUANTIZE, 1.0), (DECAY, 3.0)],
+        &[(FREQ, hz(between)), (QUANTIZE, 1.0), (DECAY, 3000.0)],
     ));
     rig.tune(Some(&tuning));
     let quantized = rig
@@ -817,7 +832,7 @@ fn under_a_19_note_tuning_quantize_and_the_notes_follow_the_tuning() {
     // acts as off: SD Shift is ignored and Freq sets the pitch.
     let mut rig = Rig::new(&with(
         &ONE,
-        &[(USE_SCALE, 1.0), (SD_SHIFT, 5.0), (DECAY, 3.0)],
+        &[(USE_SCALE, 1.0), (SD_SHIFT, 5.0), (DECAY, 3000.0)],
     ));
     rig.tune(Some(&tuning));
     let hidden = rig
@@ -860,7 +875,7 @@ fn a_scale_change_retunes_from_its_frame_and_a_held_note_keeps_its_pitch() {
         (MIDI_GATE, 0.0),
         (USE_SCALE, 1.0),
         (TRANSP, 2.0),
-        (DECAY, 5.0),
+        (DECAY, 5000.0),
     ];
     let signal = play(&params, 512);
     assert!(cents(crossing_hz(&signal[20_000..29_990]), hz(64.0)).abs() < 5.0);
@@ -874,7 +889,7 @@ fn a_scale_change_retunes_from_its_frame_and_a_held_note_keeps_its_pitch() {
             (PITCH_MODE, 1.0),
             (MIDI_GATE, 0.0),
             (USE_SCALE, 1.0),
-            (DECAY, 5.0),
+            (DECAY, 5000.0),
         ],
         512,
     );
@@ -889,7 +904,7 @@ fn deviations(params: &[(ParamId, f64)], device: u64, seconds: usize) -> Vec<f64
         device,
         &with(
             &ONE,
-            &with(params, &[(FREQ, 440.0), (DECAY, 20.0), (MOD_RATE, 2.0)]),
+            &with(params, &[(FREQ, 440.0), (DECAY, 20000.0), (MOD_RATE, 10.0)]),
         ),
     );
     let out = rig
@@ -955,9 +970,9 @@ fn granular_gates_and_scatters_the_partials_on_the_seed() {
                 &ONE,
                 &[
                     (FREQ, 440.0),
-                    (DECAY, 20.0),
+                    (DECAY, 20000.0),
                     (MODULATION, 3.0),
-                    (MOD_RATE, 8.0),
+                    (MOD_RATE, 40.0),
                     (PCH_MOD, 1.0),
                 ],
             ),
@@ -992,7 +1007,7 @@ fn unison_detunes_its_copies_evenly_and_spreads_them_between_the_channels() {
         &ONE,
         &[
             (FREQ, 440.0),
-            (DECAY, 20.0),
+            (DECAY, 20000.0),
             (UNISON, 3.0),
             (UNI_AMT, 100.0),
         ],
@@ -1097,7 +1112,7 @@ fn shown(params: &[(ParamId, f64)], input: &[f32], notes: &[NoteEvent]) -> bl_mo
 // reads headless.
 #[test]
 fn the_spectrogram_shows_the_partials_marked_and_reads_headless() {
-    let params = [(FREQ, 220.0), (HARMONICS, 8.0), (DECAY, 3.0)];
+    let params = [(FREQ, 220.0), (HARMONICS, 8.0), (DECAY, 3000.0)];
     let display = shown(&params, &common::noise(3 * 48_000), &[]);
     assert!(display.live);
     let grid = spectral_resonator::GRID;
@@ -1151,7 +1166,7 @@ fn the_display_lists_the_sounding_voices_fundamentals() {
         (PITCH_MODE, 1.0),
         (MONO_POLY, 1.0),
         (HARMONICS, 2.0),
-        (DECAY, 0.2),
+        (DECAY, 200.0),
     ];
     let notes = [on(2_000, 57), on(3_000, 64)];
     let display = shown(&params, &common::noise(30_000), &notes);
@@ -1188,7 +1203,7 @@ fn scenario(block: usize) -> Vec<Vec<f32>> {
     let params = [
         (HARMONICS, 12.0),
         (UNISON, 3.0),
-        (DECAY, 0.4),
+        (DECAY, 400.0),
         (PITCH_MODE, 1.0),
         (MONO_POLY, 1.0),
         (USE_SCALE, 1.0),
@@ -1255,7 +1270,7 @@ fn every_voice_every_copy_and_every_partial_at_once_stay_bounded() {
             (HARMONICS, 64.0),
             (UNISON, 8.0),
             (MODULATION, 2.0),
-            (DECAY, 20.0),
+            (DECAY, 20000.0),
             (UNI_AMT, 100.0),
         ],
     ));
@@ -1317,7 +1332,7 @@ fn song(block: usize, key: Option<u8>, frames: usize) -> Vec<f32> {
     let (resonator, device) = make(
         &mut chain,
         SPECTRAL_RESONATOR,
-        &[(PITCH_MODE, 1.0), (HARMONICS, 1.0), (DECAY, 5.0)],
+        &[(PITCH_MODE, 1.0), (HARMONICS, 1.0), (DECAY, 5000.0)],
     );
     let device = Device {
         midi_sidechain: spectral_resonator_type().device(resonator).midi_sidechain,

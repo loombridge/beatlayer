@@ -243,7 +243,9 @@ fn separating_makes_a_group_of_stem_tracks_and_deactivates_the_clip() {
     assert!(status.get("dialog").is_none());
     let provider = status["provider"].as_str().unwrap();
     assert!(
-        provider.starts_with("CPU") || provider.starts_with("Core ML"),
+        ["CPU", "Core ML", "DirectML", "CUDA"]
+            .iter()
+            .any(|name| provider.starts_with(name)),
         "{status}"
     );
     let created: Vec<bl_model::TrackId> =

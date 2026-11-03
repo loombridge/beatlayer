@@ -3,6 +3,7 @@
 
 #![allow(dead_code, reason = "each test file uses some")]
 
+pub mod budget;
 pub mod chain;
 pub mod response;
 pub mod synth;

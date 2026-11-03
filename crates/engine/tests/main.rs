@@ -33,6 +33,7 @@ mod external_devices;
 mod external_effect;
 mod flush;
 mod follow;
+mod granulator_capture;
 mod grooves;
 mod grooves_audio;
 mod link;

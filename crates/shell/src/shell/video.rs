@@ -25,6 +25,14 @@ pub(super) struct Movies(Mutex<HashMap<ContentHash, Read>>);
 /// A movie read from a path, or the failure to.
 type Read = (PathBuf, Option<Arc<Movie>>);
 
+/// The movie's frame shown at `seconds` into it, with the time it is asked
+/// for by. Nanoseconds, so a time between two frames' starts, which is what a
+/// warp map gives, lands on the frame it is in.
+pub(super) fn movie_frame(movie: &Movie, seconds: f64) -> Option<(usize, Rational)> {
+    let at = Rational::new((seconds * 1e9).round() as i128, 1_000_000_000);
+    movie.frame_at(at).map(|frame| (frame, at))
+}
+
 impl Shell {
     /// The movie a clip plays, if it is a video clip whose file can be read.
     #[must_use]
@@ -121,16 +129,9 @@ impl Shell {
             (Some(at), _) => found.movie_time_at(at, &doc.tempo_map(), movie.duration().seconds()),
             (None, time) => time.filter(|seconds| seconds.is_finite() && *seconds >= 0.0),
         };
-        // Nanoseconds, so a time between two frames' starts, which is what a
-        // warp map gives, lands on the frame it is in.
         let frame = movie_time
-            .and_then(|seconds| {
-                movie.frame_at(Rational::new(
-                    (seconds * 1e9).round() as i128,
-                    1_000_000_000,
-                ))
-            })
-            .and_then(|frame| Some((frame, movie.video()?.frame_start(frame)?)));
+            .and_then(|seconds| movie_frame(&movie, seconds))
+            .and_then(|(frame, _)| Some((frame, movie.video()?.frame_start(frame)?)));
         Ok(to_value(&FrameAt {
             clip: Some(found.id),
             movie_time,

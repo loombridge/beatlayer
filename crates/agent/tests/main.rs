@@ -4,6 +4,7 @@
 //! `cargo xtask check` fails on a file in tests/ that isn't listed.
 
 mod analog;
+mod audio_to_midi;
 mod bass_and_poli;
 mod chord_lane;
 mod clip_edge_fades;
@@ -14,6 +15,7 @@ mod electric;
 mod engine_host;
 mod export;
 mod fades;
+mod granulator_capture;
 mod grooves;
 mod http;
 mod instrument_filter;

@@ -25,7 +25,10 @@
 //! and key mappings; a set saved before it opens with none. Version 13
 //! (WP-7.33) gave Simpler's sample a region between Start and End flags; a
 //! set saved before it opens with a One-Shot or Slice Simpler's Start and
-//! Length as its region.
+//! Length as its region. Version 15 (T658) put Glue Compressor's Range and
+//! Drum Buss's Damp, Decay and Transients in Live's units and moved the
+//! starting values of eight dynamics, EQ and analysis devices; a set saved
+//! before it opens with the values it had.
 //! `schema-0-fake.json` is an invented version 0, with a migration to
 //! version 1 defined below, to show the scaffold carries an old file through
 //! to the current model.
@@ -38,8 +41,8 @@ use bl_core::time::{
 };
 use bl_model::{
     AudioData, AutomationTarget, Breakpoint, Clip, ClipData, Command, ContentHash, Device,
-    DeviceKind, DeviceRole, Editor, MidiData, Note, ParamId, PluginFormat, SampleRegion, TrackKind,
-    TransientLoopMode,
+    DeviceId, DeviceKind, DeviceRole, Editor, MidiData, Note, ParamId, PluginFormat, SampleRegion,
+    TrackKind, TransientLoopMode,
 };
 use bl_project::migrate::{MIGRATIONS, OLDEST_SCHEMA_VERSION};
 use bl_project::{
@@ -595,6 +598,7 @@ static FAKE_MIGRATIONS: &[Migration] = &[
     MIGRATIONS[10],
     MIGRATIONS[11],
     MIGRATIONS[12],
+    MIGRATIONS[13],
 ];
 
 /// The scaffold migrates an old file: the invented version 0 fixture loads
@@ -983,5 +987,82 @@ fn the_simplers_whose_start_was_automated_are_named_once() {
     assert_eq!(
         bl_project::migrate::simplers_whose_start_was_driven(&driven.document),
         ["One-Shot"]
+    );
+}
+
+// Spec: bus-compressor R1, drum-buss R7
+/// T658: a set saved before the dynamics panels took Live's units and starting
+/// values opens with each device sounding as it did: Glue Compressor's Range
+/// and Drum Buss's Damp, Decay and Transients converted, in both states and in
+/// the track's automation, and a Gate that listed nothing keeps its old
+/// starting values.
+#[test]
+fn a_schema_14_set_opens_with_the_dynamics_devices_sounding_as_they_did() {
+    let device = |id: u64, device_type: &str, params: Value| {
+        json!({
+            "id": id,
+            "name": "Device",
+            "kind": { "native": { "device_type": device_type } },
+            "enabled": true,
+            "params": params,
+        })
+    };
+    let mut value: Value = serde_json::from_slice(&read("schema-14.json")).unwrap();
+    value["ids"] = json!(50);
+    let kick = &mut value["document"]["tracks"][0]["children"][0];
+    let mut glue = device(40, "beatlayer.bond", json!([[5, -40.0]]));
+    glue["other_params"] = json!([[5, -10.0]]);
+    kick["devices"].as_array_mut().unwrap().extend([
+        glue,
+        device(
+            41,
+            "beatlayer.buss",
+            json!([[5, 100.0], [6, 50.0], [10, 200.0]]),
+        ),
+        device(42, "beatlayer.shutter", json!([])),
+    ]);
+    kick["automation"] = json!([{
+        "target": { "type": "device", "device": 40, "param": 5 },
+        "points": [{ "at": 0, "value": -20.0 }, { "at": 96, "value": -60.0 }],
+    }]);
+
+    let (project, info) = decode_json(
+        &serde_json::to_vec(&value).unwrap(),
+        &LoadOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(info.schema, 14);
+    let id_of = |raw| DeviceId(bl_core::id::Id::new(raw).unwrap());
+    let device = |id: u64| project.document.device(id_of(id)).unwrap();
+    let param = |id: u64, param: u32| device(id).params[&ParamId(param)];
+
+    assert_eq!(param(40, 5), 40.0, "Range is a depth now");
+    assert_eq!(device(40).other_params.as_ref().unwrap()[&ParamId(5)], 10.0);
+    let buss = |id: u32| (param(41, id) * 1e4).round() / 1e4;
+    assert_eq!(buss(5), 200.0, "Damp 100 % was a 200 Hz corner");
+    assert_eq!(buss(6), 0.5, "Transients are a number from -1 to 1");
+    assert_eq!(buss(10), 56.5412, "Decay 200 ms is 56.54 %");
+    assert_eq!(
+        [0_u32, 1, 2, 3, 4, 5].map(|id| device(42).params[&ParamId(id)]),
+        [-30.0, 6.0, 1.0, 20.0, 100.0, 0.0],
+        "a Gate's Floor was −∞ dB, a linear 0"
+    );
+
+    let kick_track = project.document.tracks().find(|t| t.devices().len() == 4);
+    let automation = kick_track
+        .and_then(|track| {
+            track.automation_for(&AutomationTarget::Device {
+                device: id_of(40),
+                param: ParamId(5),
+            })
+        })
+        .unwrap();
+    assert_eq!(
+        automation
+            .envelope
+            .points()
+            .map(|point| point.value)
+            .collect::<Vec<_>>(),
+        [20.0, 60.0]
     );
 }

@@ -50,14 +50,14 @@ The user can configure the analysis block size, channel routing (Left, Right, or
 ## Defaults, ranges and details
 
 - Parameters:
-  - `Block`: Chooser, choices `["256", "512", "1024", "2048", "4096", "8192", "16384"]`, default 2048 (index 3).
+  - `Block`: Chooser, choices `["256", "512", "1024", "2048", "4096", "8192", "16384"]`, default 8192 (index 5).
   - `Channel`: Chooser, choices `["Left", "Right", "Both"]`, default Both (index 2).
-  - `Refresh`: Continuous, range 10.0 ms to 1000.0 ms, default 50.0 ms.
+  - `Refresh`: Continuous, range 10.0 ms to 1000.0 ms, default 60.0 ms.
   - `Avg`: Integer, range 1 to 32, default 1.
   - `Graph`: Chooser, choices `["Line", "Bins"]`, default Line (index 0).
-  - `Max`: Toggle, default false.
+  - `Max`: Toggle, default true.
   - `Scale X`: Chooser, choices `["Linear", "Logarithmic", "Semitone"]`, default Logarithmic (index 1).
-  - `Range Mode`: Chooser, choices `["Range", "Auto"]`, default Range (index 0).
+  - `Range Mode`: Chooser, choices `["Range", "Auto"]`, default Auto (index 1).
   - `Range Min`: Continuous (dB), range -150.0 dB to 0.0 dB, default -120.0 dB.
   - `Range Max`: Continuous (dB), range -60.0 dB to 12.0 dB, default 0.0 dB.
   - `Clear Max`: Toggle (action trigger to reset peak hold), default false.

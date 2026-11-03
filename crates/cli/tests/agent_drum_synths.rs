@@ -53,6 +53,10 @@ fn an_agent_sets_every_drum_synth_parameter_reads_its_display_and_previews_a_hit
         bl_devices::ds_snare::ds_snare_type(),
         bl_devices::ds_tom::ds_tom_type(),
         bl_devices::ds_clap::ds_clap_type(),
+        bl_devices::ds_hh::ds_hh_type(),
+        bl_devices::ds_cymbal::ds_cymbal_type(),
+        bl_devices::ds_fm::ds_fm_type(),
+        bl_devices::ds_clang::ds_clang_type(),
     ];
     let mut shell = Shell::headless();
     shell.set_device_types(bl_devices::device_types());

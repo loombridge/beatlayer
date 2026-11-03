@@ -112,7 +112,6 @@ const STILL_GENERIC: &[&str] = &[
     "Pitch",
     "Random",
     "Scale",
-    "Utility",
     "Velocity",
 ];
 

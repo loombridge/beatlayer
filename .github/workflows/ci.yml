@@ -258,21 +258,31 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         uses: ./.github/actions/prepare
 
-      # Ubuntu 24.04's default LLVM is 18, which predates RealtimeSanitizer
-      # (LLVM 20), but noble-updates carries LLVM 20 too. This installs the
-      # compiler-rt runtimes and, from llvm-20, llvm-symbolizer, which `cargo
-      # xtask rtsan` finds next to the runtime so reports name functions.
-      # They come from Ubuntu's archive, which the runner reaches through
-      # its own mirror, rather than apt.llvm.org, whose outage on 3 November
-      # 2026 failed every pull request. Nothing downloads or builds LLVM's
-      # source, and the harness's build script fails rather than fetch a
-      # runtime if RTSAN_LIB_PATH is missing.
+      # Ubuntu 24.04's own LLVM is 18, which predates RealtimeSanitizer (LLVM
+      # 20). apt.llvm.org publishes LLVM 20 for Ubuntu as signed binary
+      # packages; this installs the compiler-rt runtimes and, from llvm-20,
+      # llvm-symbolizer, which `cargo xtask rtsan` finds next to the runtime
+      # so reports name functions. Nothing downloads or builds LLVM's source,
+      # and the harness's build script fails rather than fetch a runtime if
+      # RTSAN_LIB_PATH is missing.
       - name: Install LLVM 20's RealtimeSanitizer runtime
         if: needs.changes.outputs.code == 'true'
         run: |
-          sudo apt-get update -o Acquire::Retries=5
-          sudo apt-get install --yes --no-install-recommends -o Acquire::Retries=5 \
-            libclang-rt-20-dev llvm-20
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            --output llvm-snapshot.gpg.key https://apt.llvm.org/llvm-snapshot.gpg.key
+          # apt.llvm.org's signing key, checked by fingerprint before apt
+          # trusts it.
+          expected=6084F3CF814B57C1CF12EFD515CF4D18AF4F7421
+          fingerprint=$(gpg --show-keys --with-colons llvm-snapshot.gpg.key | awk -F: '$1 == "fpr" { print $10; exit }')
+          if [ "$fingerprint" != "$expected" ]; then
+            echo "::error::apt.llvm.org's key has fingerprint ${fingerprint:-none}, not $expected"
+            exit 1
+          fi
+          sudo install -D --mode 0644 llvm-snapshot.gpg.key /etc/apt/keyrings/apt.llvm.org.asc
+          echo "deb [signed-by=/etc/apt/keyrings/apt.llvm.org.asc] https://apt.llvm.org/noble/ llvm-toolchain-noble-20 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm-20.list
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libclang-rt-20-dev llvm-20
           runtime=$(find /usr/lib/llvm-20 -name 'libclang_rt.rtsan*.a' -print -quit)
           if [ -z "$runtime" ]; then
             echo "::error::libclang-rt-20-dev has no RealtimeSanitizer runtime"

@@ -12,6 +12,7 @@ use bl_shell::Shell;
 use bl_shell::autosample::Settings;
 use bl_shell::autosampler_commands::{self as ids, Autosampled};
 use bl_shell::export::{self, Length, Render};
+use bl_shell::testing;
 use serde_json::{Value, json};
 
 /// A folder of its own under the system's temporary folder, removed when
@@ -73,6 +74,7 @@ fn polysynth(shell: &mut Shell) -> DeviceId {
             .unwrap(),
     )
     .unwrap();
+    testing::drift_before_live(shell, added.device);
     added.device
 }
 

@@ -76,6 +76,11 @@ pub const LARGE_HEIGHT: f32 = 38.0;
 /// The width of a box in a Drum Synth's display, in points (observed).
 pub const FRAMED_WIDTH: f32 = 41.0;
 
+/// The height of a plain readout: its name's row, a gap, and its value's row,
+/// in points (observed in Live 12.4.16, 2 November 2026: the two lines'
+/// centres are 12 points apart).
+pub const PLAIN_HEIGHT: f32 = 21.0;
+
 /// The width of the unit pair beside a knob (`ms` over `sync`), in points
 /// (observed), and the space between it and the knob.
 pub const UNIT_PAIR_WIDTH: f32 = 18.0;
@@ -267,6 +272,9 @@ pub enum Widget {
     /// The name and the value on one line, the value in the accent, dragged
     /// or typed (the Drum Sampler's Start, Length and Gain under its sample).
     Inline,
+    /// Operator's knob: the name over its left edge, a ring 19 points across
+    /// and the value at its lower right.
+    MiniKnob,
 }
 
 impl Widget {
@@ -326,6 +334,7 @@ impl Widget {
             Self::Cycle | Self::Inline | Self::Abbreviated(_) => {
                 Size::new(SEGMENT_WIDTH, BOX_HEIGHT)
             }
+            Self::MiniKnob => Size::new(40.0, 34.5),
         }
     }
 
@@ -391,6 +400,8 @@ pub enum Glyph {
     /// Headphones: a device's audition button (Boom Audition, Utility's
     /// Bass Mono, EQ Eight's Audition).
     Headphones,
+    /// A loop arrow: a cycling mode (Drift's Envelope 2).
+    Loop,
 }
 
 /// A unit a knob's two parameters read in.
@@ -454,6 +465,26 @@ pub struct GreyWhen {
     pub value: i32,
 }
 
+/// A condition that shows a control: while parameter `param`'s value, rounded,
+/// is from `from` to `to`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ShownWhen {
+    /// The parameter that decides.
+    pub param: ParamId,
+    /// The lowest value, rounded, at which the control shows.
+    pub from: i32,
+    /// The highest.
+    pub to: i32,
+}
+
+impl ShownWhen {
+    /// Whether the control shows while `param` reads `value`.
+    #[must_use]
+    pub fn holds(&self, value: f64) -> bool {
+        (self.from..=self.to).contains(&(value.round() as i32))
+    }
+}
+
 /// One control in a band: a parameter, drawn by a widget, at a place in the
 /// band.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -480,6 +511,18 @@ pub struct Control {
     /// The condition that greys the control.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grey: Option<GreyWhen>,
+    /// How many words of the parameter's name the control leaves out of the
+    /// name it shows: a table's `Stiffness Vel` shows `Vel` under its row's
+    /// name.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub trim: u8,
+    /// The condition under which the control shows: only while parameter
+    /// `param`'s value, rounded, is `value`. A control that is not shown takes
+    /// no place and draws nothing, so another can be drawn where it would be
+    /// (Drift's Envelope 2 shows its Rate, Tilt and Hold in the places of its
+    /// Attack, Decay and Sustain while it cycles).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shown: Option<ShownWhen>,
     /// Set for a box or a chooser drawn without the name above it (the
     /// Saturator's curve chooser inside its display): it takes only the box's
     /// height.
@@ -492,8 +535,9 @@ pub struct Control {
     pub caption: Option<String>,
 }
 
-fn is_false(flag: &bool) -> bool {
-    !*flag
+/// Whether `n` is 0, for leaving a default out of a saved layout.
+fn is_zero_u8(n: &u8) -> bool {
+    *n == 0
 }
 
 impl Control {
@@ -509,9 +553,33 @@ impl Control {
             glyph: None,
             unit: None,
             grey: None,
+            trim: 0,
+            shown: None,
             unnamed: false,
             caption: None,
         }
+    }
+
+    /// The same control, shown only while `param`'s value rounds to `value`.
+    #[must_use]
+    pub const fn shown_while(self, param: ParamId, value: i32) -> Self {
+        self.shown_between(param, value, value)
+    }
+
+    /// The same control, shown only while `param`'s value rounds to a value
+    /// from `from` to `to`.
+    #[must_use]
+    pub const fn shown_between(mut self, param: ParamId, from: i32, to: i32) -> Self {
+        self.shown = Some(ShownWhen { param, from, to });
+        self
+    }
+
+    /// The same control, showing its parameter's name without its first `words`
+    /// words.
+    #[must_use]
+    pub const fn trimmed(mut self, words: u8) -> Self {
+        self.trim = words;
+        self
     }
 
     /// The same control showing `caption` in place of its parameter's name.
@@ -608,6 +676,15 @@ pub struct BandLabel {
     pub y: f32,
     /// The width it is centred in.
     pub width: f32,
+    /// Whether the text starts at `x` instead of being centred (a table's row
+    /// names).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub left: bool,
+}
+
+/// Whether `flag` is false, for leaving a default out of a saved layout.
+fn is_false(flag: &bool) -> bool {
+    !*flag
 }
 
 impl BandLabel {
@@ -619,6 +696,16 @@ impl BandLabel {
             x,
             y,
             width,
+            left: false,
+        }
+    }
+
+    /// `text`, starting at `x`, `y` and no wider than `width` points.
+    #[must_use]
+    pub fn left(text: &str, x: f32, y: f32, width: f32) -> Self {
+        Self {
+            left: true,
+            ..Self::new(text, x, y, width)
         }
     }
 
@@ -626,6 +713,53 @@ impl BandLabel {
     #[must_use]
     pub fn rect(&self) -> Rect {
         Rect::new(self.x, self.y, self.width, LABEL_HEIGHT)
+    }
+}
+
+/// A thin line in a band that divides its parts: the rules between the rows of
+/// Electric's table.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct BandRule {
+    /// Its left edge, from the band's.
+    pub x: f32,
+    /// Its top edge, from the band's.
+    pub y: f32,
+    /// How long it is.
+    pub length: f32,
+    /// Whether it runs down instead of across.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub vertical: bool,
+}
+
+impl BandRule {
+    /// A rule across, `length` points long from `x`, `y`.
+    #[must_use]
+    pub const fn across(x: f32, y: f32, length: f32) -> Self {
+        Self {
+            x,
+            y,
+            length,
+            vertical: false,
+        }
+    }
+
+    /// A rule down, `length` points long from `x`, `y`.
+    #[must_use]
+    pub const fn down(x: f32, y: f32, length: f32) -> Self {
+        Self {
+            vertical: true,
+            ..Self::across(x, y, length)
+        }
+    }
+
+    /// Its rectangle in its band: a line is 1 point thick.
+    #[must_use]
+    pub fn rect(&self) -> Rect {
+        if self.vertical {
+            Rect::new(self.x, self.y, 1.0, self.length)
+        } else {
+            Rect::new(self.x, self.y, self.length, 1.0)
+        }
     }
 }
 
@@ -646,6 +780,9 @@ pub struct ControlBand {
     /// Its text labels, drawn beside the controls they name.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub labels: Vec<BandLabel>,
+    /// Its rules, drawn between its parts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rules: Vec<BandRule>,
 }
 
 impl ControlBand {
@@ -674,6 +811,7 @@ impl ControlBand {
             controls: placed,
             slots: None,
             labels: Vec::new(),
+            rules: Vec::new(),
         }
     }
 
@@ -688,6 +826,7 @@ impl ControlBand {
             controls,
             slots: None,
             labels: Vec::new(),
+            rules: Vec::new(),
         }
     }
 
@@ -695,6 +834,13 @@ impl ControlBand {
     #[must_use]
     pub fn with_labels(mut self, labels: Vec<BandLabel>) -> Self {
         self.labels = labels;
+        self
+    }
+
+    /// The same band with `rules` drawn in it.
+    #[must_use]
+    pub fn with_rules(mut self, rules: Vec<BandRule>) -> Self {
+        self.rules = rules;
         self
     }
 
@@ -868,6 +1014,15 @@ pub enum PageStyle {
     /// right of it holds the second page while it is shown and the first,
     /// which is empty, while it isn't ([`PagesNode::side_strip`]).
     Strip,
+    /// No buttons: each page shows when its region of the body is clicked,
+    /// the region being the controls its [`Page::select`] names with the
+    /// heading over them (Electric's sections, Analog's, Operator's). The node's
+    /// area is the shown page's alone.
+    Regions,
+    /// A button for each page at a place of its own ([`Page::button`]) in the
+    /// node's area, as the 1 and 2 over Drift's envelope display are; the
+    /// node's area is the shown page's.
+    Placed,
 }
 
 /// The name of a side strip's page while its section is hidden.
@@ -888,6 +1043,14 @@ pub struct Page {
     /// controls, which show whichever page does.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub section: Option<LayoutNode>,
+    /// In the regions style, the parameters whose controls, with the heading
+    /// over them, make the region that shows the page when it is clicked.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub select: Vec<ParamId>,
+    /// In the placed style, the page's button: its left, top, width and
+    /// height in points from the node's top-left corner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub button: Option<[f32; 4]>,
 }
 
 impl Page {
@@ -898,7 +1061,25 @@ impl Page {
             name: name.to_owned(),
             node,
             section: None,
+            select: Vec::new(),
+            button: None,
         }
+    }
+
+    /// The same page, its button `width` by `height` points at `x`, `y` in the
+    /// node (the placed style).
+    #[must_use]
+    pub fn with_button(mut self, x: f32, y: f32, width: f32, height: f32) -> Self {
+        self.button = Some([x, y, width, height]);
+        self
+    }
+
+    /// The same page, shown by a click on the controls of `params` (the
+    /// regions style).
+    #[must_use]
+    pub fn with_select(mut self, params: &[ParamId]) -> Self {
+        self.select = params.to_vec();
+        self
     }
 
     /// The parameters whose controls the page holds, its section's included.
@@ -949,6 +1130,10 @@ pub struct PagesNode {
     /// The page shown, as an index; [`DeviceLayout::with_pages`] sets it.
     #[serde(default, skip_serializing_if = "is_first")]
     pub shown: usize,
+    /// In the title-bar style, where the run of tabs starts, in points from
+    /// the frame's left edge: at the title's right end where left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_at: Option<f32>,
 }
 
 fn is_first(index: &usize) -> bool {
@@ -964,7 +1149,16 @@ impl PagesNode {
             style,
             pages,
             shown: 0,
+            title_at: None,
         }
+    }
+
+    /// The same node, its title-bar tabs starting `x` points from the frame's
+    /// left edge.
+    #[must_use]
+    pub fn with_title_at(mut self, x: f32) -> Self {
+        self.title_at = Some(x);
+        self
     }
 
     /// A side strip named `name` holding `section` while its toggle is on:
@@ -1017,7 +1211,7 @@ impl PagesNode {
             Size::new(s.width.max(n.width), s.height.max(n.height))
         });
         match self.style {
-            PageStyle::TitleBar => pages,
+            PageStyle::TitleBar | PageStyle::Regions | PageStyle::Placed => pages,
             PageStyle::Tabs => Size::new(
                 pages.width.max(self.pages.len() as f32 * TAB_WIDTH),
                 pages.height + TAB_HEIGHT,
@@ -1044,7 +1238,16 @@ impl PagesNode {
         };
         let mut buttons = Vec::new();
         let area = match self.style {
-            PageStyle::TitleBar => at,
+            PageStyle::TitleBar | PageStyle::Regions => at,
+            PageStyle::Placed => {
+                buttons.extend(
+                    self.pages
+                        .iter()
+                        .filter_map(|p| p.button)
+                        .map(|[x, y, width, height]| Rect::new(at.x + x, at.y + y, width, height)),
+                );
+                at
+            }
             PageStyle::Tabs => {
                 let width = at.width / self.pages.len() as f32;
                 buttons.extend(
@@ -1095,6 +1298,7 @@ impl PagesNode {
             buttons,
             shown: self.shown_index(),
             rect: at,
+            select: self.pages.iter().map(|p| p.select.clone()).collect(),
         });
         page.node.place(area, slot, placed);
     }
@@ -1295,6 +1499,11 @@ fn place_band(band: &ControlBand, x: f32, y: f32, slot: u32, placed: &mut Placed
                 param: ParamId(grey.param.0 + offset),
                 ..grey
             }),
+            trim: control.trim,
+            shown: control.shown.map(|shown| ShownWhen {
+                param: ParamId(shown.param.0 + offset),
+                ..shown
+            }),
             unnamed: control.unnamed,
             caption: control.caption.clone(),
         }));
@@ -1308,7 +1517,12 @@ fn place_band(band: &ControlBand, x: f32, y: f32, slot: u32, placed: &mut Placed
                 label.width,
                 LABEL_HEIGHT,
             ),
+            left: label.left,
         }));
+    placed.rules.extend(band.rules.iter().map(|rule| {
+        let r = rule.rect();
+        Rect::new(rect.x + r.x, rect.y + r.y, r.width, r.height)
+    }));
 }
 
 /// A maker's mark in a device's title bar.
@@ -1343,6 +1557,10 @@ pub enum TitlePart {
     /// A heading across the title bar over its tabs and parts, as Drift's
     /// and Meld's.
     Heading(String),
+    /// A heading centred `centre` points from the frame's left edge, over the
+    /// section of the body that lies under it (Drift's Osc Mix, Filter and
+    /// Envelopes).
+    Section(String, f32),
     /// The MPE label, for a device that takes MPE.
     Mpe,
     /// A maker's mark.
@@ -1362,7 +1580,7 @@ impl TitlePart {
     pub fn param(&self) -> Option<ParamId> {
         match self {
             Self::Letter(_, p) | Self::Round(_, p) | Self::Button(p) => Some(*p),
-            Self::Heading(_) | Self::Mpe | Self::Maker(_) => None,
+            Self::Heading(_) | Self::Section(..) | Self::Mpe | Self::Maker(_) => None,
         }
     }
 }
@@ -1407,6 +1625,12 @@ pub struct PlacedControl {
     /// What greys the control.
     #[serde(default)]
     pub grey: Option<GreyWhen>,
+    /// How many words of the parameter's name it leaves out of its label.
+    #[serde(default)]
+    pub trim: u8,
+    /// What it is shown by: it draws nothing while the condition fails.
+    #[serde(default)]
+    pub shown: Option<ShownWhen>,
     /// Whether the control is drawn without its name above it.
     #[serde(default)]
     pub unnamed: bool,
@@ -1432,8 +1656,12 @@ pub struct PlacedHeading {
 pub struct PlacedLabel {
     /// Its text.
     pub text: String,
-    /// Where, from the body's top-left corner; the text is centred in it.
+    /// Where, from the body's top-left corner; the text is centred in it, or
+    /// starts at its left edge where `left`.
     pub rect: Rect,
+    /// Whether the text starts at the rectangle's left edge.
+    #[serde(default)]
+    pub left: bool,
 }
 
 /// A display cell where a layout placed it.
@@ -1467,6 +1695,10 @@ pub struct PlacedPages {
     /// is its left [`STRIP_WIDTH`].
     #[serde(default)]
     pub rect: Rect,
+    /// In the regions style, the parameters whose controls make each page's
+    /// region, parallel to `names`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub select: Vec<Vec<ParamId>>,
 }
 
 /// A layout placed at a size.
@@ -1489,6 +1721,67 @@ pub struct Placed {
     /// Its bands' text labels, in the layout's order.
     #[serde(default)]
     pub labels: Vec<PlacedLabel>,
+    /// Its bands' rules, as thin rectangles, in the layout's order.
+    #[serde(default)]
+    pub rules: Vec<Rect>,
+}
+
+impl Placed {
+    /// Gives each page of a regions-style node the region its controls make:
+    /// their union, the headings and labels just over it, and a margin.
+    fn place_regions(&mut self) {
+        let mut pages = std::mem::take(&mut self.pages);
+        for node in pages.iter_mut().filter(|n| n.style == PageStyle::Regions) {
+            node.buttons = node
+                .select
+                .iter()
+                .map(|params| self.region(params))
+                .collect();
+        }
+        self.pages = pages;
+    }
+
+    /// The region of the controls of `params`: empty where none is placed.
+    fn region(&self, params: &[ParamId]) -> Rect {
+        let mut found = self
+            .controls
+            .iter()
+            .filter(|c| params.contains(&c.param))
+            .map(|c| c.rect);
+        let Some(first) = found.next() else {
+            return Rect::default();
+        };
+        let (mut left, mut top, mut right, mut bottom) =
+            (first.x, first.y, first.right(), first.bottom());
+        for rect in found {
+            left = left.min(rect.x);
+            top = top.min(rect.y);
+            right = right.max(rect.right());
+            bottom = bottom.max(rect.bottom());
+        }
+        // The heading or label that sits over the controls belongs to them.
+        let controls_top = top;
+        let over = move |r: &Rect| {
+            r.right() > left
+                && r.x < right
+                && r.bottom() <= controls_top + 1e-3
+                && r.bottom() >= controls_top - 2.0 * HEADING_HEIGHT
+        };
+        let words = self
+            .headings
+            .iter()
+            .map(|h| h.rect)
+            .chain(self.labels.iter().map(|l| l.rect));
+        for rect in words.filter(over) {
+            top = top.min(rect.y);
+        }
+        Rect::new(
+            left - PADDING,
+            top - PADDING / 2.0,
+            right - left + 2.0 * PADDING,
+            bottom - top + 1.5 * PADDING,
+        )
+    }
 }
 
 impl DeviceLayout {
@@ -1662,6 +1955,7 @@ impl DeviceLayout {
             slot,
             &mut placed,
         );
+        placed.place_regions();
         placed
     }
 
@@ -1742,6 +2036,16 @@ impl DeviceLayout {
                             "the layout has two pages nodes named {}",
                             node.name
                         ));
+                    } else if let Some(id) = node
+                        .pages
+                        .iter()
+                        .flat_map(|p| &p.select)
+                        .find(|id| !params.iter().any(|p| p.id == **id))
+                    {
+                        problem = Some(format!(
+                            "pages node {} is shown by a click on parameter {}, which the device doesn't have",
+                            node.name, id.0
+                        ));
                     }
                     named.push(&node.name);
                 }
@@ -1810,6 +2114,8 @@ fn check_band(
         {
             match &descriptor.kind {
                 ParamKind::Choice { choices } if choices.len() <= room => {}
+                // A whole-number parameter's buttons are its numbers.
+                ParamKind::Integer { min, max, .. } if (max - min + 1) as usize <= room => {}
                 _ => {
                     *problem = Some(format!(
                         "parameter {}'s buttons need a choice with at most {room} choices",
@@ -2417,6 +2723,75 @@ mod tests {
                 .unwrap_err()
                 .contains("outside")
         );
+    }
+
+    // Spec: device-framework R41, R61
+    #[test]
+    fn a_regions_page_is_shown_by_a_click_on_its_controls_and_the_label_over_them() {
+        let top = ControlBand::free(
+            100.0,
+            60.0,
+            vec![
+                Control::new(ParamId(0), Widget::SmallKnob, 4.0, 14.0),
+                Control::new(ParamId(1), Widget::SmallKnob, 60.0, 14.0),
+            ],
+        )
+        .with_labels(vec![
+            BandLabel::new("One", 4.0, 3.0, 32.0),
+            BandLabel::left("Row", 70.0, 3.0, 20.0),
+        ])
+        .with_rules(vec![BandRule::across(2.0, 57.0, 90.0)]);
+        let page = |name: &str, select: ParamId| {
+            Page::new(
+                name,
+                LayoutNode::Band(ControlBand::free(100.0, 20.0, vec![])),
+            )
+            .with_select(&[select])
+        };
+        let layout = DeviceLayout::new(LayoutNode::Column(vec![
+            LayoutNode::Band(top),
+            LayoutNode::Pages(PagesNode::new(
+                "Sections",
+                PageStyle::Regions,
+                vec![page("A", ParamId(0)), page("B", ParamId(1))],
+            )),
+        ]));
+        layout.check(&params(2)).unwrap();
+        let placed = layout.place(layout.docked_size());
+        let node = &placed.pages[0];
+        assert_eq!(node.buttons.len(), 2);
+        // A's region holds its knob and the label over it, with a margin.
+        let (a, b) = (node.buttons[0], node.buttons[1]);
+        let knob = placed.controls[0].rect;
+        assert!(a.contains(&knob), "{a:?} holds {knob:?}");
+        assert!(a.y <= 3.0 && a.y >= 0.0, "the label's row is inside: {a:?}");
+        // B's has the left label over it, not A's.
+        assert!(b.y <= 3.0 && a.right() <= b.x + 1e-3, "{a:?} {b:?}");
+        // Labels know their alignment, and a rule is a line 1 point thick.
+        assert!(!placed.labels[0].left && placed.labels[1].left);
+        assert_eq!(placed.rules, [Rect::new(2.0, 57.0, 90.0, 1.0)]);
+        // A page a click names a parameter the device lacks for is refused.
+        let bad = DeviceLayout::new(LayoutNode::Pages(PagesNode::new(
+            "Sections",
+            PageStyle::Regions,
+            vec![page("A", ParamId(9))],
+        )));
+        assert!(bad.check(&params(0)).unwrap_err().contains("click"));
+    }
+
+    // Spec: device-framework R61
+    #[test]
+    fn a_control_can_leave_the_first_words_of_its_name_out_of_its_label() {
+        let control = Control::new(ParamId(0), Widget::Unboxed, 0.0, 0.0).trimmed(1);
+        let layout = DeviceLayout::new(LayoutNode::Band(ControlBand::free(
+            60.0,
+            PLAIN_HEIGHT,
+            vec![control],
+        )));
+        layout.check(&params(1)).unwrap();
+        let placed = layout.place(layout.docked_size());
+        assert_eq!(placed.controls[0].trim, 1);
+        assert_eq!(placed.controls[0].rect.height, PLAIN_HEIGHT);
     }
 
     // Spec: device-framework R55

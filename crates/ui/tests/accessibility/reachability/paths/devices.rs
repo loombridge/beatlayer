@@ -762,15 +762,6 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                 Key::Delete,
             ),
         ),
-        // WP-8.20: the buttons of Meld's Matrix tab.
-        (
-            "meld.copy_modulation",
-            main(a_meld_matrix, device_view, "Copy to B", Key::Enter),
-        ),
-        (
-            "meld.clear_modulation",
-            main(a_meld_matrix, device_view, "Clear A Modulation", Key::Enter),
-        ),
         (
             "device.add_destination",
             Exception(Equivalent(

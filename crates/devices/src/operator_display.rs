@@ -8,17 +8,17 @@ use bl_model::{DeviceDisplay, DeviceId, DisplayReading, DisplaySeries, OrdMap, P
 
 use crate::fm::{self, OPERATORS};
 use crate::operator::{
-    ALGORITHM, FILTER_CIRCUIT, FILTER_ENV, FILTER_FREQ, FILTER_RES, FILTER_TYPE, LFO_ENV,
-    OSC_REPEAT, OSC_REPEAT_ON, OSC_WAVE, PITCH_ENV, osc, osc_shape, shaped_shape,
+    ALGORITHM, FILTER_CIRCUIT, FILTER_ENV, FILTER_FREQ, FILTER_RES, LFO_ENV, OSC_REPEAT,
+    OSC_REPEAT_ON, OSC_WAVE, PITCH_ENV, osc, osc_shape, shaped_shape,
 };
 use crate::operator_envelope::{Shape, State};
 use crate::sampler::FILTER_TYPE_CHOICES;
 
-/// The views, in the order the display offers them (R29): the global
-/// display's algorithm graph, then each oscillator's envelope and partials,
-/// the LFO's, the filter's and the pitch envelope.
+/// The views, in the order the display offers them (R29): each oscillator's
+/// envelope and partials (Osc A's envelope is what a new device starts on),
+/// the LFO's, the filter's and the pitch envelope, then the global display's
+/// algorithm graph.
 pub const VIEWS: [&str; 13] = [
-    "Algorithm",
     "Osc A Envelope",
     "Osc A Oscillator",
     "Osc B Envelope",
@@ -31,21 +31,22 @@ pub const VIEWS: [&str; 13] = [
     "Filter Envelope",
     "Filter Response",
     "Pitch Envelope",
+    "Algorithm",
 ];
 
-/// The view a section's page starts on (R29): Global's algorithm graph, an
-/// oscillator's envelope, and the LFO's, filter's and pitch's envelopes.
+/// The view a row's page starts on (R29): an oscillator's envelope, and the
+/// LFO's, filter's and pitch's envelopes, and the algorithm graph for Global.
 #[must_use]
 pub fn view_of_page(page: &str) -> Option<&'static str> {
     Some(match page {
-        "Global" => VIEWS[0],
-        "Osc A" => VIEWS[1],
-        "Osc B" => VIEWS[3],
-        "Osc C" => VIEWS[5],
-        "Osc D" => VIEWS[7],
-        "LFO" => VIEWS[9],
-        "Filter" => VIEWS[10],
-        "Pitch" => VIEWS[12],
+        "Osc A" => VIEWS[0],
+        "Osc B" => VIEWS[2],
+        "Osc C" => VIEWS[4],
+        "Osc D" => VIEWS[6],
+        "LFO" => VIEWS[8],
+        "Filter" => VIEWS[9],
+        "Pitch" => VIEWS[11],
+        "Global" => VIEWS[12],
         _ => return None,
     })
 }
@@ -204,7 +205,7 @@ pub fn display(
             [-1.0, 1.0],
         )),
         "Filter Response" => {
-            let entry = (value(FILTER_TYPE) as usize).min(FILTER_TYPE_CHOICES.len() - 1);
+            let entry = crate::operator::filter_entry(&value).min(FILTER_TYPE_CHOICES.len() - 1);
             out.series.push(response_series(
                 entry,
                 value(FILTER_FREQ),

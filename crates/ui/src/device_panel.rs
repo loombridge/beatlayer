@@ -41,7 +41,9 @@ use crate::param_menu::ParamMenu;
 use crate::theme::Theme;
 use crate::widgets::modulated_text;
 
+mod drift_drawings;
 mod drum_drawings;
+mod electric_drawing;
 mod parts;
 
 /// Where a Drum Synth's drawing is centred in its display, and its note's
@@ -296,6 +298,11 @@ fn page_row(
     crate::clip_panels::selector_keys(ui, &ids);
 }
 
+/// How far the title area starts from the frame's left edge when the title
+/// bar holds only the activator: what a heading or a run of tabs placed from
+/// the frame's edge takes off.
+pub const TITLE_INSET: f32 = 18.0;
+
 /// The width of a title-bar tab reading `name`.
 fn tab_width(name: &str) -> f32 {
     name.chars().count() as f32 * 6.0 + 16.0
@@ -343,7 +350,17 @@ pub fn title_tabs(
         .filter(|p| p.style == bl_model::device_layout::PageStyle::TitleBar)
     {
         let total: f32 = node.pages.iter().map(|p| tab_width(p) + 2.0).sum();
-        let mut x = (title.right() - total).max(title.left() + 70.0);
+        let at = panel
+            .description
+            .layout
+            .pages()
+            .into_iter()
+            .find(|n| n.name == node.node)
+            .and_then(|n| n.title_at);
+        let mut x = at.map_or_else(
+            || (title.right() - total).max(title.left() + 70.0),
+            |at| title.left() - TITLE_INSET + at,
+        );
         let rects: Vec<Rect> = node
             .pages
             .iter()
@@ -406,7 +423,14 @@ pub fn show(
     for heading in &laid.headings {
         parts::heading(ui, theme, heading, body.min);
     }
-    for placed in pages.iter().filter(|p| !p.buttons.is_empty()) {
+    for placed in pages.iter().filter(|p| p.style == PageStyle::Regions) {
+        // `place_with_pages` already put the regions on the screen.
+        parts::regions(ui, frame, (placed, egui::Pos2::ZERO), events);
+    }
+    for placed in pages
+        .iter()
+        .filter(|p| !p.buttons.is_empty() && p.style != PageStyle::Regions)
+    {
         let rects: Vec<Rect> = placed
             .buttons
             .iter()
@@ -441,13 +465,6 @@ pub fn show(
             slot_cell(ui, theme, frame, panel, (id, &name, slot, rect), events);
             continue;
         }
-        // Spec: meld R63 to R66. Meld's grids and the buttons of its Matrix
-        // tab are drawn by its own panel.
-        if crate::meld_panel::is_meld(frame)
-            && crate::meld_panel::cell(ui, theme, frame, panel, (id, &name, rect), events)
-        {
-            continue;
-        }
         // Spec: wavetable R35 to R39. Wavetable's displays and its grid are
         // drawn by its own panel.
         if crate::wavetable_panel::is_wavetable(frame)
@@ -472,6 +489,35 @@ pub fn show(
             continue;
         }
         let _ = ui.interact(rect, id, Sense::hover());
+        // Layout L-DEV-063: Electric's display draws its mechanism at the left,
+        // the parts the shown section acts on lit.
+        if matches!(&frame.kind, bl_model::DeviceKind::Native { device_type }
+            if device_type == bl_devices::electric::ELECTRIC)
+            && name == bl_devices::electric::MECHANISM
+        {
+            let page = panel
+                .pages
+                .iter()
+                .find(|node| node.node == bl_devices::electric::SECTIONS)
+                .map_or("", |node| node.shown.as_str());
+            electric_drawing::draw(
+                &ui.painter_at(rect),
+                rect.min,
+                electric_drawing::Section::of(page),
+                (highlight(theme, frame.enabled), c.text_dim.0),
+            );
+        }
+        // Layout L-DEV-065: Drift's displays draw an envelope, the LFO's wave
+        // and the pitch modulation.
+        if matches!(&frame.kind, bl_model::DeviceKind::Native { device_type }
+            if device_type == bl_devices::polysynth::POLYSYNTH)
+        {
+            drift_display(
+                &ui.painter_at(rect),
+                (panel, &name, rect),
+                (highlight(theme, frame.enabled), c.text.0),
+            );
+        }
         // Spec: drum-synths R6. A click in the upper half of a Drum Synth's
         // display plays a hit.
         if bl_devices::drum_synth::is_drum_synth(&frame.kind)
@@ -545,6 +591,11 @@ pub fn show(
             // Layout L-DEV-047: a Drum Synth's display shows its drawing, not
             // the envelope that `device.display` reads.
             Some(_) if bl_devices::drum_synth::is_drum_synth(&frame.kind) => None,
+            // Layout L-DEV-066: Operator's global page is the table, with no
+            // graph under it.
+            Some(_) if name == bl_devices::operator_panel::GLOBAL && is_operator(&frame.kind) => {
+                None
+            }
             Some(d) if d.series.iter().any(|s| s.name == name) => {
                 own = DeviceDisplay {
                     spectrograms: Vec::new(),
@@ -555,14 +606,7 @@ pub fn show(
                         .cloned()
                         .collect(),
                     markers: Vec::new(),
-                    // A cell's reading, if it has one, is what a screen
-                    // reader says of it.
-                    readings: d
-                        .readings
-                        .iter()
-                        .filter(|r| r.name == name)
-                        .cloned()
-                        .collect(),
+                    readings: Vec::new(),
                     ..d.clone()
                 };
                 Some(&own)
@@ -617,8 +661,28 @@ pub fn show(
     for label in &laid.labels {
         parts::band_label(ui, theme, label, body.min);
     }
+    if is_operator(&frame.kind) {
+        operator_view_boxes(
+            ui,
+            theme,
+            (frame, panel, display),
+            (&laid, body.min),
+            events,
+        );
+    }
+    for rule in &laid.rules {
+        parts::rule(ui, theme, *rule, body.min);
+    }
     for (at, (param, widget, whole)) in controls.into_iter().enumerate() {
         let extra = laid.controls.get(at);
+        // A control shown only while another's value says so takes no place
+        // and draws nothing the rest of the time.
+        if extra
+            .and_then(|e| e.shown)
+            .is_some_and(|shown| !shown.holds(panel.read(shown.param)))
+        {
+            continue;
+        }
         // A knob with a unit pair beside it keeps the rest of its place.
         let rect = if extra.is_some_and(|e| e.unit.is_some()) {
             Rect::from_min_max(
@@ -651,9 +715,6 @@ pub fn show(
             .label(&read, param)
             .is_some_and(|label| label.unit.is_some() || label.law.is_some())
             .then(|| panel.description.text(&read, &descriptor, value));
-        // Spec: meld R63. A touch on a control adds its parameter as a row
-        // of the grid the tab shows.
-        crate::meld_panel::touched(ui, frame, panel, (&descriptor.name, rect), events);
         let control = Control {
             device: frame.id,
             enabled: frame.enabled,
@@ -709,6 +770,7 @@ pub fn show(
             } else {
                 1
             },
+            trim: extra.map_or(0, |e| usize::from(e.trim)),
             unnamed: extra.is_some_and(|e| e.unnamed),
             caption: extra.and_then(|e| e.caption.as_deref()),
         };
@@ -749,7 +811,6 @@ pub fn show(
             Widget::BesideSwitch(label) => {
                 control.beside_switch(ui, theme, events, f32::from(label))
             }
-            Widget::Check => control.check(ui, theme, events),
             Widget::Pill => control.pill(ui, theme, events),
             Widget::Readout => control.readout(ui, theme, events),
             Widget::Segments(n) => {
@@ -774,6 +835,8 @@ pub fn show(
             Widget::Framed => control.boxed(ui, theme, events, (true, false)),
             Widget::Cycle => control.cycle(ui, theme, events),
             Widget::Inline => control.inline(ui, theme, events),
+            Widget::MiniKnob => control.mini_knob(ui, theme, events),
+            Widget::Check => control.check(ui, theme, events),
         };
         if locked {
             ui.add_enabled_ui(false, draw);
@@ -868,6 +931,7 @@ pub fn show(
                         | Widget::BareSlider
                         | Widget::Framed
                         | Widget::Inline
+                        | Widget::MiniKnob
                 ),
                 events,
             );
@@ -934,6 +998,7 @@ fn display_drag(
         under: None,
         automation: None,
         coarse: 1,
+        trim: 0,
         unnamed: false,
         caption: None,
     };
@@ -952,16 +1017,26 @@ fn pan_reading(kind: &bl_model::DeviceKind, param: &ParamDescriptor, value: f64)
         bl_devices::kitbag::KITBAG,
     ]
     .contains(&device_type.as_str());
+    // Operator's Pan runs from -100 to 100 %, the others' from -50 to 50.
+    let operator = device_type == bl_devices::operator::OPERATOR;
+    if operator && param.id == bl_devices::operator::PAN {
+        return Some(bl_model::fader::pan_text(value / 100.0));
+    }
     (ours && short_name(&param.name) == "Pan").then(|| bl_model::fader::pan_text(value / 50.0))
 }
 
 /// What a control's name above it reads: a sample slot's parameter drops the
 /// slot's number (`Slot 3 Start` reads `Start`), since the panel shows one
-/// slot's at a time, and one of Meld's drops its engine's letter.
-fn short_name(name: &str) -> std::borrow::Cow<'_, str> {
-    if let Some(short) = bl_devices::meld::panel_name(name) {
-        return short.into();
-    }
+/// slot's at a time.
+fn short_name(name: &str) -> &str {
+    short_name_of(name, 0)
+}
+
+/// As [`short_name`], with the first `trim` words of the name left out too.
+fn short_name_of(name: &str, trim: usize) -> &str {
+    let name = (0..trim).fold(name, |rest, _| {
+        rest.split_once(' ').map_or("", |(_, after)| after)
+    });
     name.strip_prefix("Slot ")
         .and_then(|rest| rest.split_once(' '))
         .filter(|(number, _)| number.chars().all(|c| c.is_ascii_digit()))
@@ -974,7 +1049,170 @@ fn short_name(name: &str) -> std::borrow::Cow<'_, str> {
                 other => other,
             }
         })
-        .into()
+}
+
+/// Whether `kind` is Operator.
+fn is_operator(kind: &bl_model::DeviceKind) -> bool {
+    matches!(kind, bl_model::DeviceKind::Native { device_type }
+        if device_type == bl_devices::operator::OPERATOR)
+}
+
+/// The four coloured squares of Operator's algorithm mini-view, left of Time
+/// (layout L-DEV-066): a click on them shows the global page.
+const ALGORITHM_SQUARES: [Color32; 4] = [
+    Color32::from_rgb(232, 154, 70),
+    Color32::from_rgb(120, 104, 224),
+    Color32::from_rgb(120, 214, 208),
+    Color32::from_rgb(232, 214, 80),
+];
+
+/// Operator's check boxes before the headings Envelope, Oscillator and
+/// Filter over the display's fields: each shows the view its heading names,
+/// lit while that view is the one shown (layout L-DEV-066).
+fn operator_view_boxes(
+    ui: &mut Ui,
+    theme: &Theme,
+    (frame, panel, display): (&DeviceFrame, &DevicePanel, Option<&DeviceDisplay>),
+    (laid, origin): (&bl_model::device_layout::Placed, egui::Pos2),
+    events: &mut Vec<UiEvent>,
+) {
+    // The algorithm mini-view, in the room left of Time.
+    if let Some(time) = laid
+        .controls
+        .iter()
+        .find(|c| c.param == bl_devices::operator::TIME)
+    {
+        let first = origin + vec2(time.rect.x - 21.0, time.rect.y + 4.0);
+        for (n, colour) in ALGORITHM_SQUARES.iter().enumerate() {
+            let square = Rect::from_min_size(first + vec2(0.0, 7.0 * n as f32), vec2(6.0, 6.0));
+            ui.painter().rect_filled(square, 1.0, *colour);
+        }
+        let whole = Rect::from_min_size(first, vec2(6.0, 28.0)).expand(2.0);
+        let id = Id::new(("operator-algorithm", frame.id));
+        let response = ui.interact(whole, id, Sense::click());
+        crate::focus::register(ui.ctx(), id, bl_shell::Area::Detail, None);
+        if response.clicked() {
+            events.push(UiEvent::Invoke(Invocation::new(
+                ids::SET_PAGE,
+                json!({ "device": frame.id, "node": bl_devices::operator_panel::ROWS, "page": "Global" }),
+            )));
+        }
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(Role::Button);
+            node.set_label("Algorithm".to_owned());
+        });
+    }
+    let Some(view) = display.and_then(|d| d.view.as_deref()) else {
+        return;
+    };
+    let page = panel
+        .pages
+        .iter()
+        .find(|node| node.node == bl_devices::operator_panel::ROWS)
+        .map_or("", |node| node.shown.as_str());
+    for label in &laid.labels {
+        let target = match (label.text.as_str(), page) {
+            ("Envelope", "Filter") => "Filter Envelope".to_owned(),
+            ("Envelope", p) if p.starts_with("Osc ") => format!("{p} Envelope"),
+            ("Oscillator", p) if p.starts_with("Osc ") => format!("{p} Oscillator"),
+            ("Filter", "Filter") => "Filter Response".to_owned(),
+            _ => continue,
+        };
+        let rect = Rect::from_min_size(
+            origin + vec2(label.rect.x - 11.0, label.rect.y + 0.5),
+            vec2(8.0, 8.0),
+        );
+        let id = Id::new(("operator-view", frame.id, target.clone()));
+        let response = ui.interact(rect.expand(2.0), id, Sense::click());
+        crate::focus::register(ui.ctx(), id, bl_shell::Area::Detail, None);
+        let on = view == target;
+        let c = &theme.colors;
+        ui.painter().rect_filled(
+            rect,
+            1.0,
+            if on {
+                highlight(theme, frame.enabled)
+            } else {
+                c.window.0
+            },
+        );
+        ui.painter().rect_stroke(
+            rect,
+            1.0,
+            Stroke::new(1.0, highlight(theme, frame.enabled)),
+            StrokeKind::Inside,
+        );
+        if response.clicked() && !on {
+            events.push(UiEvent::Invoke(Invocation::new(
+                "device.set_display_view",
+                json!({ "device": frame.id, "view": target }),
+            )));
+        }
+        let name = format!("{target} view");
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(Role::Button);
+            node.set_label(name);
+            node.set_selected(on);
+        });
+    }
+}
+
+/// Draws what Drift's display cell `name` shows, in `rect`.
+fn drift_display(
+    painter: &egui::Painter,
+    (panel, name, rect): (&DevicePanel, &str, Rect),
+    (lit, white): (Color32, Color32),
+) {
+    use bl_devices::polysynth::*;
+    use bl_devices::polysynth_panel::{
+        ENVELOPE, ENVELOPE_VIEW, LFO_DISPLAY, OSCILLATORS, PITCH_DISPLAY,
+    };
+    let value = |id: ParamId| panel.read(id) as f32;
+    let text = |id: ParamId| {
+        panel
+            .description
+            .param(id)
+            .map(|p| p.format(panel.read(id)))
+            .unwrap_or_default()
+    };
+    let times = |ids: [ParamId; 4]| (value(ids[0]), value(ids[1]), value(ids[2]), value(ids[3]));
+    let env_1 = times([ENV1_ATTACK, ENV1_DECAY, ENV1_SUSTAIN, ENV1_RELEASE]);
+    let env_2 = times([ENV2_ATTACK, ENV2_DECAY, ENV2_SUSTAIN, ENV2_RELEASE]);
+    match name {
+        ENVELOPE => {
+            let second = panel
+                .pages
+                .iter()
+                .find(|node| node.node == ENVELOPE_VIEW)
+                .is_some_and(|node| node.shown == "2");
+            drift_drawings::envelope(painter, rect, if second { env_2 } else { env_1 }, lit, lit);
+        }
+        LFO_DISPLAY => drift_drawings::lfo(painter, rect, &text(LFO_SHAPE), lit),
+        OSCILLATORS => {
+            // How far each Pitch Mod slot moves the pitch by Envelope 2 and by
+            // the LFO: 2 and 3 are their places in the sources' list.
+            let (mut by_env, mut by_lfo) = (0.0, 0.0);
+            for (source, amount) in [
+                (PITCH_MOD1_SOURCE, PITCH_MOD1_AMOUNT),
+                (PITCH_MOD2_SOURCE, PITCH_MOD2_AMOUNT),
+            ] {
+                match value(source).round() as i32 {
+                    2 => by_env += value(amount),
+                    3 => by_lfo += value(amount),
+                    _ => {}
+                }
+            }
+            let [x, y, width, height] = PITCH_DISPLAY;
+            drift_drawings::pitch_mod(
+                painter,
+                Rect::from_min_size(rect.min + vec2(x, y), vec2(width, height)),
+                (env_2, &text(LFO_SHAPE)),
+                (by_env, by_lfo),
+                white,
+            );
+        }
+        _ => {}
+    }
 }
 
 /// A display cell standing for a sample slot (WP-5.17): its number and key,
@@ -1224,6 +1462,8 @@ struct Control<'a> {
     /// How many steps Shift with Up or Down moves it: 12 for Roar's
     /// Feedback Note, an octave (the roar spec, R26), else 1.
     coarse: i32,
+    /// How many words of its name it leaves out of the name it shows.
+    trim: usize,
     /// Whether the layout leaves the name off a box or a chooser.
     unnamed: bool,
     /// The name the layout shows in place of the parameter's.

@@ -17,7 +17,8 @@ use bl_dsp::physical::{ModalBank, ModalParams, Quality, Shape};
 use bl_dsp::random::Random;
 use bl_engine::{DeviceType, NodeConfig, NodeData, NodeEvent, Registry};
 use bl_model::device_layout::{
-    BODY_HEIGHT, ControlBand, LayoutNode, Page, PageStyle, PagesNode, Widget,
+    BODY_HEIGHT, BandLabel, BandRule, Control, ControlBand, DisplayCell, LayoutNode, PLAIN_HEIGHT,
+    Page, PageStyle, PagesNode, Widget,
 };
 use bl_model::param::db_to_gain;
 use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
@@ -71,9 +72,69 @@ pub const DETUNE: ParamId = ParamId(27);
 pub const STRETCH: ParamId = ParamId(28);
 pub const PB_RANGE: ParamId = ParamId(29);
 pub const NOTE_PB: ParamId = ParamId(30);
+/// The Fork section's Tine and Tone: the levels of the tine and of the tone
+/// bar.
+pub const TINE: ParamId = ParamId(31);
+pub const TONE: ParamId = ParamId(32);
 
 /// The names of the pickup types: electrodynamic and electrostatic.
 pub const PICKUP_TYPES: [&str; 2] = ["R", "W"];
+
+/// Where a Vel or Key amount, which Live reads from 0 to 100, has no effect.
+const NEUTRAL: f64 = 50.0;
+
+/// Spec: electric R15. Live shows Pitch, Decay, Release, Level, Input and
+/// Output in per cent only, so each travel is Beatlayer's own scale: a time or
+/// a pitch spans its range evenly in octaves, so `scaled(0, ..)` is the low
+/// end and `scaled(100, ..)` the high end.
+#[must_use]
+pub fn scaled(percent: f64, low: f64, high: f64) -> f64 {
+    low * (high / low).powf(percent.clamp(0.0, 100.0) / 100.0)
+}
+
+/// The per cent that `scaled` reads as `value`: the other way round.
+#[must_use]
+pub fn percent_of(value: f64, low: f64, high: f64) -> f64 {
+    100.0 * (value / low).ln() / (high / low).ln()
+}
+
+/// The ranges of the parameters Live shows in per cent: the noise's centre in
+/// hertz, its decay in milliseconds, the tine's and the tone bar's decay in
+/// milliseconds, and Release in milliseconds.
+pub const NOISE_PITCH_HZ: (f64, f64) = (100.0, 10_000.0);
+pub const NOISE_DECAY_MS: (f64, f64) = (1.0, 1_000.0);
+pub const DECAY_MS: (f64, f64) = (100.0, 60_000.0);
+pub const RELEASE_MS: (f64, f64) = (10.0, 10_000.0);
+
+/// Spec: electric R15. The pickup's Input and Output read in per cent: 0 is
+/// silence, [`GAIN_UNITY`] per cent is 0 dB and 100 % is +12 dB, between them
+/// along a power law.
+pub const GAIN_UNITY: f64 = 42.0;
+const GAIN_TOP_DB: f64 = 12.0;
+
+/// A gain, as the linear factor it is, from the per cent Input or Output
+/// reads.
+#[must_use]
+pub fn gain_of(percent: f64) -> f64 {
+    let top = 10f64.powf(GAIN_TOP_DB / 20.0);
+    let power = top.ln() / (100.0 / GAIN_UNITY).ln();
+    (percent.clamp(0.0, 100.0) / GAIN_UNITY).powf(power)
+}
+
+/// The per cent that reads as the linear gain `gain`.
+#[must_use]
+pub fn percent_of_gain(gain: f64) -> f64 {
+    let top = 10f64.powf(GAIN_TOP_DB / 20.0);
+    let power = top.ln() / (100.0 / GAIN_UNITY).ln();
+    GAIN_UNITY * gain.max(0.0).powf(1.0 / power)
+}
+
+/// Spec: electric R15. The damper's Level, in per cent: a square law, so 100 %
+/// is its full level and 50 % a quarter of it.
+#[must_use]
+pub fn damper_level_of(percent: f64) -> f64 {
+    (percent.clamp(0.0, 100.0) / 100.0).powi(2)
+}
 
 /// Spec: electric R2. A hammer's pulse is this long at Stiffness 0 and at
 /// 100 %.
@@ -119,8 +180,14 @@ const BASE_COLOR: f32 = -0.4;
 /// takes does not shrink with the ratio.
 const COUPLING: f32 = 0.1;
 
+/// Spec: electric R7. The lowest pitch the electrodynamic pickup passes at
+/// unity: a note below it falls with its pitch, as the differentiator's gain
+/// does, instead of the hammer's noise growing with the number of octaves
+/// under it.
+const REFERENCE_FLOOR_HZ: f32 = 100.0;
+
 /// The hammer's noise, at 100 %, as a share of the tine's full swing.
-const NOISE_SCALE: f32 = 0.2;
+const NOISE_SCALE: f32 = 0.1;
 
 /// The damper's noise lasts this long, and falls with this time constant.
 const DAMPER_SECONDS: f64 = 0.1;
@@ -150,12 +217,12 @@ pub const PRESETS: [(&str, &[(ParamId, f64)]); 4] = [
         &[
             (STIFFNESS, 25.0),
             (FORCE, 55.0),
-            (FORCE_VEL, 40.0),
+            (FORCE_VEL, 70.0),
             (NOISE, 10.0),
-            (TINE_COLOR, -20.0),
-            (TINE_DECAY, 5_000.0),
-            (TONE_DECAY, 9_000.0),
-            (RELEASE, 400.0),
+            (TINE_COLOR, 40.0),
+            (TINE_DECAY, 61.0),
+            (TONE_DECAY, 70.0),
+            (RELEASE, 53.0),
             (DISTANCE, 70.0),
         ],
     ),
@@ -163,31 +230,31 @@ pub const PRESETS: [(&str, &[(ParamId, f64)]); 4] = [
         "Bark",
         &[
             (STIFFNESS, 70.0),
-            (STIFFNESS_VEL, 50.0),
+            (STIFFNESS_VEL, 75.0),
             (FORCE, 75.0),
-            (FORCE_VEL, 60.0),
+            (FORCE_VEL, 80.0),
             (NOISE, 35.0),
-            (NOISE_PITCH, 2_500.0),
-            (TINE_DECAY, 3_000.0),
-            (TONE_DECAY, 6_000.0),
-            (RELEASE, 250.0),
+            (NOISE_PITCH, 70.0),
+            (TINE_DECAY, 53.0),
+            (TONE_DECAY, 64.0),
+            (RELEASE, 47.0),
             (SYMMETRY, 40.0),
             (DISTANCE, 15.0),
             (PICKUP_TYPE, 0.0),
-            (INPUT, 2.0),
+            (INPUT, 65.0),
         ],
     ),
     (
         "Glass",
         &[
             (STIFFNESS, 90.0),
-            (TINE_COLOR, 50.0),
-            (TINE_DECAY, 9_000.0),
-            (TONE_DECAY, 4_000.0),
-            (RELEASE, 900.0),
+            (TINE_COLOR, 75.0),
+            (TINE_DECAY, 70.0),
+            (TONE_DECAY, 58.0),
+            (RELEASE, 65.0),
             (SYMMETRY, 55.0),
             (DISTANCE, 60.0),
-            (DAMPER_LEVEL, 0.03),
+            (DAMPER_LEVEL, 17.0),
         ],
     ),
     (
@@ -196,33 +263,22 @@ pub const PRESETS: [(&str, &[(ParamId, f64)]); 4] = [
             (STIFFNESS, 5.0),
             (FORCE, 70.0),
             (NOISE, 0.0),
-            (TINE_COLOR, -60.0),
-            (TINE_DECAY, 2_000.0),
-            (TONE_DECAY, 3_000.0),
-            (RELEASE, 150.0),
+            (TINE_COLOR, 20.0),
+            (TINE_DECAY, 47.0),
+            (TONE_DECAY, 53.0),
+            (RELEASE, 39.0),
             (DISTANCE, 80.0),
             (DAMPER_TONE, 20.0),
-            (DAMPER_LEVEL, 0.1),
+            (DAMPER_LEVEL, 32.0),
         ],
     ),
 ];
 
-fn knobs(params: &[ParamId]) -> Vec<(ParamId, Widget)> {
-    params.iter().map(|&p| (p, Widget::Knob)).collect()
-}
+/// The name of the display cell that draws the mechanism.
+pub const MECHANISM: &str = "Mechanism";
 
-/// A page of the shell: its section button's control, and the controls the
-/// display area holds.
-fn page(name: &str, section: ParamId, rest: &[(ParamId, Widget)]) -> Page {
-    Page::new(
-        name,
-        LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, rest)),
-    )
-    .with_section(LayoutNode::Band(ControlBand::stacked(
-        60.0,
-        &knobs(&[section]),
-    )))
-}
+/// The name of the pages node whose page is the section the display shows.
+pub const SECTIONS: &str = "Sections";
 
 /// Electric's type.
 #[must_use]
@@ -233,133 +289,84 @@ pub fn electric_type() -> DeviceType {
     let amount = |id, name: &str| {
         ParamDescriptor::continuous(id, name, (-100.0, 100.0), 0.0, ParamUnit::Percent)
     };
-    let time = |id, name: &str, min: f64, max: f64, default: f64| {
-        ParamDescriptor::continuous(id, name, (min, max), default, ParamUnit::Milliseconds)
-            .logarithmic()
+    // Live reads a Vel or a Key from 0 to 100 with no unit, 50 where it does
+    // nothing.
+    let neutral = |id, name: &str| {
+        ParamDescriptor::continuous(id, name, (0.0, 100.0), NEUTRAL, ParamUnit::None).decimals(0)
     };
     let params = vec![
         percent(STIFFNESS, "Stiffness", 50.0)
             .describe("How hard the hammer is: a harder hammer strikes for less time and sounds brighter."),
-        amount(STIFFNESS_VEL, "Stiffness Vel")
-            .describe("How far the note's velocity moves the stiffness."),
-        amount(STIFFNESS_KEY, "Stiffness Key")
-            .describe("How far the key moves the stiffness: positive makes higher keys harder."),
-        percent(NOISE, "Noise", 20.0)
+        neutral(STIFFNESS_VEL, "Stiffness Vel")
+            .describe("How far the note's velocity moves the stiffness: 50 does nothing, above it a harder note strikes harder and below it softer."),
+        neutral(STIFFNESS_KEY, "Stiffness Key")
+            .describe("How far the key moves the stiffness: 50 does nothing, above it higher keys are harder."),
+        percent(NOISE, "Noise", 50.0)
             .describe("The level of the burst of noise the hammer adds to the strike."),
-        ParamDescriptor::continuous(NOISE_PITCH, "Noise Pitch", (100.0, 10_000.0), 1_000.0, ParamUnit::Hertz)
-            .logarithmic()
-            .describe("The centre of the hammer noise's band."),
-        time(NOISE_DECAY, "Noise Decay", 1.0, 1_000.0, 30.0)
-            .describe("How long the hammer noise takes to fall 60 dB."),
-        amount(NOISE_KEY, "Noise Key")
-            .describe("How far the key moves the noise's level, up to 12 dB over four octaves from C3."),
-        percent(FORCE, "Force", 60.0)
+        percent(NOISE_PITCH, "Noise Pitch", 50.0)
+            .describe("The centre of the hammer noise's band, from 100 Hz to 10 kHz."),
+        percent(NOISE_DECAY, "Noise Decay", 50.0)
+            .describe("How long the hammer noise takes to fall 60 dB, from 1 ms to 1 s."),
+        neutral(NOISE_KEY, "Noise Key")
+            .describe("How far the key moves the noise's level, up to 12 dB over four octaves from C3: 50 does nothing."),
+        percent(FORCE, "Force Amount", 50.0)
             .describe("How hard the hammer strikes, from soft to hard."),
-        amount(FORCE_VEL, "Force Vel")
-            .describe("How far the note's velocity moves the force."),
-        amount(FORCE_KEY, "Force Key")
-            .describe("How far the key moves the force: positive makes higher keys strike harder."),
-        amount(TINE_COLOR, "Tine Color")
-            .describe("The balance of the tine's high and low partials: positive brightens it."),
-        time(TINE_DECAY, "Tine Decay", 100.0, 60_000.0, 4_000.0)
-            .describe("How long the tine takes to fall 60 dB while the key is held."),
-        amount(TINE_KEY, "Tine Key")
-            .describe("How far the key moves the tine's level, up to 12 dB over four octaves from C3."),
-        time(TONE_DECAY, "Tone Decay", 100.0, 60_000.0, 8_000.0)
-            .describe("How long the tone bar takes to fall 60 dB while the key is held."),
-        time(RELEASE, "Release", 10.0, 10_000.0, 300.0)
-            .describe("How long the fork takes to fall 60 dB after the key is let go."),
+        neutral(FORCE_VEL, "Force Vel")
+            .describe("How far the note's velocity moves the force: 50 does nothing."),
+        neutral(FORCE_KEY, "Force Key")
+            .describe("How far the key moves the force: 50 does nothing, above it higher keys strike harder."),
+        percent(TINE_COLOR, "Tine Color", 50.0)
+            .describe("The balance of the tine's high and low partials: above 50 % brightens it, below darkens it."),
+        percent(TINE_DECAY, "Tine Decay", 50.0)
+            .describe("How long the tine takes to fall 60 dB while the key is held, from 0.1 s to 60 s."),
+        neutral(TINE_KEY, "Tine Key")
+            .describe("How far the key moves the tine's level, up to 12 dB over four octaves from C3: 50 does nothing."),
+        percent(TONE_DECAY, "Tone Decay", 50.0)
+            .describe("How long the tone bar takes to fall 60 dB while the key is held, from 0.1 s to 60 s."),
+        percent(RELEASE, "Release", 50.0)
+            .describe("How long the fork takes to fall 60 dB after the key is let go, from 10 ms to 10 s."),
         percent(DAMPER_TONE, "Damper Tone", 50.0)
             .describe("The colour of the damper's noise, from soft to bright."),
-        ParamDescriptor::gain(DAMPER_LEVEL, "Damper Level", 0.0, -24.0)
+        percent(DAMPER_LEVEL, "Damper Level", 50.0)
             .describe("The level of the damper's noise, down to silence."),
         amount(DAMPER_ATT_REL, "Damper Att/Rel")
+            .decimals(0)
             .describe("Where the damper sounds: -100 % only when the note starts, 100 % only when it ends, 0 at both."),
         percent(SYMMETRY, "Pickup Symmetry", 50.0)
             .describe("The pickup's height against the tine: 50 % is straight in front, and away from it the even harmonics rise."),
         percent(DISTANCE, "Pickup Distance", 50.0)
             .describe("How far the pickup is from the tine: the closer, the more it overdrives."),
-        ParamDescriptor::choice(PICKUP_TYPE, "Pickup Type", &PICKUP_TYPES, 1)
+        ParamDescriptor::choice(PICKUP_TYPE, "Pickup Type", &PICKUP_TYPES, 0)
             .describe("R is an electrodynamic pickup, which responds to the change of a magnetic field; W is an electrostatic one, which responds to capacitance."),
-        ParamDescriptor::gain(INPUT, "Pickup Input", 12.0, 0.0)
-            .describe("How loud the fork's signal enters the pickup, which drives its distortion."),
-        ParamDescriptor::gain(OUTPUT, "Pickup Output", 12.0, 0.0)
-            .describe("The level of the pickup's signal."),
-        amount(OUTPUT_KEY, "Pickup Out Key")
-            .describe("How far the key moves the pickup's output level, up to 12 dB over four octaves from C3."),
+        percent(INPUT, "Pickup Input", GAIN_UNITY)
+            .describe("How loud the fork's signal enters the pickup, which drives its distortion: 42 % is unity and 100 % adds 12 dB."),
+        percent(OUTPUT, "Pickup Output", GAIN_UNITY)
+            .describe("The level of the pickup's signal: 42 % is unity and 100 % adds 12 dB."),
+        neutral(OUTPUT_KEY, "Pickup Out Key")
+            .describe("How far the key moves the pickup's output level, up to 12 dB over four octaves from C3: 50 does nothing."),
         ParamDescriptor::gain(VOLUME, "Volume", 0.0, 0.0)
             .describe("Sets the instrument's output level, down to silence."),
-        instrument::voices(VOICES, MAX_VOICES as i64, 16),
+        instrument::voices(VOICES, MAX_VOICES as i64, MAX_VOICES as i64),
         ParamDescriptor::integer(SEMI, "Semi", (-48, 48), 0, ParamUnit::Semitones)
             .decimals(0)
             .describe("Transposes the instrument in semitones."),
-        ParamDescriptor::continuous(DETUNE, "Detune", (-50.0, 50.0), 0.0, ParamUnit::Cents)
+        ParamDescriptor::continuous(DETUNE, "Detune", (-50.0, 50.0), 0.0, ParamUnit::None)
+            .decimals(2)
             .describe("Tunes the instrument finely, in cents."),
-        instrument::stretch(STRETCH),
-        ParamDescriptor::integer(PB_RANGE, "Pitch Bend", (0, 24), 2, ParamUnit::Semitones)
-            .decimals(0)
+        instrument::stretch(STRETCH).decimals(0),
+        ParamDescriptor::continuous(PB_RANGE, "PB Range", (0.0, 24.0), 12.0, ParamUnit::None)
             .describe("Sets the pitch bend wheel's range, in semitones."),
-        ParamDescriptor::integer(NOTE_PB, "Note PB", (0, 48), 48, ParamUnit::Semitones)
+        ParamDescriptor::integer(NOTE_PB, "Note PB", (0, 48), 0, ParamUnit::Semitones)
             .decimals(0)
             .describe("Sets the range of a per-note pitch bend, in semitones."),
+        percent(TINE, "Tine", 50.0)
+            .describe("The level of the tine in the sound: 50 % is as the fork rings, 0 silences it and 100 % doubles it."),
+        percent(TONE, "Tone", 50.0)
+            .describe("The level of the tone bar in the sound: 50 % is as the fork rings, 0 silences it and 100 % doubles it."),
     ];
-    let layout = DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Pages(PagesNode::new(
-            "Sections",
-            PageStyle::Shell,
-            vec![
-                page(
-                    "Hammer",
-                    FORCE,
-                    &knobs(&[
-                        STIFFNESS,
-                        STIFFNESS_VEL,
-                        STIFFNESS_KEY,
-                        FORCE_VEL,
-                        FORCE_KEY,
-                        NOISE,
-                        NOISE_PITCH,
-                        NOISE_DECAY,
-                        NOISE_KEY,
-                    ]),
-                ),
-                page(
-                    "Fork",
-                    RELEASE,
-                    &knobs(&[TINE_COLOR, TINE_DECAY, TINE_KEY, TONE_DECAY]),
-                ),
-                page(
-                    "Damper/Pickup",
-                    SYMMETRY,
-                    &[
-                        (DISTANCE, Widget::Knob),
-                        (PICKUP_TYPE, Widget::Chooser),
-                        (INPUT, Widget::Knob),
-                        (OUTPUT, Widget::Knob),
-                        (OUTPUT_KEY, Widget::Knob),
-                        (DAMPER_TONE, Widget::Knob),
-                        (DAMPER_LEVEL, Widget::Knob),
-                        (DAMPER_ATT_REL, Widget::Knob),
-                    ],
-                ),
-            ],
-        )),
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (VOLUME, Widget::Knob),
-                (VOICES, Widget::Number),
-                (SEMI, Widget::Number),
-                (DETUNE, Widget::Knob),
-                (STRETCH, Widget::Knob),
-                (PB_RANGE, Widget::Number),
-                (NOTE_PB, Widget::Number),
-            ],
-        )),
-    ]));
     DeviceType::native(ELECTRIC, "Electric", DeviceRole::Instrument).with_description(
         DeviceDescription::new(params)
-            .with_layout(layout)
+            .with_layout(layout())
             .with_banks(&[
                 (
                     "Hammer",
@@ -367,7 +374,7 @@ pub fn electric_type() -> DeviceType {
                         "Stiffness",
                         "Stiffness Vel",
                         "Stiffness Key",
-                        "Force",
+                        "Force Amount",
                         "Force Vel",
                         "Force Key",
                     ],
@@ -379,6 +386,8 @@ pub fn electric_type() -> DeviceType {
                 (
                     "Fork",
                     &[
+                        "Tine",
+                        "Tone",
                         "Tine Color",
                         "Tine Decay",
                         "Tine Key",
@@ -401,17 +410,139 @@ pub fn electric_type() -> DeviceType {
                 (
                     "Global",
                     &[
-                        "Volume",
-                        "Voices",
-                        "Semi",
-                        "Detune",
-                        "Stretch",
-                        "Pitch Bend",
-                        "Note PB",
+                        "Volume", "Voices", "Semi", "Detune", "Stretch", "PB Range", "Note PB",
                     ],
                 ),
             ]),
     )
+}
+
+/// The width of Electric's body, in points (observed in Live 12.4.16, 2
+/// November 2026; layout L-DEV-063).
+const WIDTH: f32 = 345.0;
+/// The height of the four sections across the top, and of the display under
+/// them.
+const TOP: f32 = 65.6;
+const DISPLAY: f32 = BODY_HEIGHT - TOP;
+/// Where the display's table starts, its three columns and its three rows.
+const TABLE_X: f32 = 100.5;
+const NAME_X: f32 = 105.2;
+const COLUMNS: [f32; 3] = [167.7, 230.9, 293.9];
+const ROWS: [f32; 3] = [3.7, 34.4, 65.3];
+const RULES: [f32; 2] = [30.4, 60.8];
+
+/// Layout L-DEV-063: four sections across the top, each a heading over its
+/// knobs, and under them a black display with the mechanism drawn at its left
+/// and, at its right, a table of the further controls of the section that was
+/// clicked last.
+fn layout() -> DeviceLayout {
+    let small = |p, centre: f32| Control::new(p, Widget::SmallKnob, centre - 16.0, 17.2);
+    let top = ControlBand::free(
+        WIDTH,
+        TOP,
+        vec![
+            small(STIFFNESS, 29.2),
+            small(NOISE, 74.5),
+            small(TINE, 127.6),
+            small(TONE, 171.2),
+            small(SYMMETRY, 226.0).trimmed(1),
+            Control::new(PICKUP_TYPE, Widget::Stack(2), 257.5, 31.1).sized(25.0, 27.0),
+            small(VOLUME, 318.6),
+        ],
+    )
+    .with_labels(vec![
+        BandLabel::new("Hammer", 20.0, 4.2, 61.0),
+        BandLabel::new("Fork", 115.0, 4.2, 69.0),
+        BandLabel::new("Damper / Pickup", 205.0, 4.2, 80.0),
+        BandLabel::new("Global", 300.0, 4.2, 38.0),
+        BandLabel::new("Type", 255.0, 19.5, 30.0),
+    ]);
+    let cell = |controls: Vec<Control>, names: Vec<BandLabel>, rules: &[f32]| {
+        let mut lines = vec![BandRule::down(TABLE_X, 0.0, DISPLAY)];
+        lines.extend(
+            rules
+                .iter()
+                .map(|&y| BandRule::across(TABLE_X, y, WIDTH - TABLE_X)),
+        );
+        LayoutNode::Cell(
+            DisplayCell::new(MECHANISM, WIDTH, DISPLAY, 1.0).with_top(
+                ControlBand::free(WIDTH, DISPLAY, controls)
+                    .with_labels(names)
+                    .with_rules(lines),
+            ),
+        )
+    };
+    let at = |p, column: usize, row: usize, trim: u8| {
+        Control::new(p, Widget::Unboxed, COLUMNS[column], ROWS[row])
+            .sized(50.0, PLAIN_HEIGHT)
+            .trimmed(trim)
+    };
+    let name = |text: &str, row: usize| BandLabel::left(text, NAME_X, ROWS[row], 60.0);
+    let hammer = cell(
+        vec![
+            at(STIFFNESS_VEL, 1, 0, 1),
+            at(STIFFNESS_KEY, 2, 0, 1),
+            at(FORCE, 0, 1, 1),
+            at(FORCE_VEL, 1, 1, 1),
+            at(FORCE_KEY, 2, 1, 1),
+            at(NOISE_PITCH, 0, 2, 1),
+            at(NOISE_DECAY, 1, 2, 1),
+            at(NOISE_KEY, 2, 2, 1),
+        ],
+        vec![name("Stiffness", 0), name("Force", 1), name("Noise", 2)],
+        &RULES,
+    );
+    let fork = cell(
+        vec![
+            at(TINE_COLOR, 0, 0, 1),
+            at(TINE_DECAY, 1, 0, 1),
+            at(TINE_KEY, 2, 0, 1),
+            at(RELEASE, 0, 1, 0),
+            at(TONE_DECAY, 1, 1, 1),
+        ],
+        vec![name("Tine", 0), name("Tone", 1)],
+        &RULES[..1],
+    );
+    let damper = cell(
+        vec![
+            at(DAMPER_TONE, 0, 0, 1),
+            at(DAMPER_ATT_REL, 1, 0, 1),
+            at(DAMPER_LEVEL, 2, 0, 1),
+            at(INPUT, 0, 1, 1),
+            at(OUTPUT, 1, 1, 1),
+            at(OUTPUT_KEY, 2, 1, 2),
+            at(DISTANCE, 0, 2, 1),
+        ],
+        vec![name("Damper", 0), name("Pickup", 1)],
+        &RULES[..1],
+    );
+    let global = cell(
+        vec![
+            Control::new(VOICES, Widget::UnboxedChooser, COLUMNS[0], ROWS[0])
+                .sized(50.0, PLAIN_HEIGHT),
+            at(SEMI, 1, 0, 0),
+            at(DETUNE, 2, 0, 0),
+            at(STRETCH, 0, 1, 0),
+            at(PB_RANGE, 1, 1, 0),
+            at(NOTE_PB, 2, 1, 0),
+        ],
+        vec![name("Keyboard", 0)],
+        &[],
+    );
+    let sections = PagesNode::new(
+        SECTIONS,
+        PageStyle::Regions,
+        vec![
+            Page::new("Hammer", hammer).with_select(&[STIFFNESS, NOISE]),
+            Page::new("Fork", fork).with_select(&[TINE, TONE]),
+            Page::new("Damper/Pickup", damper).with_select(&[SYMMETRY, PICKUP_TYPE]),
+            Page::new("Global", global).with_select(&[VOLUME]),
+        ],
+    );
+    DeviceLayout::new(LayoutNode::Column(vec![
+        LayoutNode::Band(top),
+        LayoutNode::Pages(sections),
+    ]))
 }
 
 /// Adds Electric to `registry`.
@@ -473,38 +604,47 @@ struct Settings {
     output_key: f64,
     volume: f64,
     detune: f64,
+    /// Spec: electric R15. The tine's and the tone bar's levels: 1 at 50 %.
+    tine_level: f64,
+    tone_level: f64,
 }
 
 impl Settings {
     fn read(params: &ParamBank) -> Self {
         let v = |id: ParamId| params.value(params.index(id).expect("the description lists it"));
+        // Spec: electric R15. A Vel, a Key or a Color reads 0 to 100, 50 where
+        // it does nothing: −1 to 1 here.
+        let amount = |id: ParamId| (v(id) - NEUTRAL) / NEUTRAL;
+        let seconds = |id: ParamId, (low, high): (f64, f64)| scaled(v(id), low, high) / 1000.0;
         Self {
             stiffness: v(STIFFNESS) / 100.0,
-            stiffness_vel: v(STIFFNESS_VEL) / 100.0,
-            stiffness_key: v(STIFFNESS_KEY) / 100.0,
+            stiffness_vel: amount(STIFFNESS_VEL),
+            stiffness_key: amount(STIFFNESS_KEY),
             noise: v(NOISE) / 100.0,
-            noise_pitch: v(NOISE_PITCH),
-            noise_decay: v(NOISE_DECAY) / 1000.0,
-            noise_key: v(NOISE_KEY) / 100.0,
+            noise_pitch: scaled(v(NOISE_PITCH), NOISE_PITCH_HZ.0, NOISE_PITCH_HZ.1),
+            noise_decay: seconds(NOISE_DECAY, NOISE_DECAY_MS),
+            noise_key: amount(NOISE_KEY),
             force: v(FORCE) / 100.0,
-            force_vel: v(FORCE_VEL) / 100.0,
-            force_key: v(FORCE_KEY) / 100.0,
-            color: v(TINE_COLOR) / 100.0,
-            tine_decay: (v(TINE_DECAY) / 1000.0).clamp(0.001, 60.0),
-            tine_key: v(TINE_KEY) / 100.0,
-            tone_decay: (v(TONE_DECAY) / 1000.0).clamp(0.001, 60.0),
-            release: (v(RELEASE) / 1000.0).clamp(0.001, 60.0),
+            force_vel: amount(FORCE_VEL),
+            force_key: amount(FORCE_KEY),
+            color: amount(TINE_COLOR),
+            tine_decay: seconds(TINE_DECAY, DECAY_MS).clamp(0.001, 60.0),
+            tine_key: amount(TINE_KEY),
+            tone_decay: seconds(TONE_DECAY, DECAY_MS).clamp(0.001, 60.0),
+            release: seconds(RELEASE, RELEASE_MS).clamp(0.001, 60.0),
             damper_tone: v(DAMPER_TONE) / 100.0,
-            damper_level: v(DAMPER_LEVEL),
+            damper_level: damper_level_of(v(DAMPER_LEVEL)),
             damper_att_rel: v(DAMPER_ATT_REL) / 100.0,
             symmetry: v(SYMMETRY) / 100.0,
             distance: v(DISTANCE) / 100.0,
             electrostatic: v(PICKUP_TYPE) >= 0.5,
-            input: v(INPUT),
-            output: v(OUTPUT),
-            output_key: v(OUTPUT_KEY) / 100.0,
+            input: gain_of(v(INPUT)),
+            output: gain_of(v(OUTPUT)),
+            output_key: amount(OUTPUT_KEY),
             volume: v(VOLUME),
             detune: v(DETUNE),
+            tine_level: v(TINE) / NEUTRAL,
+            tone_level: v(TONE) / NEUTRAL,
         }
     }
 }
@@ -711,6 +851,8 @@ struct Voice {
     tine: ModalParams,
     bar: ModalParams,
     tine_gain: f32,
+    /// The tone bar's level in the sound.
+    bar_gain: f32,
     /// How much of the tine drives the tone bar.
     drive: f32,
     /// The note's velocity, and the output's key factor.
@@ -743,6 +885,7 @@ impl Voice {
             tine: ModalParams::default(),
             bar: ModalParams::default(),
             tine_gain: 1.0,
+            bar_gain: 1.0,
             drive: 0.0,
             level: 0.0,
             out_key: 1.0,
@@ -942,7 +1085,8 @@ impl Fork {
         voice.amp = (force * s.tine_decay * rate / IMPULSE_SCALE) as f32;
         voice.tine = tine;
         voice.bar = bar;
-        voice.tine_gain = gain(s.tine_key);
+        voice.tine_gain = gain(s.tine_key) * s.tine_level as f32;
+        voice.bar_gain = s.tone_level as f32;
         voice.drive = (f64::from(COUPLING) * s.tone_decay / s.tine_decay).min(100.0) as f32;
         voice.level = velocity as f32;
         voice.out_key = gain(s.output_key);
@@ -967,8 +1111,9 @@ impl Fork {
         voice.rng = Random::seeded(seed);
         voice.damper_rng = Random::seeded(!seed);
         voice.field = Field::at_rest(&geometry);
-        voice.reference =
-            (1.0 / (TAU * f64::from(hz.max(20.0)) / (rate * f64::from(1u32 << STAGES)))) as f32;
+        voice.reference = (1.0
+            / (TAU * f64::from(hz.max(REFERENCE_FLOOR_HZ)) / (rate * f64::from(1u32 << STAGES))))
+            as f32;
     }
 
     /// The key is let go on `v`: the fork falls within Release, and the
@@ -1058,7 +1203,7 @@ impl Fork {
             let mut damper = [0.0f32; CHUNK];
             for f in 0..n {
                 let l = f * stride * 2 + v;
-                let mut x = self.tine_out[l] * voice.tine_gain + self.bar_out[l];
+                let mut x = self.tine_out[l] * voice.tine_gain + self.bar_out[l] * voice.bar_gain;
                 if voice.hammer.left > 0 {
                     let level = voice.hammer.next() * voice.hammer_gain;
                     x += voice.band.step(voice.rng.next_bipolar() as f32) * level;

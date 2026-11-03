@@ -993,12 +993,12 @@ fn electric() -> Scene {
         },
     );
     for (param, value) in [
-        (FORCE_VEL, 60.0),
+        (FORCE_VEL, 40.0),
         (STIFFNESS_VEL, 40.0),
         (TINE_COLOR, 20.0),
         (SYMMETRY, 35.0),
         (DISTANCE, 30.0),
-        (RELEASE, 350.0),
+        (RELEASE, 40.0),
     ] {
         device.params.insert(param, value);
     }
@@ -1036,7 +1036,7 @@ fn electric() -> Scene {
             ClipData::Midi(bl_model::MidiData::new(notes)),
         ),
     });
-    song.finish(4.5)
+    song.finish(4.25)
 }
 
 /// Spec: tension R1 to R13, R17. A bowed line and a plucked chord on Tension.
@@ -1185,44 +1185,49 @@ fn operator() -> Scene {
             device_type: OPERATOR.to_owned(),
         },
     );
-    for (param, value) in [
-        (op::ALGORITHM, 4.0),
-        (op::ANTIALIAS, 0.0),
-        (op::TONE, 80.0),
-        (op::TIME, 15.0),
-        (op::TIME_KEY, 20.0),
-        (op::PAN_KEY, 35.0),
-        (op::PAN_RANDOM, 25.0),
-        (op::VOICES, 4.0),
-        (osc(0, op::OSC_LEVEL_VEL), 50.0),
-        (osc(0, op::OSC_LEVEL_KEY), 20.0),
-        (osc(0, op::ENV_SUSTAIN), 0.5),
-        (osc(0, op::ENV_RELEASE), 400.0),
-        (osc(1, op::OSC_LEVEL), 0.3),
-        (osc(1, op::OSC_COARSE), 2.0),
-        (osc(1, op::OSC_FEEDBACK), 25.0),
-        (osc(1, op::ENV_LOOP), Loop::Beat as usize as f64),
-        (osc(1, op::ENV_REPEAT), 4.0),
-        (osc(1, op::ENV_DECAY), 250.0),
-        (osc(1, op::ENV_SUSTAIN), 0.05),
-        (osc(2, op::OSC_LEVEL), 0.2),
-        (osc(2, op::OSC_COARSE), 3.0),
-        (osc(2, op::OSC_FINE), 20.0),
-        (osc(2, op::ENV_SUSTAIN), 0.1),
-        (osc(2, op::ENV_DECAY), 500.0),
-        (op::PITCH_ON, 1.0),
-        (op::PITCH_AMOUNT, 15.0),
-        (shaped(op::PITCH_ENV, op::SHAPED_INITIAL), 100.0),
-        (shaped(op::PITCH_ENV, op::SHAPED_PEAK), 100.0),
-        (shaped(op::PITCH_ENV, op::SHAPED_SUSTAIN), 0.0),
-        (shaped(op::PITCH_ENV, op::SHAPED_DECAY), 300.0),
-        (shaped(op::PITCH_ENV, op::SHAPED_DECAY_SLOPE), 0.5),
-        (
-            shaped(op::PITCH_ENV, op::SHAPED_LOOP),
-            Loop::Sync as usize as f64,
-        ),
-        (shaped(op::PITCH_ENV, op::SHAPED_REPEAT), 3.0),
-    ] {
+    // The values Operator opened with before its panel was laid out as Live's,
+    // so the reference render is the same sound; the fixture's own follow.
+    for (param, value) in bl_devices::testing::operator_before_live()
+        .into_iter()
+        .chain([
+            (op::ALGORITHM, 4.0),
+            (op::ANTIALIAS, 0.0),
+            (op::TONE, 80.0),
+            (op::TIME, 15.0),
+            (op::TIME_KEY, 20.0),
+            (op::PAN_KEY, 35.0),
+            (op::PAN_RANDOM, 25.0),
+            (op::VOICES, 4.0),
+            (osc(0, op::OSC_LEVEL_VEL), 50.0),
+            (osc(0, op::OSC_LEVEL_KEY), 20.0),
+            (osc(0, op::ENV_SUSTAIN), 0.5),
+            (osc(0, op::ENV_RELEASE), 400.0),
+            (osc(1, op::OSC_LEVEL), 0.3),
+            (osc(1, op::OSC_COARSE), 2.0),
+            (osc(1, op::OSC_FEEDBACK), 25.0),
+            (osc(1, op::ENV_LOOP), Loop::Beat as usize as f64),
+            (osc(1, op::ENV_REPEAT), 4.0),
+            (osc(1, op::ENV_DECAY), 250.0),
+            (osc(1, op::ENV_SUSTAIN), 0.05),
+            (osc(2, op::OSC_LEVEL), 0.2),
+            (osc(2, op::OSC_COARSE), 3.0),
+            (osc(2, op::OSC_FINE), 20.0),
+            (osc(2, op::ENV_SUSTAIN), 0.1),
+            (osc(2, op::ENV_DECAY), 500.0),
+            (op::PITCH_ON, 1.0),
+            (op::PITCH_AMOUNT, 15.0),
+            (shaped(op::PITCH_ENV, op::SHAPED_INITIAL), 100.0),
+            (shaped(op::PITCH_ENV, op::SHAPED_PEAK), 100.0),
+            (shaped(op::PITCH_ENV, op::SHAPED_SUSTAIN), 0.0),
+            (shaped(op::PITCH_ENV, op::SHAPED_DECAY), 300.0),
+            (shaped(op::PITCH_ENV, op::SHAPED_DECAY_SLOPE), 0.5),
+            (
+                shaped(op::PITCH_ENV, op::SHAPED_LOOP),
+                Loop::Sync as usize as f64,
+            ),
+            (shaped(op::PITCH_ENV, op::SHAPED_REPEAT), 3.0),
+        ])
+    {
         device.params.insert(param, value);
     }
     song.apply(Command::InsertDevice {

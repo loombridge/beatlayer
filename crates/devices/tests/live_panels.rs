@@ -105,7 +105,6 @@ const STILL_GENERIC: &[&str] = &[
     "Arpeggiator",
     "CC Control",
     "Chord",
-    "External Instrument",
     "MPE Control",
     "Note Echo",
     "Note Length",

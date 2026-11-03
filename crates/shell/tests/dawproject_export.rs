@@ -501,7 +501,7 @@ mod render {
             });
         });
         // MIDI through the test plug-in, placed before the instrument.
-        shell
+        let cascade = shell
             .run(
                 "device.add",
                 json!({ "track": lead,
@@ -509,6 +509,8 @@ mod render {
                                     "name": "Cascade" } }),
             )
             .unwrap();
+        let cascade: DeviceId = serde_json::from_value(cascade["device"].clone()).unwrap();
+        bl_shell::testing::drift_before_live(&mut shell, cascade);
         let loaded = shell
             .run(
                 plugin_ids::LOAD,

@@ -41,7 +41,9 @@ pub struct Bank {
 /// Two parameters that share one control, which a switch turns between:
 /// while `switch` is on the control is `on`'s, and otherwise `off`'s. The
 /// layout places `off`'s control only (Limiter's Maximize turns Ceiling into
-/// Threshold).
+/// Threshold). A control can have several alternates, one for each choice of a
+/// choice parameter (Drift's LFO Rate is its Ratio, Time or Sync as the time
+/// mode says).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Alternate {
     /// The switch.
@@ -573,7 +575,7 @@ impl DeviceDescription {
                 || self
                     .alternates
                     .iter()
-                    .filter(|b| b.on == a.on || b.off == a.off)
+                    .filter(|b| b.on == a.on || (b.off == a.off && b.at == a.at))
                     .count()
                     > 1
             {

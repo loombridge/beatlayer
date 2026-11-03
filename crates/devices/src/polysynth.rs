@@ -26,11 +26,8 @@ use core::f64::consts::TAU;
 
 use bl_dsp::random::Random;
 use bl_engine::{DeviceType, NodeConfig, NodeData, NodeEvent, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
 use bl_model::param::gain_to_db;
-use bl_model::{
-    Device, DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit,
-};
+use bl_model::{Device, DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 use lspk_dsp::envelope::{EnvelopeBank, EnvelopeParams, StealRestart, TimeUnit, Timing, Trigger};
 use lspk_dsp::filter::{FilterBank, FilterType, VoiceParams, pitch_of};
 use lspk_voice::{MAX_VOICES, Start, VoiceBlock, VoiceEvent, VoiceEventKind};
@@ -52,7 +49,7 @@ pub const POLYSYNTH: &str = "beatlayer.cascade";
 pub const OSC1: ParamId = ParamId(0);
 /// Oscillator 1's waveform.
 pub const OSC1_WAVE: ParamId = ParamId(1);
-/// Oscillator 1's shape, in per cent.
+/// Oscillator 1's shape, from 0 to 1.
 pub const OSC1_SHAPE: ParamId = ParamId(2);
 /// Oscillator 1's octave transposition.
 pub const OSC1_OCT: ParamId = ParamId(3);
@@ -72,8 +69,12 @@ pub const OSC2_GAIN: ParamId = ParamId(9);
 pub const NOISE: ParamId = ParamId(10);
 /// The noise generator's gain.
 pub const NOISE_GAIN: ParamId = ParamId(11);
-/// The filter processing switch.
-pub const FILTER: ParamId = ParamId(12);
+/// Whether Oscillator 1 goes through the filter.
+pub const OSC1_FILTER: ParamId = ParamId(12);
+/// Whether Oscillator 2 goes through the filter.
+pub const OSC2_FILTER: ParamId = ParamId(78);
+/// Whether the noise goes through the filter.
+pub const NOISE_FILTER: ParamId = ParamId(79);
 /// The oscillator phase retrigger switch.
 pub const RETRIGGER: ParamId = ParamId(13);
 /// The low-pass cutoff, in Hz.
@@ -235,7 +236,7 @@ pub const LFO_SHAPES: [&str; 9] = [
     "Exponential Envelope",
 ];
 /// The LFO's time modes, in the manual's order.
-pub const LFO_MODES: [&str; 4] = ["Rate", "Ratio", "Time", "Sync"];
+pub const LFO_MODES: [&str; 4] = ["Hz", "1:1", "ms", "Sync"];
 /// The Sync time mode's divisions; Beatlayer's own list, to observe.
 pub const LFO_DIVISIONS: [&str; 7] = ["1/16", "1/8", "1/4", "1/2", "1 Bar", "2 Bars", "4 Bars"];
 /// How many sixteenths each division holds: the Sync time mode's rates.
@@ -243,20 +244,12 @@ pub(crate) const DIVISION_SIXTEENTHS: [f64; 7] = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0
 /// The modulation sources every route chooser offers, in the manual's
 /// order, after Off.
 pub const MOD_SOURCES: [&str; 9] = [
-    "Off",
-    "Env 1",
-    "Env 2 / Cyc",
-    "LFO",
-    "Key",
-    "Velocity",
-    "Modwheel",
-    "Pressure",
-    "Slide",
+    "Off", "Env 1", "Env 2", "LFO", "Key", "Velocity", "Modwheel", "Pressure", "Slide",
 ];
 /// The Mod section's destinations, in the manual's order, after Off; Cyc Env
 /// Rate is last so that a saved choice keeps its meaning (R32).
 pub const MOD_DESTINATIONS: [&str; 12] = [
-    "Off",
+    "None",
     "Osc 1 Gain",
     "Osc 1 Shape",
     "Osc 2 Gain",
@@ -401,7 +394,8 @@ pub fn polysynth_type() -> DeviceType {
         ParamDescriptor::toggle(OSC1, "Osc 1", true).describe("Turns Oscillator 1 on."),
         ParamDescriptor::choice(OSC1_WAVE, "Osc 1 Wave", &WAVES1, SAW)
             .describe("Oscillator 1's waveform."),
-        ParamDescriptor::continuous(OSC1_SHAPE, "Osc 1 Shape", (0.0, 100.0), 0.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(OSC1_SHAPE, "Osc 1 Shape", (0.0, 1.0), 0.0, ParamUnit::None)
+            .decimals(2)
             .describe("Morphs Oscillator 1's waveform, narrowing a pulse or skewing the others."),
         ParamDescriptor::integer(OSC1_OCT, "Osc 1 Oct", (-4, 4), 0, ParamUnit::None)
             .decimals(0)
@@ -409,24 +403,24 @@ pub fn polysynth_type() -> DeviceType {
         ParamDescriptor::gain(OSC1_GAIN, "Osc 1 Gain", DRIVE_FULL_DB, DEFAULT_GAIN_DB)
             .describe("Sets Oscillator 1's level, down to silence."),
         ParamDescriptor::toggle(OSC2, "Osc 2", true).describe("Turns Oscillator 2 on."),
-        ParamDescriptor::choice(OSC2_WAVE, "Osc 2 Wave", &WAVES2, 3)
+        ParamDescriptor::choice(OSC2_WAVE, "Osc 2 Wave", &WAVES2, 0)
             .describe("Oscillator 2's waveform."),
-        ParamDescriptor::integer(OSC2_OCT, "Osc 2 Oct", (-4, 4), 0, ParamUnit::None)
+        ParamDescriptor::integer(OSC2_OCT, "Osc 2 Oct", (-4, 4), -1, ParamUnit::None)
             .decimals(0)
             .describe("Transposes Oscillator 2 in octaves."),
         ParamDescriptor::integer(OSC2_DETUNE, "Osc 2 Detune", (-12, 12), 0, ParamUnit::Semitones)
             .decimals(0)
             .describe("Transposes Oscillator 2 in semitones."),
-        ParamDescriptor::gain(OSC2_GAIN, "Osc 2 Gain", DRIVE_FULL_DB, DEFAULT_GAIN_DB)
+        ParamDescriptor::gain(OSC2_GAIN, "Osc 2 Gain", DRIVE_FULL_DB, -8.0)
             .describe("Sets Oscillator 2's level, down to silence."),
-        ParamDescriptor::toggle(NOISE, "Noise", false).describe("Adds white noise."),
-        ParamDescriptor::gain(NOISE_GAIN, "Noise Gain", DRIVE_FULL_DB, DEFAULT_GAIN_DB)
+        ParamDescriptor::toggle(NOISE, "Noise", true).describe("Adds white noise."),
+        ParamDescriptor::gain(NOISE_GAIN, "Noise Gain", DRIVE_FULL_DB, f64::NEG_INFINITY)
             .describe("Sets the noise generator's level, down to silence."),
-        ParamDescriptor::toggle(FILTER, "Filter", true)
-            .describe("Sends the oscillators and the noise through the filter; off bypasses it."),
+        ParamDescriptor::toggle(OSC1_FILTER, "Osc 1 Filter", true)
+            .describe("Sends Oscillator 1 through the filter; off lets it bypass the filter."),
         ParamDescriptor::toggle(RETRIGGER, "Retrigger", true)
             .describe("Restarts both oscillators at the same phase on every note; off runs them freely."),
-        ParamDescriptor::continuous(FREQ, "Freq", (20.0, 20_000.0), 1_000.0, ParamUnit::Hertz)
+        ParamDescriptor::continuous(FREQ, "Freq", (20.0, 20_000.0), 20_000.0, ParamUnit::Hertz)
             .logarithmic()
             .describe("Sets the low-pass cutoff."),
         ParamDescriptor::choice(FILTER_TYPE, "Type", &FILTER_TYPES, 0)
@@ -436,32 +430,32 @@ pub fn polysynth_type() -> DeviceType {
             .describe("How much the played note moves the low-pass cutoff: one octave per octave at 1.00."),
         ParamDescriptor::continuous(RES, "Res", (0.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("Raises the low-pass resonance."),
-        ParamDescriptor::continuous(HP, "HP", (20.0, 20_000.0), 20.0, ParamUnit::Hertz)
+        ParamDescriptor::continuous(HP, "HP", (10.0, 20_000.0), 10.0, ParamUnit::Hertz)
             .logarithmic()
             .describe("Sets the high-pass cutoff."),
         time(ENV1_ATTACK, "Env 1 Attack", 1.0).describe("How long Envelope 1 takes to reach full."),
-        time(ENV1_DECAY, "Env 1 Decay", 1_000.0)
+        time(ENV1_DECAY, "Env 1 Decay", 600.0)
             .describe("How long Envelope 1 takes to fall to its sustain level."),
-        ParamDescriptor::continuous(ENV1_SUSTAIN, "Env 1 Sustain", (0.0, 100.0), 100.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(ENV1_SUSTAIN, "Env 1 Sustain", (0.0, 100.0), 70.0, ParamUnit::Percent)
             .describe("The level Envelope 1 holds while a note lasts."),
-        time(ENV1_RELEASE, "Env 1 Release", 15.0)
+        time(ENV1_RELEASE, "Env 1 Release", 600.0)
             .describe("How long Envelope 1 takes to fall to silence after a note ends."),
-        time(ENV2_ATTACK, "Env 2 Attack", 0.5).describe("How long Envelope 2 takes to reach full."),
-        time(ENV2_DECAY, "Env 2 Decay", 1_000.0)
+        time(ENV2_ATTACK, "Env 2 Attack", 1.0).describe("How long Envelope 2 takes to reach full."),
+        time(ENV2_DECAY, "Env 2 Decay", 600.0)
             .describe("How long Envelope 2 takes to fall to its sustain level."),
-        ParamDescriptor::continuous(ENV2_SUSTAIN, "Env 2 Sustain", (0.0, 100.0), 100.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(ENV2_SUSTAIN, "Env 2 Sustain", (0.0, 100.0), 20.0, ParamUnit::Percent)
             .describe("The level Envelope 2 holds while a note lasts."),
-        time(ENV2_RELEASE, "Env 2 Release", 15.0)
+        time(ENV2_RELEASE, "Env 2 Release", 600.0)
             .describe("How long Envelope 2 takes to fall to silence after a note ends."),
-        ParamDescriptor::gain(VOLUME, "Volume", DRIVE_FULL_DB, 0.0)
+        ParamDescriptor::gain(VOLUME, "Volume", DRIVE_FULL_DB, -6.0)
             .describe("Sets the instrument's output level, down to silence."),
-        instrument::voices(VOICES, MAX_VOICES as i64, 16),
+        instrument::voices(VOICES, MAX_VOICES as i64, MAX_VOICES as i64),
         instrument::transpose(TRANSPOSE, 48),
-        ParamDescriptor::continuous(VEL_VOL, "Vel > Vol", (0.0, 100.0), 0.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(VEL_VOL, "Vel > Vol", (0.0, 100.0), 50.0, ParamUnit::Percent)
             .describe("How much the notes' velocity moves the volume."),
-        ParamDescriptor::choice(LFO_MODE, "LFO Mode", &LFO_MODES, MODE_SYNC)
+        ParamDescriptor::choice(LFO_MODE, "LFO Mode", &LFO_MODES, MODE_RATE)
             .describe("Sets the LFO's rate in hertz, as a ratio of the note, in milliseconds, or in beat divisions."),
-        ParamDescriptor::continuous(LFO_RATE, "LFO Rate", (0.01, 100.0), 1.0, ParamUnit::Hertz)
+        ParamDescriptor::continuous(LFO_RATE, "LFO Rate", (0.01, 100.0), 0.4, ParamUnit::Hertz)
             .logarithmic()
             .describe("The LFO's rate in hertz, in the Rate time mode."),
         ParamDescriptor::continuous(LFO_RATIO, "LFO Ratio", (0.0625, 64.0), 1.0, ParamUnit::Ratio)
@@ -484,7 +478,7 @@ pub fn polysynth_type() -> DeviceType {
             .describe("Restarts the LFO at the same position on every note; off runs it freely."),
         ParamDescriptor::continuous(LFO_AMOUNT, "LFO Amount", (0.0, 100.0), 100.0, ParamUnit::Percent)
             .describe("Sets the LFO's overall intensity."),
-        ParamDescriptor::choice(LFO_MOD_SOURCE, "LFO Mod", &MOD_SOURCES, 0)
+        ParamDescriptor::choice(LFO_MOD_SOURCE, "LFO Mod", &MOD_SOURCES, 6)
             .describe("The source that moves the LFO's own rate."),
         ParamDescriptor::continuous(
             LFO_MOD_AMOUNT,
@@ -494,35 +488,35 @@ pub fn polysynth_type() -> DeviceType {
             ParamUnit::Percent,
         )
         .describe("How much the LFO's own modulation source moves its rate."),
-        ParamDescriptor::choice(MOD1_SOURCE, "Mod 1 Source", &MOD_SOURCES, 0)
+        ParamDescriptor::choice(MOD1_SOURCE, "Mod 1 Source", &MOD_SOURCES, 6)
             .describe("The first Mod slot's modulation source."),
-        ParamDescriptor::choice(MOD1_DEST, "Mod 1 Dest", &MOD_DESTINATIONS, 0)
+        ParamDescriptor::choice(MOD1_DEST, "Mod 1 Dest", &MOD_DESTINATIONS, 8)
             .describe("The first Mod slot's destination."),
-        ParamDescriptor::continuous(MOD1_AMOUNT, "Mod 1 Amount", (-100.0, 100.0), 0.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(MOD1_AMOUNT, "Mod 1 Amount", (-100.0, 100.0), 80.0, ParamUnit::Percent)
             .describe("How far the first Mod slot's source moves its destination, in per cent of its travel."),
-        ParamDescriptor::choice(MOD2_SOURCE, "Mod 2 Source", &MOD_SOURCES, 0)
+        ParamDescriptor::choice(MOD2_SOURCE, "Mod 2 Source", &MOD_SOURCES, 5)
             .describe("The second Mod slot's modulation source."),
         ParamDescriptor::choice(MOD2_DEST, "Mod 2 Dest", &MOD_DESTINATIONS, 0)
             .describe("The second Mod slot's destination."),
         ParamDescriptor::continuous(MOD2_AMOUNT, "Mod 2 Amount", (-100.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("How far the second Mod slot's source moves its destination, in per cent of its travel."),
-        ParamDescriptor::choice(MOD3_SOURCE, "Mod 3 Source", &MOD_SOURCES, 0)
+        ParamDescriptor::choice(MOD3_SOURCE, "Mod 3 Source", &MOD_SOURCES, 7)
             .describe("The third Mod slot's modulation source."),
         ParamDescriptor::choice(MOD3_DEST, "Mod 3 Dest", &MOD_DESTINATIONS, 0)
             .describe("The third Mod slot's destination."),
         ParamDescriptor::continuous(MOD3_AMOUNT, "Mod 3 Amount", (-100.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("How far the third Mod slot's source moves its destination, in per cent of its travel."),
-        ParamDescriptor::choice(SHAPE_MOD_SOURCE, "Shape Mod", &MOD_SOURCES, 0)
+        ParamDescriptor::choice(SHAPE_MOD_SOURCE, "Shape Mod", &MOD_SOURCES, 8)
             .describe("The source for Oscillator 1's Shape Mod."),
         ParamDescriptor::continuous(
             SHAPE_MOD_AMOUNT,
             "Shape Mod Amount",
             (-100.0, 100.0),
-            0.0,
+            5.0,
             ParamUnit::Percent,
         )
         .describe("How far the Shape Mod source morphs Oscillator 1's waveform."),
-        ParamDescriptor::choice(PITCH_MOD1_SOURCE, "Pitch Mod 1", &MOD_SOURCES, 0)
+        ParamDescriptor::choice(PITCH_MOD1_SOURCE, "Pitch Mod 1", &MOD_SOURCES, 2)
             .describe("The first Pitch Mod source, which moves both oscillators."),
         ParamDescriptor::continuous(
             PITCH_MOD1_AMOUNT,
@@ -532,7 +526,7 @@ pub fn polysynth_type() -> DeviceType {
             ParamUnit::Percent,
         )
         .describe("How far the first Pitch Mod source moves both oscillators."),
-        ParamDescriptor::choice(PITCH_MOD2_SOURCE, "Pitch Mod 2", &MOD_SOURCES, 0)
+        ParamDescriptor::choice(PITCH_MOD2_SOURCE, "Pitch Mod 2", &MOD_SOURCES, 3)
             .describe("The second Pitch Mod source, which moves both oscillators."),
         ParamDescriptor::continuous(
             PITCH_MOD2_AMOUNT,
@@ -542,28 +536,28 @@ pub fn polysynth_type() -> DeviceType {
             ParamUnit::Percent,
         )
         .describe("How far the second Pitch Mod source moves both oscillators."),
-        ParamDescriptor::choice(FREQ_MOD1_SOURCE, "Freq Mod 1", &MOD_SOURCES, 0)
+        ParamDescriptor::choice(FREQ_MOD1_SOURCE, "Freq Mod 1", &MOD_SOURCES, 2)
             .describe("The first Freq Mod source, which moves the low-pass cutoff."),
         ParamDescriptor::continuous(
             FREQ_MOD1_AMOUNT,
             "Freq Mod 1 Amount",
             (-100.0, 100.0),
-            0.0,
+            80.0,
             ParamUnit::Percent,
         )
         .describe("How far the first Freq Mod source moves the low-pass cutoff, in per cent of its travel."),
-        ParamDescriptor::choice(FREQ_MOD2_SOURCE, "Freq Mod 2", &MOD_SOURCES, 0)
+        ParamDescriptor::choice(FREQ_MOD2_SOURCE, "Freq Mod 2", &MOD_SOURCES, 7)
             .describe("The second Freq Mod source, which moves the low-pass cutoff."),
         ParamDescriptor::continuous(
             FREQ_MOD2_AMOUNT,
             "Freq Mod 2 Amount",
             (-100.0, 100.0),
-            0.0,
+            15.0,
             ParamUnit::Percent,
         )
         .describe("How far the second Freq Mod source moves the low-pass cutoff, in per cent of its travel."),
         instrument::note_pb(NOTE_PB, true),
-        instrument::pb_range(PB_RANGE, 96, 48),
+        instrument::pb_range(PB_RANGE, 96, 2),
         instrument::voice_modes(VOICE_MODE),
         ParamDescriptor::continuous(THICKNESS, "Thickness", (0.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("In Mono, the level of the three extra copies; at 0 % only one sounds."),
@@ -571,7 +565,7 @@ pub fn polysynth_type() -> DeviceType {
             .describe("In Stereo, how far the two copies detune and pan apart."),
         ParamDescriptor::continuous(STRENGTH, "Strength", (0.0, 100.0), 50.0, ParamUnit::Percent)
             .describe("In Unison, how far the four copies detune."),
-        ParamDescriptor::continuous(DRIFT, "Drift", (0.0, 100.0), 0.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(DRIFT, "Drift", (0.0, 100.0), 7.2, ParamUnit::Percent)
             .describe("How far each voice's pitch and filter frequency wander at random."),
         instrument::legato(LEGATO, false),
         instrument::glide_time(GLIDE, 5_000.0, 0.0),
@@ -601,122 +595,22 @@ pub fn polysynth_type() -> DeviceType {
         ParamDescriptor::choice(CYC_SYNC, "Cyc Env Sync", &LFO_DIVISIONS, 2)
             .describe("The cycling envelope's cycle as a division of the song's tempo, in the Sync time mode."),
         instrument::hi_quality(HI_QUALITY),
+        ParamDescriptor::toggle(OSC2_FILTER, "Osc 2 Filter", true)
+            .describe("Sends Oscillator 2 through the filter; off lets it bypass the filter."),
+        ParamDescriptor::toggle(NOISE_FILTER, "Noise Filter", true)
+            .describe("Sends the noise through the filter; off lets it bypass the filter."),
     ];
-    let layout = DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (OSC1, Widget::Toggle),
-                (OSC1_WAVE, Widget::Chooser),
-                (OSC1_SHAPE, Widget::Knob),
-                (OSC1_OCT, Widget::Number),
-                (OSC1_GAIN, Widget::Knob),
-                (OSC2, Widget::Toggle),
-                (OSC2_WAVE, Widget::Chooser),
-                (OSC2_OCT, Widget::Number),
-                (OSC2_DETUNE, Widget::Number),
-                (OSC2_GAIN, Widget::Knob),
-                (NOISE, Widget::Toggle),
-                (NOISE_GAIN, Widget::Knob),
-                (FILTER, Widget::Toggle),
-                (RETRIGGER, Widget::Toggle),
-                (SHAPE_MOD_SOURCE, Widget::Chooser),
-                (SHAPE_MOD_AMOUNT, Widget::Knob),
-                (PITCH_MOD1_SOURCE, Widget::Chooser),
-                (PITCH_MOD1_AMOUNT, Widget::Knob),
-                (PITCH_MOD2_SOURCE, Widget::Chooser),
-                (PITCH_MOD2_AMOUNT, Widget::Knob),
-            ],
-        )),
-        LayoutNode::Cell(DisplayCell::new("Waveform", 150.0, BODY_HEIGHT, 1.0)),
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (FREQ, Widget::Knob),
-                (FILTER_TYPE, Widget::Chooser),
-                (KEY, Widget::Knob),
-                (RES, Widget::Knob),
-                (HP, Widget::Knob),
-                (FREQ_MOD1_SOURCE, Widget::Chooser),
-                (FREQ_MOD1_AMOUNT, Widget::Knob),
-                (FREQ_MOD2_SOURCE, Widget::Chooser),
-                (FREQ_MOD2_AMOUNT, Widget::Knob),
-            ],
-        )),
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (ENV1_ATTACK, Widget::Knob),
-                (ENV1_DECAY, Widget::Knob),
-                (ENV1_SUSTAIN, Widget::Knob),
-                (ENV1_RELEASE, Widget::Knob),
-                (ENV2_ATTACK, Widget::Knob),
-                (ENV2_DECAY, Widget::Knob),
-                (ENV2_SUSTAIN, Widget::Knob),
-                (ENV2_RELEASE, Widget::Knob),
-                (ENV2_MODE, Widget::Chooser),
-                (CYC_TILT, Widget::Knob),
-                (CYC_HOLD, Widget::Knob),
-                (CYC_MODE, Widget::Chooser),
-                (CYC_SYNC, Widget::Chooser),
-                (CYC_RATE, Widget::Knob),
-                (CYC_RATIO, Widget::Knob),
-                (CYC_TIME, Widget::Knob),
-            ],
-        )),
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (LFO_SHAPE, Widget::Chooser),
-                (LFO_MODE, Widget::Chooser),
-                (LFO_SYNC, Widget::Chooser),
-                (LFO_RATE, Widget::Knob),
-                (LFO_RATIO, Widget::Knob),
-                (LFO_TIME, Widget::Knob),
-                (LFO_RETRIGGER, Widget::Toggle),
-                (LFO_AMOUNT, Widget::Knob),
-                (LFO_MOD_SOURCE, Widget::Chooser),
-                (LFO_MOD_AMOUNT, Widget::Knob),
-            ],
-        )),
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (MOD1_SOURCE, Widget::Chooser),
-                (MOD1_DEST, Widget::Chooser),
-                (MOD1_AMOUNT, Widget::Knob),
-                (MOD2_SOURCE, Widget::Chooser),
-                (MOD2_DEST, Widget::Chooser),
-                (MOD2_AMOUNT, Widget::Knob),
-                (MOD3_SOURCE, Widget::Chooser),
-                (MOD3_DEST, Widget::Chooser),
-                (MOD3_AMOUNT, Widget::Knob),
-            ],
-        )),
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (VOLUME, Widget::Knob),
-                (VOICES, Widget::Number),
-                (TRANSPOSE, Widget::Number),
-                (VEL_VOL, Widget::Knob),
-                (NOTE_PB, Widget::Toggle),
-                (PB_RANGE, Widget::Number),
-                (VOICE_MODE, Widget::Chooser),
-                (THICKNESS, Widget::Knob),
-                (SPREAD, Widget::Knob),
-                (STRENGTH, Widget::Knob),
-                (DRIFT, Widget::Knob),
-                (LEGATO, Widget::Toggle),
-                (GLIDE, Widget::Knob),
-            ],
-        )),
-    ]));
     DeviceType::native(POLYSYNTH, "Drift", DeviceRole::Instrument)
         .with_description(
             DeviceDescription::new(params)
-                .with_layout(layout)
+                .with_layout(crate::polysynth_panel::layout())
                 .with_menu_options(&[HI_QUALITY])
+                .with_alternate_at((LFO_MODE, 1), LFO_RATE, LFO_RATIO)
+                .with_alternate_at((LFO_MODE, 2), LFO_RATE, LFO_TIME)
+                .with_alternate_at((LFO_MODE, 3), LFO_RATE, LFO_SYNC)
+                .with_alternate_at((CYC_MODE, 1), CYC_RATE, CYC_RATIO)
+                .with_alternate_at((CYC_MODE, 2), CYC_RATE, CYC_TIME)
+                .with_alternate_at((CYC_MODE, 3), CYC_RATE, CYC_SYNC)
                 .with_banks(&[
                     (
                         "Oscillators",
@@ -733,9 +627,17 @@ pub fn polysynth_type() -> DeviceType {
                     ),
                     (
                         "Osc Detail",
-                        &["Osc 1 Shape", "Osc 2 Detune", "Noise", "Noise Gain"],
+                        &[
+                            "Osc 1 Shape",
+                            "Osc 2 Detune",
+                            "Noise",
+                            "Noise Gain",
+                            "Osc 1 Filter",
+                            "Osc 2 Filter",
+                            "Noise Filter",
+                        ],
                     ),
-                    ("Filter", &["Filter", "Type", "Freq", "Res", "HP", "Key"]),
+                    ("Filter", &["Type", "Freq", "Res", "HP", "Key"]),
                     (
                         "Envelope 1",
                         &[
@@ -1395,6 +1297,9 @@ struct Synth {
     /// The stretch's per-voice buffers, `frames × stride` each.
     audio: Vec<f32>,
     audio_r: Vec<f32>,
+    /// What bypasses the filter, which joins the filtered audio after it.
+    dry: Vec<f32>,
+    dry_r: Vec<f32>,
     cutoff: Vec<f32>,
     hp_cutoff: Vec<f32>,
     env1_out: Vec<f32>,
@@ -1428,6 +1333,9 @@ struct Synth {
     osc2_on: bool,
     noise_on: bool,
     filter_on: bool,
+    filter1: bool,
+    filter2: bool,
+    filter_noise: bool,
     retrigger: bool,
     wave1: usize,
     wave2: usize,
@@ -1542,6 +1450,8 @@ impl Synth {
             drift: ramp(),
             audio: buffer(),
             audio_r: buffer(),
+            dry: buffer(),
+            dry_r: buffer(),
             cutoff: buffer(),
             hp_cutoff: buffer(),
             env1_out: buffer(),
@@ -1584,6 +1494,9 @@ impl Synth {
             osc2_on: true,
             noise_on: false,
             filter_on: true,
+            filter1: true,
+            filter2: true,
+            filter_noise: true,
             retrigger: true,
             wave1: SAW,
             wave2: 3,
@@ -1645,7 +1558,10 @@ impl Synth {
         self.osc1_on = params.value(at(OSC1)) >= 0.5;
         self.osc2_on = params.value(at(OSC2)) >= 0.5;
         self.noise_on = params.value(at(NOISE)) >= 0.5;
-        self.filter_on = params.value(at(FILTER)) >= 0.5;
+        self.filter1 = params.value(at(OSC1_FILTER)) >= 0.5;
+        self.filter2 = params.value(at(OSC2_FILTER)) >= 0.5;
+        self.filter_noise = params.value(at(NOISE_FILTER)) >= 0.5;
+        self.filter_on = self.filter1 || self.filter2 || self.filter_noise;
         self.retrigger = params.value(at(RETRIGGER)) >= 0.5;
         let wave1 = (params.value(at(OSC1_WAVE)) as usize).min(WAVES1.len() - 1);
         let wave2 = (params.value(at(OSC2_WAVE)) as usize).min(WAVES2.len() - 1);
@@ -1658,7 +1574,7 @@ impl Synth {
             self.osc2.set_table(self.tables2[wave2].clone());
         }
         let transpose = params.value(at(TRANSPOSE)) as f32;
-        let shape1 = params.value(at(OSC1_SHAPE)) as f32 / 100.0;
+        let shape1 = params.value(at(OSC1_SHAPE)) as f32;
         self.shape = f64::from(shape1);
         let phase_mode = if self.retrigger {
             PhaseMode::NoteStart
@@ -2335,20 +2251,33 @@ impl Instrument for Synth {
                         b_right += y * plan.right[copy];
                     }
                 }
-                let mut sample = a * g1 + b * g2;
-                let mut sample_right = a_right * g1 + b_right * g2;
+                // Spec: polysynth R33. Each source goes through the filter or
+                // round it, as its arrow says; what goes round joins after.
+                let (mut wet, mut wet_right, mut dry, mut dry_right) = (0.0, 0.0, 0.0, 0.0);
+                let mut route = |through: bool, left: f32, right: f32| {
+                    if through {
+                        wet += left;
+                        wet_right += right;
+                    } else {
+                        dry += left;
+                        dry_right += right;
+                    }
+                };
+                route(self.filter1, a * g1, a_right * g1);
+                route(self.filter2, b * g2, b_right * g2);
                 if noise_on && gn != 0.0 {
                     let noise = self.noise(voice) * gn;
-                    sample += noise;
-                    sample_right += noise;
+                    route(self.filter_noise, noise, noise);
                 }
                 if self.filter_on {
-                    sample = soft_clip(sample, pre);
-                    sample_right = soft_clip(sample_right, pre);
+                    wet = soft_clip(wet, pre);
+                    wet_right = soft_clip(wet_right, pre);
                 }
-                self.audio[frame * stride + voice] = sample;
+                self.audio[frame * stride + voice] = wet;
+                self.dry[frame * stride + voice] = dry;
                 if stereo {
-                    self.audio_r[frame * stride + voice] = sample_right;
+                    self.audio_r[frame * stride + voice] = wet_right;
+                    self.dry_r[frame * stride + voice] = dry_right;
                 }
             }
         }
@@ -2397,6 +2326,22 @@ impl Instrument for Synth {
                         *sample = soft_clip(*sample, post);
                     }
                 }
+            }
+        }
+
+        // What went round the filter joins what came through it.
+        for (audio, dry) in [
+            (&mut self.audio, &self.dry),
+            (&mut self.audio_r, &self.dry_r),
+        ]
+        .into_iter()
+        .take(if stereo { 2 } else { 1 })
+        {
+            for (out, round) in audio[..count * stride]
+                .iter_mut()
+                .zip(&dry[..count * stride])
+            {
+                *out += round;
             }
         }
 
@@ -2654,6 +2599,21 @@ mod tests {
         let routes = |params: &[(ParamId, f64)]| {
             let mut device =
                 polysynth_type().device(bl_model::DeviceId(bl_core::id::Id::new(1).unwrap()));
+            // Every slot starts with no source, not at the routes Live's
+            // panel opens with.
+            for id in [
+                MOD1_SOURCE,
+                MOD2_SOURCE,
+                MOD3_SOURCE,
+                SHAPE_MOD_SOURCE,
+                PITCH_MOD1_SOURCE,
+                PITCH_MOD2_SOURCE,
+                FREQ_MOD1_SOURCE,
+                FREQ_MOD2_SOURCE,
+                LFO_MOD_SOURCE,
+            ] {
+                device.params.insert(id, 0.0);
+            }
             for &(id, value) in params {
                 device.params.insert(id, value);
             }

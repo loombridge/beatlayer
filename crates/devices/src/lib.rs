@@ -91,11 +91,8 @@ pub mod lift;
 pub mod limiter;
 pub mod looper;
 pub mod meld;
-pub mod meld_display;
 pub mod meld_filter;
 mod meld_gen;
-mod meld_matrix;
-mod meld_mod;
 mod meld_osc;
 pub mod midi_cc;
 mod midi_fx;
@@ -110,6 +107,7 @@ pub mod operator;
 pub mod operator_display;
 pub mod operator_envelope;
 pub mod operator_lfo;
+pub mod operator_panel;
 pub mod oscilloscope;
 pub mod overdrive;
 pub mod pedal;
@@ -119,6 +117,7 @@ pub mod pitchloop89;
 pub mod play_mod;
 pub mod poli;
 pub mod polysynth;
+pub mod polysynth_panel;
 pub mod re_enveloper;
 pub mod remap;
 pub mod resonators;
@@ -283,7 +282,6 @@ pub fn display_in(
         ECHO => Some(echo::display(device, description, values, data, view)),
         COMPRESSOR => Some(compressor::display(device, description, values, data)),
         corpus::CORPUS => Some(corpus::display(device, data)),
-        meld::MELD => Some(meld_display::display(device, description, values)),
         CHANNEL_EQ => Some(channel_eq::display(device, description, values, data)),
         BUS_COMPRESSOR => Some(bus_compressor::display(device, description, values, data)),
         GATE => Some(gate::display(device, description, values, data)),

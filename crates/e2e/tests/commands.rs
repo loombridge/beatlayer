@@ -67,14 +67,6 @@ const SKIPPED: &[(&str, &str)] = &[
         "moves files to the system's trash, outside the test's folder",
     ),
     ("control_surface.dump", "sends to a hardware controller"),
-    (
-        "meld.copy_modulation",
-        "acts only on a Meld, which the rich set has none of (bl-shell's meld tests run it)",
-    ),
-    (
-        "meld.clear_modulation",
-        "acts only on a Meld, which the rich set has none of (bl-shell's meld tests run it)",
-    ),
 ];
 
 /// Why the sweep doesn't run `command`, if it doesn't.

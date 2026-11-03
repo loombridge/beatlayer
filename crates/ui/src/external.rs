@@ -4,7 +4,9 @@
 //! command (`device.set_external`), and a drag on Hardware Latency is one
 //! undo step however far it goes.
 //!
-//! Beatlayer's own layout; Live's is to observe.
+//! The External Instrument's rows are Live's (layout L-DEV-064); the External
+//! Audio Effect's and the CV devices' are Beatlayer's own, as Live's are to
+//! observe.
 
 use bl_model::device_layout::BOX_HEIGHT;
 use bl_model::{DeviceId, HardwareLatency, MAX_HARDWARE_LATENCY_MS, MAX_HARDWARE_LATENCY_SAMPLES};
@@ -20,10 +22,6 @@ use serde_json::json;
 use crate::main_window::UiEvent;
 use crate::sidechain::{describe, draw_chooser, focus_ring, invoke, pressed};
 use crate::theme::Theme;
-
-/// The height of a row in the section, and the gap between rows.
-const ROW: f32 = 14.0;
-const ROW_GAP: f32 = 2.0;
 
 /// The undo step a drag on Hardware Latency is.
 const LATENCY_STEP: &str = "Change \"Hardware Latency\"";
@@ -69,23 +67,31 @@ pub fn section_rect(frame: Rect) -> Rect {
     )
 }
 
-/// Where each control sits, top to bottom: the MIDI To chooser, its channel,
-/// the Audio From chooser, and Hardware Latency with its unit switch beside
-/// it (the box, then the switch).
+/// Layout L-DEV-064: where each control of the External Instrument sits, as
+/// Live puts them: the MIDI To chooser and its channel across the top, the
+/// Audio From chooser under a rule and left of the Gain knob, and Hardware
+/// Latency's box and its unit switch at the foot. Each name is above its box.
 #[must_use]
 pub fn rows(frame: Rect) -> [Rect; 5] {
-    let section = section_rect(frame).shrink2(vec2(3.0, 0.0));
-    let latency = row_at(section, 3);
-    let unit = unit_beside(latency);
-    let latency = Rect::from_min_max(latency.min, pos2(unit.left() - 2.0, latency.bottom()));
+    let body = pos2(frame.left(), frame.top() + TITLE_BAR_HEIGHT);
+    let at = |x: f32, y: f32, width: f32| {
+        Rect::from_min_size(body + vec2(x, y), vec2(width, INSTRUMENT_BOX))
+    };
     [
-        row_at(section, 0),
-        row_at(section, 1),
-        row_at(section, 2),
-        latency,
-        unit,
+        at(2.6, 15.9, 121.0),
+        at(2.6, 31.0, 121.0),
+        at(2.6, 70.8, 78.0),
+        at(2.6, 141.0, 32.0),
+        at(37.7, 141.0, 22.5),
     ]
 }
+
+/// The height of an External Instrument's choosers and boxes, in points.
+const INSTRUMENT_BOX: f32 = 12.0;
+
+/// The rule across the External Instrument's section under its channel, from
+/// its top-left, and how long it runs.
+const INSTRUMENT_RULE: (f32, f32, f32) = (2.6, 53.0, 121.2);
 
 /// The External Audio Effect's section down the left of its frame (the
 /// panel's own first band reaches under it).
@@ -115,17 +121,6 @@ pub fn effect_rows(frame: Rect) -> [Rect; 4] {
         at(4.0, 141.0, 32.5),
         at(40.0, 141.0, 22.0),
     ]
-}
-
-/// The row `n` of the section, each control with its name above it.
-fn row_at(section: Rect, n: usize) -> Rect {
-    let top = section.top() + 3.0 + (ROW + ROW_GAP) * (n * 2 + 1) as f32 - ROW_GAP;
-    Rect::from_min_size(pos2(section.left(), top), vec2(section.width(), ROW))
-}
-
-/// The unit switch, at the end of the Hardware Latency box.
-fn unit_beside(latency: Rect) -> Rect {
-    Rect::from_min_size(pos2(latency.right() - 22.0, latency.top()), vec2(22.0, ROW))
 }
 
 /// A Hardware Latency as the box shows it: `12.50 ms` or `600 smp`.
@@ -190,7 +185,10 @@ pub fn draw(
     } else {
         section_rect(frame)
     };
-    if !section.output {
+    // Live's External Instrument is one panel with its Gain knob: its section
+    // has no ground of its own.
+    let instrument = !section.output && section.cv.is_none();
+    if !section.output && !instrument {
         ui.painter_at(area).rect_filled(area, 0.0, c.control.0);
     }
     let Some(ExternalChoosers {
@@ -236,13 +234,23 @@ pub fn draw(
         )
     };
 
-    // The names above the controls: the effect's are at Live's size.
-    let name_font = if section.output {
+    // The names above the controls: the effect's and the instrument's are at
+    // Live's size.
+    let name_font = if section.output || instrument {
         egui::FontId::proportional(9.0)
     } else {
         theme.small_font()
     };
-    let painter = ui.painter_at(area);
+    let painter = ui.painter_at(if instrument { frame } else { area });
+    if instrument {
+        let (x, y, length) = INSTRUMENT_RULE;
+        let top = pos2(frame.left() + x, frame.top() + TITLE_BAR_HEIGHT + y);
+        painter.hline(
+            top.x..=top.x + length,
+            top.y,
+            Stroke::new(1.0, c.separator.0),
+        );
+    }
     for (rect, name) in [
         (midi_to, "MIDI To"),
         (audio_to, "Audio To"),
@@ -316,14 +324,15 @@ pub fn draw(
         shell,
         theme,
         device,
-        (section.hardware_latency, section.output),
+        (section.hardware_latency, section.output || instrument),
         (latency, unit),
         events,
     );
 }
 
 /// Hardware Latency's number box and its unit switch, in `latency` and
-/// `unit`.
+/// `unit`; the box holds the number alone where `bare` (Live's External
+/// Instrument), its unit being the switch's.
 fn latency_controls(
     ui: &mut Ui,
     shell: &Shell,

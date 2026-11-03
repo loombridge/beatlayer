@@ -1089,12 +1089,12 @@ fn rig_with_synth(
         .run("arrangement.select_tracks", json!({ "tracks": [track] }))
         .unwrap();
     let synth = bl_devices::polysynth_type();
-    shell
-        .run(
-            "device.add",
-            json!({ "device": { "kind": synth.kind, "name": synth.name, "role": synth.role }, "track": track }),
-        )
-        .unwrap();
+    let added: bl_shell::device_commands::DeviceAdded = run(
+        &mut shell,
+        "device.add",
+        json!({ "device": { "kind": synth.kind, "name": synth.name, "role": synth.role }, "track": track }),
+    );
+    testing::drift_before_live(&mut shell, added.device);
     if let Some(gain) = gain {
         let loaded: bl_shell::plugin_commands::PluginLoaded = run(
             &mut shell,

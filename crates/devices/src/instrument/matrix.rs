@@ -66,9 +66,6 @@ pub struct Matrix {
     /// A control-rate destination's worked-out movement for each voice, and
     /// whether it holds one: the movement is held between grid points (R7).
     held: Vec<Cell<(f64, bool)>>,
-    /// How many voices (or slots) hold a movement: the kit's most, unless
-    /// the device asks for more.
-    voices: usize,
     oldest: Cell<Option<usize>>,
     /// The newest sounding voice, and for each destination the position
     /// that voice played last in the stretch (R12).
@@ -81,22 +78,13 @@ impl Matrix {
     /// the device (R13).
     #[must_use]
     pub fn new(layout: Arc<MatrixLayout>) -> Self {
-        Self::with_voices(layout, MAX_VOICES)
-    }
-
-    /// A matrix for `layout` whose control-rate movements are held for
-    /// `voices` voices: Meld holds one for each of its slots, which are a
-    /// voice's stacked copies. Allocates: make it with the device (R13).
-    #[must_use]
-    pub fn with_voices(layout: Arc<MatrixLayout>, voices: usize) -> Self {
         let dests = layout.dests.len();
         Self {
             layout,
             free: FreeRoutes::default(),
             routes: Vec::with_capacity(MAX_SLOTS),
             amount: Cell::new(1.0),
-            held: vec![Cell::new((0.0, false)); dests * voices],
-            voices,
+            held: vec![Cell::new((0.0, false)); dests * MAX_VOICES],
             oldest: Cell::new(None),
             newest: None,
             shown: vec![Cell::new(None); dests],
@@ -106,13 +94,7 @@ impl Matrix {
     /// A matrix holding `device`'s free routes.
     #[must_use]
     pub fn of(layout: Arc<MatrixLayout>, device: &bl_model::Device) -> Self {
-        Self::of_voices(layout, device, MAX_VOICES)
-    }
-
-    /// [`of`](Self::of), holding movements for `voices` voices.
-    #[must_use]
-    pub fn of_voices(layout: Arc<MatrixLayout>, device: &bl_model::Device, voices: usize) -> Self {
-        let mut matrix = Self::with_voices(layout, voices);
+        let mut matrix = Self::new(layout);
         matrix.free = matrix.layout.free_routes(device);
         matrix
     }
@@ -190,7 +172,7 @@ impl Matrix {
             self.oldest.set(oldest);
             for (dest, def) in self.layout.dests.iter().enumerate() {
                 if def.scope == Scope::Global {
-                    self.held[dest * self.voices].set((0.0, false));
+                    self.held[dest * MAX_VOICES].set((0.0, false));
                 }
             }
         }
@@ -219,7 +201,7 @@ impl Matrix {
     /// once, on the frame of its note and not at the next grid point.
     pub fn start(&mut self, voice: usize) {
         for dest in 0..self.layout.dests.len() {
-            self.held[dest * self.voices + voice].set((0.0, false));
+            self.held[dest * MAX_VOICES + voice].set((0.0, false));
         }
     }
 
@@ -308,7 +290,7 @@ impl Matrix {
             }
             Rate::Audio => (base * self.factor(dest, from, frame, read)).clamp(0.0, 1.0),
             Rate::Control => {
-                let at = dest * self.voices + if def.scope == Scope::Global { 0 } else { voice };
+                let at = dest * MAX_VOICES + if def.scope == Scope::Global { 0 } else { voice };
                 if due || !self.held[at].get().1 {
                     let moved = if multiplicative {
                         self.factor(dest, from, frame, read)

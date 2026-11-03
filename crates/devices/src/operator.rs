@@ -15,17 +15,11 @@
 use std::sync::Arc;
 
 use bl_engine::{DeviceType, NodeConfig, NodeData, NodeEvent, Registry};
-use bl_model::device_layout::{
-    BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Page, PageStyle, PagesNode, TAB_HEIGHT,
-    Widget,
-};
 use bl_model::matrix::{
     DestDef, Kind as MatrixKind, MatrixLayout, Pick, Range as MatrixRange, Rate, Scope, SlotDef,
     SourceDef,
 };
-use bl_model::{
-    Device, DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit,
-};
+use bl_model::{Device, DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 use lspk_dsp::filter::pitch_of;
 use lspk_voice::unison::pan_gains;
 use lspk_voice::{MAX_VOICES, Start, VoiceBlock, VoiceEvent, VoiceEventKind};
@@ -38,7 +32,6 @@ use crate::instrument_filter::{CIRCUITS, InstrumentFilter, Kind, Per, PerFrame, 
 use crate::multisampler::shape;
 use crate::operator_envelope::{self as envelope, Curve, Loop, Shape};
 use crate::operator_lfo::{self as lfo, Lfo};
-use crate::sampler::FILTER_TYPE_CHOICES;
 
 /// Operator's device type.
 pub const OPERATOR: &str = "beatlayer.operator";
@@ -112,6 +105,9 @@ pub const PITCH_OSC: u32 = 145;
 pub const PITCH_LFO: ParamId = ParamId(149);
 pub const PITCH_DEST_B: ParamId = ParamId(150);
 pub const PITCH_AMOUNT_B: ParamId = ParamId(151);
+/// How far the pitch envelope moves the destinations switched on in A: Live's
+/// Dest. A on the Pitch section's page.
+pub const PITCH_AMOUNT_A: ParamId = ParamId(152);
 
 /// How far apart the filter's, the pitch's and the LFO's envelopes' first
 /// parameters are, and where each begins.
@@ -166,6 +162,9 @@ pub const LFO_AMOUNT_B: ParamId = ParamId(223);
 /// modulation depths and the shaper after it.
 pub const FILTER_ON: ParamId = ParamId(224);
 pub const FILTER_TYPE: ParamId = ParamId(225);
+/// The filter's slope, 12 or 24 dB per octave, which Live draws as two
+/// buttons beside its type.
+pub const FILTER_SLOPE: ParamId = ParamId(237);
 pub const FILTER_CIRCUIT: ParamId = ParamId(226);
 pub const FILTER_FREQ: ParamId = ParamId(227);
 pub const FILTER_RES: ParamId = ParamId(228);
@@ -195,6 +194,26 @@ pub const fn target_dest(source: usize, b: bool) -> ParamId {
 #[must_use]
 pub const fn target_amount(source: usize, b: bool) -> ParamId {
     ParamId(250 + source as u32 * 2 + b as u32)
+}
+
+/// The filter's types, and its slopes (R24). The type and the slope make the
+/// entry of the instruments' filter chooser: its type's two times, plus 1 for 24.
+pub const FILTER_TYPES: [&str; 5] = ["Low-pass", "High-pass", "Band-pass", "Notch", "Morph"];
+pub const FILTER_SLOPES: [&str; 2] = ["12", "24"];
+
+/// The entry of the instruments' filter chooser (the Sampler's Type choices)
+/// the type and the slope make, as `value` reads them.
+pub(crate) fn filter_entry(value: &impl Fn(ParamId) -> f64) -> usize {
+    let kind = (value(FILTER_TYPE) as usize).min(FILTER_TYPES.len() - 1);
+    kind * 2 + usize::from(value(FILTER_SLOPE) >= 0.5)
+}
+
+/// Whether global modulation source `source` has a chosen Destination B and
+/// Amount B: Live's Key and Pitch Bend rows put Time and Pitch there instead,
+/// which are `Time < Key` and `PB Range`.
+#[must_use]
+pub const fn has_destination_b(source: usize) -> bool {
+    source != 1 && source != 3
 }
 
 /// The shaper's curves: Off, then the multisampler's (R24).
@@ -323,41 +342,51 @@ fn parameters() -> Vec<ParamDescriptor> {
             .describe("The oscillator's output level; a modulator's sets how far it bends its carriers."),
             ParamDescriptor::choice(id(OSC_WAVE), &name("Wave"), &fm::WAVES, 0)
                 .describe("The waveform the oscillator plays."),
-            percent(id(OSC_FEEDBACK), &name("Feedback"), (0.0, 100.0), 0.0)
+            percent(id(OSC_FEEDBACK), &name("Feedback"), (0.0, 100.0), 0.0).decimals(0)
                 .describe("How far the oscillator modulates itself, if nothing modulates it."),
-            ParamDescriptor::continuous(
-                id(OSC_PHASE),
-                &name("Phase"),
-                (0.0, 360.0),
-                0.0,
-                ParamUnit::None,
-            )
-            .describe("Where in its cycle the oscillator starts, in degrees."),
+            percent(id(OSC_PHASE), &name("Phase"), (0.0, 100.0), 0.0).decimals(0)
+                .describe("Where in its cycle the oscillator starts, in per cent of a turn."),
             ParamDescriptor::toggle(id(OSC_RETRIGGER), &name("Retrigger"), true)
                 .describe("Starts the oscillator at Phase with each note."),
             percent(id(OSC_REPEAT), &name("Repeat"), (0.0, 100.0), 0.0)
                 .describe("How far the drawn partials of a User wave repeat above their count, each copy fainter."),
             ParamDescriptor::toggle(id(OSC_REPEAT_ON), &name("Repeat On"), false)
                 .describe("Repeats the drawn partials of a User wave above their count; off, the partials above it are silent."),
-            percent(id(OSC_VEL), &name("Osc < Vel"), (-100.0, 100.0), 0.0)
-                .describe("How far velocity moves the ratio, up to an octave."),
+            ParamDescriptor::continuous(
+                id(OSC_VEL),
+                &name("Osc < Vel"),
+                (-100.0, 100.0),
+                0.0,
+                ParamUnit::None,
+            )
+            .decimals(0)
+            .describe("How far velocity moves the ratio, up to an octave at 100."),
             ParamDescriptor::toggle(id(OSC_Q), &name("Q"), true)
                 .describe("Rounds the velocity-shifted Coarse to a whole step."),
-            percent(id(OSC_LEVEL_VEL), &name("Level < Vel"), (0.0, 100.0), 0.0)
+            percent(id(OSC_LEVEL_VEL), &name("Level < Vel"), (0.0, 100.0), 50.0).decimals(0)
                 .describe("How far velocity moves the level: at 100 %, the softest notes are nearly silent."),
-            percent(id(OSC_LEVEL_KEY), &name("Level < Key"), (-100.0, 100.0), 0.0)
+            percent(id(OSC_LEVEL_KEY), &name("Level < Key"), (-100.0, 100.0), 0.0).decimals(0)
                 .describe("How far the key moves the level, up to 6 dB per octave from C3."),
             ParamDescriptor::gain(id(ENV_INITIAL), &name("Initial"), 0.0, f64::NEG_INFINITY)
                 .describe("The envelope's level at the start of the attack."),
             ParamDescriptor::gain(id(ENV_PEAK), &name("Peak"), 0.0, 0.0)
                 .describe("The envelope's level at the end of the attack."),
-            ParamDescriptor::gain(id(ENV_SUSTAIN), &name("Sustain"), 0.0, 0.0)
+            ParamDescriptor::gain(
+                id(ENV_SUSTAIN),
+                &name("Sustain"),
+                0.0,
+                if op == 3 { -24.0 } else { 0.0 },
+            )
                 .describe("The level the envelope holds while the note does."),
-            time(id(ENV_ATTACK), &name("Attack"), 1.0)
+            time(id(ENV_ATTACK), &name("Attack"), 0.0)
                 .describe("How long the envelope takes from Initial to Peak."),
-            time(id(ENV_DECAY), &name("Decay"), 1_000.0)
-                .describe("How long the envelope takes from Peak to Sustain."),
-            time(id(ENV_RELEASE), &name("Release"), 50.0)
+            time(
+                id(ENV_DECAY),
+                &name("Decay"),
+                if op == 3 { 400.0 } else { 1_000.0 },
+            )
+            .describe("How long the envelope takes from Peak to Sustain."),
+            time(id(ENV_RELEASE), &name("Release"), 400.0)
                 .describe("How long the envelope takes to fall to silence after the note ends."),
             ParamDescriptor::choice(id(ENV_LOOP), &name("Loop"), &envelope::LOOPS, 0)
                 .describe("None, Loop, Beat, Sync or Trigger: how the envelope repeats or ignores the note's end."),
@@ -365,7 +394,7 @@ fn parameters() -> Vec<ParamDescriptor> {
                 .describe("How long Loop takes to return to Initial."),
             ParamDescriptor::choice(id(ENV_REPEAT), &name("Env Repeat"), &envelope::REPEATS, 4)
                 .describe("How often Beat and Sync start the envelope again, in beats."),
-            percent(id(ENV_TIME_VEL), &name("Time < Vel"), (-100.0, 100.0), 0.0)
+            percent(id(ENV_TIME_VEL), &name("Time < Vel"), (-100.0, 100.0), 0.0).decimals(0)
                 .describe("How far velocity shortens the envelope's times."),
         ]);
     }
@@ -378,16 +407,18 @@ fn parameters() -> Vec<ParamDescriptor> {
             .describe("Reads the oscillators' tables with interpolation."),
         percent(TONE, "Tone", (0.0, 100.0), 70.0)
             .describe("Limits the partials every oscillator plays: lower is darker."),
-        percent(TIME, "Time", (-100.0, 100.0), 0.0)
+        percent(TIME, "Time", (-100.0, 100.0), 0.0).decimals(0)
             .describe("Lengthens every envelope's times, or shortens them when negative; levels stay."),
         percent(TIME_KEY, "Time < Key", (-100.0, 100.0), 0.0)
             .describe("How far higher keys shorten every envelope's times, from C3."),
-        ParamDescriptor::gain(VOLUME, "Volume", 0.0, -6.0)
+        ParamDescriptor::gain(VOLUME, "Volume", 0.0, -18.0)
             .describe("The instrument's output level."),
         percent(PAN, "Pan", (-100.0, 100.0), 0.0).describe("Places the instrument between left and right."),
-        percent(PAN_KEY, "Pan < Key", (-100.0, 100.0), 0.0)
-            .describe("Pans low notes left and high notes right, hard four octaves either side of C3 at 100 %."),
-        percent(PAN_RANDOM, "Pan < Random", (0.0, 100.0), 0.0)
+        ParamDescriptor::continuous(PAN_KEY, "Pan < Key", (-100.0, 100.0), 0.0, ParamUnit::None)
+            .decimals(0)
+            .describe("Pans low notes left and high notes right, hard four octaves either side of C3 at 100."),
+        ParamDescriptor::continuous(PAN_RANDOM, "Pan < Random", (0.0, 100.0), 0.0, ParamUnit::None)
+            .decimals(0)
             .describe("Pans each note by a random amount up to this."),
         instrument::transpose(TRANSPOSE, 48),
         instrument::voices(VOICES, MAX_VOICES as i64, 6),
@@ -418,13 +449,17 @@ fn parameters() -> Vec<ParamDescriptor> {
             .describe("Sends the pitch envelope to the LFO's rate."),
         ParamDescriptor::choice(PITCH_DEST_B, "Pitch Dest B", &DESTINATIONS, 0)
             .describe("Sends the pitch envelope to one more destination."),
+        percent(PITCH_AMOUNT_A, "Pitch Amount A", (-100.0, 100.0), 100.0)
+            .describe("How far the pitch envelope moves the destinations switched on in A."),
         percent(PITCH_AMOUNT_B, "Pitch Amount B", (-100.0, 100.0), 0.0)
             .describe("How far the pitch envelope moves its second destination."),
     ]);
-    for (name, base, level) in [
-        ("Filter", FILTER_ENV, 0.0),
-        ("Pitch", PITCH_ENV, 0.0),
-        ("LFO", LFO_ENV, 100.0),
+    // Each envelope's starting values as Live shows them: Initial, Peak,
+    // Sustain, End, Decay.
+    for (name, base, [initial, peak, sustain, end], decay_ms) in [
+        ("Filter", FILTER_ENV, [0.0, 100.0, 0.0, 0.0], 600.0),
+        ("Pitch", PITCH_ENV, [25.0, 25.0, 0.0, 0.0], 400.0),
+        ("LFO", LFO_ENV, [0.0, 100.0, 100.0, 0.0], 600.0),
     ] {
         let id = |control| shaped(base, control);
         let name = |what: &str| format!("{name} {what}");
@@ -439,17 +474,17 @@ fn parameters() -> Vec<ParamDescriptor> {
             .describe("Bends the segment: positive starts fast and ends slow, negative the other way, 0 is straight.")
         };
         params.extend([
-            percent(id(SHAPED_INITIAL), &name("Initial"), (-100.0, 100.0), level)
+            percent(id(SHAPED_INITIAL), &name("Initial"), (-100.0, 100.0), initial)
                 .describe("The envelope's level at the start of the attack."),
-            percent(id(SHAPED_PEAK), &name("Peak"), (-100.0, 100.0), level)
+            percent(id(SHAPED_PEAK), &name("Peak"), (-100.0, 100.0), peak)
                 .describe("The envelope's level at the end of the attack."),
-            percent(id(SHAPED_SUSTAIN), &name("Sustain"), (-100.0, 100.0), level)
+            percent(id(SHAPED_SUSTAIN), &name("Sustain"), (-100.0, 100.0), sustain)
                 .describe("The level the envelope holds while the note does."),
-            percent(id(SHAPED_END), &name("End"), (-100.0, 100.0), level)
+            percent(id(SHAPED_END), &name("End"), (-100.0, 100.0), end)
                 .describe("The level the envelope reaches at the end of its release."),
             time(id(SHAPED_ATTACK), &name("Attack"), 0.0)
                 .describe("How long the envelope takes from Initial to Peak."),
-            time(id(SHAPED_DECAY), &name("Decay"), 1_000.0)
+            time(id(SHAPED_DECAY), &name("Decay"), decay_ms)
                 .describe("How long the envelope takes from Peak to Sustain."),
             time(id(SHAPED_RELEASE), &name("Release"), 50.0)
                 .describe("How long the envelope takes from Sustain to End after the note ends."),
@@ -462,22 +497,22 @@ fn parameters() -> Vec<ParamDescriptor> {
                 .describe("How long Loop takes to return to Initial."),
             ParamDescriptor::choice(id(SHAPED_REPEAT), &name("Repeat"), &envelope::REPEATS, 4)
                 .describe("How often Beat and Sync start the envelope again, in beats."),
-            percent(id(SHAPED_TIME_VEL), &name("Time < Vel"), (-100.0, 100.0), 0.0)
+            percent(id(SHAPED_TIME_VEL), &name("Time < Vel"), (-100.0, 100.0), 0.0).decimals(0)
                 .describe("How far velocity shortens the envelope's times."),
         ]);
     }
     params.extend([
-        ParamDescriptor::toggle(LFO_ON, "LFO On", true).describe("Plays the LFO."),
+        ParamDescriptor::toggle(LFO_ON, "LFO On", false).describe("Plays the LFO."),
         ParamDescriptor::choice(LFO_WAVE, "LFO Wave", &lfo::WAVES, 0)
             .describe("The LFO's waveform: Noise is band-pass filtered noise."),
         ParamDescriptor::choice(LFO_RANGE, "LFO Range", &lfo::RANGES, 0).describe(
             "Low runs from 50 seconds a cycle to 30 Hz, Hi from 8 Hz to 12 kHz, and Sync in divisions of the song's tempo.",
         ),
-        percent(LFO_RATE, "LFO Rate", (0.0, 100.0), 50.0)
-            .describe("The LFO's speed within its range."),
+        ParamDescriptor::continuous(LFO_RATE, "LFO Rate", (0.0, 100.0), 100.0, ParamUnit::None)
+            .describe("The LFO's speed within its range, from 0 to 100."),
         percent(LFO_RATE_KEY, "LFO Rate < Key", (0.0, 100.0), 0.0)
             .describe("How far higher keys speed the LFO: at 100 %, it doubles each octave."),
-        percent(LFO_AMOUNT, "LFO Amount", (0.0, 100.0), 0.0)
+        percent(LFO_AMOUNT, "LFO Amount", (0.0, 100.0), 10.0)
             .describe("How far the LFO moves its destinations."),
         percent(LFO_AMT_VEL, "LFO Amt < Vel", (0.0, 100.0), 0.0)
             .describe("How far velocity scales the LFO's amount: at 100 %, the softest notes have none."),
@@ -503,22 +538,24 @@ fn parameters() -> Vec<ParamDescriptor> {
             .describe("Sends the LFO to one more destination."),
         percent(LFO_AMOUNT_B, "LFO Amount B", (-100.0, 100.0), 0.0)
             .describe("How far the LFO moves its second destination."),
-        ParamDescriptor::toggle(FILTER_ON, "Filter On", false)
+        ParamDescriptor::toggle(FILTER_ON, "Filter On", true)
             .describe("Plays every voice through the filter."),
-        ParamDescriptor::choice(FILTER_TYPE, "Filter Type", &FILTER_TYPE_CHOICES, 1)
-            .describe("The filter's type and slope: low-pass, high-pass, band-pass, notch or Morph, at 12 or 24 dB per octave."),
+        ParamDescriptor::choice(FILTER_TYPE, "Filter Type", &FILTER_TYPES, 0)
+            .describe("The filter's type: low-pass, high-pass, band-pass, notch or Morph."),
+        ParamDescriptor::choice(FILTER_SLOPE, "Filter Slope", &FILTER_SLOPES, 1)
+            .describe("The filter's slope, 12 or 24 dB per octave."),
         ParamDescriptor::choice(FILTER_CIRCUIT, "Filter Circuit", &CIRCUITS, 0)
             .describe("The filter's circuit; one a type doesn't offer plays Clean."),
         ParamDescriptor::continuous(
             FILTER_FREQ,
             "Filter Freq",
             (20.0, 20_000.0),
-            20_000.0,
+            12_000.0,
             ParamUnit::Hertz,
         )
         .logarithmic()
         .describe("The filter's cutoff frequency."),
-        percent(FILTER_RES, "Filter Res", (0.0, 100.0), 0.0)
+        percent(FILTER_RES, "Filter Res", (0.0, 100.0), 28.0)
             .describe("Raises the filter's resonance at the cutoff."),
         ParamDescriptor::continuous(
             FILTER_DRIVE,
@@ -528,14 +565,20 @@ fn parameters() -> Vec<ParamDescriptor> {
             ParamUnit::Decibels,
         )
         .describe("Drives the signal into the filter's circuit; Clean and Morph ignore it."),
-        percent(FILTER_MORPH, "Filter Morph", (0.0, 100.0), 0.0)
-            .describe("Where the Morph type sits between low-pass, band-pass, high-pass and notch."),
+        percent(FILTER_MORPH, "Filter Morph", (0.0, 100.0), 0.0).describe(
+            "Where the Morph type sits between low-pass, band-pass, high-pass and notch.",
+        ),
         percent(FREQ_VEL, "Freq < Vel", (-100.0, 100.0), 0.0)
+            .decimals(0)
             .describe("How far velocity moves the cutoff, up to six octaves."),
-        percent(FREQ_KEY, "Freq < Key", (0.0, 100.0), 0.0)
-            .describe("How far the key moves the cutoff: at 100 %, it doubles each octave from C3."),
+        percent(FREQ_KEY, "Freq < Key", (0.0, 100.0), 0.0).describe(
+            "How far the key moves the cutoff: at 100 %, it doubles each octave from C3.",
+        ),
         percent(FREQ_ENV, "Freq < Envelope", (-100.0, 100.0), 0.0)
-            .describe("How far the filter's envelope moves the cutoff: 100 % reaches nine octaves."),
+            .decimals(0)
+            .describe(
+                "How far the filter's envelope moves the cutoff: 100 % reaches nine octaves.",
+            ),
         ParamDescriptor::choice(SHAPER_TYPE, "Shaper Type", &SHAPERS, 0)
             .describe("The shaper's curve after the filter; Off bypasses it."),
         ParamDescriptor::continuous(
@@ -550,7 +593,12 @@ fn parameters() -> Vec<ParamDescriptor> {
             .describe("Mixes the shaped signal with the unshaped; at 0 %, the shaper is bypassed."),
     ]);
     for (source, name) in TARGET_SOURCES.into_iter().enumerate() {
-        for (b, letter) in [(false, "A"), (true, "B")] {
+        let letters: &[(bool, &str)] = if has_destination_b(source) {
+            &[(false, "A"), (true, "B")]
+        } else {
+            &[(false, "A")]
+        };
+        for &(b, letter) in letters {
             params.push(
                 ParamDescriptor::choice(
                     target_dest(source, b),
@@ -561,14 +609,16 @@ fn parameters() -> Vec<ParamDescriptor> {
                 .describe("The destination this source moves."),
             );
         }
-        for (b, letter) in [(false, "A"), (true, "B")] {
+        for &(b, letter) in letters {
             params.push(
-                percent(
+                ParamDescriptor::continuous(
                     target_amount(source, b),
                     &format!("{name} Amount {letter}"),
                     (-100.0, 100.0),
                     0.0,
+                    ParamUnit::None,
                 )
+                .decimals(2)
                 .describe("How far this source moves its destination."),
             );
         }
@@ -576,163 +626,29 @@ fn parameters() -> Vec<ParamDescriptor> {
     params.extend([
         ParamDescriptor::toggle(GLIDE_ON, "Glide", false)
             .describe("Slides each new note from the last, whether or not they overlap."),
-        instrument::glide_time(GLIDE_TIME, 10_000.0, 100.0),
-        percent(SPREAD, "Spread", (0.0, 100.0), 0.0).describe(
+        instrument::glide_time(GLIDE_TIME, 10_000.0, 50.0),
+        percent(SPREAD, "Spread", (0.0, 100.0), 0.0).decimals(0).describe(
             "Plays each new note as two detuned copies, left and right; the copies' mono sum starts in phase.",
         ),
     ]);
     params
 }
 
-/// A band `height` tall of the controls for `ids`, each drawn as its
-/// parameter's kind says.
-fn band(params: &[ParamDescriptor], height: f32, ids: &[ParamId]) -> LayoutNode {
-    let controls: Vec<(ParamId, Widget)> = ids
-        .iter()
-        .map(|id| {
-            let kind = &params
-                .iter()
-                .find(|p| p.id == *id)
-                .expect("a parameter")
-                .kind;
-            (*id, Widget::for_kind(kind))
-        })
-        .collect();
-    LayoutNode::Band(ControlBand::stacked(height, &controls))
-}
-
-/// The shell's sections in order (R18): each a page with its main controls
-/// in the strip and the rest in the display. Which controls are main and
-/// which fill the display is Beatlayer's own.
-fn layout(params: &[ParamDescriptor]) -> DeviceLayout {
-    let section = |ids: &[ParamId]| band(params, BODY_HEIGHT - TAB_HEIGHT, ids);
-    let display = |ids: &[ParamId]| band(params, BODY_HEIGHT, ids);
-    let range = |first: u32, count: u32| (first..first + count).map(ParamId).collect::<Vec<_>>();
-    let envelope_of = |base: u32| range(base, 14);
-    // Spec: operator R29. Every section's display is one cell, which the
-    // section's view fills: layout is open (the displays' placement).
-    let cell = || LayoutNode::Cell(DisplayCell::new("Display", 160.0, BODY_HEIGHT, 1.0));
-    let mut pages = vec![
-        Page::new(
-            "Global",
-            LayoutNode::Row(vec![
-                cell(),
-                display(&[
-                    ANTIALIAS,
-                    INTERPOLATION,
-                    TONE,
-                    TIME,
-                    TIME_KEY,
-                    PAN,
-                    PAN_KEY,
-                    PAN_RANDOM,
-                    TRANSPOSE,
-                    VOICES,
-                    RETRIGGER,
-                    PB_RANGE,
-                    GLIDE_ON,
-                    GLIDE_TIME,
-                    SPREAD,
-                ]),
-                display(
-                    &(0..TARGET_SOURCES.len())
-                        .flat_map(|s| {
-                            [
-                                target_dest(s, false),
-                                target_amount(s, false),
-                                target_dest(s, true),
-                                target_amount(s, true),
-                            ]
-                        })
-                        .collect::<Vec<_>>(),
-                ),
-            ]),
-        )
-        .with_section(section(&[ALGORITHM, VOLUME])),
-    ];
-    for (op, letter) in ["A", "B", "C", "D"].into_iter().enumerate() {
-        let id = |control| osc(op, control);
-        let extra: Vec<ParamId> = [
-            OSC_FINE,
-            OSC_FIXED,
-            OSC_FREQ,
-            OSC_MULTI,
-            OSC_FEEDBACK,
-            OSC_PHASE,
-            OSC_RETRIGGER,
-            OSC_REPEAT,
-            OSC_REPEAT_ON,
-            OSC_VEL,
-            OSC_Q,
-            OSC_LEVEL_VEL,
-            OSC_LEVEL_KEY,
-        ]
+/// The slopes of the filter's, the pitch's and the LFO's envelopes: Live sets
+/// them by the handles on the envelope's display, so no control is laid out
+/// for them.
+fn slopes() -> Vec<ParamId> {
+    [FILTER_ENV, PITCH_ENV, LFO_ENV]
         .into_iter()
-        .map(id)
-        .collect();
-        let envelope: Vec<ParamId> = (ENV_INITIAL..=ENV_TIME_VEL).map(id).collect();
-        pages.push(
-            Page::new(
-                &format!("Osc {letter}"),
-                LayoutNode::Row(vec![cell(), display(&extra), display(&envelope)]),
-            )
-            .with_section(section(&[
-                id(OSC_ON),
-                id(OSC_WAVE),
-                id(OSC_COARSE),
-                id(OSC_LEVEL),
-            ])),
-        );
-    }
-    let mut lfo_controls = vec![LFO_RANGE, LFO_RATE_KEY, LFO_AMT_VEL, LFO_RETRIGGER];
-    lfo_controls.extend((0..OPERATORS as u32).map(|op| ParamId(LFO_OSC + op)));
-    lfo_controls.extend([LFO_FILTER, LFO_AMOUNT_A, LFO_DEST_B, LFO_AMOUNT_B]);
-    pages.push(
-        Page::new(
-            "LFO",
-            LayoutNode::Row(vec![
-                cell(),
-                display(&lfo_controls),
-                display(&envelope_of(LFO_ENV)),
-            ]),
-        )
-        .with_section(section(&[LFO_ON, LFO_WAVE, LFO_RATE, LFO_AMOUNT])),
-    );
-    let filter_controls = [
-        FILTER_TYPE,
-        FILTER_CIRCUIT,
-        FILTER_DRIVE,
-        FILTER_MORPH,
-        FREQ_VEL,
-        FREQ_KEY,
-        FREQ_ENV,
-        SHAPER_TYPE,
-        SHAPER_DRIVE,
-        SHAPER_WET,
-    ];
-    pages.push(
-        Page::new(
-            "Filter",
-            LayoutNode::Row(vec![
-                cell(),
-                display(&filter_controls),
-                display(&envelope_of(FILTER_ENV)),
-            ]),
-        )
-        .with_section(section(&[FILTER_ON, FILTER_FREQ, FILTER_RES])),
-    );
-    let mut pitch = envelope_of(PITCH_ENV);
-    pitch.extend((0..OPERATORS as u32).map(|op| ParamId(PITCH_OSC + op)));
-    pitch.extend([PITCH_LFO, PITCH_DEST_B, PITCH_AMOUNT_B]);
-    pages.push(
-        Page::new("Pitch", LayoutNode::Row(vec![cell(), display(&pitch)]))
-            .with_section(section(&[PITCH_ON, PITCH_AMOUNT])),
-    );
-    DeviceLayout::new(LayoutNode::Row(vec![LayoutNode::Pages(PagesNode::new(
-        "Sections",
-        PageStyle::Shell,
-        pages,
-    ))]))
+        .flat_map(|base| {
+            [
+                SHAPED_ATTACK_SLOPE,
+                SHAPED_DECAY_SLOPE,
+                SHAPED_RELEASE_SLOPE,
+            ]
+            .map(|c| shaped(base, c))
+        })
+        .collect()
 }
 
 /// Operator's banks of eight for control surfaces (R19, decision 4): the
@@ -895,17 +811,18 @@ fn banks() -> Vec<(String, Vec<String>)> {
             owned(&[
                 "Filter On",
                 "Filter Type",
+                "Filter Slope",
                 "Filter Circuit",
                 "Filter Freq",
                 "Filter Res",
                 "Filter Drive",
                 "Filter Morph",
-                "Freq < Vel",
             ]),
         ),
         (
             "Filter 2".to_owned(),
             owned(&[
+                "Freq < Vel",
                 "Freq < Key",
                 "Freq < Envelope",
                 "Shaper Type",
@@ -914,10 +831,15 @@ fn banks() -> Vec<(String, Vec<String>)> {
             ]),
         ),
     ]);
-    for source in TARGET_SOURCES {
+    for (index, source) in TARGET_SOURCES.into_iter().enumerate() {
+        let whats: &[&str] = if has_destination_b(index) {
+            &["Dest A", "Amount A", "Dest B", "Amount B"]
+        } else {
+            &["Dest A", "Amount A"]
+        };
         banks.push((
             format!("{source} Targets"),
-            ["Dest A", "Amount A", "Dest B", "Amount B"]
+            whats
                 .iter()
                 .map(|what| format!("{source} {what}"))
                 .collect(),
@@ -939,7 +861,10 @@ fn banks() -> Vec<(String, Vec<String>)> {
             .map(str::to_owned)
             .to_vec(),
         ),
-        ("Pitch 2".to_owned(), vec!["Pitch Amount B".to_owned()]),
+        (
+            "Pitch 2".to_owned(),
+            vec!["Pitch Amount A".to_owned(), "Pitch Amount B".to_owned()],
+        ),
     ]);
     banks
 }
@@ -1018,11 +943,14 @@ pub fn operator_matrix() -> MatrixLayout {
             .collect(),
         slots: (0..TARGET_SOURCES.len())
             .flat_map(|source| {
-                [false, true].map(|b| SlotDef {
-                    source: Pick::Fixed(source as u8),
-                    dest: Pick::Chosen(target_dest(source, b)),
-                    amount: target_amount(source, b),
-                })
+                [false, true]
+                    .into_iter()
+                    .filter(move |&b| !b || has_destination_b(source))
+                    .map(move |b| SlotDef {
+                        source: Pick::Fixed(source as u8),
+                        dest: Pick::Chosen(target_dest(source, b)),
+                        amount: target_amount(source, b),
+                    })
             })
             .collect(),
         forbidden: Vec::new(),
@@ -1033,7 +961,6 @@ pub fn operator_matrix() -> MatrixLayout {
 #[must_use]
 pub fn operator_type() -> DeviceType {
     let params = parameters();
-    let layout = layout(&params);
     let banks = banks();
     let banks: Vec<(&str, Vec<&str>)> = banks
         .iter()
@@ -1041,14 +968,27 @@ pub fn operator_type() -> DeviceType {
         .collect();
     let banks: Vec<(&str, &[&str])> = banks.iter().map(|(n, p)| (*n, p.as_slice())).collect();
     DeviceType::native(OPERATOR, "Operator", DeviceRole::Instrument)
-        .with_description(
+        .with_description(alternates(
             DeviceDescription::new(params)
-                .with_layout(layout)
+                .with_layout(crate::operator_panel::layout())
                 .with_menu_options(&[NOTE_PB])
+                .with_grid_params(slopes())
                 .with_views(&crate::operator_display::VIEWS)
                 .with_banks(&banks),
-        )
+        ))
         .with_matrix(operator_matrix())
+}
+
+/// Which controls give their place to another's: Fixed puts Freq and Multi in
+/// the places of Coarse and Fine, and the Morph type puts Morph in the place
+/// of the filter's Drive.
+fn alternates(mut description: DeviceDescription) -> DeviceDescription {
+    for op in 0..OPERATORS {
+        description = description
+            .with_alternate(osc(op, OSC_FIXED), osc(op, OSC_COARSE), osc(op, OSC_FREQ))
+            .with_alternate(osc(op, OSC_FIXED), osc(op, OSC_FINE), osc(op, OSC_MULTI));
+    }
+    description.with_alternate_at((FILTER_TYPE, 4), FILTER_DRIVE, FILTER_MORPH)
 }
 
 /// A factory preset: a name and the parameters it sets, the rest staying at
@@ -1592,7 +1532,7 @@ impl Synth {
             s.level = 1.0;
             s.wave = control(OSC_WAVE) as usize;
             s.feedback = (control(OSC_FEEDBACK) / 100.0) as f32;
-            s.phase = (control(OSC_PHASE) / 360.0) as f32;
+            s.phase = (control(OSC_PHASE) / 100.0) as f32;
             s.retrigger = control(OSC_RETRIGGER) >= 0.5;
             self.fixed[op] = s.fixed;
             self.level_vel[op] = (control(OSC_LEVEL_VEL) / 100.0) as f32;
@@ -1611,7 +1551,7 @@ impl Synth {
             self.time_vel[index] = (value(shaped(base, SHAPED_TIME_VEL)) / 100.0) as f32;
         }
         self.pitch_on = value(PITCH_ON) >= 0.5;
-        self.pitch_amount = (value(PITCH_AMOUNT) / 100.0) as f32;
+        self.pitch_amount = (value(PITCH_AMOUNT) / 100.0 * value(PITCH_AMOUNT_A) / 100.0) as f32;
         for op in 0..OPERATORS {
             self.pitch_to[op] = value(ParamId(PITCH_OSC + op as u32)) >= 0.5;
         }
@@ -1651,7 +1591,7 @@ impl Synth {
                 self.audible |= 1 << op;
             }
         }
-        let entry = (value(FILTER_TYPE) as usize).min(FILTER_TYPE_CHOICES.len() - 1);
+        let entry = filter_entry(&value);
         self.setup = Setup::new(entry / 2, entry % 2 == 1, value(FILTER_CIRCUIT) as usize);
         self.filter_on = value(FILTER_ON) >= 0.5;
         self.shaper_kind = value(SHAPER_TYPE) as usize;

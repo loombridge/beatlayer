@@ -129,7 +129,7 @@ fn every_lfo_route_and_mpe_setting_is_reachable_by_command() {
     // And every Mod destination's own parameter, by command.
     for (id, value) in [
         (OSC1_GAIN, 1.0),
-        (OSC1_SHAPE, 50.0),
+        (OSC1_SHAPE, 0.5),
         (OSC2_GAIN, 0.5),
         (OSC2_DETUNE, -5.0),
         (NOISE_GAIN, 0.25),
@@ -219,12 +219,12 @@ fn every_voice_mode_drift_glide_cycle_and_hi_quality_setting_is_reachable_by_com
         )
     };
 
-    // A new device plays Poly, with Drift at 0 %, Legato off, Glide at 0,
-    // Envelope 2 an ADSR and Hi-Quality off, which is a menu option.
+    // A new device plays Poly, with Drift at Live's 7.2 %, Legato off, Glide
+    // at 0, Envelope 2 an ADSR and Hi-Quality off, which is a menu option.
     let before = parameters(&mut client);
+    assert_eq!(read(&before, "Drift").0, 7.2, "Drift in a new device");
     for name in [
         "Voice Mode",
-        "Drift",
         "Legato",
         "Glide Time",
         "Env 2 Mode",

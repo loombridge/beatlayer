@@ -22,7 +22,7 @@ use egui::{
 };
 use serde_json::json;
 
-use super::{Control, focus_ring, page_button_id, short_name};
+use super::{Control, focus_ring, page_button_id, short_name, short_name_of};
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
 use crate::widgets::{paint_ring_segment, ring_segment};
@@ -44,6 +44,12 @@ const LARGE_TEXT: f32 = 17.5;
 /// Where a large number's figures start under the top of its control, in
 /// points: the name's row and a gap (observed).
 const LARGE_NUMBER_TOP: f32 = 11.0;
+
+/// Operator's knob: its ring's radius, how far under the top of its place the
+/// ring and its value sit, in points (observed).
+const MINI_RADIUS: f32 = 9.5;
+const MINI_RING_TOP: f32 = 12.7;
+const MINI_VALUE_TOP: f32 = 29.6;
 
 /// The font of a device's labels, values and buttons.
 #[must_use]
@@ -85,7 +91,7 @@ impl Control<'_> {
         ui.painter().text(
             top.center(),
             Align2::CENTER_CENTER,
-            &*self.name(),
+            self.name(),
             font(),
             theme.colors.text.0,
         );
@@ -93,9 +99,9 @@ impl Control<'_> {
     }
 
     /// The name the control shows: its caption where the layout gives one.
-    pub(super) fn name(&self) -> std::borrow::Cow<'_, str> {
+    pub(super) fn name(&self) -> &str {
         self.caption
-            .map_or_else(|| short_name(&self.descriptor.name), Into::into)
+            .unwrap_or_else(|| short_name_of(&self.descriptor.name, self.trim))
     }
 
     /// Whether the value is a lit (on) one of a switch.
@@ -121,7 +127,6 @@ impl Control<'_> {
         crate::focus::register(ui.ctx(), self.id(), bl_shell::Area::Detail, None);
         self.value_input(ui, &response, events);
         let c = &theme.colors;
-        let painter = ui.painter();
         let radius = if small {
             SMALL_KNOB_DIAMETER
         } else {
@@ -129,6 +134,58 @@ impl Control<'_> {
         } / 2.0;
         // The ring hangs from the top of the face, its open foot unused.
         let centre = pos2(face.center().x, face.top() + radius);
+        self.ring(ui, theme, centre, radius);
+        ui.painter().text(
+            value_row.center(),
+            Align2::CENTER_CENTER,
+            self.text
+                .clone()
+                .unwrap_or_else(|| self.descriptor.format(self.shown())),
+            font(),
+            c.text.0,
+        );
+        focus_ring(ui, theme, self.rect, &response);
+        self.describe(ui, &response, Role::Slider);
+        self.knob_menus(&response, events);
+    }
+
+    /// Operator's knob: its name over its left edge, a ring 19 points across
+    /// and its value at the ring's lower right (observed in Live 12.4.16, 2
+    /// November 2026; layout L-DEV-066).
+    pub(super) fn mini_knob(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
+        let c = &theme.colors;
+        let response = ui.interact(self.rect, self.id(), Sense::click_and_drag());
+        crate::focus::register(ui.ctx(), self.id(), bl_shell::Area::Detail, None);
+        self.value_input(ui, &response, events);
+        ui.painter().text(
+            self.rect.left_top() + vec2(0.0, LABEL_HEIGHT / 2.0),
+            Align2::LEFT_CENTER,
+            short_name_of(&self.descriptor.name, self.trim),
+            font(),
+            c.text.0,
+        );
+        let centre = self.rect.left_top() + vec2(MINI_RADIUS, MINI_RING_TOP + MINI_RADIUS);
+        self.ring(ui, theme, centre, MINI_RADIUS);
+        ui.painter().text(
+            self.rect.left_top() + vec2(MINI_RADIUS + 2.0, MINI_VALUE_TOP),
+            Align2::LEFT_CENTER,
+            self.text
+                .clone()
+                .unwrap_or_else(|| self.descriptor.format(self.shown())),
+            font(),
+            c.text.0,
+        );
+        focus_ring(ui, theme, self.rect, &response);
+        self.describe(ui, &response, Role::Slider);
+        self.knob_menus(&response, events);
+    }
+
+    /// A knob's ring of `radius` about `centre`: dark, with the lit arc over
+    /// it, the notch at a bipolar knob's zero, the modulation's segment and
+    /// the pointer.
+    fn ring(&self, ui: &Ui, theme: &Theme, centre: Pos2, radius: f32) {
+        let c = &theme.colors;
+        let painter = ui.painter();
         // The arc sweeps 300 degrees, from lower left to lower right.
         let (from, sweep) = (PI * 0.5 + PI / 6.0, PI * 5.0 / 3.0);
         let point = |to: f32| {
@@ -172,18 +229,6 @@ impl Control<'_> {
             paint_ring_segment(painter, theme, segment, point);
         }
         painter.line_segment([centre, point(n)], Stroke::new(1.5, c.text.0));
-        painter.text(
-            value_row.center(),
-            Align2::CENTER_CENTER,
-            self.text
-                .clone()
-                .unwrap_or_else(|| self.descriptor.format(self.shown())),
-            font(),
-            c.text.0,
-        );
-        focus_ring(ui, theme, self.rect, &response);
-        self.describe(ui, &response, Role::Slider);
-        self.knob_menus(&response, events);
     }
 
     /// Where along its sweep a knob's lit arc starts: the low end, or zero
@@ -294,13 +339,15 @@ impl Control<'_> {
         if on {
             painter.rect_filled(square.shrink(2.0), 0.0, self.lit(theme));
         }
-        painter.text(
-            pos2(square.right() + 4.0, self.rect.center().y),
-            Align2::LEFT_CENTER,
-            self.name(),
-            font(),
-            c.text_dim.0,
-        );
+        if !self.unnamed {
+            painter.text(
+                pos2(square.right() + 4.0, self.rect.center().y),
+                Align2::LEFT_CENTER,
+                self.name(),
+                font(),
+                c.text_dim.0,
+            );
+        }
         if Self::chosen(ui, &response) {
             self.change(if on { 0.0 } else { 1.0 }, events);
         }
@@ -486,16 +533,26 @@ impl Control<'_> {
         }
         let text = self.descriptor.format(self.value);
         if style == ChooserStyle::Unboxed {
-            // The value from the box's left, the ▼ after it.
-            let used = painter
-                .text(
-                    pos2(field.left(), field.center().y),
-                    Align2::LEFT_CENTER,
-                    &text,
-                    font(),
-                    ink,
-                )
-                .width();
+            // The value from the box's left, the ▼ after it: a waveform's
+            // choice is drawn as the waveform, as Live's choosers do.
+            let wave = Rect::from_min_size(
+                field.left_top() + vec2(0.0, 2.0),
+                vec2(18.0, BOX_HEIGHT - 4.0),
+            );
+            let used =
+                if self.unnamed && super::drift_drawings::wave_icon(painter, wave, &text, ink) {
+                    wave.width()
+                } else {
+                    painter
+                        .text(
+                            pos2(field.left(), field.center().y),
+                            Align2::LEFT_CENTER,
+                            &text,
+                            font(),
+                            ink,
+                        )
+                        .width()
+                };
             paint_glyph(
                 painter,
                 Rect::from_center_size(
@@ -506,13 +563,31 @@ impl Control<'_> {
                 c.text.0,
             );
         } else {
-            painter.text(
-                pos2(field.left() + 3.0, field.center().y),
-                Align2::LEFT_CENTER,
-                text,
-                font(),
-                ink,
-            );
+            // A filter's type reads as its response where the chooser has no
+            // name over it (Operator's), as Live draws it.
+            match (style == ChooserStyle::Nameless)
+                .then(|| filter_glyph(&text))
+                .flatten()
+            {
+                Some(glyph) => paint_glyph(
+                    painter,
+                    Rect::from_center_size(
+                        pos2(field.left() + 12.0, field.center().y),
+                        vec2(14.0, 8.0),
+                    ),
+                    glyph,
+                    ink,
+                ),
+                None => {
+                    painter.text(
+                        pos2(field.left() + 3.0, field.center().y),
+                        Align2::LEFT_CENTER,
+                        text,
+                        font(),
+                        ink,
+                    );
+                }
+            }
             paint_glyph(
                 painter,
                 Rect::from_center_size(pos2(field.right() - 6.0, field.center().y), vec2(5.0, 5.0)),
@@ -520,24 +595,52 @@ impl Control<'_> {
                 c.text.0,
             );
         }
+
         focus_ring(ui, theme, field, &response);
-        if let bl_model::ParamKind::Choice { choices } = &self.descriptor.kind {
-            egui::Popup::menu(&response).show(|ui| {
-                for (index, choice) in choices.iter().enumerate() {
-                    if ui
-                        .selectable_label(index as f64 == self.value, choice)
-                        .clicked()
-                    {
-                        self.change(index as f64, events);
-                        ui.close();
-                    }
-                }
-            });
-        }
+        self.menu(&response, events);
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_role(Role::ComboBox);
             node.set_label(self.descriptor.name.clone());
             node.set_value(self.descriptor.format(self.value));
+        });
+    }
+
+    /// What a chooser or a row of buttons picks between, each as the value it
+    /// sets and its name: a choice parameter's names, every whole number of an
+    /// integer one, or Off and On for a switch.
+    fn items(&self) -> Vec<(f64, String)> {
+        match &self.descriptor.kind {
+            bl_model::ParamKind::Choice { choices } => choices
+                .iter()
+                .enumerate()
+                .map(|(index, name)| (index as f64, name.clone()))
+                .collect(),
+            bl_model::ParamKind::Integer { .. } => {
+                let (low, high) = (self.descriptor.min() as i64, self.descriptor.max() as i64);
+                (low..=high)
+                    .map(|n| (n as f64, self.descriptor.format(n as f64)))
+                    .collect()
+            }
+            bl_model::ParamKind::Toggle => {
+                vec![(0.0, "Off".to_owned()), (1.0, "On".to_owned())]
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// The menu of a chooser's choices.
+    fn menu(&self, response: &Response, events: &mut Vec<UiEvent>) {
+        let items = self.items();
+        if items.is_empty() {
+            return;
+        }
+        egui::Popup::menu(response).show(|ui| {
+            for (value, name) in &items {
+                if ui.selectable_label(*value == self.value, name).clicked() {
+                    self.change(*value, events);
+                    ui.close();
+                }
+            }
         });
     }
 
@@ -610,7 +713,6 @@ impl Control<'_> {
         let look = if outlined { Look::Outlined } else { Look::Dark };
         let on = self.on();
         let name = self.name();
-        let name = &*name;
         let name = chars.map_or(name, |n| {
             name.char_indices()
                 .nth(n)
@@ -673,7 +775,7 @@ impl Control<'_> {
         } else if let Some(glyph) = glyph {
             Face::Glyph(glyph)
         } else {
-            Face::Text(&self.name())
+            Face::Text(self.name())
         };
         let response = self.button(ui, theme, (self.rect, self.id()), (Look::Dark, on), face);
         if Self::chosen(ui, &response) {
@@ -789,7 +891,7 @@ impl Control<'_> {
         let c = &theme.colors;
         let painter = ui.painter();
         let name = short_name(&self.descriptor.name);
-        let wide = text_width(painter, &name, c.text_dim.0);
+        let wide = text_width(painter, name, c.text_dim.0);
         painter.text(
             self.rect.left_center(),
             Align2::LEFT_CENTER,
@@ -818,25 +920,23 @@ impl Control<'_> {
         events: &mut Vec<UiEvent>,
         (cells, icons): (&[Rect], bool),
     ) {
-        let bl_model::ParamKind::Choice { choices } = &self.descriptor.kind else {
-            return;
-        };
-        for (index, (rect, choice)) in cells.iter().zip(choices).enumerate() {
-            let chosen = index as f64 == self.value;
-            let glyph = icons.then(|| filter_glyph(choice)).flatten();
-            let id = self.id().with(index);
-            let face = glyph.map_or(Face::Text(choice), Face::Glyph);
+        for (rect, (value, choice)) in cells.iter().zip(self.items()) {
+            let chosen = (value - self.value).abs() < 1e-9;
+            let glyph = icons.then(|| filter_glyph(&choice)).flatten();
+            let id = self.id().with(value.to_bits());
+            let face = glyph.map_or(Face::Text(&choice), Face::Glyph);
             let response = self.button(ui, theme, (*rect, id), (Look::Dark, chosen), face);
             if Self::chosen(ui, &response) && !chosen {
-                self.change(index as f64, events);
+                self.change(value, events);
             }
-            let (name, choice) = (self.descriptor.name.clone(), choice.clone());
+            let name = self.descriptor.name.clone();
+            let label = choice.clone();
             response.widget_info(|| {
                 WidgetInfo::selected(
                     WidgetType::RadioButton,
                     true,
                     chosen,
-                    format!("{name} {choice}"),
+                    format!("{name} {label}"),
                 )
             });
             ui.ctx().accesskit_node_builder(id, |node| {
@@ -1034,6 +1134,11 @@ pub fn paint_glyph(painter: &Painter, rect: Rect, glyph: Glyph, ink: Color32) {
             painter.circle_filled(at(0.0, -0.65), s * 0.18, ink);
             line(&[(0.0, -0.2), (0.0, 0.7)]);
         }
+        Glyph::Loop => {
+            // An arrow that leaves its end and turns back to its start.
+            line(&[(0.6, -0.6), (0.6, 0.2), (-0.6, 0.2)]);
+            fill(&[(-0.2, -0.2), (-0.7, 0.2), (-0.2, 0.7)]);
+        }
         Glyph::Plus => {
             line(&[(-0.6, 0.0), (0.6, 0.0)]);
             line(&[(0.0, -0.6), (0.0, 0.6)]);
@@ -1071,13 +1176,55 @@ pub(super) fn band_label(ui: &Ui, theme: &Theme, placed: &PlacedLabel, origin: P
         origin + vec2(placed.rect.x, placed.rect.y),
         vec2(placed.rect.width, placed.rect.height),
     );
-    ui.painter().text(
-        rect.center(),
-        Align2::CENTER_CENTER,
-        &placed.text,
-        font(),
-        theme.colors.text.0,
-    );
+    let (at, align) = if placed.left {
+        (rect.left_center(), Align2::LEFT_CENTER)
+    } else {
+        (rect.center(), Align2::CENTER_CENTER)
+    };
+    ui.painter()
+        .text(at, align, &placed.text, font(), theme.colors.text.0);
+}
+
+/// A rule across or down a band, in the separator's colour.
+pub(super) fn rule(ui: &Ui, theme: &Theme, rect: bl_model::device_layout::Rect, origin: Pos2) {
+    let rect = Rect::from_min_size(origin + vec2(rect.x, rect.y), vec2(rect.width, rect.height));
+    ui.painter()
+        .rect_filled(rect, 0.0, theme.colors.separator.0);
+}
+
+/// The regions of a pages node in the regions style: each shows its page when
+/// clicked. They draw nothing, and the controls drawn after them take their own
+/// clicks.
+pub(super) fn regions(
+    ui: &mut Ui,
+    frame: &DeviceFrame,
+    (placed, origin): (&PlacedPages, Pos2),
+    events: &mut Vec<UiEvent>,
+) {
+    for (index, (name, rect)) in placed.names.iter().zip(&placed.buttons).enumerate() {
+        if rect.width <= 0.0 {
+            continue;
+        }
+        let rect =
+            Rect::from_min_size(origin + vec2(rect.x, rect.y), vec2(rect.width, rect.height));
+        let id = page_button_id(frame.id, &placed.name, name);
+        let response = ui.interact(rect, id, Sense::click());
+        crate::focus::register(ui.ctx(), id, bl_shell::Area::Detail, None);
+        let shown = index == placed.shown;
+        if response.clicked() && !shown {
+            events.push(UiEvent::Invoke(Invocation::new(
+                bl_shell::device_commands::SET_PAGE,
+                json!({ "device": frame.id, "node": placed.name, "page": name }),
+            )));
+        }
+        let label = name.clone();
+        response.widget_info(|| WidgetInfo::selected(WidgetType::RadioButton, true, shown, &label));
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(Role::RadioButton);
+            node.set_label(name.clone());
+            node.set_selected(shown);
+        });
+    }
 }
 
 /// A section heading over a group of controls.
@@ -1227,6 +1374,15 @@ pub fn title_parts(
                     c.text.0,
                 );
             }
+            TitlePart::Section(text, centre) => {
+                painter.text(
+                    pos2(title.left() - super::TITLE_INSET + centre, title.center().y),
+                    Align2::CENTER_CENTER,
+                    text,
+                    font(),
+                    c.text.0,
+                );
+            }
             TitlePart::Mpe => {
                 let width = text_width(&painter, "MPE", ink) + 6.0;
                 let rect = row(room.right() - width, width);
@@ -1331,6 +1487,7 @@ pub(super) fn plain_control<'a>(
         under: None,
         automation: None,
         coarse: 1,
+        trim: 0,
         unnamed: false,
         caption: None,
     }

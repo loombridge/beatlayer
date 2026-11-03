@@ -11,7 +11,8 @@ use std::f64::consts::TAU;
 use bl_core::time::{TICKS_PER_QUARTER, Ticks};
 use bl_devices::NativeNode;
 use bl_devices::polysynth::{
-    FILTER, FREQ, HP, KEY, NOISE, OSC1_WAVE, OSC2, POLYSYNTH, RES, RETRIGGER, VOLUME,
+    FREQ, HP, KEY, NOISE, NOISE_FILTER, OSC1_FILTER, OSC1_WAVE, OSC2, OSC2_FILTER, POLYSYNTH, RES,
+    RETRIGGER, VOLUME,
 };
 use bl_devices::tuner::{REFERENCE, TUNER, Tuner, tuner_type};
 use bl_engine::{
@@ -169,18 +170,20 @@ fn track_with_tuner(editor: &mut Editor) -> (TrackId, DeviceId) {
             .device(editor.new_id())
     };
     let mut drift = make(editor, POLYSYNTH);
-    for (param, value) in [
+    for (param, value) in crate::instrument_voices::drift_before().into_iter().chain([
         (OSC1_WAVE, 0.0),
         (OSC2, 0.0),
         (NOISE, 0.0),
-        (FILTER, 0.0),
+        (OSC1_FILTER, 0.0),
+        (OSC2_FILTER, 0.0),
+        (NOISE_FILTER, 0.0),
         (FREQ, 20_000.0),
         (HP, 20.0),
         (RES, 0.0),
         (KEY, 0.0),
         (RETRIGGER, 1.0),
         (VOLUME, 1.0),
-    ] {
+    ]) {
         drift.params.insert(param, value);
     }
     let tuner = make(editor, TUNER);

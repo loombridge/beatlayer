@@ -6,8 +6,8 @@
 use std::path::PathBuf;
 
 use bl_devices::operator::{
-    ALGORITHM, ENV_ATTACK, NOTE_PB, OPERATOR, OSC_FINE, OSC_REPEAT, OSC_REPEAT_ON, OSC_WAVE,
-    SHAPED_INITIAL, SHAPED_PEAK, SHAPED_SUSTAIN, operator_type, osc,
+    ALGORITHM, ENV_ATTACK, LFO_ON, NOTE_PB, OPERATOR, OSC_FEEDBACK, OSC_FINE, OSC_REPEAT,
+    OSC_REPEAT_ON, OSC_WAVE, SHAPED_INITIAL, SHAPED_PEAK, SHAPED_SUSTAIN, operator_type, osc,
 };
 use bl_model::{DeviceId, DeviceKind, DeviceRole, ParamId};
 use bl_shell::Shell;
@@ -124,27 +124,28 @@ fn a_sections_button_switches_the_display_and_every_parameter_stays_reachable() 
     assert_eq!(panel.pages.len(), 1);
     assert_eq!(
         panel.pages[0].style,
-        bl_model::device_layout::PageStyle::Shell
+        bl_model::device_layout::PageStyle::Regions
     );
     assert_eq!(
         panel.pages[0].pages,
         [
-            "Global", "Osc A", "Osc B", "Osc C", "Osc D", "LFO", "Filter", "Pitch"
+            "Osc A", "Osc B", "Osc C", "Osc D", "LFO", "Filter", "Pitch", "Global"
         ]
     );
-    assert_eq!(shown(&shell, device), "Global");
-    // The Global section's display holds the global controls; the
-    // oscillators' further controls aren't placed until their section shows.
+    assert_eq!(shown(&shell, device), "Osc A");
+    // The Global row's display holds the global table; an oscillator's
+    // envelope isn't placed until its row shows.
+    set_page(&mut shell, device, "Global");
     let global = placed(&shell, device);
     assert!(global.contains(&ALGORITHM.0));
-    assert!(!global.contains(&osc(2, OSC_FINE).0));
+    assert!(!global.contains(&osc(2, ENV_ATTACK).0));
     set_page(&mut shell, device, "Osc C");
     let c = placed(&shell, device);
     assert_eq!(shown(&shell, device), "Osc C");
-    assert!(c.contains(&osc(2, OSC_FINE).0) && c.contains(&osc(2, ENV_ATTACK).0));
-    assert!(!c.contains(&osc(1, OSC_FINE).0));
-    // The sections' own controls show whichever section does.
-    assert!(c.contains(&ALGORITHM.0));
+    assert!(c.contains(&osc(2, OSC_FEEDBACK).0) && c.contains(&osc(2, ENV_ATTACK).0));
+    assert!(!c.contains(&osc(1, ENV_ATTACK).0));
+    // The rows' own controls show whichever row does.
+    assert!(c.contains(&LFO_ON.0) && c.contains(&osc(1, OSC_FINE).0));
     // Switching is no undo step, and a section the device lacks is refused.
     let steps = shell.editor().undo_history().len();
     set_page(&mut shell, device, "Pitch");
@@ -418,7 +419,7 @@ fn the_menus_envelope_levels_and_play_by_key_set_their_parameters_in_one_undo_st
     assert_eq!(value(&shell, device, FILTER_FREQ), 466.0);
     assert_eq!(value(&shell, device, FREQ_KEY), 100.0);
     shell.run("edit.undo", json!({})).unwrap();
-    assert_eq!(value(&shell, device, FILTER_FREQ), 20_000.0);
+    assert_eq!(value(&shell, device, FILTER_FREQ), 12_000.0);
     assert_eq!(value(&shell, device, FREQ_KEY), 0.0);
 }
 
@@ -461,7 +462,11 @@ fn device_display_reports_the_view_a_section_starts_on_from_the_parameters() {
             .invoke("device.display", json!({ "device": device }))
             .unwrap()
     };
-    // Global's page starts on the algorithm graph.
+    // A new device starts on Osc A's envelope, and Global's page on the
+    // algorithm graph.
+    let first = display(&mut shell);
+    assert_eq!(first["view"], json!("Osc A Envelope"));
+    set_page(&mut shell, device, "Global");
     let global = display(&mut shell);
     assert_eq!(global["view"], json!("Algorithm"));
     assert_eq!(global["readings"][0]["name"], json!("Algorithm"));

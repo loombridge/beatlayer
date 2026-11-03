@@ -354,7 +354,13 @@ impl Song {
                             "name": name, "role": role, "sidechain": sidechain },
             }),
         );
-        serde_json::from_value(added["device"].clone()).expect("the new device")
+        let device: DeviceId =
+            serde_json::from_value(added["device"].clone()).expect("the new device");
+        if device_type == POLYSYNTH {
+            // Drift's measured references were taken before Live's starting values.
+            bl_shell::testing::drift_before_live(self.shell(), device);
+        }
+        device
     }
 
     /// Sets a compressor to turn its track down hard while `source` plays

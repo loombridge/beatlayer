@@ -1,7 +1,8 @@
 //! The instruments' modulation matrix under RealtimeSanitizer (WP-8.4; the
 //! instrument modulation spec R10, R13): the framework's test instrument and
 //! Drift play overlapping notes while routes are set and cleared, amounts,
-//! choosers, the matrix's Amount and Hi-Quality change, and the engine
+//! choosers, the matrix's Amount and Hi-Quality change, Drift's voice mode,
+//! drift, glide, Legato and cycling envelope change, and the engine
 //! publishes what the newest voice plays. RTSan stops the process at the
 //! first allocation, free, lock, or blocking call in any of it, and the
 //! allocation trap, installed as in every Beatlayer test binary, fails the
@@ -10,7 +11,10 @@
 bl_rt::install_trap!();
 
 use bl_core::time::{SampleRate, Ticks};
-use bl_devices::polysynth::{MOD1_AMOUNT, MOD1_DEST, MOD1_SOURCE, POLYSYNTH};
+use bl_devices::polysynth::{
+    CYC_RATE, DRIFT, ENV2_MODE, GLIDE, HI_QUALITY, LEGATO, MOD1_AMOUNT, MOD1_DEST, MOD1_SOURCE,
+    MOD2_DEST, POLYSYNTH, VOICE_MODE,
+};
 use bl_devices::testing::{
     self, INSTRUMENT, INSTRUMENT_CHOSEN_AMOUNT, INSTRUMENT_CHOSEN_DEST, INSTRUMENT_CHOSEN_SOURCE,
     INSTRUMENT_FREE_AMOUNTS, INSTRUMENT_HI_QUALITY, INSTRUMENT_MATRIX_AMOUNT,
@@ -146,6 +150,16 @@ fn routes_amounts_and_choosers_changing_during_playback_pass_under_rtsan() {
             9 => Some(set(drift, MOD1_SOURCE, 1.0 + (step % 8) as f64)),
             10 => Some(set(drift, MOD1_DEST, 1.0 + (step % 10) as f64)),
             11 => Some(set(drift, MOD1_AMOUNT, (step % 5) as f64 * 40.0 - 80.0)),
+            // Drift's voice modes, its drift, glide, Legato, Envelope 2's
+            // cycle and its rate as a destination, and Hi-Quality.
+            12 => Some(set(drift, VOICE_MODE, (step % 4) as f64)),
+            13 => Some(set(drift, DRIFT, (step % 3) as f64 * 50.0)),
+            14 => Some(set(drift, LEGATO, (step % 2) as f64)),
+            15 => Some(set(drift, GLIDE, (step % 3) as f64 * 200.0)),
+            16 => Some(set(drift, ENV2_MODE, (step % 2) as f64)),
+            17 => Some(set(drift, CYC_RATE, 1.0 + (step % 5) as f64 * 4.0)),
+            18 => Some(set(drift, MOD2_DEST, 10.0 + (step % 2) as f64)),
+            19 => Some(set(drift, HI_QUALITY, (step % 2) as f64)),
             _ => None,
         };
         if let Some(command) = command {

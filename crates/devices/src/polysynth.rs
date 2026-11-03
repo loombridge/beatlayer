@@ -16,16 +16,21 @@
 //!
 //! Part 1 plays polyphonically. The LFO, the modulation routes it and the
 //! envelopes drive, and MPE's per-note pitch bend, pressure and slide
-//! arrived with the work package's second part; the voice modes, the
-//! Drift-style per-voice variation, glide and Envelope 2's cycling mode
-//! are still to come.
+//! arrived with the work package's second part. WP-8.7 completed it: the
+//! voice modes (Poly, Mono, Stereo and Unison stack up to four copies of
+//! a note, each in a lane of its own), the Drift control's slow random
+//! walk, Legato and Glide, Envelope 2's cycling mode with its rate as a
+//! Mod destination, and Hi-Quality.
 
 use core::f64::consts::TAU;
 
+use bl_dsp::random::Random;
 use bl_engine::{DeviceType, NodeConfig, NodeData, NodeEvent, Registry};
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
 use bl_model::param::gain_to_db;
-use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
+use bl_model::{
+    Device, DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit,
+};
 use lspk_dsp::envelope::{EnvelopeBank, EnvelopeParams, StealRestart, TimeUnit, Timing, Trigger};
 use lspk_dsp::filter::{FilterBank, FilterType, VoiceParams, pitch_of};
 use lspk_voice::{MAX_VOICES, Start, VoiceBlock, VoiceEvent, VoiceEventKind};
@@ -169,6 +174,39 @@ pub const FREQ_MOD2_AMOUNT: ParamId = ParamId(59);
 pub const NOTE_PB: ParamId = ParamId(60);
 /// The instrument's pitch bend range, in semitones.
 pub const PB_RANGE: ParamId = ParamId(61);
+/// The voice mode: Poly, Mono, Stereo or Unison.
+pub const VOICE_MODE: ParamId = ParamId(62);
+/// Mono's extra copies' level, in per cent.
+pub const THICKNESS: ParamId = ParamId(63);
+/// Stereo's width, in per cent.
+pub const SPREAD: ParamId = ParamId(64);
+/// Unison's detune, in per cent.
+pub const STRENGTH: ParamId = ParamId(65);
+/// How far each voice's pitch and cutoff wander, in per cent.
+pub const DRIFT: ParamId = ParamId(66);
+/// Legato in Mono.
+pub const LEGATO: ParamId = ParamId(67);
+/// Glide Time.
+pub const GLIDE: ParamId = ParamId(68);
+/// Envelope 2's mode: ADSR or Cycling.
+pub const ENV2_MODE: ParamId = ParamId(69);
+/// The cycling envelope's tilt, in per cent.
+pub const CYC_TILT: ParamId = ParamId(70);
+/// How long the cycling envelope stays at its top, in per cent of the cycle.
+pub const CYC_HOLD: ParamId = ParamId(71);
+/// The cycling envelope's time mode: Rate, Ratio, Time, or Sync.
+pub const CYC_MODE: ParamId = ParamId(72);
+/// The cycling envelope's rate in hertz, in the Rate time mode: the Cyc Env
+/// Rate destination.
+pub const CYC_RATE: ParamId = ParamId(73);
+/// The cycling envelope's rate as a ratio of the played note's frequency.
+pub const CYC_RATIO: ParamId = ParamId(74);
+/// The cycling envelope's cycle in milliseconds.
+pub const CYC_TIME: ParamId = ParamId(75);
+/// The cycling envelope's division of the song's tempo.
+pub const CYC_SYNC: ParamId = ParamId(76);
+/// Hi-Quality, a menu option.
+pub const HI_QUALITY: ParamId = ParamId(77);
 
 /// Oscillator 1's waveforms, in the manual's order.
 pub const WAVES1: [&str; 7] = [
@@ -215,8 +253,9 @@ pub const MOD_SOURCES: [&str; 9] = [
     "Pressure",
     "Slide",
 ];
-/// The Mod section's destinations, in the manual's order, after Off.
-pub const MOD_DESTINATIONS: [&str; 11] = [
+/// The Mod section's destinations, in the manual's order, after Off; Cyc Env
+/// Rate is last so that a saved choice keeps its meaning (R32).
+pub const MOD_DESTINATIONS: [&str; 12] = [
     "Off",
     "Osc 1 Gain",
     "Osc 1 Shape",
@@ -228,7 +267,14 @@ pub const MOD_DESTINATIONS: [&str; 11] = [
     "HP Frequency",
     "LFO Rate",
     "Main Volume",
+    "Cyc Env Rate",
 ];
+/// Envelope 2's modes.
+pub const ENV2_MODES: [&str; 2] = ["ADSR", "Cycling"];
+/// The voice modes by index, as [`instrument::voice_modes`] lists them.
+const MODE_MONO: usize = 1;
+const MODE_STEREO: usize = 2;
+const MODE_UNISON: usize = 3;
 
 /// Oscillator 1's waveforms by index.
 const SINE: usize = 0;
@@ -275,6 +321,27 @@ const LFO_RATE_OCTAVES: f64 = 4.0;
 /// cycle: Beatlayer's own reading.
 const EXPONENTIAL_DECAY: f64 = 5.0;
 
+/// The most copies a note plays, each in a lane of its own, and the lanes
+/// the oscillators hold.
+const COPIES: usize = 4;
+const LANES: usize = MAX_VOICES * COPIES;
+/// Spec: polysynth R27, R28. Mono's copies' detune in cents, Stereo's at
+/// 100 % Spread, Unison's at 100 % Strength, and the random offset each
+/// Unison copy adds at 100 % Strength: Beatlayer's own.
+const MONO_CENTS: [f32; COPIES] = [0.0, -10.0, 5.0, 10.0];
+const STEREO_CENTS: f32 = 10.0;
+const UNISON_CENTS: f32 = 25.0;
+const UNISON_RANDOM_CENTS: f32 = 5.0;
+/// Spec: polysynth R29. How far a full Drift moves a voice's pitch (cents)
+/// and low-pass cutoff (semitones), and how often its walk picks a new
+/// target: Beatlayer's own.
+const DRIFT_CENTS: f64 = 25.0;
+const DRIFT_SEMITONES: f64 = 2.0;
+const DRIFT_HZ: f64 = 0.5;
+/// Spec: polysynth R31. How close to either end Tilt bends the slope beside
+/// it from straight towards exponential: a tenth of its travel.
+const TILT_BEND: f64 = 0.1;
+
 /// The modulation sources by place in the matrix's list: one less than the
 /// choosers' value, which counts Off as 0.
 const SRC_ENV1: usize = 0;
@@ -297,9 +364,10 @@ const DEST_LP_RES: usize = 6;
 const DEST_HP_FREQ: usize = 7;
 const DEST_LFO_RATE: usize = 8;
 const DEST_VOLUME: usize = 9;
+const DEST_CYC_RATE: usize = 10;
 /// Pitch is no Mod destination: the Pitch Mod slots carry it, and no chooser
 /// reaches it.
-const DEST_PITCH: usize = 10;
+const DEST_PITCH: usize = 11;
 /// The LFO's waveforms by index.
 const LFO_SINE: usize = 0;
 const LFO_TRIANGLE: usize = 1;
@@ -496,6 +564,43 @@ pub fn polysynth_type() -> DeviceType {
         .describe("How far the second Freq Mod source moves the low-pass cutoff, in per cent of its travel."),
         instrument::note_pb(NOTE_PB, true),
         instrument::pb_range(PB_RANGE, 96, 48),
+        instrument::voice_modes(VOICE_MODE),
+        ParamDescriptor::continuous(THICKNESS, "Thickness", (0.0, 100.0), 0.0, ParamUnit::Percent)
+            .describe("In Mono, the level of the three extra copies; at 0 % only one sounds."),
+        ParamDescriptor::continuous(SPREAD, "Spread", (0.0, 100.0), 50.0, ParamUnit::Percent)
+            .describe("In Stereo, how far the two copies detune and pan apart."),
+        ParamDescriptor::continuous(STRENGTH, "Strength", (0.0, 100.0), 50.0, ParamUnit::Percent)
+            .describe("In Unison, how far the four copies detune."),
+        ParamDescriptor::continuous(DRIFT, "Drift", (0.0, 100.0), 0.0, ParamUnit::Percent)
+            .describe("How far each voice's pitch and filter frequency wander at random."),
+        instrument::legato(LEGATO, false),
+        instrument::glide_time(GLIDE, 5_000.0, 0.0),
+        ParamDescriptor::choice(ENV2_MODE, "Env 2 Mode", &ENV2_MODES, 0)
+            .describe("Envelope 2 as an ADSR, or as a cycle that restarts with each note."),
+        ParamDescriptor::continuous(CYC_TILT, "Cyc Env Tilt", (0.0, 100.0), 50.0, ParamUnit::Percent)
+            .describe("Moves the cycling envelope's top from the start of its cycle to its end."),
+        ParamDescriptor::continuous(CYC_HOLD, "Cyc Env Hold", (0.0, 100.0), 0.0, ParamUnit::Percent)
+            .describe("How long the cycling envelope stays at its top, in per cent of its cycle."),
+        ParamDescriptor::choice(CYC_MODE, "Cyc Env Mode", &LFO_MODES, MODE_RATE)
+            .describe("Sets the cycling envelope's rate in hertz, as a ratio of the note, in milliseconds, or in beat divisions."),
+        ParamDescriptor::continuous(CYC_RATE, "Cyc Env Rate", (0.01, 100.0), 1.0, ParamUnit::Hertz)
+            .logarithmic()
+            .describe("The cycling envelope's rate in hertz, in the Rate time mode."),
+        ParamDescriptor::continuous(CYC_RATIO, "Cyc Env Ratio", (0.0625, 64.0), 1.0, ParamUnit::Ratio)
+            .logarithmic()
+            .describe("The cycling envelope's speed as a ratio of the played note's frequency, in the Ratio time mode."),
+        ParamDescriptor::continuous(
+            CYC_TIME,
+            "Cyc Env Time",
+            (1.0, 20_000.0),
+            500.0,
+            ParamUnit::Milliseconds,
+        )
+        .logarithmic()
+        .describe("The cycling envelope's cycle in milliseconds, in the Time time mode."),
+        ParamDescriptor::choice(CYC_SYNC, "Cyc Env Sync", &LFO_DIVISIONS, 2)
+            .describe("The cycling envelope's cycle as a division of the song's tempo, in the Sync time mode."),
+        instrument::hi_quality(HI_QUALITY),
     ];
     let layout = DeviceLayout::new(LayoutNode::Row(vec![
         LayoutNode::Band(ControlBand::stacked(
@@ -549,6 +654,14 @@ pub fn polysynth_type() -> DeviceType {
                 (ENV2_DECAY, Widget::Knob),
                 (ENV2_SUSTAIN, Widget::Knob),
                 (ENV2_RELEASE, Widget::Knob),
+                (ENV2_MODE, Widget::Chooser),
+                (CYC_TILT, Widget::Knob),
+                (CYC_HOLD, Widget::Knob),
+                (CYC_MODE, Widget::Chooser),
+                (CYC_SYNC, Widget::Chooser),
+                (CYC_RATE, Widget::Knob),
+                (CYC_RATIO, Widget::Knob),
+                (CYC_TIME, Widget::Knob),
             ],
         )),
         LayoutNode::Band(ControlBand::stacked(
@@ -589,6 +702,13 @@ pub fn polysynth_type() -> DeviceType {
                 (VEL_VOL, Widget::Knob),
                 (NOTE_PB, Widget::Toggle),
                 (PB_RANGE, Widget::Number),
+                (VOICE_MODE, Widget::Chooser),
+                (THICKNESS, Widget::Knob),
+                (SPREAD, Widget::Knob),
+                (STRENGTH, Widget::Knob),
+                (DRIFT, Widget::Knob),
+                (LEGATO, Widget::Toggle),
+                (GLIDE, Widget::Knob),
             ],
         )),
     ]));
@@ -596,6 +716,7 @@ pub fn polysynth_type() -> DeviceType {
         .with_description(
             DeviceDescription::new(params)
                 .with_layout(layout)
+                .with_menu_options(&[HI_QUALITY])
                 .with_banks(&[
                     (
                         "Oscillators",
@@ -631,6 +752,19 @@ pub fn polysynth_type() -> DeviceType {
                             "Env 2 Decay",
                             "Env 2 Sustain",
                             "Env 2 Release",
+                        ],
+                    ),
+                    (
+                        "Cycling",
+                        &[
+                            "Env 2 Mode",
+                            "Cyc Env Tilt",
+                            "Cyc Env Hold",
+                            "Cyc Env Mode",
+                            "Cyc Env Rate",
+                            "Cyc Env Ratio",
+                            "Cyc Env Time",
+                            "Cyc Env Sync",
                         ],
                     ),
                     (
@@ -683,6 +817,18 @@ pub fn polysynth_type() -> DeviceType {
                             "Freq Mod 2 Amount",
                         ],
                     ),
+                    (
+                        "Voice Mode",
+                        &[
+                            "Voice Mode",
+                            "Thickness",
+                            "Spread",
+                            "Strength",
+                            "Drift",
+                            "Legato",
+                            "Glide Time",
+                        ],
+                    ),
                 ]),
         )
         .with_matrix(polysynth_matrix())
@@ -692,8 +838,9 @@ pub fn polysynth_type() -> DeviceType {
 /// destinations the choosers list after Off (and Pitch, which only the Pitch
 /// Mod slots reach), the three Mod slots as chosen slots and the dedicated
 /// Shape, Pitch, Freq and LFO slots as fixed ones, in the order their routes
-/// have always been summed in. Every destination is worked out every frame
-/// (Drift has no Hi-Quality), per voice and additive.
+/// have always been summed in. Every destination is worked out every frame,
+/// per voice and additive, with or without Hi-Quality (R20 asks for a grid
+/// only of control-rate routes, and Drift has none).
 #[must_use]
 pub fn polysynth_matrix() -> MatrixLayout {
     let source = |which: usize, range, scope| SourceDef {
@@ -740,6 +887,7 @@ pub fn polysynth_matrix() -> MatrixLayout {
             dest(DEST_HP_FREQ, HP),
             dest(DEST_LFO_RATE, LFO_RATE),
             dest(DEST_VOLUME, VOLUME),
+            dest(DEST_CYC_RATE, CYC_RATE),
             DestDef {
                 name: "Pitch",
                 param: None,
@@ -765,14 +913,14 @@ pub fn polysynth_matrix() -> MatrixLayout {
 
 /// Adds Drift to `registry`.
 pub fn register(registry: &mut Registry) {
-    add(registry, polysynth_type(), |_, config| make(config));
+    add(registry, polysynth_type(), make);
 }
 
 /// Makes a Drift for `config`'s rate, channels, and block size. Every
 /// buffer and table it needs is made here, off the audio thread.
 #[must_use]
-pub fn make(config: &NodeConfig) -> PolySynth {
-    PolySynth::new(config)
+pub fn make(device: &Device, config: &NodeConfig) -> PolySynth {
+    PolySynth::new(device, config)
 }
 
 /// The waveform at phase `p` (0 to 1) before the Shape knob narrows it.
@@ -903,6 +1051,69 @@ fn lfo_wave(shape: usize, phase: f64, held: f64, drawn: f64) -> f64 {
     }
 }
 
+/// Spec: polysynth R31. Envelope 2's cycling shape at `phase` (0 to 1) of
+/// its cycle, with Tilt and Hold as fractions: it rises to 1 over Tilt's share
+/// of the cycle left after Hold, stays at 1 for Hold's share, and falls to 0
+/// over the rest. Within a tenth of Tilt's either end the slope beside the
+/// top bends from straight towards exponential; the curve is Beatlayer's own.
+fn cycle_wave(phase: f64, tilt: f64, hold: f64) -> f64 {
+    let rise = tilt * (1.0 - hold);
+    let top = rise + hold;
+    let floor = (-EXPONENTIAL_DECAY).exp();
+    // The exponential decay from 1 at the start of a slope to 0 at its end.
+    let decay = |x: f64| ((-EXPONENTIAL_DECAY * x).exp() - floor) / (1.0 - floor);
+    if phase < rise {
+        let x = phase / rise;
+        let bend = ((tilt - (1.0 - TILT_BEND)) / TILT_BEND).clamp(0.0, 1.0);
+        x + bend * (1.0 - decay(x) - x)
+    } else if phase < top {
+        1.0
+    } else {
+        let x = (phase - top) / (1.0 - top);
+        let bend = ((TILT_BEND - tilt) / TILT_BEND).clamp(0.0, 1.0);
+        1.0 - x + bend * (decay(x) - (1.0 - x))
+    }
+}
+
+/// A time mode's settings, as the LFO and the cycling envelope read them
+/// (R19, R31).
+#[derive(Clone, Copy)]
+struct TimeMode {
+    /// One of the `MODE_*` values.
+    mode: usize,
+    /// Its speed in cycles a second, in the Rate, Time and Sync modes.
+    hz: f64,
+    /// Its speed as a ratio of the note's frequency, in the Ratio mode.
+    ratio: f64,
+}
+
+impl TimeMode {
+    /// Reads the mode, Rate, Ratio, Time and Sync parameters `ids` hold,
+    /// the Sync mode's cycle coming from the tempo `bpm`.
+    fn read(
+        params: &ParamBank,
+        at: impl Fn(ParamId) -> usize,
+        rate: f64,
+        bpm: f64,
+        ids: [ParamId; 5],
+    ) -> Self {
+        let [mode, hz, ratio, time, sync] = ids;
+        let mode = (params.value(at(mode)) as usize).min(LFO_MODES.len() - 1);
+        let division = (params.value(at(sync)) as usize).min(LFO_DIVISIONS.len() - 1);
+        let sixteenth = rate * 60.0 / bpm / 4.0;
+        Self {
+            mode,
+            hz: match mode {
+                MODE_RATE => params.value(at(hz)).max(0.0),
+                MODE_TIME => 1_000.0 / params.value(at(time)).max(0.001),
+                MODE_SYNC => rate / (DIVISION_SIXTEENTHS[division] * sixteenth).max(1.0),
+                _ => params.value(at(ratio)),
+            },
+            ratio: params.value(at(ratio)).max(0.0),
+        }
+    }
+}
+
 /// The stretch's modulation source lanes: the envelopes and the LFO, one
 /// buffer `frames × stride` each.
 struct SourceLanes<'a> {
@@ -941,16 +1152,66 @@ fn source_value(
 #[derive(Clone, Copy)]
 struct Lfos {
     shape: usize,
-    /// Its time mode, one of the `MODE_*` values.
-    mode: usize,
     /// Whether a note restarts the LFO.
     retrigger: bool,
     /// Its overall intensity, 0 to 1.
     amount: f64,
-    /// Its speed in cycles a second, in the Rate, Time and Sync modes.
-    hz: f64,
-    /// Its speed as a ratio of the note's frequency, in the Ratio mode.
-    ratio: f64,
+    /// Its time mode and speed.
+    time: TimeMode,
+}
+
+/// Envelope 2's cycling settings for a stretch.
+#[derive(Clone, Copy)]
+struct Cycle {
+    /// Whether Envelope 2 cycles rather than being an ADSR.
+    on: bool,
+    /// Tilt and Hold as fractions.
+    tilt: f64,
+    hold: f64,
+    time: TimeMode,
+}
+
+/// Spec: polysynth R27, R28. What a stack of copies plays at a frame: each
+/// copy's detune in cents and its gain into the left and right channels.
+#[derive(Clone, Copy)]
+struct CopyPlan {
+    cents: [f32; COPIES],
+    left: [f32; COPIES],
+    right: [f32; COPIES],
+}
+
+/// Spec: polysynth R29. A slow random walk from −1 to 1: it moves from one
+/// target to the next, smoothly, drawing a new one at `DRIFT_HZ`.
+struct Walk {
+    random: Random,
+    phase: f64,
+    from: f64,
+    to: f64,
+}
+
+impl Walk {
+    fn new(seed: u64) -> Self {
+        let mut random = Random::seeded(seed);
+        let (from, to) = (random.next_bipolar(), random.next_bipolar());
+        Self {
+            random,
+            phase: 0.0,
+            from,
+            to,
+        }
+    }
+
+    /// The next frame's value, at `rate` frames a second.
+    fn next(&mut self, rate: f64) -> f64 {
+        self.phase += DRIFT_HZ / rate;
+        if self.phase >= 1.0 {
+            self.phase -= 1.0;
+            self.from = self.to;
+            self.to = self.random.next_bipolar();
+        }
+        let x = self.phase;
+        self.from + (self.to - self.from) * x * x * (3.0 - 2.0 * x)
+    }
 }
 
 /// The LFO's state: a phase for every voice, and one more for a
@@ -1020,26 +1281,33 @@ pub struct PolySynth {
 }
 
 impl PolySynth {
-    fn new(config: &NodeConfig) -> Self {
+    fn new(device: &Device, config: &NodeConfig) -> Self {
         let rate = config.sample_rate.as_f64();
         Self {
-            // Spec: instrument voices R22. Drift's voices are the voice
-            // section's, with the parts Drift has.
+            // Spec: instrument voices R22, polysynth R26 to R30, R33. Drift's
+            // voices are the voice section's, with the parts Drift has.
             section: Section::new(
                 Parts {
                     voices: Some(VOICES),
+                    voice_mode: Some(VOICE_MODE),
+                    copy_modes: true,
+                    legato: Some(LEGATO),
+                    glide_time: Some(GLIDE),
+                    glide_only_held: true,
+                    poly_glide: true,
                     transpose: Some(TRANSPOSE),
                     pb_range: Some(PB_RANGE),
                     note_pb: Some(NOTE_PB),
                     note_range: NoteRange::PbRange,
+                    hi_quality: Some(HI_QUALITY),
                     ..Parts::default()
                 },
                 MAX_VOICES,
-                1,
+                COPIES,
                 rate,
                 0,
             ),
-            synth: Synth::new(rate, config.max_frames),
+            synth: Synth::new(rate, config.max_frames, u64::from(device.id.0)),
         }
     }
 }
@@ -1052,10 +1320,15 @@ impl NativeDevice for PolySynth {
         }
         self.synth.snapshot(audio, params);
         self.section.process(audio, params, &mut self.synth);
+        // Stereo's two copies sit left and right; the other modes are mono.
+        let stereo = self.synth.mode == MODE_STEREO;
         for channel in 0..audio.channels() {
-            audio
-                .channel_mut(channel)
-                .copy_from_slice(&self.synth.out[..frames]);
+            let out = if stereo && channel % 2 == 1 {
+                &self.synth.out_r
+            } else {
+                &self.synth.out
+            };
+            audio.channel_mut(channel).copy_from_slice(&out[..frames]);
         }
     }
 
@@ -1092,8 +1365,9 @@ struct Synth {
     osc2: Oscillator,
     tables1: Vec<SharedTable>,
     tables2: Vec<SharedTable>,
-    lp: FilterBank,
-    hp: FilterBank,
+    /// The filters, left and then right: only Stereo runs the second.
+    lp: [FilterBank; 2],
+    hp: [FilterBank; 2],
     env1: EnvelopeBank,
     env2: EnvelopeBank,
     rng: [u32; MAX_VOICES],
@@ -1114,20 +1388,41 @@ struct Synth {
     res: Vec<f32>,
     detune: Vec<f32>,
     vel_vol: Vec<f32>,
+    thickness: Vec<f32>,
+    spread: Vec<f32>,
+    strength: Vec<f32>,
+    drift: Vec<f32>,
     /// The stretch's per-voice buffers, `frames × stride` each.
-    osc1_out: Vec<f32>,
-    osc2_out: Vec<f32>,
     audio: Vec<f32>,
+    audio_r: Vec<f32>,
     cutoff: Vec<f32>,
     hp_cutoff: Vec<f32>,
     env1_out: Vec<f32>,
     env2_out: Vec<f32>,
     lfo_out: Vec<f32>,
+    /// What each voice's pitch and cutoff drift by this stretch, in
+    /// semitones.
+    drift_pitch: Vec<f32>,
+    drift_cutoff: Vec<f32>,
+    /// The stretch's per-lane buffers, `frames × LANES` each: what the
+    /// oscillators render and read.
+    osc1_out: Vec<f32>,
+    osc2_out: Vec<f32>,
     pitch_mod: Vec<f32>,
     pitch_mod2: Vec<f32>,
     frame_mod: Vec<f32>,
-    /// The stretch's mixed output, one value a frame.
+    /// The stretch's mixed output, one value a frame, left and right.
     out: Vec<f32>,
+    out_r: Vec<f32>,
+    /// The voice mode of the stretch, and each voice's drift walks (pitch,
+    /// then cutoff), Unison's random offsets (each lane's, from −1 to 1),
+    /// and Envelope 2's cycle phase.
+    mode: usize,
+    walks: Vec<[Walk; 2]>,
+    unison_random: [f32; LANES],
+    unison: Random,
+    cycle: Cycle,
+    cycle_phase: [f64; MAX_VOICES],
     /// The switches and choices of the stretch.
     osc1_on: bool,
     osc2_on: bool,
@@ -1158,11 +1453,11 @@ struct Synth {
 }
 
 impl Synth {
-    fn new(rate: f64, max_frames: usize) -> Self {
+    fn new(rate: f64, max_frames: usize, seed: u64) -> Self {
         let max_frames = max_frames.max(1);
         let layout = OscLayout {
             voices: MAX_VOICES,
-            lanes_per_voice: 1,
+            lanes_per_voice: COPIES,
         };
         let tables1: Vec<SharedTable> = (0..WAVES1.len()).map(|w| wave_table(w, true)).collect();
         let tables2: Vec<SharedTable> = WAVES2_BASE
@@ -1183,12 +1478,19 @@ impl Synth {
             max_frames,
             0x0C45_CADF,
         );
-        let mut lp = FilterBank::new(rate as f32, MAX_VOICES, 1);
-        lp.set_type(FilterType::Lp12);
-        let mut hp = FilterBank::new(rate as f32, MAX_VOICES, 1);
-        hp.set_type(FilterType::Hp12);
+        let lp = [(); 2].map(|()| {
+            let mut bank = FilterBank::new(rate as f32, MAX_VOICES, 1);
+            bank.set_type(FilterType::Lp12);
+            bank
+        });
+        let hp = [(); 2].map(|()| {
+            let mut bank = FilterBank::new(rate as f32, MAX_VOICES, 1);
+            bank.set_type(FilterType::Hp12);
+            bank
+        });
         let stride = MAX_VOICES.next_multiple_of(16);
         let buffer = || vec![0.0; max_frames * stride];
+        let lane_buffer = || vec![0.0; max_frames * LANES];
         let ramp = || vec![0.0; max_frames];
         let description = polysynth_type().description;
         let destination = |id: ParamId| {
@@ -1208,6 +1510,7 @@ impl Synth {
             destination(HP),
             destination(LFO_RATE),
             destination(VOLUME),
+            destination(CYC_RATE),
         ];
         Self {
             rate,
@@ -1233,18 +1536,50 @@ impl Synth {
             res: ramp(),
             detune: ramp(),
             vel_vol: ramp(),
-            osc1_out: buffer(),
-            osc2_out: buffer(),
+            thickness: ramp(),
+            spread: ramp(),
+            strength: ramp(),
+            drift: ramp(),
             audio: buffer(),
+            audio_r: buffer(),
             cutoff: buffer(),
             hp_cutoff: buffer(),
             env1_out: buffer(),
             env2_out: buffer(),
             lfo_out: buffer(),
-            pitch_mod: buffer(),
-            pitch_mod2: buffer(),
-            frame_mod: buffer(),
+            drift_pitch: buffer(),
+            drift_cutoff: buffer(),
+            osc1_out: lane_buffer(),
+            osc2_out: lane_buffer(),
+            pitch_mod: lane_buffer(),
+            pitch_mod2: lane_buffer(),
+            frame_mod: lane_buffer(),
             out: vec![0.0; max_frames],
+            out_r: vec![0.0; max_frames],
+            mode: 0,
+            // Spec: polysynth R29. The device's own seed and the voice's
+            // number.
+            walks: (0..MAX_VOICES as u64)
+                .map(|voice| {
+                    [
+                        Walk::new(seed.wrapping_mul(64).wrapping_add(2 * voice)),
+                        Walk::new(seed.wrapping_mul(64).wrapping_add(2 * voice + 1)),
+                    ]
+                })
+                .collect(),
+            unison_random: [0.0; LANES],
+            unison: Random::seeded(seed ^ 0x0C45_CADE_0000_0000),
+            cycle: Cycle {
+                on: false,
+                tilt: 0.5,
+                hold: 0.0,
+                time: TimeMode {
+                    mode: MODE_RATE,
+                    hz: 1.0,
+                    ratio: 1.0,
+                },
+            },
+            cycle_phase: [0.0; MAX_VOICES],
             osc1_on: true,
             osc2_on: true,
             noise_on: false,
@@ -1255,11 +1590,13 @@ impl Synth {
             filter_type: 0,
             lfos: Lfos {
                 shape: LFO_SINE,
-                mode: MODE_SYNC,
                 retrigger: true,
                 amount: 1.0,
-                hz: 1.0,
-                ratio: 1.0,
+                time: TimeMode {
+                    mode: MODE_SYNC,
+                    hz: 1.0,
+                    ratio: 1.0,
+                },
             },
             shape: 0.0,
             matrix: Matrix::new(
@@ -1297,7 +1634,13 @@ impl Synth {
         ramp_into(&mut self.res[..frames], params, RES);
         ramp_into(&mut self.detune[..frames], params, OSC2_DETUNE);
         ramp_into(&mut self.vel_vol[..frames], params, VEL_VOL);
+        ramp_into(&mut self.thickness[..frames], params, THICKNESS);
+        ramp_into(&mut self.spread[..frames], params, SPREAD);
+        ramp_into(&mut self.strength[..frames], params, STRENGTH);
+        ramp_into(&mut self.drift[..frames], params, DRIFT);
         self.out[..frames].fill(0.0);
+        self.out_r[..frames].fill(0.0);
+        self.mode = (params.value(at(VOICE_MODE)) as usize).min(instrument::MODE_COPIES.len() - 1);
 
         self.osc1_on = params.value(at(OSC1)) >= 0.5;
         self.osc2_on = params.value(at(OSC2)) >= 0.5;
@@ -1354,11 +1697,13 @@ impl Synth {
         let filter_type = (params.value(at(FILTER_TYPE)) as usize).min(FILTER_TYPES.len() - 1);
         if filter_type != self.filter_type {
             self.filter_type = filter_type;
-            self.lp.set_type(if filter_type == 0 {
-                FilterType::Lp12
-            } else {
-                FilterType::Lp24
-            });
+            for lp in &mut self.lp {
+                lp.set_type(if filter_type == 0 {
+                    FilterType::Lp12
+                } else {
+                    FilterType::Lp24
+                });
+            }
         }
         // The manual's two saturation points: the gains' headroom drives
         // the filter's clipper and the resonance's taming, and a second
@@ -1380,8 +1725,7 @@ impl Synth {
             self.filter_params = filter_params;
             self.filter_resonance_moved = false;
             for voice in 0..MAX_VOICES {
-                self.lp.set_params(voice, &filter_params);
-                self.hp.set_params(voice, &filter_params);
+                self.set_filter_params(voice, &filter_params);
             }
         }
 
@@ -1413,24 +1757,32 @@ impl Synth {
             self.env2.set_all_params(env2);
         }
 
-        let mode = (params.value(at(LFO_MODE)) as usize).min(LFO_MODES.len() - 1);
-        let division = (params.value(at(LFO_SYNC)) as usize).min(LFO_DIVISIONS.len() - 1);
         // The Sync mode's cycle comes from the tempo map's tempo at the
         // stretch, as the delay device's does.
         let bpm = audio.bpm();
-        let sixteenth = self.rate * 60.0 / bpm / 4.0;
         self.lfos = Lfos {
             shape: (params.value(at(LFO_SHAPE)) as usize).min(LFO_SHAPES.len() - 1),
-            mode,
             retrigger: params.value(at(LFO_RETRIGGER)) >= 0.5,
             amount: (params.value(at(LFO_AMOUNT)) / 100.0).clamp(0.0, 1.0),
-            hz: match mode {
-                MODE_RATE => params.value(at(LFO_RATE)).max(0.0),
-                MODE_TIME => 1_000.0 / params.value(at(LFO_TIME)).max(0.001),
-                MODE_SYNC => self.rate / (DIVISION_SIXTEENTHS[division] * sixteenth).max(1.0),
-                _ => params.value(at(LFO_RATIO)),
-            },
-            ratio: params.value(at(LFO_RATIO)).max(0.0),
+            time: TimeMode::read(
+                params,
+                at,
+                self.rate,
+                bpm,
+                [LFO_MODE, LFO_RATE, LFO_RATIO, LFO_TIME, LFO_SYNC],
+            ),
+        };
+        self.cycle = Cycle {
+            on: params.value(at(ENV2_MODE)) >= 0.5,
+            tilt: (params.value(at(CYC_TILT)) / 100.0).clamp(0.0, 1.0),
+            hold: (params.value(at(CYC_HOLD)) / 100.0).clamp(0.0, 1.0),
+            time: TimeMode::read(
+                params,
+                at,
+                self.rate,
+                bpm,
+                [CYC_MODE, CYC_RATE, CYC_RATIO, CYC_TIME, CYC_SYNC],
+            ),
         };
         self.matrix.begin(params);
     }
@@ -1457,9 +1809,18 @@ impl Synth {
             self.env1.reset(voice);
             self.env2.reset(voice);
         }
-        self.lp.reset();
-        self.hp.reset();
+        for bank in self.lp.iter_mut().chain(&mut self.hp) {
+            bank.reset();
+        }
         self.out.fill(0.0);
+        self.out_r.fill(0.0);
+    }
+
+    /// Gives voice `voice`'s filters, in both channels, `params`.
+    fn set_filter_params(&mut self, voice: usize, params: &VoiceParams) {
+        for bank in self.lp.iter_mut().chain(&mut self.hp) {
+            bank.set_params(voice, params);
+        }
     }
 
     /// Voice `voice`'s value for source `which` at `frame` of the stretch.
@@ -1522,23 +1883,58 @@ impl Synth {
         self.value_of(dest, position)
     }
 
-    /// The LFO's speed in cycles a second for `voice` at `frame`, after
-    /// every route into its rate: a full route is ±4 octaves, Beatlayer's
-    /// own reading. In the Ratio mode the speed follows the note, and
-    /// elsewhere it is the mode's own rate.
-    fn lfo_rate(&self, voice: usize, frame: usize, voices: &VoiceBlock) -> f64 {
+    /// The speed in cycles a second of the LFO (`dest` is its rate) or of
+    /// Envelope 2's cycle (Cyc Env Rate), with time mode `time`, for `voice`
+    /// at `frame`, after every route into it: a full route is ±4 octaves,
+    /// Beatlayer's own reading. In the Ratio mode the speed follows the
+    /// note, and elsewhere it is the mode's own rate.
+    fn speed(
+        &self,
+        dest: usize,
+        time: &TimeMode,
+        voice: usize,
+        frame: usize,
+        voices: &VoiceBlock,
+    ) -> f64 {
         let delta = self
             .matrix
-            .add(DEST_LFO_RATE, 0.0, voice, frame, &|source, voice, frame| {
+            .add(dest, 0.0, voice, frame, &|source, voice, frame| {
                 self.source(source, voice, frame, voices)
             });
-        let base = if self.lfos.mode == MODE_RATIO {
-            let note = f64::from(voices.pitch()[voice] + voices.pitch_step()[voice] * frame as f32);
-            self.lfos.ratio * 440.0 * ((note - 69.0) / 12.0).exp2()
+        let base = if time.mode == MODE_RATIO {
+            let lane = voice * COPIES;
+            let note = f64::from(voices.pitch()[lane] + voices.pitch_step()[lane] * frame as f32);
+            time.ratio * 440.0 * ((note - 69.0) / 12.0).exp2()
         } else {
-            self.lfos.hz
+            time.hz
         };
         base * (delta * LFO_RATE_OCTAVES).exp2()
+    }
+
+    fn lfo_rate(&self, voice: usize, frame: usize, voices: &VoiceBlock) -> f64 {
+        self.speed(DEST_LFO_RATE, &self.lfos.time, voice, frame, voices)
+    }
+
+    /// Spec: polysynth R31, R32. Renders Envelope 2's cycle for every active
+    /// voice, frame by frame, into `env2_out`: from 0 at the voice's note,
+    /// at its rate and the Cyc Env Rate routes'.
+    fn render_cycle(&mut self, voices: &VoiceBlock, count: usize) {
+        let stride = self.stride;
+        let cycle = self.cycle;
+        let mut active = voices.active_mask();
+        self.env2_out[..count * stride].fill(0.0);
+        while active != 0 {
+            let voice = active.trailing_zeros() as usize;
+            active &= active - 1;
+            for frame in 0..count {
+                let phase = self.cycle_phase[voice];
+                self.env2_out[frame * stride + voice] =
+                    cycle_wave(phase, cycle.tilt, cycle.hold) as f32;
+                let cycles =
+                    self.speed(DEST_CYC_RATE, &cycle.time, voice, frame, voices) / self.rate;
+                self.cycle_phase[voice] = (phase + cycles).fract();
+            }
+        }
     }
 
     /// Renders the LFO's value for every active voice, frame by frame,
@@ -1548,7 +1944,7 @@ impl Synth {
     fn render_lfo(&mut self, voices: &VoiceBlock, count: usize) {
         let stride = self.stride;
         let lfos = self.lfos;
-        let shared = !lfos.retrigger && lfos.mode != MODE_RATIO;
+        let shared = !lfos.retrigger && lfos.time.mode != MODE_RATIO;
         let mask = voices.active_mask();
         let first = if mask == 0 {
             0
@@ -1644,7 +2040,7 @@ fn envelope_params(
 impl Instrument for Synth {
     fn voice_event(&mut self, voices: &mut VoiceBlock, _state: &State, event: VoiceEvent) {
         let voice = event.voice;
-        let key = voices.pitch()[voice];
+        let key = voices.pitch()[voice * COPIES];
         match event.kind {
             VoiceEventKind::Start { start, .. } => {
                 let onset = match start {
@@ -1656,19 +2052,26 @@ impl Instrument for Synth {
                 };
                 self.osc1.start(voice, key, onset);
                 self.osc2.start(voice, key, onset);
-                // Retrigger starts the LFO's cycle over, and so does the
-                // Ratio mode, whose speed is the note's own.
-                if matches!(start, Start::Fresh | Start::Steal | Start::Retrigger)
-                    && (self.lfos.retrigger || self.lfos.mode == MODE_RATIO)
-                {
-                    self.lfo.restart(voice);
+                if matches!(start, Start::Fresh | Start::Steal | Start::Retrigger) {
+                    // Spec: polysynth R28, R31. The cycle starts at 0 with
+                    // the note, and Unison draws each copy's offset.
+                    self.cycle_phase[voice] = 0.0;
+                    for random in &mut self.unison_random[voice * COPIES..(voice + 1) * COPIES] {
+                        *random = self.unison.next_bipolar() as f32;
+                    }
+                    // Retrigger starts the LFO's cycle over, and so does the
+                    // Ratio mode, whose speed is the note's own.
+                    if self.lfos.retrigger || self.lfos.time.mode == MODE_RATIO {
+                        self.lfo.restart(voice);
+                    }
                 }
                 match start {
                     Start::Fresh => {
                         self.env1.trigger(voice, Trigger::New);
                         self.env2.trigger(voice, Trigger::New);
-                        self.lp.reset_voice(voice, &self.filter_params);
-                        self.hp.reset_voice(voice, &self.filter_params);
+                        for bank in self.lp.iter_mut().chain(&mut self.hp) {
+                            bank.reset_voice(voice, &self.filter_params);
+                        }
                     }
                     Start::Steal | Start::Retrigger => {
                         self.env1.trigger(voice, Trigger::Retrigger);
@@ -1702,27 +2105,55 @@ impl Instrument for Synth {
             return;
         }
         let stride = self.stride;
-        let span = voices.span(16);
-        if span == 0 {
+        let lane_span = voices.span(16);
+        if lane_span == 0 {
             return;
         }
+        // The voices those lanes belong to, in the filters' sixteens, and
+        // how many copies each plays.
+        let span = (lane_span / COPIES).next_multiple_of(16).min(MAX_VOICES);
+        let mode = self.mode;
+        let copies = instrument::MODE_COPIES[mode];
+        let stereo = mode == MODE_STEREO;
         // Spec: modulation R31. The controls show what the newest voice plays.
         let newest = state.newest(voices);
         self.matrix.set_newest(newest);
 
         // 1. The envelopes and the LFO: the modulation sources of the
-        //    stretch, before the routes that read them.
+        //    stretch, before the routes that read them; Envelope 2 is the
+        //    cycle where it cycles.
         self.env1.process(&mut self.env1_out[..count * stride]);
         self.env2.process(&mut self.env2_out[..count * stride]);
         self.lfo_out[..count * stride].fill(0.0);
         if self.matrix.uses(SRC_LFO) {
             self.render_lfo(voices, count);
         }
+        if self.cycle.on && self.matrix.uses(SRC_ENV2) {
+            self.render_cycle(voices, count);
+        }
+
+        // Spec: polysynth R29. Each sounding voice's drift walks, moved a
+        // frame at a time whether or not Drift is up, so that a render
+        // doesn't depend on where its blocks fall.
+        let drift_on = self.drift[from..to].iter().any(|&drift| drift > 0.0);
+        let mut active = voices.active_mask();
+        while active != 0 {
+            let voice = active.trailing_zeros() as usize;
+            active &= active - 1;
+            let [pitch, cutoff] = &mut self.walks[voice];
+            for frame in 0..count {
+                let amount = f64::from(self.drift[from + frame]) / 100.0;
+                self.drift_pitch[frame * stride + voice] =
+                    (pitch.next(self.rate) * amount * DRIFT_CENTS / 100.0) as f32;
+                self.drift_cutoff[frame * stride + voice] =
+                    (cutoff.next(self.rate) * amount * DRIFT_SEMITONES) as f32;
+            }
+        }
 
         // 2. Each voice's low-pass cutoff per frame, in semitones: the
-        //    knob's frequency, its Freq Mod and Mod routes, and the played
-        //    note through Key. The high-pass takes its Mod routes and
-        //    doesn't key-track.
+        //    knob's frequency, its Freq Mod and Mod routes, the played
+        //    note through Key, and the drift. The high-pass takes its Mod
+        //    routes and doesn't key-track.
         let freq_moved = self.matrix.has(DEST_LP_FREQ);
         let hp_moved = self.matrix.has(DEST_HP_FREQ);
         {
@@ -1733,9 +2164,10 @@ impl Instrument for Synth {
                 let plain_hp = pitch_of(self.hp_hz[from + frame], REFERENCE);
                 let key = self.key[from + frame];
                 for voice in 0..span {
+                    let lane = voice * COPIES;
                     // Spec: polysynth R24. Key follows the tuned pitch.
-                    let note = pitch[voice] + state.tuned_by(voice) + step[voice] * frame as f32
-                        - MIDDLE_C;
+                    let note =
+                        pitch[lane] + state.tuned_by(voice) + step[lane] * frame as f32 - MIDDLE_C;
                     let lp = if freq_moved {
                         let base =
                             self.position_of(DEST_LP_FREQ, f64::from(self.freq[from + frame]));
@@ -1752,50 +2184,63 @@ impl Instrument for Synth {
                     } else {
                         plain_hp
                     };
-                    self.cutoff[frame * stride + voice] = lp + key * note;
+                    let mut cutoff = lp + key * note;
+                    if drift_on {
+                        cutoff += self.drift_cutoff[frame * stride + voice];
+                    }
+                    self.cutoff[frame * stride + voice] = cutoff;
                     self.hp_cutoff[frame * stride + voice] = hp;
                 }
             }
         }
 
-        // 3. Pitch Mod, in semitones, and Shape Mod, in frames; both
-        //    oscillators take Pitch and Oscillator 1 the Shape. Oscillator
-        //    2's Detune is part of its own pitch.
+        // 3. Pitch Mod, in semitones, and Shape Mod, in frames, for every
+        //    lane; both oscillators take Pitch and Oscillator 1 the Shape.
+        //    Oscillator 2's Detune is part of its own pitch. A copy's detune
+        //    and the voice's drift ride on Pitch Mod too.
         // Spec: polysynth R24. A tuned voice's offset from its key's pitch
         // rides on Pitch Mod, so the oscillators play the tuned pitch.
         let tuned = state.any_tuned();
-        let pitch_moved = self.matrix.has(DEST_PITCH) || tuned;
+        let pitch_moved = self.matrix.has(DEST_PITCH) || tuned || copies > 1 || drift_on;
         let shape_moved = self.matrix.has(DEST_OSC1_SHAPE);
         let detune_moved = self.matrix.has(DEST_OSC2_DETUNE);
-        if pitch_moved {
-            self.pitch_mod[..count * stride].fill(0.0);
+        if pitch_moved || detune_moved {
             for frame in 0..count {
-                for voice in 0..span {
-                    self.pitch_mod[frame * stride + voice] =
-                        (self.pitch_semitones(voice, frame, voices)
-                            + f64::from(state.tuned_by(voice))) as f32;
-                }
-            }
-        }
-        if detune_moved {
-            self.pitch_mod2[..count * stride].fill(0.0);
-            for frame in 0..count {
+                let plan = self.plan(from + frame);
+                let unison = if mode == MODE_UNISON {
+                    self.strength[from + frame] / 100.0 * UNISON_RANDOM_CENTS / 100.0
+                } else {
+                    0.0
+                };
                 let base_value = f64::from(self.detune[from + frame]);
                 for voice in 0..span {
                     let semitones = self.pitch_semitones(voice, frame, voices)
                         + f64::from(state.tuned_by(voice));
-                    let base = self.position_of(DEST_OSC2_DETUNE, base_value);
-                    let position = self.modulated(base, DEST_OSC2_DETUNE, voice, frame, voices);
-                    let moved = self.value_of(DEST_OSC2_DETUNE, position);
-                    self.pitch_mod2[frame * stride + voice] =
-                        (semitones + moved - base_value) as f32;
+                    let mut first = semitones as f32;
+                    let mut second = if detune_moved {
+                        let base = self.position_of(DEST_OSC2_DETUNE, base_value);
+                        let position = self.modulated(base, DEST_OSC2_DETUNE, voice, frame, voices);
+                        let moved = self.value_of(DEST_OSC2_DETUNE, position);
+                        (semitones + moved - base_value) as f32
+                    } else {
+                        first
+                    };
+                    if drift_on {
+                        let drift = self.drift_pitch[frame * stride + voice];
+                        first += drift;
+                        second += drift;
+                    }
+                    for copy in 0..copies {
+                        let lane = voice * COPIES + copy;
+                        let extra = plan.cents[copy] / 100.0 + self.unison_random[lane] * unison;
+                        self.pitch_mod[frame * LANES + lane] = first + extra;
+                        self.pitch_mod2[frame * LANES + lane] = second + extra;
+                    }
                 }
             }
-        } else if pitch_moved {
-            self.pitch_mod2[..count * stride].copy_from_slice(&self.pitch_mod[..count * stride]);
         }
         if shape_moved {
-            self.frame_mod[..count * stride].fill(0.0);
+            self.frame_mod[..count * LANES].fill(0.0);
             for frame in 0..count {
                 for voice in 0..span {
                     let moved = self.matrix.add(
@@ -1805,35 +2250,37 @@ impl Instrument for Synth {
                         frame,
                         &|source, voice, frame| self.source(source, voice, frame, voices),
                     );
-                    self.frame_mod[frame * stride + voice] =
-                        (moved * (SHAPE_FRAMES - 1) as f64) as f32;
+                    let frames = (moved * (SHAPE_FRAMES - 1) as f64) as f32;
+                    let first = frame * LANES + voice * COPIES;
+                    self.frame_mod[first..first + COPIES].fill(frames);
                 }
             }
         }
 
-        // 4. The oscillators, band-limited, every voice in its lane.
+        // 4. The oscillators, band-limited, every copy in its lane.
         let inputs1 = Inputs {
-            lanes: span,
+            lanes: lane_span,
             pitch: voices.pitch(),
             pitch_step: Some(voices.pitch_step()),
-            pitch_mod: pitch_moved.then(|| &self.pitch_mod[..count * stride]),
-            frame_mod: shape_moved.then(|| &self.frame_mod[..count * stride]),
+            pitch_mod: pitch_moved.then(|| &self.pitch_mod[..count * LANES]),
+            frame_mod: shape_moved.then(|| &self.frame_mod[..count * LANES]),
         };
         self.osc1
-            .process(count, &inputs1, &mut self.osc1_out[..count * stride]);
+            .process(count, &inputs1, &mut self.osc1_out[..count * LANES]);
         let pitch_moved2 = pitch_moved || detune_moved;
         let inputs2 = Inputs {
-            lanes: span,
+            lanes: lane_span,
             pitch: voices.pitch(),
             pitch_step: Some(voices.pitch_step()),
-            pitch_mod: pitch_moved2.then(|| &self.pitch_mod2[..count * stride]),
+            pitch_mod: pitch_moved2.then(|| &self.pitch_mod2[..count * LANES]),
             frame_mod: None,
         };
         self.osc2
-            .process(count, &inputs2, &mut self.osc2_out[..count * stride]);
+            .process(count, &inputs2, &mut self.osc2_out[..count * LANES]);
 
         // 5. The sources summed, with the first saturation point. The
-        //    gains take their Mod routes, per voice.
+        //    gains take their Mod routes, per voice, and a voice's copies
+        //    their gains into the left and right.
         let pre = self.pre;
         let noise_on = self.noise_on;
         let gains_moved = self.matrix.has(DEST_OSC1_GAIN)
@@ -1841,6 +2288,7 @@ impl Instrument for Synth {
             || self.matrix.has(DEST_NOISE_GAIN);
         for frame in 0..count {
             let at = from + frame;
+            let plan = self.plan(at);
             for voice in 0..span {
                 let (g1, g2, gn) = if gains_moved {
                     (
@@ -1876,16 +2324,32 @@ impl Instrument for Synth {
                         self.gn[at],
                     )
                 };
-                let a = self.osc1_out[frame * stride + voice] * g1;
-                let b = self.osc2_out[frame * stride + voice] * g2;
-                let mut sample = a + b;
+                let (mut a, mut b, mut a_right, mut b_right) = (0.0, 0.0, 0.0, 0.0);
+                for copy in 0..copies {
+                    let lane = frame * LANES + voice * COPIES + copy;
+                    let (x, y) = (self.osc1_out[lane], self.osc2_out[lane]);
+                    a += x * plan.left[copy];
+                    b += y * plan.left[copy];
+                    if stereo {
+                        a_right += x * plan.right[copy];
+                        b_right += y * plan.right[copy];
+                    }
+                }
+                let mut sample = a * g1 + b * g2;
+                let mut sample_right = a_right * g1 + b_right * g2;
                 if noise_on && gn != 0.0 {
-                    sample += self.noise(voice) * gn;
+                    let noise = self.noise(voice) * gn;
+                    sample += noise;
+                    sample_right += noise;
                 }
                 if self.filter_on {
                     sample = soft_clip(sample, pre);
+                    sample_right = soft_clip(sample_right, pre);
                 }
                 self.audio[frame * stride + voice] = sample;
+                if stereo {
+                    self.audio_r[frame * stride + voice] = sample_right;
+                }
             }
         }
 
@@ -1907,37 +2371,44 @@ impl Instrument for Synth {
                         resonance: (value / 100.0).clamp(0.0, 1.0) as f32,
                         ..self.filter_params
                     };
-                    self.lp.set_params(voice, &params);
-                    self.hp.set_params(voice, &params);
+                    self.set_filter_params(voice, &params);
                 }
                 self.filter_resonance_moved = true;
             }
-            self.lp.process_voices(
-                span,
-                &self.cutoff[..count * stride],
-                &mut self.audio[..count * stride],
-            );
-            self.hp.process_voices(
-                span,
-                &self.hp_cutoff[..count * stride],
-                &mut self.audio[..count * stride],
-            );
             let post = self.post;
-            if post > 0.0 {
-                for sample in &mut self.audio[..count * stride] {
-                    *sample = soft_clip(*sample, post);
+            let channels = if stereo { 2 } else { 1 };
+            for (channel, audio) in [&mut self.audio, &mut self.audio_r]
+                .into_iter()
+                .take(channels)
+                .enumerate()
+            {
+                self.lp[channel].process_voices(
+                    span,
+                    &self.cutoff[..count * stride],
+                    &mut audio[..count * stride],
+                );
+                self.hp[channel].process_voices(
+                    span,
+                    &self.hp_cutoff[..count * stride],
+                    &mut audio[..count * stride],
+                );
+                if post > 0.0 {
+                    for sample in &mut audio[..count * stride] {
+                        *sample = soft_clip(*sample, post);
+                    }
                 }
             }
         }
 
-        // 7. The voices mixed to one mono signal, under Envelope 1, the
-        //    velocity, and the Main Volume and its Mod routes.
+        // 7. The voices mixed, under Envelope 1, the velocity, and the Main
+        //    Volume and its Mod routes: to one mono signal, or in Stereo to
+        //    a left and a right.
         let volume_moved = self.matrix.has(DEST_VOLUME);
         let mut mask = voices.active_mask();
         while mask != 0 {
             let voice = mask.trailing_zeros() as usize;
             mask &= mask - 1;
-            let velocity = voices.velocity()[voice];
+            let velocity = voices.velocity()[voice * COPIES];
             for frame in 0..count {
                 let level = self.env1_out[frame * stride + voice];
                 if level == 0.0 {
@@ -1960,12 +2431,16 @@ impl Instrument for Synth {
                 };
                 let mixed = self.audio[frame * stride + voice] * level * scale * volume;
                 self.out[from + frame] += mixed;
+                if stereo {
+                    self.out_r[from + frame] +=
+                        self.audio_r[frame * stride + voice] * level * scale * volume;
+                }
             }
         }
 
-        // Spec: modulation R31. The controls of Shape and LFO Rate show the
-        // newest voice's movement at the stretch's last frame, as the others
-        // do (the rest are shown as they are worked out).
+        // Spec: modulation R31. The controls of Shape, LFO Rate and Cyc Env
+        // Rate show the newest voice's movement at the stretch's last frame,
+        // as the others do (the rest are shown as they are worked out).
         if let Some(voice) = newest {
             let last = count - 1;
             if self.matrix.has(DEST_OSC1_SHAPE) {
@@ -1978,11 +2453,19 @@ impl Instrument for Synth {
                 );
                 self.matrix.show(DEST_OSC1_SHAPE, moved.clamp(0.0, 1.0));
             }
-            if self.matrix.has(DEST_LFO_RATE) && self.lfos.mode == MODE_RATE {
+            if self.matrix.has(DEST_LFO_RATE) && self.lfos.time.mode == MODE_RATE {
                 let hz = self.lfo_rate(voice, last, voices);
                 self.matrix.show(
                     DEST_LFO_RATE,
                     self.position_of(DEST_LFO_RATE, hz).clamp(0.0, 1.0),
+                );
+            }
+            if self.matrix.has(DEST_CYC_RATE) && self.cycle.on && self.cycle.time.mode == MODE_RATE
+            {
+                let hz = self.speed(DEST_CYC_RATE, &self.cycle.time, voice, last, voices);
+                self.matrix.show(
+                    DEST_CYC_RATE,
+                    self.position_of(DEST_CYC_RATE, hz).clamp(0.0, 1.0),
                 );
             }
         }
@@ -2000,6 +2483,61 @@ impl Instrument for Synth {
 }
 
 impl Synth {
+    /// Spec: polysynth R26 to R28. The copies the voice mode plays at frame
+    /// `at` of the stretch: Poly one; Mono four at Thickness; Stereo two,
+    /// detuned and panned by Spread; Unison four, detuned by Strength. A
+    /// stack keeps the note's level for uncorrelated copies (instrument
+    /// voices R13).
+    fn plan(&self, at: usize) -> CopyPlan {
+        match self.mode {
+            MODE_MONO => {
+                let thickness = self.thickness[at] / 100.0;
+                let level = (1.0 + 3.0 * thickness * thickness).sqrt().recip();
+                let gains = [
+                    level,
+                    thickness * level,
+                    thickness * level,
+                    thickness * level,
+                ];
+                CopyPlan {
+                    cents: MONO_CENTS,
+                    left: gains,
+                    right: gains,
+                }
+            }
+            MODE_STEREO => {
+                let spread = self.spread[at] / 100.0;
+                let (left0, right0) = instrument::copy_gains(0, 2, spread);
+                let (left1, right1) = instrument::copy_gains(1, 2, spread);
+                let cents = STEREO_CENTS * spread;
+                CopyPlan {
+                    cents: [
+                        instrument::copy_cents(0, 2, cents),
+                        instrument::copy_cents(1, 2, cents),
+                        0.0,
+                        0.0,
+                    ],
+                    left: [left0, left1, 0.0, 0.0],
+                    right: [right0, right1, 0.0, 0.0],
+                }
+            }
+            MODE_UNISON => {
+                let cents = UNISON_CENTS * self.strength[at] / 100.0;
+                let (gain, _) = instrument::copy_gains(0, COPIES, 0.0);
+                CopyPlan {
+                    cents: core::array::from_fn(|i| instrument::copy_cents(i, COPIES, cents)),
+                    left: [gain; COPIES],
+                    right: [gain; COPIES],
+                }
+            }
+            _ => CopyPlan {
+                cents: [0.0; COPIES],
+                left: [1.0, 0.0, 0.0, 0.0],
+                right: [1.0, 0.0, 0.0, 0.0],
+            },
+        }
+    }
+
     /// Voice `voice`'s Pitch Mod value at `frame`, in semitones.
     fn pitch_semitones(&self, voice: usize, frame: usize, voices: &VoiceBlock) -> f64 {
         let semitones = self
@@ -2063,6 +2601,43 @@ mod tests {
             lfo_wave(LFO_EXPONENTIAL, 0.5, 0.0, 0.0) < lfo_wave(LFO_LINEAR, 0.5, 0.0, 0.0),
             "the exponential decays faster"
         );
+    }
+
+    // Spec: polysynth R31 (Envelope 2's cycle: Tilt, Hold and the bent slopes)
+    #[test]
+    fn the_cycle_rises_holds_and_falls_by_tilt_and_hold() {
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        // Tilt 50 %, no Hold: a triangle that peaks half way.
+        assert!(near(cycle_wave(0.0, 0.5, 0.0), 0.0));
+        assert!(near(cycle_wave(0.25, 0.5, 0.0), 0.5));
+        assert!(near(cycle_wave(0.5, 0.5, 0.0), 1.0));
+        assert!(near(cycle_wave(0.75, 0.5, 0.0), 0.5));
+        // Hold 50 % keeps the top for half the cycle, between the slopes.
+        assert!(near(cycle_wave(0.25, 0.5, 0.5), 1.0));
+        assert!(near(cycle_wave(0.7, 0.5, 0.5), 1.0));
+        assert!(near(cycle_wave(0.875, 0.5, 0.5), 0.5));
+        // Tilt moves the top to either end of the cycle.
+        assert!(near(cycle_wave(0.0, 0.0, 0.0), 1.0));
+        assert!(cycle_wave(0.999, 1.0, 0.0) > 0.99);
+        // Within a tenth of an end the slope beside the top bends towards an
+        // exponential: it falls faster at first (Tilt 0) or rises faster
+        // (Tilt 100 %) than a straight line, and is straight from 10 %.
+        assert!(cycle_wave(0.5, 0.0, 0.0) < 0.1);
+        assert!(cycle_wave(0.5, 1.0, 0.0) > 0.9);
+        assert!(near(cycle_wave(0.5, 0.1, 0.0), 1.0 - (0.5 - 0.1) / 0.9));
+        assert!(cycle_wave(0.5, 0.05, 0.0) < 1.0 - (0.5 - 0.05) / 0.95);
+        // It never leaves 0 to 1.
+        for tilt in [0.0, 0.03, 0.5, 0.97, 1.0] {
+            for hold in [0.0, 0.3, 1.0] {
+                for step in 0..1000 {
+                    let value = cycle_wave(f64::from(step) / 1000.0, tilt, hold);
+                    assert!(
+                        (0.0..=1.0).contains(&value),
+                        "{tilt} {hold} {step}: {value}"
+                    );
+                }
+            }
+        }
     }
 
     // Spec: polysynth R20 (the routes); instrument modulation R2, R17.

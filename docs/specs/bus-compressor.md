@@ -40,6 +40,7 @@ The detector hears what the engine hands the device on its sidechain (the [routi
 | Rule | Test | Kind |
 |---|---|---|
 | R1 | `crates/devices/tests/bus_compressor.rs`, `the_bus_compressor_is_described_with_oversampling_as_a_menu_option`; `crates/shell/tests/eqs_and_dynamics.rs`, `a_set_with_the_four_devices_reopens_with_every_parameter`; `crates/cli/tests/agent.rs`, `an_agent_adds_the_eqs_and_dynamics_sets_them_by_id_and_keys_them_from_another_track`; `rtsan/tests/devices.rs`, `the_bus_compressor_passes_under_rtsan` | unit, MCP script, RTSan |
+| R1 | `crates/project/tests/schemas.rs`, `a_schema_14_set_opens_with_the_dynamics_devices_sounding_as_they_did` | unit |
 | R2 | `crates/devices/tests/bus_compressor.rs`, `the_static_curve_matches_at_each_ratio`, `the_knee_narrows_as_the_ratio_rises` | unit, real-time trap |
 | R3 | `crates/devices/tests/bus_compressor.rs`, `attack_and_release_are_time_constants_of_the_reduction` | unit, real-time trap |
 | R4 | `crates/devices/tests/bus_compressor.rs`, `auto_release_lets_go_in_a_fast_part_and_a_slow_one` | unit, real-time trap |

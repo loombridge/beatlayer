@@ -55,6 +55,7 @@ The signal runs through, in order: Trim; a fixed compressor while Comp is on; a 
 | R14 | `crates/devices/tests/drum_bus.rs`, `dry_wet_at_zero_is_the_input` | real-time trap |
 | R15 | `crates/devices/tests/drum_bus.rs`, `renders_are_bit_identical_at_any_block_size` | real-time trap |
 | R1, R15 | `crates/devices/tests/drum_bus.rs`, `a_set_with_drum_buss_saves_and_reopens` | unit |
+| R7, R11 | `crates/project/tests/schemas.rs`, `a_schema_14_set_opens_with_the_dynamics_devices_sounding_as_they_did` | unit |
 | R1 | `crates/cli/tests/agent.rs`, `an_agent_adds_drum_buss_sets_it_by_id_and_reads_it_back` | MCP script |
 | R1, R15 | `rtsan/tests/devices.rs`, `drum_buss_passes_under_rtsan` | RTSan |
 

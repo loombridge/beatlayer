@@ -349,3 +349,54 @@ impl Envelope {
         self.level
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FRAME: Frame = Frame {
+        rate: 48_000.0,
+        bpm: 120.0,
+    };
+
+    fn tick(state: &mut State, ins: [Option<f32>; MAX_IN], set: &[f64; MAX_SET]) -> f32 {
+        let mut out = [0.0; MAX_OUT];
+        state.tick(FRAME, ins, set, &mut out);
+        out[0]
+    }
+
+    // Spec: modular-device R21
+    #[test]
+    fn a_rising_gate_on_sync_starts_the_oscillators_cycle_again() {
+        let mut osc = State::new("oscillator", 48_000.0, 1);
+        // A saw: 2 * phase - 1, so a fresh cycle reads −1.
+        let set = [2.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let mut last = 0.0;
+        for _ in 0..100 {
+            last = tick(&mut osc, [None; MAX_IN], &set);
+        }
+        assert!(last > -0.9);
+        // The jump back is smoothed, so the cycle reads −1 a frame later.
+        tick(&mut osc, [None, None, Some(1.0), None], &set);
+        let next = tick(&mut osc, [None, None, Some(1.0), None], &set);
+        assert!(next < -0.95, "{next}");
+        // The gate held high doesn't restart it again.
+        for _ in 0..50 {
+            tick(&mut osc, [None, None, Some(1.0), None], &set);
+        }
+        assert!(tick(&mut osc, [None, None, Some(1.0), None], &set) > -0.9);
+    }
+
+    // Spec: modular-device R24
+    #[test]
+    fn a_rising_gate_on_reset_starts_the_lfos_cycle_again() {
+        let mut lfo = State::new("lfo", 48_000.0, 1);
+        // A saw at 1 Hz.
+        let set = [2.0, 1.0, 0.0, 2.0, 0.0, 0.0, 0.0];
+        for _ in 0..24_000 {
+            tick(&mut lfo, [None; MAX_IN], &set);
+        }
+        assert!(tick(&mut lfo, [None; MAX_IN], &set).abs() < 0.01, "half way through the cycle");
+        assert!((tick(&mut lfo, [Some(1.0), None, None, None], &set) + 1.0).abs() < 0.01);
+    }
+}

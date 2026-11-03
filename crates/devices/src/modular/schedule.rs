@@ -53,8 +53,6 @@ pub(super) struct Step {
 /// A patch ready to run.
 pub(super) struct Schedule {
     pub(super) steps: Vec<Step>,
-    /// Output slots, each a value per voice lane.
-    pub(super) slots: usize,
     /// The voice lanes: how many voices the schedule can play; 1 with none.
     pub(super) lanes: usize,
     /// Whether a cable joins a Note In to a Note Out (a MIDI effect passes
@@ -146,7 +144,6 @@ impl Schedule {
         }
         let mut schedule = Self {
             steps: Vec::with_capacity(order.len()),
-            slots,
             lanes,
             notes_through: false,
             note_ins: Vec::new(),

@@ -84,6 +84,7 @@ pub mod lift;
 pub mod limiter;
 pub mod looper;
 pub mod meld;
+pub mod meld_filter;
 mod meld_gen;
 mod meld_osc;
 pub mod midi_cc;

@@ -135,7 +135,7 @@ pub fn register(registry: &mut Registry) {
 /// from −1 up to one step under 1. `power` below 1 (Shape) quantises the
 /// signal raised to it, so steps near zero are finer; `offset` (DC Shift) is
 /// in steps and is added before the rounding.
-fn quantise(x: f32, bits: u32, power: f32, offset: f32) -> f32 {
+pub(crate) fn quantise(x: f32, bits: u32, power: f32, offset: f32) -> f32 {
     let half = (1u32 << (bits - 1)) as f32;
     let x = x.clamp(-1.0, 1.0);
     let curved = if power == 1.0 {
@@ -154,7 +154,7 @@ fn quantise(x: f32, bits: u32, power: f32, offset: f32) -> f32 {
 }
 
 /// A 4th-order low-pass at `corner` Hz: two stages.
-fn low_pass(corner: f64, rate: f64) -> [Coeffs; 2] {
+pub(crate) fn low_pass(corner: f64, rate: f64) -> [Coeffs; 2] {
     let corner = corner.min(rate * MAX_CORNER);
     BUTTERWORTH_Q.map(|q| coeffs(Type::HighCut12, corner, 0.0, q, rate))
 }

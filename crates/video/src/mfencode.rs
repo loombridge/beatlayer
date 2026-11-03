@@ -92,7 +92,7 @@ pub(crate) fn open_encoder(
         .ok_or_else(|| fail("Media Foundation has no H.264 encoder on this computer".into()))?;
     let rate = (
         frame_rate.numer().max(1) as u64,
-        u64::try_from(frame_rate.denom()).unwrap_or(1).max(1),
+        frame_rate.denom().max(1),
     );
     // Quality 100 spends about a quarter of a bit on a pixel of a frame, and
     // 1 about a hundredth.

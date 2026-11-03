@@ -26,14 +26,15 @@ In Chorus and Ensemble modes, Width adjusts the stereo image balance from mono (
 ## Rules
 
 - **R1.** Beatlayer ships Chorus-Ensemble, a native audio effect device type (`beatlayer.chorus_ensemble`, display name "Chorus-Ensemble", `DeviceRole::AudioEffect`). (S1, S2)
-- **R2.** In all modes, a high-pass filter is available with cutoff from 20.0 Hz to 2000.0 Hz (default 20.0 Hz), attenuating modulation of content below the cutoff. Output is a gain reaching −∞ dB (default 0 dB / gain 1.0). Warmth (0% to 100%, default 0%) adds soft saturation and gentle filtering. (S1, S3, S5)
-- **R3.** In Chorus and Ensemble modes, controls include Rate (0.01 Hz to 20.0 Hz, default 1.0 Hz), Amount (0% to 100%, default 50%), Feedback (0% to 100%, default 0%), Feedback Invert (toggle Ø, default off), Dry/Wet (0% to 100%, default 50%), and Width (0% to 200%, default 100%). Width sets the balance between mid and side channels: at 0% wet is mono, at 100% equal, and at 200% side channel gain is 6 dB higher than mid gain within 0.1 dB. (S1, S5)
+- **R2.** In all modes, a high-pass filter is available with cutoff from 20.0 Hz to 2000.0 Hz (default 50.0 Hz), attenuating modulation of content below the cutoff. Output is a gain reaching −∞ dB (default 0 dB / gain 1.0). Warmth (0% to 100%, default 0%) adds soft saturation and gentle filtering. (S1, S3, S5)
+- **R3.** In Chorus and Ensemble modes, controls include Rate (0.01 Hz to 20.0 Hz, default 0.90 Hz), Amount (0% to 100%, default 50%), Feedback (0% to 100%, default 0%), Feedback Invert (toggle Ø, default off), Dry/Wet (0% to 100%, default 50%), and Width (0% to 200%, default 100%). Width sets the balance between mid and side channels: at 0% wet is mono, at 100% equal, and at 200% side channel gain is 6 dB higher than mid gain within 0.1 dB. (S1, S5)
 - **R4.** In Chorus mode, two delay lines per channel are modulated. The Time parameter selects Auto (delay time scales dynamically with modulation amount) or a fixed delay time (7 ms, 10 ms, 20 ms, 35 ms, or 50 ms), maintaining a constant base delay independent of Amount. The Taps parameter selects 1 Tap (single delay line per channel) or 2 Taps (two delay lines per channel). (S1, S2, S5)
 - **R5.** In Ensemble mode, three delay lines per channel are modulated with their LFO phases split evenly a third of a cycle apart (120° apart within 1°). The lines' base delay is 10 ms and Amount scales the modulation's depth to 3.5 ms at 100 % (Beatlayer's own: the manual gives neither). (S1, S5)
 - **R6.** In Vibrato mode, pitch modulation is applied with no dry signal passing (wet only). Feedback, Feedback Invert, and Dry/Wet are disabled and ignored. Offset (0° to 180°, default 180°) controls the stereo channel phase offset. Shape (0% to 100%, default 0%) morphs the modulation waveform seamlessly from Sine (at 0%) to Triangle (at 100%). (S1, S5)
 - **R7.** The device reports 0 latency through `Node::latency`. (S1)
 - **R8.** Renders are bit-identical at block sizes 1, 64, 512, and 4096. No memory allocation, locking, or blocking calls occur on the audio thread. (S3, S4)
 - **R9.** An agent can add, configure parameters by ID, read parameters and display headlessly, and save/reopen sets containing the device. (S3, S4)
+- **R10.** The panel is Live's (observed in Live 12.4.16, 2 November 2026): the display with the three modes as tabs and, along its foot, the high-pass's frequency, Width and, in Chorus mode, Time and Taps (1 or 2); under it Rate, Amount and Feedback with its Ø; at the right Output, Warmth and Dry/Wet. In Vibrato mode Offset and Shape take Time's and Taps' places. A new Chorus-Ensemble is in Chorus mode at 0.90 Hz and 50 %, with a 50 Hz high-pass, Width 100 %, a Time of 20 ms, 2 Taps, Warmth 0 %, Output 0 dB and 50 % Dry/Wet. The taps read 1 and 2. (Layout L-DEV-092)
 
 ## Tests
 
@@ -48,3 +49,4 @@ In Chorus and Ensemble modes, Width adjusts the stereo image balance from mono (
 | R7 | `crates/devices/tests/chorus_ensemble.rs`, `latency_is_zero` | unit |
 | R8 | `crates/devices/tests/chorus_ensemble.rs`, `renders_are_bit_identical_at_any_block_size`; `rtsan/tests/devices.rs`, `the_modulation_devices_pass_under_rtsan` | real-time trap, RTSan |
 | R9 | `crates/cli/tests/agent.rs`, `an_agent_adds_sets_and_reads_the_modulation_devices_by_id_and_reopens_them` | MCP script |
+| R10 | `crates/devices/tests/live_panels.rs`, `chorus_ensemble_holds_lives_controls_in_lives_order` | unit |

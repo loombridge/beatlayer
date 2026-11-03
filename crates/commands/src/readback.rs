@@ -136,6 +136,7 @@ mod arrangement;
 mod browser;
 mod clip;
 mod device;
+mod extension;
 mod session;
 mod settings;
 mod song;
@@ -146,11 +147,12 @@ mod transport;
 type Row = (&'static str, Readback);
 
 /// The areas' tables, in the order [`READBACK`] lists them.
-const TABLES: [&[Row]; 9] = [
+const TABLES: [&[Row]; 10] = [
     arrangement::ROWS,
     browser::ROWS,
     clip::ROWS,
     device::ROWS,
+    extension::ROWS,
     session::ROWS,
     settings::ROWS,
     song::ROWS,

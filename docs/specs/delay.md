@@ -1,6 +1,6 @@
 # The delay device
 
-- **Status:** partial (R1 to R12 and R14 each have a passing test; R13's toggle works but is not yet saved with the set)
+- **Status:** partial (R1 to R12 and R14 to R16 each have a passing test; R13's toggle works but is not yet saved with the set)
 - **Work packages:** WP-2.18b, part 2 (R1 to R9); WP-8.33 (Live 12.4's LFO rate modes and Morph, the renamed controls and the device's banks: R10 to R14). The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)); the compressor, EQ and limiter are WP-2.18a; the reverb and Utility are the rest of WP-2.18b
 - **Parity-matrix row:** Devices: Delay
 - **Checked against:** the Live 12 reference manual, chapter 29 "Live Audio Effect Reference", section 29.11 "Delay", read on 14 October 2026 and again (online edition) on 30 October 2026; the Live 12.4 release notes, read 30 October 2026
@@ -18,8 +18,8 @@ delay time changes while audio is playing, the change is handled as a
 Repitch (a glide, with a pitch change), a Fade (a crossfade between the old
 and new times), or a Jump (a cut to the new time).
 
-The device takes Live's name, Delay; its look is the device
-framework's generic controls and one display cell, and its parameters,
+The device takes Live's name, Delay; its panel is laid out as Live's is
+(R15), and its parameters,
 ranges, defaults and units come from the manual's Delay section. The tempo
 it syncs to is the song's tempo map ([the musical time spec](musical-time.md)).
 This spec covers the device only; where a delay sits in a chain, and the
@@ -94,6 +94,8 @@ or an observation of Live running, as the clean-room policy allows.
 - **R12.** Each parameter's name is the one Live 12.4 gives it, in the table under "Defaults, ranges and details", and its descriptor keeps its number, so sets, presets, automation lanes, clip envelopes, macro and remote mappings saved before the change load onto the same parameter under its new name; its undo steps and its automation lane read the new name. A set saved before WP-8.33 opens with the LFO in Rate mode at its saved rate and, with Morph at 0 %, renders sample-identically (a set with Morph above 0 % renders its waves as R11 now shapes them). (S6; keeping the numbers is Beatlayer's own)
 - **R13.** The LFO Controls toggle shows and hides the LFO's controls in the device's body; it is view state, saved with the set, and not an undo step. (S7; saving it with the set is Beatlayer's own)
 - **R14.** Delay declares its banks of eight (S8): Main (Sync, Link, Freeze, Ping Pong, Feedback, Dry/Wet and the left and right divisions), Time (the left and right times, the offsets and Time Mode), Filter and LFO (Filter, Freq, Width, the Delay and Filter amounts, Rate Mode, Wave and Morph) and LFO Rate (the amount of each rate mode), so every automatable parameter is in a bank. (S8; the banks are Beatlayer's own)
+- **R15.** The panel is Live's (observed in Live 12.4.16, 2 November 2026): the Left and Right columns each a Sync button over a grid of buttons 1 2 3 4 5 6 8 16 for the sixteenths (the time in milliseconds takes the grid's place while Sync is off) and the offset in a plain box, the link button between them, Feedback with the Freeze button beside it under them, the display with Filter, Freq and Width along its foot and the LFO's Delay and Filter amounts under those, and at the right Smoothing (Repitch, Fade, Jump), Ping Pong and Dry/Wet. A new Delay has Sync on in both channels, 3 sixteenths a side, the filter on at Freq 1.00 kHz and Width 8.00, 50 % Feedback and 50 % Dry/Wet. (Layout L-DEV-085)
+- **R16.** Each channel has its own Sync: the left's is Sync and the right's is R Sync On. Each channel's time is its own divisions (Sync on) or its own milliseconds (Sync off); with Link on the right channel takes everything of the left's, Sync included. (S1; Live's panel has a Sync button in each column)
 
 ## Tests
 
@@ -113,15 +115,17 @@ or an observation of Live running, as the clean-room policy allows.
 | R12 | `crates/devices/tests/delay.rs`, `a_delay_saved_before_the_rate_modes_opens_in_rate_mode_and_plays_as_it_did` | unit, real-time trap |
 | R13 | `crates/ui/tests/delay_limiter.rs`, `the_lfo_controls_toggle_shows_the_rest_of_the_lfo_and_is_no_undo_step` (saving it with the set is not built) | UI script |
 | R14 | `crates/devices/tests/banks.rs`, `every_native_device_types_banks_hold_every_parameter_and_none_more_than_eight` | unit |
+| R15 | `crates/devices/tests/live_panels.rs`, `delay_holds_lives_controls_in_lives_order` | unit |
+| R16 | `crates/devices/tests/delay.rs`, `each_channel_has_its_own_sync_until_link_ties_them` | unit, real-time trap |
 
 ## Defaults, ranges and details
 
-- A new Delay starts with Sync on, Link off, Filter off, Freeze off, Ping Pong off, a delay time of one beat (four sixteenths) in Sync and 100 ms in Time, 50 per cent Feedback, 100 per cent Dry/Wet, a Freq of 1 kHz at a Width of Q 2.5, and an LFO of a 1 Hz sine with no movement.
-- Freq runs from 20 Hz to 20 kHz, logarithmically. Width runs from 0.5 to 9 and is the band-pass's Q, so a wider setting passes a wider band. Offset runs from −50 to +50 per cent of the division. The LFO's Rate runs from 0.01 to 40 Hz, and its Delay and Filter amounts from 0 to 100 per cent. The sync buttons run from 1 to 16 sixteenths.
+- A new Delay starts with Sync on in both channels, Link off, Filter on, Freeze off, Ping Pong off, a delay time of three sixteenths in Sync and 100 ms in Time, 50 per cent Feedback, 50 per cent Dry/Wet, a Freq of 1 kHz at a Width of Q 8, and an LFO of a 1 Hz sine with no movement.
+- Freq runs from 20 Hz to 20 kHz, logarithmically. Width runs from 0.5 to 9 and is the band-pass's Q, so a wider setting passes a wider band. Offset runs from −50 to +50 per cent of the division. The LFO's Rate runs from 0.01 to 40 Hz, and its Delay and Filter amounts from 0 to 100 per cent. The sync value runs from 1 to 16 sixteenths, and the panel's buttons set 1, 2, 3, 4, 5, 6, 8 and 16.
 - The LFO is the effects LFO (the device framework spec, R26 and R27), in the six rate modes of R10; a new Delay starts in Rate mode at 1 Hz, Time at 1 s, Synced at 1/4, Triplet and Dotted at 1/8 and Sixteenth at 4, Morph at 0 %. Its S&H and Wander waves follow the device's own random seed (R29), and Wander is a line between random values.
 - The rate modes' parameters are numbered 21 to 26: Rate Mode (21), LFO Time (22, 25 ms to 100 s, logarithmic), LFO Synced (23), LFO Triplet (24), LFO Dotted (25) and LFO Sixteenth (26, 1 to 16). The old LFO rate keeps number 16 and the name Rate, and is Rate mode's amount. The divisions are 1/64, 1/32, 1/16, 1/8, 1/4, 1/2, 1 bar, 2, 4 and 8 bars.
 - The parameters' names (R12): neither the 12.4 release notes nor the manual lists an old and a new name for any Delay parameter, so none is renamed and the table is empty; the six new parameters' names are Beatlayer's own, chosen so no two parameters share one. The LFO Controls toggle is the title bar's expand toggle (the device chains spec), which shows Delay's LFO section; the two amounts stay in the body.
 - Freeze cycles the buffer at the Feedback setting. Ping Pong crosses the feedback between the channels.
 - The band-pass filters the signal entering each line, feedback included, so the repeats thin out as they decay.
 - The framework does not smooth the delay time: the device reads the time parameters' targets and moves between them itself, over 20 ms in Repitch and Fade. Other continuous parameters take the framework's smoothing as every device does.
-- The device ships as Delay, drawn from its descriptors and one display cell.
+- The device ships as Delay, laid out as R15 says.

@@ -560,7 +560,17 @@ fn lfo2_sync_follows_the_tempo_at_the_playhead() {
 
 /// One second of noise through a 16-notch Phaser in blocks of `block_size`.
 fn sixteen_notches(block_size: usize) -> Vec<f32> {
-    let params = [(MODE, 0.0), (NOTCHES, 16.0), (AMOUNT, 60.0), (LFO_HZ, 3.0)];
+    // Center, Spread and Dry/Wet as the golden samples were captured with them:
+    // Live's panel starts at 400 Hz, 35 % and 100 % wet.
+    let params = [
+        (MODE, 0.0),
+        (NOTCHES, 16.0),
+        (AMOUNT, 60.0),
+        (LFO_HZ, 3.0),
+        (CENTER, 1_000.0),
+        (SPREAD, 50.0),
+        (DRY_WET, 50.0),
+    ];
     let input = noise(48_000);
     let mut pf = phaser_flanger_node(&params, block_size);
     input

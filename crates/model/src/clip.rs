@@ -306,6 +306,31 @@ impl Clip {
         (seconds >= 0.0).then_some(seconds)
     }
 
+    /// Where a video clip's whole movie falls in the song, through the
+    /// clip's warp map (the export spec, R50): the positions of the movie's
+    /// first instant and of its end, the first possibly before 1.1.1 and
+    /// either outside the clip, as the movie goes on past a trimmed clip
+    /// and starts before it. `movie_seconds` is the movie's length. `None`
+    /// for a clip that isn't a video clip.
+    #[must_use]
+    pub fn movie_span(&self, tempo: &TempoMap, movie_seconds: f64) -> Option<(Ticks, Ticks)> {
+        let ClipData::Audio(audio) = &self.data else {
+            return None;
+        };
+        if !audio.video {
+            return None;
+        }
+        let place = |seconds: f64| {
+            let elapsed = audio.in_clip_form(seconds) - audio.start;
+            if audio.warp {
+                self.start + Ticks(elapsed.round() as i64)
+            } else {
+                tempo.seconds_to_ticks(tempo.ticks_to_seconds(self.start) + elapsed)
+            }
+        };
+        Some((place(0.0), place(movie_seconds)))
+    }
+
     /// Where the clip's contents begin in the arrangement: its start less
     /// its offset. A MIDI clip's notes are placed from it. An audio clip's
     /// offset is 0, so this is its start, where it plays its file from its

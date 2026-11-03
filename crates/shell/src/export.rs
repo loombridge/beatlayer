@@ -47,6 +47,7 @@ use bl_shell_spec::export::{
 };
 
 use crate::ShellError;
+use crate::export_video::{self, MovieJob, MovieOf};
 
 /// The engine's rate when no audio device or setting gives one.
 pub const DEFAULT_ENGINE_RATE: u32 = 48_000;
@@ -1286,9 +1287,24 @@ struct Plan {
     start: Ticks,
     end: Ticks,
     source: RangeSource,
+    /// Create Video: the encoder and its settings (R46, R52).
+    video: Option<VideoPlan>,
     /// Each file's render, with the track it is of, if one: a set for the
     /// Main output, or for each track.
     renders: Vec<(Option<TrackId>, Document, Job)>,
+}
+
+/// What a movie is written with.
+#[derive(Clone, Copy)]
+struct VideoPlan {
+    encoder: bl_video::EncoderKind,
+    settings: bl_shell_spec::export::VideoSettings,
+}
+
+/// The movie written beside an audio file: its name with `.mov` (R46).
+#[must_use]
+pub fn movie_path(audio: &Path) -> PathBuf {
+    audio.with_extension("mov")
 }
 
 /// Works out what `export.audio` renders and the files it writes, as
@@ -1346,6 +1362,32 @@ fn plan(
     };
     let (start, end, source) =
         range(document, args.start.as_ref(), args.length, selection).map_err(invalid)?;
+    // Spec: export R38, R46, R47, R52. A movie needs a PCM file to take its
+    // sound from, a video clip in the range, and an encoder this computer has.
+    let video = match &args.video {
+        None => None,
+        Some(options) => {
+            if file_type == FileType::Mp3 {
+                return Err(invalid(
+                    "`video` needs a PCM file type (WAV, AIFF or FLAC): the movie's sound is the \
+                     PCM file"
+                        .to_owned(),
+                ));
+            }
+            export_video::check_settings(&options.settings).map_err(invalid)?;
+            let encoder = export_video::choose_encoder(options.encoder).map_err(invalid)?;
+            if !document.has_video_between(start, end) {
+                return Err(invalid(
+                    "`video` needs a video clip in the range, and the set has none there"
+                        .to_owned(),
+                ));
+            }
+            Some(VideoPlan {
+                encoder,
+                settings: options.settings,
+            })
+        }
+    };
 
     // Resolve target tracks (WP-2.26)
     let rendered_choice = args.rendered_track.clone().unwrap_or_default();
@@ -1458,13 +1500,14 @@ fn plan(
         start,
         end,
         source,
+        video,
         renders,
     })
 }
 
 /// The files `export.audio` with `args` would write: the file or each
-/// track's, and each one's MP3 (the export spec, R20, R37). The Export
-/// dialog asks about those that exist before it starts.
+/// track's, and each one's MP3 and movie (the export spec, R20, R37, R46).
+/// The Export dialog asks about those that exist before it starts.
 ///
 /// # Errors
 ///
@@ -1477,11 +1520,20 @@ pub fn planned_files(
     args: &ExportArgs,
 ) -> Result<Vec<PathBuf>, ShellError> {
     let plan = plan(document, selection, selected_tracks, engine_rate, args)?;
-    Ok(plan
+    Ok(written_files(&plan))
+}
+
+/// Every file a plan writes: each render's files, then the movies.
+fn written_files(plan: &Plan) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = plan
         .renders
         .iter()
         .flat_map(|(_, _, job)| job.destinations())
-        .collect())
+        .collect();
+    if plan.video.is_some() {
+        files.extend(plan.renders.iter().map(|(_, _, job)| movie_path(&job.path)));
+    }
+    files
 }
 
 /// Runs `export.audio` with its arguments: the set in `document`, its
@@ -1502,6 +1554,7 @@ pub fn run_command(
     plugins: Hosts<'_>,
     selection: Option<(Ticks, Ticks)>,
     selected_tracks: &[TrackId],
+    movies: &MovieOf<'_>,
     engine_rate: u32,
     args: &ExportArgs,
     audio: Option<&mut crate::audio::AudioHost>,
@@ -1512,6 +1565,11 @@ pub fn run_command(
         command: AUDIO.to_owned(),
         message,
     };
+    // Spec: export R50, R52. A video clip named in `video` with no range
+    // given is the range of its whole movie.
+    let args = &export_video::with_clip_range(document, args, movies).map_err(invalid)?;
+    let plan = plan(document, selection, selected_tracks, engine_rate, args)?;
+    let written_paths = written_files(&plan);
     let Plan {
         path,
         file_type,
@@ -1520,12 +1578,26 @@ pub fn run_command(
         start,
         end,
         source,
+        video,
         renders,
-    } = plan(document, selection, selected_tracks, engine_rate, args)?;
-    let written_paths: Vec<PathBuf> = renders
-        .iter()
-        .flat_map(|(_, _, job)| job.destinations())
-        .collect();
+    } = plan;
+    // Spec: export R51. A movie already there is refused before anything is
+    // rendered, as an audio file is.
+    if video.is_some()
+        && !args.replace
+        && let Some(existing) = renders
+            .iter()
+            .map(|(_, _, job)| movie_path(&job.path))
+            .find(|movie| movie.exists())
+    {
+        return Err(ShellError::Unavailable {
+            command: AUDIO.to_owned(),
+            reason: format!(
+                "{}: set `replace` to replace it",
+                ExportError::Exists(existing)
+            ),
+        });
+    }
     progress(&written_paths, 0.0);
 
     // Spec: external-devices R22. The outputs whose path runs through
@@ -1575,6 +1647,7 @@ pub fn run_command(
     })
     .map_err(failed)?;
     let mut outcome = crate::realtime::Outcome::default();
+    let mut live_promote: Option<(Vec<PathBuf>, Vec<PathBuf>)> = None;
     if !live.is_empty() {
         // Spec: external-devices R22, R26. Without a running audio device,
         // an export that needs real time is refused before anything renders.
@@ -1624,6 +1697,61 @@ pub fn run_command(
             .iter()
             .flat_map(|(_, job)| job.destinations())
             .collect();
+        live_promote = Some((live_partials, destinations));
+    }
+
+    // Spec: export R46, R49, R51. Audio is rendered; now the picture, to a
+    // hidden file of its own, the bar starting again for it. Whatever fails
+    // leaves no partial file behind, the audio's included.
+    let movie_destinations: Vec<PathBuf> = if video.is_some() {
+        renders
+            .iter()
+            .map(|(_, _, job)| movie_path(&job.path))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let mut movie_partials: Vec<PathBuf> = Vec::new();
+    if let Some(video) = &video {
+        let written = (|| -> Result<(), ExportError> {
+            for (i, (_, _, job)) in renders.iter().enumerate() {
+                let partial = hidden_beside(&movie_destinations[i], "partial");
+                movie_partials.push(partial.clone());
+                progress(&written_paths, 0.0);
+                export_video::write_movie(
+                    &MovieJob {
+                        document,
+                        movies,
+                        start,
+                        audio: &job.partials()[0],
+                        audio_extension: job.file_type.extension(),
+                        encoder: video.encoder,
+                        settings: &video.settings,
+                        out: &partial,
+                    },
+                    &cancel,
+                    &mut |share| {
+                        progress(&written_paths, (i as f64 + share) / renders.len() as f64);
+                    },
+                )?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = written {
+            for (_, _, job) in &renders {
+                for partial in job.partials() {
+                    let _ = fs::remove_file(partial);
+                }
+                let _ = fs::remove_file(hidden_beside(&job.path, "render"));
+            }
+            for partial in &movie_partials {
+                let _ = fs::remove_file(partial);
+            }
+            return Err(failed(error));
+        }
+    }
+
+    if let Some((live_partials, destinations)) = live_promote {
         promote(&live_partials, &destinations).map_err(failed)?;
     }
     // The outputs that rendered offline are moved into place as well.
@@ -1632,8 +1760,16 @@ pub fn run_command(
         .flat_map(|(_, job)| job.destinations())
         .collect();
     promote(&partials, &destinations).map_err(failed)?;
+    promote(&movie_partials, &movie_destinations).map_err(failed)?;
     progress(&written_paths, 1.0);
 
+    let canonical = |p: &Path| {
+        fs::canonicalize(p)
+            .unwrap_or_else(|_| p.to_path_buf())
+            .display()
+            .to_string()
+    };
+    let movie = movie_destinations.first().map(|movie| canonical(movie));
     let canonical_path = fs::canonicalize(&path).unwrap_or(path);
     let files: Vec<String> = written_paths
         .iter()
@@ -1667,6 +1803,7 @@ pub fn run_command(
 
     Ok(ExportResult {
         path: canonical_path.display().to_string(),
+        movie,
         files,
         file_type: match file_type {
             FileType::Wav => SpecFileType::Wav,

@@ -1599,6 +1599,16 @@ impl DeviceViewUi {
             }
             crate::menus::take_focus_first(ui, &response);
         }
+        // Spec: operator R27, R28 (C-DEVICE-015). Operator's own items after
+        // its switch: Copy Oscillator settings, Set All Envelope Levels for
+        // the envelope shown, the harmonics editor's options and Play By Key.
+        if matches!(
+            &frame.kind,
+            bl_model::DeviceKind::Native { device_type }
+                if device_type == bl_devices::operator::OPERATOR
+        ) {
+            self.operator_items(ui, shell, frame, events);
+        }
         // Spec: mpe R14, R18 (C-DEVICE-015). A plug-in's MPE Mode, ticked
         // while it's on, and the MPE/Multi-channel Settings.
         if let Some(mpe) = frame.mpe {
@@ -1669,6 +1679,99 @@ impl DeviceViewUi {
                 node.set_description(text.to_owned());
             });
             pad.on_disabled_hover_text(text);
+        }
+    }
+
+    /// Operator's items in its title bar menu (operator R27, R28), each a
+    /// registered command.
+    fn operator_items(
+        &self,
+        ui: &mut Ui,
+        shell: &Shell,
+        frame: &DeviceFrame,
+        events: &mut Vec<UiEvent>,
+    ) {
+        ui.separator();
+        let letter = |op: u8| char::from(b'A' + op);
+        ui.menu_button("Copy Oscillator Settings", |ui| {
+            for from in 0..4u8 {
+                ui.menu_button(format!("From Oscillator {}", letter(from)), |ui| {
+                    for to in (0..4u8).filter(|to| *to != from) {
+                        let response = ui.button(format!("To Oscillator {}", letter(to)));
+                        crate::menus::register_item(ui.ctx(), &response);
+                        if response.clicked() {
+                            invoke(
+                                events,
+                                ids::COPY_OSCILLATOR,
+                                json!({ "device": frame.id, "from": from, "to": to }),
+                            );
+                            ui.close();
+                        }
+                    }
+                });
+            }
+        });
+        // The envelope shown is the selected section's: an oscillator's, the
+        // LFO's, the filter's or the pitch's; the global section has none.
+        let shown = frame
+            .panel
+            .as_ref()
+            .and_then(|panel| panel.pages.iter().find(|p| p.node == "Sections"))
+            .map(|node| node.shown.as_str());
+        let envelope = match shown {
+            Some("Osc A") => Some("A"),
+            Some("Osc B") => Some("B"),
+            Some("Osc C") => Some("C"),
+            Some("Osc D") => Some("D"),
+            Some("LFO") => Some("LFO"),
+            Some("Filter") => Some("Filter"),
+            Some("Pitch") => Some("Pitch"),
+            _ => None,
+        };
+        for (label, to) in [
+            ("Maximum", "maximum"),
+            ("Minimum", "minimum"),
+            ("Middle", "middle"),
+        ] {
+            let response = ui.add_enabled(
+                envelope.is_some(),
+                egui::Button::new(format!("Set All Envelope Levels to {label}")),
+            );
+            crate::menus::register_item(ui.ctx(), &response);
+            if let (true, Some(envelope)) = (response.clicked(), envelope) {
+                invoke(
+                    events,
+                    ids::SET_ENVELOPE_LEVELS,
+                    json!({ "device": frame.id, "envelope": envelope, "to": to }),
+                );
+                ui.close();
+            }
+        }
+        // The harmonics editor's options, ticked while on.
+        let harmonics = shell.devices().harmonics(frame.id);
+        for (label, field, on) in [
+            ("Even Only", "even_only", harmonics.even_only),
+            ("Odd Only", "odd_only", harmonics.odd_only),
+            ("Normalize", "normalize", harmonics.normalize),
+        ] {
+            let response = ui.button(if on { format!("✔ {label}") } else { label.to_owned() });
+            crate::menus::register_item(ui.ctx(), &response);
+            if response.clicked() {
+                invoke(
+                    events,
+                    ids::SET_HARMONICS,
+                    json!({ "device": frame.id, field: !on }),
+                );
+                ui.close();
+            }
+        }
+        // shortcut: the filter frequency has no menu of its own yet, so Play
+        // By Key is here; move it when per-control menus exist.
+        let response = ui.button("Play By Key");
+        crate::menus::register_item(ui.ctx(), &response);
+        if response.clicked() {
+            invoke(events, ids::PLAY_BY_KEY, json!({ "device": frame.id }));
+            ui.close();
         }
     }
 

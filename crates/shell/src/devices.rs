@@ -488,6 +488,16 @@ impl DeviceView {
             articulations: device.articulations.clone(),
             learning: self.learning.get(&device.id).map(|learn| learn.row),
             matrix_routes: self.matrix_routes(device),
+            harmonics: matches!(&device.kind, DeviceKind::Native { device_type }
+                if device_type == bl_devices::operator::OPERATOR)
+            .then(|| {
+                let view = self.harmonics(device.id);
+                bl_shell_spec::devices::HarmonicsOptions {
+                    even_only: view.even_only,
+                    odd_only: view.odd_only,
+                    normalize: view.normalize,
+                }
+            }),
             locked: Vec::new(),
         })
     }
@@ -605,6 +615,7 @@ impl DeviceView {
             articulations: Vec::new(),
             learning: None,
             matrix_routes: Vec::new(),
+            harmonics: None,
             locked: Vec::new(),
         }
     }

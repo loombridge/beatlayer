@@ -599,11 +599,34 @@ pub struct DevicePanel {
     /// value. Empty for a device without a matrix or with no route.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub matrix_routes: Vec<MatrixRoutes>,
+    /// An Operator's harmonics editor options, which a drag across its
+    /// partials follows (operator R27): view state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harmonics: Option<HarmonicsOptions>,
     /// The parameters drawn disabled because the device takes them from its
     /// current scale: Scale's Base and Scale Name and Arpeggiator's Root and
     /// Scale, while Use Current Scale is on (the scales spec, R16).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub locked: Vec<ParamId>,
+}
+
+/// The harmonics editor's options in a device's panel (operator R27).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct HarmonicsOptions {
+    pub even_only: bool,
+    pub odd_only: bool,
+    pub normalize: bool,
+}
+
+impl Default for HarmonicsOptions {
+    /// A new device's: Normalize on.
+    fn default() -> Self {
+        Self {
+            even_only: false,
+            odd_only: false,
+            normalize: true,
+        }
+    }
 }
 
 /// The sources routed into one parameter of an instrument's matrix.

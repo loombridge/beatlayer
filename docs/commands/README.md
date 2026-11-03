@@ -63,6 +63,7 @@ The commands, by the part of their ID before its first dot:
 - [`modulation`](modulation.md)
 - [`modulator`](modulator.md)
 - [`note`](note.md)
+- [`operator`](operator.md)
 - [`packages`](packages.md)
 - [`pad`](pad.md)
 - [`perception`](perception.md)
@@ -9172,6 +9173,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `mpe` | [`PluginMpe`](#pluginmpe) | no | A plug-in's MPE Mode and the MPE/Multi-channel Settings its MPE MIDI goes out on (the MPE spec, R14, R18). Off in a new device, and left out of the saved set until changed. Native devices never set it. |
 | `other_params` | array or null | no | The values of the state that isn't active, in the same form as [`params`](Self::params) (device compare R1, R10). `None` while the two states are equal, as a new device's are, and left out of the saved set then. Use [`other_params`](Self::other_params) to read it. |
 | `own_name` | string | no | The device's own name, such as `Auto Filter`, which the title bar shows while Show Preset Name is off. Empty while it's the same as [`name`](Self::name), and left out of the saved set then. |
+| `partials` | array of [`Partials`](#partials) | no | The partials of the user waves an Operator's oscillators play (the Operator spec, R27), by oscillator; one that isn't listed has the first partial alone. Empty for a device without drawn waves, and left out of the saved set then. |
 | `plugin` | [`PluginState`](#pluginstate) or null | no | A plug-in's own state and where it was loaded from (WP-2.6), as last saved with the set. Left out of the saved set for a native device, and for a plug-in until the set is first saved with it. |
 | `preset_name` | string or null | no | The name of the preset the device holds (the plug-in list spec, R5): the Beatlayer device preset last loaded into it or saved from it, or else the program name the plug-in's format reported. Left out of the saved set while there is none, so a device saved before this package loads with none. |
 | `region` | [`SampleRegion`](#sampleregion) or null | no | The part of slot 0's sample a Simpler plays, between its Start and End flags (the sampler spec, R22): `None` for the whole sample. Loading another sample clears it; an edit that changes the sample's length moves it. Left out of the saved set while it is the whole sample. |
@@ -9339,6 +9341,13 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
           }
         ],
         "type": "array"
+      },
+      "type": "array"
+    },
+    "partials": {
+      "description": "The partials of the user waves an Operator's oscillators play (the Operator spec, R27), by oscillator; one that isn't listed has the first partial alone. Empty for a device without drawn waves, and left out of the saved set then.",
+      "items": {
+        "$ref": "#/$defs/Partials"
       },
       "type": "array"
     },
@@ -12458,6 +12467,28 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `EnvelopeLevel`
+
+The level `operator.set_envelope_levels` sets.
+
+Type: one of `"maximum"`, `"minimum"`, `"middle"`.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The level `operator.set_envelope_levels` sets.",
+  "enum": [
+    "maximum",
+    "minimum",
+    "middle"
+  ],
+  "type": "string"
 }
 ```
 
@@ -15674,6 +15705,49 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `HarmonicsView`
+
+The harmonics editor's options, which `operator.set_harmonics` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `even_only` | boolean | yes |  |
+| `odd_only` | boolean | yes |  |
+| `normalize` | boolean | yes |  |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The harmonics editor's options, which `operator.set_harmonics` returns.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "even_only": {
+      "type": "boolean"
+    },
+    "normalize": {
+      "type": "boolean"
+    },
+    "odd_only": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "device",
+    "even_only",
+    "odd_only",
+    "normalize"
+  ],
+  "type": "object"
 }
 ```
 
@@ -23471,6 +23545,34 @@ One of:
 
 </details>
 
+### `OperatorChanged`
+
+What `operator.set_envelope_levels` and `operator.play_by_key` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `operator.set_envelope_levels` and `operator.play_by_key` return.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    }
+  },
+  "required": [
+    "device"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Origin`
 
 Where a shortcut's keys come from.
@@ -23503,6 +23605,52 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `OscillatorCopied`
+
+What `operator.copy_oscillator` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `from` | integer from 0 to 255 | yes | The oscillator copied from. |
+| `to` | integer from 0 to 255 | yes | The oscillator copied to. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `operator.copy_oscillator` returns.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "from": {
+      "description": "The oscillator copied from.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "to": {
+      "description": "The oscillator copied to.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "from",
+    "to"
+  ],
+  "type": "object"
 }
 ```
 
@@ -25155,6 +25303,92 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `Partials`
+
+One oscillator's drawn partials.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `osc` | integer from 0 to 255 | yes | The oscillator, from 0 for A. |
+| `levels` | array of number | yes | The levels of the first partials, each from 0 to 1; there are 16, 32 or 64 of them. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One oscillator's drawn partials.",
+  "properties": {
+    "levels": {
+      "description": "The levels of the first partials, each from 0 to 1; there are 16, 32 or 64 of them.",
+      "items": {
+        "format": "float",
+        "type": "number"
+      },
+      "type": "array"
+    },
+    "osc": {
+      "description": "The oscillator, from 0 for A.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "osc",
+    "levels"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PartialsChanged`
+
+What `device.set_partials` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `osc` | integer from 0 to 255 | yes | The oscillator, from 0. |
+| `count` | integer, at least 0 | yes | Its partials' count. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.set_partials` returns.",
+  "properties": {
+    "count": {
+      "description": "Its partials' count.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "osc": {
+      "description": "The oscillator, from 0.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "osc",
+    "count"
+  ],
+  "type": "object"
 }
 ```
 

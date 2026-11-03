@@ -16,7 +16,8 @@ use std::sync::Arc;
 
 use bl_engine::{DeviceType, NodeConfig, NodeData, NodeEvent, Registry};
 use bl_model::device_layout::{
-    BODY_HEIGHT, ControlBand, LayoutNode, Page, PageStyle, PagesNode, TAB_HEIGHT, Widget,
+    BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Page, PageStyle, PagesNode, TAB_HEIGHT,
+    Widget,
 };
 use bl_model::matrix::{
     DestDef, Kind as MatrixKind, MatrixLayout, Pick, Range as MatrixRange, Rate, Scope, SlotDef,
@@ -614,10 +615,14 @@ fn layout(params: &[ParamDescriptor]) -> DeviceLayout {
     let display = |ids: &[ParamId]| band(params, BODY_HEIGHT, ids);
     let range = |first: u32, count: u32| (first..first + count).map(ParamId).collect::<Vec<_>>();
     let envelope_of = |base: u32| range(base, 14);
+    // Spec: operator R29. Every section's display is one cell, which the
+    // section's view fills: layout is open (the displays' placement).
+    let cell = || LayoutNode::Cell(DisplayCell::new("Display", 160.0, BODY_HEIGHT, 1.0));
     let mut pages = vec![
         Page::new(
             "Global",
             LayoutNode::Row(vec![
+                cell(),
                 display(&[
                     ANTIALIAS,
                     INTERPOLATION,
@@ -675,7 +680,7 @@ fn layout(params: &[ParamDescriptor]) -> DeviceLayout {
         pages.push(
             Page::new(
                 &format!("Osc {letter}"),
-                LayoutNode::Row(vec![display(&extra), display(&envelope)]),
+                LayoutNode::Row(vec![cell(), display(&extra), display(&envelope)]),
             )
             .with_section(section(&[
                 id(OSC_ON),
@@ -691,7 +696,11 @@ fn layout(params: &[ParamDescriptor]) -> DeviceLayout {
     pages.push(
         Page::new(
             "LFO",
-            LayoutNode::Row(vec![display(&lfo_controls), display(&envelope_of(LFO_ENV))]),
+            LayoutNode::Row(vec![
+                cell(),
+                display(&lfo_controls),
+                display(&envelope_of(LFO_ENV)),
+            ]),
         )
         .with_section(section(&[LFO_ON, LFO_WAVE, LFO_RATE, LFO_AMOUNT])),
     );
@@ -711,6 +720,7 @@ fn layout(params: &[ParamDescriptor]) -> DeviceLayout {
         Page::new(
             "Filter",
             LayoutNode::Row(vec![
+                cell(),
                 display(&filter_controls),
                 display(&envelope_of(FILTER_ENV)),
             ]),
@@ -720,8 +730,10 @@ fn layout(params: &[ParamDescriptor]) -> DeviceLayout {
     let mut pitch = envelope_of(PITCH_ENV);
     pitch.extend((0..OPERATORS as u32).map(|op| ParamId(PITCH_OSC + op)));
     pitch.extend([PITCH_LFO, PITCH_DEST_B, PITCH_AMOUNT_B]);
-    pages
-        .push(Page::new("Pitch", display(&pitch)).with_section(section(&[PITCH_ON, PITCH_AMOUNT])));
+    pages.push(
+        Page::new("Pitch", LayoutNode::Row(vec![cell(), display(&pitch)]))
+            .with_section(section(&[PITCH_ON, PITCH_AMOUNT])),
+    );
     DeviceLayout::new(LayoutNode::Row(vec![LayoutNode::Pages(PagesNode::new(
         "Sections",
         PageStyle::Shell,

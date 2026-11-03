@@ -699,6 +699,48 @@ pub(crate) fn a_wavetable_route(h: &mut Harness) {
     wavetable_grid(h, true);
 }
 
+/// A Meld on the first MIDI track, its A Matrix tab shown, with a route
+/// from LFO 1 into A Filter Frequency.
+pub(crate) fn a_meld_matrix(h: &mut Harness) {
+    h.shell.set_device_types(bl_devices::device_types());
+    let track = h
+        .shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|t| t.kind() == bl_model::TrackKind::Midi)
+        .map(bl_model::Track::id)
+        .unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let t = bl_devices::meld::meld_type();
+    let device = h
+        .shell
+        .run(
+            "device.add",
+            json!({ "device": { "kind": t.kind, "name": t.name, "role": t.role } }),
+        )
+        .unwrap()["device"]
+        .clone();
+    h.shell
+        .run(
+            "device.set_page",
+            json!({ "device": device, "node": "A Tabs", "page": "Matrix" }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            "device.set_route",
+            json!({ "device": device, "source": "A LFO 1",
+                    "destination": "A Filter Frequency", "amount": 25.0 }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
 /// A Compressor, whose display has views, on the selected audio track.
 pub(crate) fn a_squeeze(h: &mut Harness) {
     h.shell.set_device_types(bl_devices::device_types());

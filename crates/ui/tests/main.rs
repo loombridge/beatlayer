@@ -67,6 +67,7 @@ mod main_properties;
 mod main_window;
 mod map_modes;
 mod mapping_targets;
+mod meld_panel;
 mod midi_input;
 mod midi_meters;
 mod midi_tools;

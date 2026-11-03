@@ -190,6 +190,11 @@ pub const REMOVE_DESTINATION: &str = "device.remove_destination";
 /// resonators to the other.
 pub const COPY_RESONATOR: &str = "collision.copy_resonator";
 
+/// `meld.copy_modulation`: copies the routes of one of Meld's engines to the
+/// other.
+pub const COPY_MODULATION: &str = "meld.copy_modulation";
+/// `meld.clear_modulation`: clears the routes of one of Meld's engines.
+pub const CLEAR_MODULATION: &str = "meld.clear_modulation";
 /// `device.set_partials`: draws an Operator oscillator's user wave, its
 /// partials, count and Repeat (operator R27).
 pub const SET_PARTIALS: &str = "device.set_partials";
@@ -273,6 +278,8 @@ pub const IDS: &[&str] = &[
     ADD_DESTINATION,
     REMOVE_DESTINATION,
     COPY_RESONATOR,
+    COPY_MODULATION,
+    CLEAR_MODULATION,
     SET_PARTIALS,
     COPY_OSCILLATOR,
     SET_ENVELOPE_LEVELS,
@@ -1707,6 +1714,54 @@ pub struct ResonatorCopied {
     pub from: u8,
     /// The resonator copied to, 1 or 2.
     pub to: u8,
+}
+
+/// Arguments of `meld.copy_modulation`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CopyModulationArgs {
+    /// The Meld; the selected device if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The engine to copy from, `A` or `B`; its routes go to the other.
+    pub engine: String,
+}
+
+/// What `meld.copy_modulation` returns: the Meld, the engines it copied
+/// between and how many routes it wrote.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ModulationCopied {
+    /// The device.
+    pub device: DeviceId,
+    /// The engine copied from, `A` or `B`.
+    pub from: String,
+    /// The engine copied to.
+    pub to: String,
+    /// How many routes the other engine now holds from the copy.
+    pub routes: usize,
+}
+
+/// Arguments of `meld.clear_modulation`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ClearModulationArgs {
+    /// The Meld; the selected device if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The engine whose routes to clear, `A` or `B`.
+    pub engine: String,
+}
+
+/// What `meld.clear_modulation` returns: the Meld, the engine and how many
+/// routes it cleared.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ModulationCleared {
+    /// The device.
+    pub device: DeviceId,
+    /// The engine cleared.
+    pub engine: String,
+    /// How many routes were cleared.
+    pub routes: usize,
 }
 
 /// What `device.set_route` and `device.clear_route` return: the slot they
@@ -3386,6 +3441,39 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .args::<CopyResonatorArgs>()
             .result::<ResonatorCopied>(),
+        CommandSpec::new(COPY_MODULATION, "Copy Modulation")
+            .description(
+                "Copies the routes of one of Meld's engines to the other, as the Copy to A and \
+                 Copy to B buttons of its Matrix tab do: `engine` is `A` to copy engine A's \
+                 routes to engine B, or `B` to copy B's to A. Each route into one of the \
+                 engine's own destinations (a global destination, Mixer Drive or Volume, \
+                 belongs to neither) is written for the other engine's matching destination, \
+                 from the other engine's matching source, with the same amount; the other \
+                 engine's routes into those destinations are replaced, and its routes into \
+                 other destinations stay. The shared sources (Velocity, Pitch and the rest) \
+                 stay as they are. The device is a Meld, by ID or the selected one. It is \
+                 refused, changing nothing, when the other engine's routes and the copy would \
+                 need more than the matrix's sixty-four slots. One undo step (Copy \
+                 Modulation); the device's `matrix` reads back the result.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<CopyModulationArgs>()
+            .result::<ModulationCopied>(),
+        CommandSpec::new(CLEAR_MODULATION, "Clear Modulation")
+            .description(
+                "Clears every route of one of Meld's engines, as the X button of its Matrix \
+                 tab does: `engine` is `A` or `B`. The engine's routes are those into its own \
+                 destinations and those from its own modulators into a global destination; \
+                 the shared sources' routes into a global destination stay. Each cleared \
+                 slot's amount goes back to 0 %. The device is a Meld, by ID or the selected \
+                 one. One undo step (Clear Modulation); the device's `matrix` reads back the \
+                 result.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<ClearModulationArgs>()
+            .result::<ModulationCleared>(),
         CommandSpec::new(SET_PARTIALS, "Change Partials")
             .description(
                 "Draws the user wave of an Operator oscillator, as dragging across its \

@@ -189,7 +189,7 @@ pub fn bus_compressor_type() -> DeviceType {
         )
 }
 
-/// The device's layout as Live draws it (L-DEV-048): the SC EQ's column, the
+/// The device's layout as Live draws it (L-DEV-051): the SC EQ's column, the
 /// times and ratio as a column of small knobs, the needle meter over
 /// Threshold and Makeup, and Soft Clip, Range and Dry/Wet at the right.
 fn layout() -> DeviceLayout {

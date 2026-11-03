@@ -5,15 +5,11 @@
 
 use bl_dsp::random::Random;
 use bl_engine::{DeviceType, Registry};
-use bl_model::ParamUnit;
-use bl_model::device_layout::Widget;
-use bl_model::{
-    DeviceDescription, DeviceDisplay, DeviceId, DeviceRole, OrdMap, ParamDescriptor, ParamId,
-};
+use bl_model::{DeviceDescription, DeviceDisplay, DeviceId, DeviceRole, OrdMap, ParamId};
 
 use crate::drum_synth::{
-    DECAY, DrumSynth, Filter, Hit, Pass, Preset, VOLUME, decay, layout, master_at, percent, tune,
-    volume,
+    DECAY, DrumSynth, Filter, Hit, Pass, Preset, VOLUME, decay, decay_ms, framed, label, large,
+    master_at, panel, percent, tune, tune_semitones, volume,
 };
 use crate::filters::Ring;
 use crate::framework::{ParamBank, add};
@@ -21,7 +17,8 @@ use crate::framework::{ParamBank, add};
 /// DS Clap's device type id.
 pub const DS_CLAP: &str = "beatlayer.ds_clap";
 
-/// The time between the two delay lines.
+/// The time between the two delay lines, from none at 0 % to
+/// [`SLOPPY_MAX_MS`] at 100 %.
 pub const SLOPPY: ParamId = ParamId(2);
 /// How much filtered noise follows the bursts.
 pub const TAIL: ParamId = ParamId(3);
@@ -29,7 +26,8 @@ pub const TAIL: ParamId = ParamId(3);
 pub const SPREAD: ParamId = ParamId(4);
 /// The band-pass's brightness.
 pub const TONE: ParamId = ParamId(5);
-/// The pitch of the band-pass, in semitones.
+/// The pitch of the band-pass: 50 % is its own, and the ends are two octaves
+/// away.
 pub const TUNE: ParamId = ParamId(6);
 
 /// How many bursts there are, how far apart they start and how fast each
@@ -56,50 +54,49 @@ const MIN_MS: f64 = BURSTS as f64 * BURST_GAP_MS + 2.0 * BURST_DECAY_MS + SLOPPY
 #[must_use]
 pub fn ds_clap_type() -> DeviceType {
     let params = vec![
-        decay(300.0),
+        decay(30.0),
         volume(),
-        ParamDescriptor::continuous(
+        percent(
             SLOPPY,
             "Sloppy",
-            (0.0, SLOPPY_MAX_MS),
-            10.0,
-            ParamUnit::Milliseconds,
-        )
-        .describe(
-            "The time between the two delay lines, left and right: the claps line up \
-                 tightly at 0.",
+            24.0,
+            "The time between the two delay lines, left and right, up to 30 ms: the claps \
+             line up tightly at 0.",
         ),
         percent(
             TAIL,
             "Tail",
-            50.0,
+            65.0,
             "Adds band-passed noise to the clap's bursts, decaying over Decay.",
         ),
         percent(
             SPREAD,
             "Spread",
-            50.0,
+            76.0,
             "The stereo width: mono at 0, the two lines hard left and right at 100 %.",
         ),
         percent(
             TONE,
             "Tone",
-            50.0,
+            32.0,
             "Tilts the band-pass's brightness: higher values add high frequencies.",
         ),
-        tune(TUNE, "Tune"),
+        tune(TUNE, "Tune", 18.0),
     ];
     DeviceType::native(DS_CLAP, "DS Clap", DeviceRole::Instrument).with_description(
         DeviceDescription::new(params)
-            .with_layout(layout(&[
-                (SLOPPY, Widget::Knob),
-                (TAIL, Widget::Knob),
-                (SPREAD, Widget::Knob),
-                (TONE, Widget::Knob),
-                (TUNE, Widget::Knob),
-                (DECAY, Widget::Knob),
-                (VOLUME, Widget::Knob),
-            ]))
+            .with_layout(panel(
+                (
+                    vec![
+                        large(SLOPPY, 0),
+                        large(TAIL, 1),
+                        framed(SPREAD, 2, 0),
+                        framed(TONE, 2, 1),
+                    ],
+                    vec![label("Spread/Tone", 2)],
+                ),
+                [TUNE, DECAY, VOLUME],
+            ))
             .with_banks(&[
                 ("Clap", &["Sloppy", "Tail", "Spread", "Tone", "Tune"]),
                 ("Level", &["Decay", "Volume"]),
@@ -111,26 +108,26 @@ pub fn ds_clap_type() -> DeviceType {
 pub const PRESETS: [Preset; 3] = [
     Preset {
         name: "Tight",
-        params: &[(SLOPPY, 2.0), (TAIL, 30.0), (SPREAD, 40.0), (DECAY, 200.0)],
+        params: &[(SLOPPY, 6.7), (TAIL, 30.0), (SPREAD, 40.0), (DECAY, 50.0)],
     },
     Preset {
         name: "Room",
         params: &[
-            (SLOPPY, 14.0),
+            (SLOPPY, 46.7),
             (TAIL, 70.0),
             (SPREAD, 80.0),
             (TONE, 40.0),
-            (DECAY, 600.0),
+            (DECAY, 68.3),
         ],
     },
     Preset {
         name: "Sloppy Crowd",
         params: &[
-            (SLOPPY, 28.0),
+            (SLOPPY, 93.3),
             (TAIL, 50.0),
             (SPREAD, 100.0),
-            (TUNE, -3.0),
-            (DECAY, 450.0),
+            (TUNE, 43.8),
+            (DECAY, 63.5),
         ],
     },
 ];
@@ -171,9 +168,15 @@ pub fn display(
     description: &DeviceDescription,
     values: &OrdMap<ParamId, f64>,
 ) -> DeviceDisplay {
-    crate::drum_synth::display(device, description, values, |value, ms| {
-        bursts(ms) + value(TAIL) / 100.0 * tail_in(ms) * master_at(ms, value(DECAY))
-    })
+    crate::drum_synth::display(
+        device,
+        description,
+        values,
+        |_| Vec::new(),
+        |value, ms| {
+            bursts(ms) + value(TAIL) / 100.0 * tail_in(ms) * master_at(ms, decay_ms(value(DECAY)))
+        },
+    )
 }
 
 /// One clap hit.
@@ -216,7 +219,7 @@ impl Hit for Clap {
         let at = |id: ParamId| f64::from(bank.ramp(id.0 as usize)[frame]);
         let ms = f64::from(self.age) * 1000.0 / self.rate;
         let centre = CENTRE_HZ
-            * 2f64.powf(at(TUNE) / 12.0)
+            * 2f64.powf(tune_semitones(at(TUNE)) / 12.0)
             * 2f64.powf((at(TONE) / 100.0 - 0.5) * 2.0 * TONE_OCTAVES);
         let burst = self.noise.next_bipolar() * bursts(ms);
         let hiss = self.noise.next_bipolar() * at(TAIL) / 100.0 * tail_in(ms) * f64::from(master);
@@ -227,7 +230,9 @@ impl Hit for Clap {
                 + self.tail.tick(hiss, Pass::Band, centre, BAND_Q, self.rate));
         self.line.write(sound);
         let left = self.line.read(1.0);
-        let right = self.line.read(1.0 + at(SLOPPY) / 1000.0 * self.rate);
+        let right = self
+            .line
+            .read(1.0 + at(SLOPPY) / 100.0 * SLOPPY_MAX_MS / 1000.0 * self.rate);
         let spread = at(SPREAD) / 100.0;
         let mid = (left + right) / 2.0;
         self.age = self.age.saturating_add(1);

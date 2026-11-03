@@ -1,6 +1,6 @@
 //! The dynamics, EQ and utility panels hold the controls Live's do, in
 //! Live's order and kinds, and none else, with Live's defaults (layout rows
-//! L-DEV-047 to L-DEV-058).
+//! L-DEV-050 to L-DEV-061).
 
 use bl_devices::device_types;
 use bl_model::device_layout::Widget;

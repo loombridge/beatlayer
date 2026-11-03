@@ -136,7 +136,7 @@ pub fn gate_type() -> DeviceType {
         )
 }
 
-/// The device's layout as Live draws it (L-DEV-050): the SC EQ's column,
+/// The device's layout as Live draws it (L-DEV-053): the SC EQ's column,
 /// Threshold and Return over Flip and Lookahead, the level display with the
 /// envelope's small knobs along its foot.
 fn layout() -> DeviceLayout {

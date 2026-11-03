@@ -141,7 +141,7 @@ pub fn limiter_type() -> DeviceType {
         ParamDescriptor::gain(OUTPUT, "Output", 0.0, -0.3)
             .describe("With Maximize on, the level the output is limited at."),
     ];
-    // As Live lays it out (L-DEV-049): Gain over Maximize and Release over
+    // As Live lays it out (L-DEV-052): Gain over Maximize and Release over
     // Auto, the Ceiling and gain reduction meters with Link under them, and
     // the look-ahead, the ceiling mode and the routing at the right.
     let at = Control::new;

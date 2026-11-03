@@ -203,7 +203,7 @@ pub fn compressor_type() -> DeviceType {
         )
 }
 
-/// The device's layout as Live draws it (L-DEV-047): the SC Filter's column,
+/// The device's layout as Live draws it (L-DEV-050): the SC Filter's column,
 /// Ratio, Attack, Release and Auto in a column of small knobs, the gain
 /// reduction's display with the threshold and Out on its top edge and the
 /// knee, look-ahead and envelope on its bottom one, and Makeup, the mode

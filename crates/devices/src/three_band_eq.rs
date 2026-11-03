@@ -133,7 +133,7 @@ pub fn three_band_eq_type() -> DeviceType {
     )
 }
 
-/// The panel as Live draws it (L-DEV-054): the bands' gains in a row over
+/// The panel as Live draws it (L-DEV-057): the bands' gains in a row over
 /// their switches, and the crossovers either side of the slope under them.
 fn layout() -> DeviceLayout {
     let at = Control::new;

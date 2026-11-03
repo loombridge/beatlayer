@@ -90,7 +90,7 @@ pub fn tuner_type() -> DeviceType {
             .describe("Spell chromatic notes with both sharps and flats."),
     ];
 
-    // As Live lays it out (L-DEV-058): one display, the mode, the readout
+    // As Live lays it out (L-DEV-061): one display, the mode, the readout
     // and the reference along its foot.
     let at = Control::new;
     let layout = DeviceLayout::new(LayoutNode::Row(vec![LayoutNode::Cell(

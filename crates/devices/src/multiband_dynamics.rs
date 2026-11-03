@@ -331,7 +331,7 @@ fn band_descriptors(band: usize) -> Vec<ParamDescriptor> {
     out
 }
 
-/// The device's layout as Live draws it (L-DEV-051): Split Freq with each
+/// The device's layout as Live draws it (L-DEV-054): Split Freq with each
 /// band's switches, the bands' Input knobs, the Below values, the display,
 /// the Above values and the times, the bands' Output knobs and the global
 /// column. The bands run High, Mid, Low from the top, as Live's rows do.

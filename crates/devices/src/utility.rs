@@ -2,7 +2,7 @@
 //! mono, phase invert per side, balance, the DC filter and mute, matching
 //! Live 12's Utility (the utility spec).
 //!
-//! Its panel is Live's (layout row L-DEV-055): Input and Output sections.
+//! Its panel is Live's (layout row L-DEV-058): Input and Output sections.
 
 use core::f32::consts::TAU;
 use core::mem;

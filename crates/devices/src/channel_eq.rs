@@ -135,7 +135,7 @@ pub fn channel_eq_type() -> DeviceType {
     )
 }
 
-/// The panel as Live draws it (L-DEV-053): the display with the high-pass
+/// The panel as Live draws it (L-DEV-056): the display with the high-pass
 /// button and the mid frequency along its foot, and the bands' knobs under
 /// it, Output set apart.
 fn layout() -> DeviceLayout {

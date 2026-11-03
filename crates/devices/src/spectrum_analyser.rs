@@ -113,7 +113,7 @@ pub fn spectrum_type() -> DeviceType {
             .describe("Clears the accumulated peak-hold curve."),
     ];
 
-    // As Live lays it out (L-DEV-057): the measurement's controls in a column
+    // As Live lays it out (L-DEV-060): the measurement's controls in a column
     // at the left, the display filling the rest.
     let at = Control::new;
     let layout = DeviceLayout::new(LayoutNode::Row(vec![

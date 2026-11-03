@@ -167,7 +167,7 @@ pub fn drum_buss_type() -> DeviceType {
         ParamDescriptor::gain(OUTPUT, "Output", 24.0, 0.0)
             .describe("The output level, down to silence."),
     ];
-    // As Live lays it out (L-DEV-052): Drive over the distortion's type, Trim
+    // As Live lays it out (L-DEV-055): Drive over the distortion's type, Trim
     // and Comp; the mid-high shaping's three knobs; the low-end enhancer;
     // and the bass and output meters with Dry/Wet under them.
     let at = Control::new;

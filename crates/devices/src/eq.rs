@@ -395,7 +395,7 @@ fn band_cells(curve: usize) -> LayoutNode {
     )
 }
 
-/// The layout as Live draws it (L-DEV-056): the selected band's Frequency,
+/// The layout as Live draws it (L-DEV-059): the selected band's Frequency,
 /// Gain and Q at the left, the display over the eight band cells, and the
 /// mode, Adaptive Q and Output at the right. The second curve (Live's Edit
 /// L and R) is the expanded part.

@@ -296,6 +296,7 @@ pub fn display_in(
         AUTO_FILTER => Some(auto_filter::display(device, description, values, data)),
         AUTO_PAN_TREMOLO => Some(auto_pan_tremolo::display(device, description, values, data)),
         DRUM_BUSS => Some(drum_bus::display(device, description, values, data)),
+        ANALOG => Some(analog::display(device, description, values)),
         ds_kick::DS_KICK => Some(ds_kick::display(device, description, values)),
         ds_snare::DS_SNARE => Some(ds_snare::display(device, description, values)),
         ds_tom::DS_TOM => Some(ds_tom::display(device, description, values)),

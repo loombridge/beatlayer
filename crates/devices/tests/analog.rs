@@ -877,7 +877,7 @@ fn a_phrase_renders_the_same_at_block_sizes_1_64_512_and_4096() {
     }
 }
 
-// Spec: analog R16: every section's page places its controls inside the
+// Spec: analog R16, R27: every section's page places its controls inside the
 // body without overlap, and each parameter exactly once across the pages.
 #[test]
 fn the_shell_places_every_page_without_overlap_and_every_control_once() {
@@ -893,7 +893,7 @@ fn the_shell_places_every_page_without_overlap_and_every_control_once() {
             && a.y < b.bottom() - 1e-3
             && b.y < a.bottom() - 1e-3
     };
-    assert_eq!(analog::SECTIONS.len(), 8);
+    assert_eq!(analog::SECTIONS.len(), 10);
     for page in analog::SECTIONS {
         let shown = layout.with_pages(&PageChoice::from([(
             analog::PAGES.to_owned(),

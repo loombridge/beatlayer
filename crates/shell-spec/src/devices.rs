@@ -190,6 +190,9 @@ pub const REMOVE_DESTINATION: &str = "device.remove_destination";
 /// resonators to the other.
 pub const COPY_RESONATOR: &str = "collision.copy_resonator";
 
+/// `analog.quick_routing`: sets Analog's filters, amplifiers and balances to
+/// one of Quick Routing's four routings.
+pub const QUICK_ROUTING: &str = "analog.quick_routing";
 /// `meld.copy_modulation`: copies the routes of one of Meld's engines to the
 /// other.
 pub const COPY_MODULATION: &str = "meld.copy_modulation";
@@ -278,6 +281,7 @@ pub const IDS: &[&str] = &[
     ADD_DESTINATION,
     REMOVE_DESTINATION,
     COPY_RESONATOR,
+    QUICK_ROUTING,
     COPY_MODULATION,
     CLEAR_MODULATION,
     SET_PARTIALS,
@@ -1535,6 +1539,45 @@ pub struct ClearRouteArgs {
     /// The destination of the route to clear, with its source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub destination: Option<String>,
+}
+
+/// One of Analog's Quick Routing buttons (analog R22).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub enum QuickRouting {
+    /// Both filters and amplifiers on, Oscillator 1 and the noise to
+    /// Filter 1, Oscillator 2 to Filter 2, the amplifiers centred.
+    #[serde(rename = "parallel")]
+    Parallel,
+    /// As Parallel, with the amplifiers panned hard left and right.
+    #[serde(rename = "split")]
+    Split,
+    /// Filter 2 and Amplifier 2 off, every source to Filter 1.
+    #[serde(rename = "filter_1_only")]
+    Filter1Only,
+    /// Every source to Filter 1, which feeds all of Filter 2; Amplifier 1
+    /// off and Amplifier 2 on.
+    #[serde(rename = "serial")]
+    Serial,
+}
+
+/// Arguments of `analog.quick_routing`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct QuickRoutingArgs {
+    /// The Analog; the selected device if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The routing to set.
+    pub routing: QuickRouting,
+}
+
+/// What `analog.quick_routing` returns: the Analog and the routing set.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct QuickRoutingSet {
+    /// The device.
+    pub device: DeviceId,
+    /// The routing set.
+    pub routing: QuickRouting,
 }
 
 /// Arguments of `device.add_destination` and `device.remove_destination`.
@@ -3443,6 +3486,23 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .args::<CopyResonatorArgs>()
             .result::<ResonatorCopied>(),
+        CommandSpec::new(QUICK_ROUTING, "Quick Routing")
+            .description(
+                "Sets Analog's filters, amplifiers and balances to one of Quick Routing's four \
+                 routings, as its buttons do: `routing` is `parallel` (both filters and \
+                 amplifiers on, Oscillator 1 and the noise to Filter 1, Oscillator 2 to \
+                 Filter 2, Filter 1's To F2 at 0 % and the amplifiers centred), `split` (as \
+                 parallel, the amplifiers panned hard left and right), `filter_1_only` \
+                 (Filter 2 and Amplifier 2 off, every source to Filter 1) or `serial` (every \
+                 source to Filter 1, To F2 at 100 %, Amplifier 1 off and Amplifier 2 on). No \
+                 oscillator's level or tuning changes. The device is an Analog, by ID or the \
+                 selected one, and its `params` read back the result. One undo step (Quick \
+                 Routing).",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<QuickRoutingArgs>()
+            .result::<QuickRoutingSet>(),
         CommandSpec::new(COPY_MODULATION, "Copy Modulation")
             .description(
                 "Copies the routes of one of Meld's engines to the other, as the Copy to A and \

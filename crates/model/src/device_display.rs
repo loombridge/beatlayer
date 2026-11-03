@@ -89,6 +89,11 @@ pub struct DisplayHandle {
     /// The parameter its vertical place is, if it has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub y: Option<ParamId>,
+    /// The part of the cell's width, from 0 to 1 across it, that the
+    /// horizontal parameter's travel covers (the whole width without one):
+    /// an envelope's stages each take a share of the cell.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub span: Option<[f32; 2]>,
 }
 
 /// A single reading, such as a gain reduction.

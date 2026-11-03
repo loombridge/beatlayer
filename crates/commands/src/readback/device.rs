@@ -105,6 +105,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("device.return_to_reference", read("device.similar", "position")),
     ("device.set_route", query(Device, "matrix")),
     ("device.clear_route", query(Device, "matrix")),
+    ("device.remove_destination", query(Device, "matrix")),
     ("device.write_route", query(Device, "matrix")),
     ("device.erase_route", query(Device, "matrix")),
     ("device.set_wavetable", query(Device, "wavetables")),

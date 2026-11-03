@@ -434,6 +434,21 @@ pub fn show(
             slot_cell(ui, theme, frame, panel, (id, &name, slot, rect), events);
             continue;
         }
+        // Spec: wavetable R35 to R39. Wavetable's displays and its grid are
+        // drawn by its own panel.
+        if crate::wavetable_panel::is_wavetable(frame)
+            && crate::wavetable_panel::cell(
+                ui,
+                theme,
+                frame,
+                panel,
+                display,
+                (id, &name, rect),
+                events,
+            )
+        {
+            continue;
+        }
         // Spec: corpus R1. Corpus's X–Y control is its display cell.
         if matches!(&frame.kind, bl_model::DeviceKind::Native { device_type }
             if device_type == bl_devices::corpus::CORPUS)

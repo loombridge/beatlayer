@@ -125,6 +125,10 @@ pub struct DeviceView {
     /// The view each device's display shows, where it has chosen one
     /// (WP-5.43).
     display_views: std::collections::BTreeMap<DeviceId, String>,
+    /// The destinations each instrument's matrix grid shows a row for beyond
+    /// those with a route (the wavetable spec, R39): view state, never
+    /// saved and never an undo step.
+    destinations: BTreeMap<DeviceId, BTreeSet<String>>,
     /// The page each device's pages nodes show, where it has chosen one
     /// (WP-8.1): saved with the set but not part of the document, so
     /// switching pages is no undo step. A multisampler's `Tabs` node is not
@@ -484,6 +488,7 @@ impl DeviceView {
             articulations: device.articulations.clone(),
             learning: self.learning.get(&device.id).map(|learn| learn.row),
             matrix_routes: self.matrix_routes(device),
+            matrix_grid: self.matrix_grid(device),
             locked: Vec::new(),
         })
     }
@@ -589,6 +594,7 @@ impl DeviceView {
                 title_switch: None,
                 banks: Vec::new(),
                 spectrogram: None,
+                grid_params: Vec::new(),
                 alternates: Vec::new(),
                 relabels: Vec::new(),
             },
@@ -601,8 +607,58 @@ impl DeviceView {
             articulations: Vec::new(),
             learning: None,
             matrix_routes: Vec::new(),
+            matrix_grid: None,
             locked: Vec::new(),
         }
+    }
+
+    /// `device`'s matrix as its grid draws it (the wavetable spec, R39): a
+    /// row for each destination a free slot routes into and each added, and
+    /// in each row the slot that routes a source there.
+    fn matrix_grid(&self, device: &Device) -> Option<ids::MatrixGrid> {
+        let device_type = self.device_type(&device.kind)?;
+        if device_type.description.grid_params.is_empty() {
+            return None;
+        }
+        let state = device_type.matrix.as_ref()?.state(device);
+        let added = self.destinations.get(&device.id);
+        let free: Vec<_> = state
+            .slots
+            .iter()
+            .filter(|slot| slot.kind == bl_model::matrix::SlotKind::Free)
+            .collect();
+        let routed = |name: &str| free.iter().any(|slot| slot.destination == Some(name));
+        let (shown, addable): (Vec<_>, Vec<_>) = state
+            .destinations
+            .iter()
+            .map(|dest| dest.name)
+            .partition(|name| routed(name) || added.is_some_and(|rows| rows.contains(*name)));
+        let rows = shown
+            .into_iter()
+            .map(|name| ids::GridRow {
+                destination: name.to_owned(),
+                cells: state
+                    .sources
+                    .iter()
+                    .map(|source| {
+                        free.iter()
+                            .find(|slot| {
+                                slot.destination == Some(name) && slot.source == Some(source.name)
+                            })
+                            .map(|slot| ids::GridCell {
+                                slot: slot.slot as u8,
+                                amount_param: slot.amount_param,
+                                amount: slot.amount,
+                            })
+                    })
+                    .collect(),
+            })
+            .collect();
+        Some(ids::MatrixGrid {
+            sources: state.sources.iter().map(|s| s.name.to_owned()).collect(),
+            rows,
+            addable: addable.into_iter().map(str::to_owned).collect(),
+        })
     }
 
     /// The sources routed into each parameter `device`'s matrix moves (the
@@ -826,6 +882,7 @@ impl DeviceView {
         self.layer_hot_swap = self.layer_hot_swap.filter(|(device, _)| exists(device));
         self.armed = self.armed.filter(|(d, _)| exists(d));
         self.display_views.retain(|d, _| exists(d));
+        self.destinations.retain(|d, _| exists(d));
         self.pages.retain(|d, _| exists(d));
         self.displays.retain(|d, _| exists(d));
         self.pads_selected.retain(|d, _| exists(d));
@@ -1752,12 +1809,37 @@ impl DeviceView {
         device: &Device,
         tuning: Option<&bl_model::Tuning>,
     ) -> bl_model::DeviceDisplay {
+        self.display_with(device, tuning, [None, None])
+    }
+
+    /// As [`Devices::display`], for a Wavetable whose oscillators play
+    /// `tables`: they draw in its oscillator displays (the wavetable spec,
+    /// R35).
+    #[must_use]
+    pub fn display_with(
+        &self,
+        device: &Device,
+        tuning: Option<&bl_model::Tuning>,
+        tables: [Option<Arc<bl_devices::wavetable_display::Preview>>; 2],
+    ) -> bl_model::DeviceDisplay {
         let DeviceKind::Native { device_type } = &device.kind else {
             return empty_display(device.id);
         };
         let view = self.display_view(device);
         let data = self.displays.get(&device.id).map(|d| d.values.as_slice());
-        let mut display = if device.is_articulation_map() {
+        let mut display = if device_type == bl_devices::wavetable::WAVETABLE {
+            self.description(&device.kind)
+                .map(|description| {
+                    bl_devices::wavetable_display::display(
+                        device.id,
+                        description,
+                        &device.params,
+                        view.as_deref(),
+                        [tables[0].as_deref(), tables[1].as_deref()],
+                    )
+                })
+                .unwrap_or_else(|| empty_display(device.id))
+        } else if device.is_articulation_map() {
             // Spec: articulation-map R17. The current articulation's number
             // and name.
             bl_devices::articulation_map::display(
@@ -1957,7 +2039,11 @@ impl DeviceView {
                     })
             }
             ids::LOAD_PRESET => has_target() && args.get("path").is_some(),
-            ids::SET_ROUTE | ids::CLEAR_ROUTE | ids::COPY_RESONATOR => has_target(),
+            ids::SET_ROUTE
+            | ids::CLEAR_ROUTE
+            | ids::ADD_DESTINATION
+            | ids::REMOVE_DESTINATION
+            | ids::COPY_RESONATOR => has_target(),
             ids::PARAMETERS
             | ids::DISPLAY
             | ids::PREVIEW_HIT
@@ -2773,6 +2859,22 @@ impl DeviceView {
                 outcome.value = to_value(&changed);
                 return Ok(outcome);
             }
+            ids::ADD_DESTINATION => {
+                let ids::DestinationArgs {
+                    device,
+                    destination,
+                } = parse(args)?;
+                let device = self.target(editor.document(), device)?;
+                let current = editor.document().device(device).expect("the target exists");
+                let name = self.grid_destination(device, current, &destination)?;
+                self.destinations.entry(device).or_default().insert(name);
+            }
+            ids::REMOVE_DESTINATION => {
+                let removed = self.remove_destination(args, editor)?;
+                outcome.document_changed = true;
+                outcome.value = to_value(&removed);
+                return Ok(outcome);
+            }
             ids::COPY_RESONATOR => {
                 let copied = self.copy_resonator(args, editor)?;
                 outcome.document_changed = true;
@@ -3032,6 +3134,75 @@ impl DeviceView {
             device,
             from: args.from,
             to: if args.from == 1 { 2 } else { 1 },
+        })
+    }
+
+    /// The name `destination` has in `device`'s matrix, if its Matrix tab
+    /// draws a grid (`device.add_destination`).
+    fn grid_destination(
+        &self,
+        device: DeviceId,
+        current: &Device,
+        destination: &str,
+    ) -> Result<String, DeviceError> {
+        self.device_type(&current.kind)
+            .filter(|t| !t.description.grid_params.is_empty())
+            .ok_or_else(|| DeviceError::Unavailable(format!("{device} has no matrix grid")))?;
+        let layout = self.matrix_of(device, current)?;
+        layout
+            .dest_named(destination)
+            .map(|at| layout.dests[at].name.to_owned())
+            .ok_or_else(|| {
+                DeviceError::InvalidArgs(format!(
+                    "{device} has no modulation destination {destination:?}"
+                ))
+            })
+    }
+
+    /// `device.remove_destination`: clears every free slot that routes into
+    /// the destination and takes its row off the grid, in one undo step.
+    fn remove_destination(
+        &mut self,
+        args: Value,
+        editor: &mut Editor,
+    ) -> Result<ids::DestinationRemoved, DeviceError> {
+        let ids::DestinationArgs {
+            device,
+            destination,
+        } = parse(args)?;
+        let device = self.target(editor.document(), device)?;
+        let current = editor.document().device(device).expect("the target exists");
+        let name = self.grid_destination(device, current, &destination)?;
+        let layout = self.matrix_of(device, current)?;
+        let slots: Vec<(u8, ParamId)> = layout
+            .state(current)
+            .slots
+            .iter()
+            .filter(|slot| {
+                slot.kind == bl_model::matrix::SlotKind::Free && slot.destination == Some(&name)
+            })
+            .map(|slot| (slot.slot as u8, slot.amount_param))
+            .collect();
+        editor
+            .transact("Remove Destination", |editor| {
+                for &(slot, amount) in &slots {
+                    editor.apply(Command::ClearModRoute { device, slot })?;
+                    editor.apply(Command::SetDeviceParam {
+                        device,
+                        param: amount,
+                        value: 0.0,
+                    })?;
+                }
+                Ok::<(), bl_model::EditError>(())
+            })
+            .map_err(|e| DeviceError::Failed(e.to_string()))?;
+        if let Some(rows) = self.destinations.get_mut(&device) {
+            rows.remove(&name);
+        }
+        Ok(ids::DestinationRemoved {
+            device,
+            destination: name,
+            cleared: slots.into_iter().map(|(slot, _)| slot).collect(),
         })
     }
 

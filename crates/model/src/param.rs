@@ -127,6 +127,10 @@ pub struct DeviceDescription {
     /// device framework spec, R46).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spectrogram: Option<SpectrogramGrid>,
+    /// The parameters a display cell sets by its own gestures, which the
+    /// layout places no control for: a matrix grid's route amounts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub grid_params: Vec<ParamId>,
     /// The controls that show one of two parameters, as a switch says. Both
     /// parameters keep their values and their lanes whichever is shown.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -155,9 +159,18 @@ impl DeviceDescription {
             title_switch: None,
             banks: Vec::new(),
             spectrogram: None,
+            grid_params: Vec::new(),
             alternates: Vec::new(),
             relabels: Vec::new(),
         }
+    }
+
+    /// The same, with `params` set by a display cell's gestures: the layout
+    /// places no control for them.
+    #[must_use]
+    pub fn with_grid_params(mut self, params: Vec<ParamId>) -> Self {
+        self.grid_params = params;
+        self
     }
 
     /// The same, with a display that holds a spectrogram of `grid`.
@@ -396,6 +409,7 @@ impl DeviceDescription {
             .filter(|p| {
                 !self.menu_options.contains(&p.id)
                     && self.title_switch != Some(p.id)
+                    && !self.grid_params.contains(&p.id)
                     && !self.alternates.iter().any(|a| a.on == p.id)
             })
             .cloned()

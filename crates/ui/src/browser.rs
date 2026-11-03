@@ -3254,6 +3254,9 @@ impl BrowserUi {
         events: &mut Vec<UiEvent>,
     ) {
         let ctx = ui.ctx().clone();
+        // The places the Device View drew last frame that take a dropped
+        // file themselves.
+        let own_drops = crate::wavetable_panel::take_drop_zones(&ctx);
         let payload = DragAndDrop::payload::<BrowserDrag>(&ctx);
         let set_payload = DragAndDrop::payload::<SetDrag>(&ctx);
         let groove_payload = DragAndDrop::payload::<crate::groove_pool::GrooveDrag>(&ctx);
@@ -3290,6 +3293,11 @@ impl BrowserUi {
         if pointer.is_some_and(|p| clip_view.contains(p)) {
             // Spec: sample-editor R18. A file dropped on the Clip View
             // replaces the clip's sample, which the Clip View does.
+            return;
+        }
+        if pointer.is_some_and(|p| own_drops.iter().any(|zone| zone.contains(p))) {
+            // Spec: wavetable R37. A file dropped on an oscillator's display
+            // is its table, not also a new clip in the Arrangement.
             return;
         }
         let view = shell.arrangement();

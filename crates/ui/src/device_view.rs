@@ -239,6 +239,31 @@ fn sample_drop(
     let Some((device, _)) = placed.iter().find(|(_, rect)| rect.contains(pointer)) else {
         return;
     };
+    // Spec: wavetable R37. A WAV or AIFF dropped on an oscillator's display
+    // is its user table; anything else is refused there.
+    if let Some(frame) = state
+        .devices
+        .iter()
+        .find(|frame| frame.id == *device && crate::wavetable_panel::is_wavetable(frame))
+    {
+        let oscillator = frame.panel.as_ref().and_then(|panel| {
+            let rect = placed.iter().find(|(id, _)| id == device)?.1;
+            let mut body = crate::device_panel::body_rect(rect, TITLE_BAR_HEIGHT);
+            body.min.x += ids::sidechain_width(frame);
+            let (_, cells) = crate::device_panel::place_shown(panel, frame.expanded, body);
+            cells.into_iter().find_map(|(name, cell, _)| {
+                crate::wavetable_panel::oscillator_of(&name).filter(|_| cell.contains(pointer))
+            })
+        });
+        if let Some(oscillator) =
+            oscillator.filter(|_| crate::wavetable_panel::is_table_file(&path))
+        {
+            events.push(UiEvent::Invoke(crate::wavetable_panel::drop_command(
+                frame, oscillator, &path,
+            )));
+        }
+        return;
+    }
     let takes = state
         .devices
         .iter()

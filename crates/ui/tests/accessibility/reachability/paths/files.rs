@@ -109,6 +109,27 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                 "the Library Credits window's Close, which Tab reaches, or Esc",
             )),
         ),
+        // The extension host (WP-9.29).
+        ("extension.list", Exception(Query)),
+        ("extension.describe", Exception(Query)),
+        (
+            "extension.install",
+            Exception(AgentOnly(
+                "where a person manages extensions is not decided yet, so only agents install one",
+            )),
+        ),
+        (
+            "extension.remove",
+            Exception(AgentOnly(
+                "where a person manages extensions is not decided yet, so only agents remove one",
+            )),
+        ),
+        (
+            "extension.set_enabled",
+            Exception(AgentOnly(
+                "where a person manages extensions is not decided yet, so only agents switch one",
+            )),
+        ),
         ("export.realtime.status", Exception(Query)),
         (
             "export.realtime.restart",

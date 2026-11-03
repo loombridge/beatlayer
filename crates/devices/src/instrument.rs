@@ -585,6 +585,16 @@ impl State {
             .min_by_key(|&voice| self.started[voice])
     }
 
+    /// The oldest of the voices in `mask`: a device that knows sooner than the
+    /// section which voices still sound picks the one a global destination
+    /// reads from itself.
+    #[must_use]
+    pub fn oldest_of(&self, mask: u32) -> Option<usize> {
+        (0..MAX_VOICES)
+            .filter(|&voice| mask >> voice & 1 == 1)
+            .min_by_key(|&voice| self.started[voice])
+    }
+
     /// The newest voice still sounding: the one a control shows the matrix's
     /// movement of (spec: modulation R31).
     #[must_use]

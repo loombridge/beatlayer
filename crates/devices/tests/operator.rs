@@ -1508,7 +1508,8 @@ fn amt_vel_and_the_lfos_envelope_scale_its_depth() {
     assert!(at_frame(&loud, 4_500) < 0.01);
     // An envelope held at 50 % halves it.
     let envelope = |level| {
-        [SHAPED_INITIAL, SHAPED_PEAK, SHAPED_SUSTAIN, SHAPED_END].map(|c| (shaped(LFO_ENV, c), level))
+        [SHAPED_INITIAL, SHAPED_PEAK, SHAPED_SUSTAIN, SHAPED_END]
+            .map(|c| (shaped(LFO_ENV, c), level))
     };
     let half = run(tremolo(&envelope(50.0)), vec![on(0, A3, 0.8)]).left(24_000);
     assert!((at_frame(&half, 4_500) - 0.5).abs() < 0.01);
@@ -1518,11 +1519,7 @@ fn amt_vel_and_the_lfos_envelope_scale_its_depth() {
 #[test]
 fn rate_key_doubles_the_rate_each_octave_from_c3() {
     // C4 is an octave up: 16 Hz, so the LFO is high for 1,500 frames.
-    let signal = run(
-        tremolo(&[(LFO_RATE_KEY, 100.0)]),
-        vec![on(0, 72, 0.8)],
-    )
-    .left(12_000);
+    let signal = run(tremolo(&[(LFO_RATE_KEY, 100.0)]), vec![on(0, 72, 0.8)]).left(12_000);
     assert!((at_frame(&signal, 700) - 1.0).abs() < 0.01);
     assert!(at_frame(&signal, 2_200) < 0.01);
     assert!((at_frame(&signal, 3_700) - 1.0).abs() < 0.01);
@@ -1540,7 +1537,10 @@ fn sync_runs_the_lfo_in_a_division_of_the_tempo() {
         let signal = run(tremolo(&sync), vec![on(0, A3, 0.8)])
             .playing(steady(bpm))
             .left(cycle * 2);
-        assert!((at_frame(&signal, cycle / 4) - 1.0).abs() < 0.01, "{bpm} bpm");
+        assert!(
+            (at_frame(&signal, cycle / 4) - 1.0).abs() < 0.01,
+            "{bpm} bpm"
+        );
         assert!(at_frame(&signal, cycle * 3 / 4) < 0.01, "{bpm} bpm");
         assert!(
             (at_frame(&signal, cycle + cycle / 4) - 1.0).abs() < 0.01,
@@ -1595,11 +1595,7 @@ fn the_lfo_moves_the_filters_cutoff_and_one_more_destination() {
 
 /// A saw (Saw 64) at A3 through the filter with `extra`, left channel.
 fn filtered(extra: &[(ParamId, f64)], notes: Vec<NoteEvent>, frames: usize) -> Vec<f32> {
-    let mut params = vec![
-        (osc(0, OSC_WAVE), 9.0),
-        (FILTER_ON, 1.0),
-        (LFO_ON, 0.0),
-    ];
+    let mut params = vec![(osc(0, OSC_WAVE), 9.0), (FILTER_ON, 1.0), (LFO_ON, 0.0)];
     params.extend_from_slice(extra);
     run(patch(&params), notes).left(frames)
 }
@@ -1669,7 +1665,10 @@ fn the_shaper_follows_the_filter_and_is_bypassed_at_zero_wet() {
     // Off bypasses it whatever the wet.
     let mut params = vec![(LFO_ON, 0.0), (SHAPER_DRIVE, 24.0), (SHAPER_WET, 100.0)];
     params.push((SHAPER_TYPE, 0.0));
-    assert_eq!(run(patch(&params), vec![on(0, A3, 0.1)]).left(24_000), clean);
+    assert_eq!(
+        run(patch(&params), vec![on(0, A3, 0.1)]).left(24_000),
+        clean
+    );
 }
 
 /// Target `source`'s Destination A chooser and Amount A.
@@ -1750,11 +1749,7 @@ fn each_global_target_moves_its_destination_by_its_amount() {
         velocity: 0.0,
         note_id: None,
     };
-    let mut extra = vec![
-        (ALGORITHM, 11.0),
-        level(2, 1.0),
-        (osc(2, OSC_COARSE), 3.0),
-    ];
+    let mut extra = vec![(ALGORITHM, 11.0), level(2, 1.0), (osc(2, OSC_COARSE), 3.0)];
     extra.extend(target(2, 5, 100.0));
     let signal = run(patch(&extra), vec![pressure, on(0, A3, 0.8)]).left(48_000);
     assert!(amplitude_at(&signal[4_800..], F0) < 0.001);

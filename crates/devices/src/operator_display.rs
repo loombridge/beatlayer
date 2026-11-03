@@ -4,9 +4,7 @@
 //! from the device's parameters and drawn partials, so `device.display`
 //! reports them with no engine running.
 
-use bl_model::{
-    DeviceDisplay, DeviceId, DisplayReading, DisplaySeries, OrdMap, ParamId, Partials,
-};
+use bl_model::{DeviceDisplay, DeviceId, DisplayReading, DisplaySeries, OrdMap, ParamId, Partials};
 
 use crate::fm::{self, OPERATORS};
 use crate::operator::{
@@ -220,8 +218,7 @@ pub fn display(
                     "{} {:.0} Hz, {}",
                     FILTER_TYPE_CHOICES[entry],
                     value(FILTER_FREQ),
-                    crate::instrument_filter::CIRCUITS
-                        [(value(FILTER_CIRCUIT) as usize).min(4)]
+                    crate::instrument_filter::CIRCUITS[(value(FILTER_CIRCUIT) as usize).min(4)]
                 ),
             });
         }
@@ -232,8 +229,7 @@ pub fn display(
                 let mut shape = osc_shape(&value, op);
                 // An oscillator's levels are amplitudes, 0 to 1.
                 shape.end = 0.0;
-                out.series
-                    .push(envelope_series(view, &shape, [0.0, 1.0]));
+                out.series.push(envelope_series(view, &shape, [0.0, 1.0]));
             } else {
                 let wave = value(osc(op, OSC_WAVE)) as usize;
                 out.readings.push(DisplayReading {

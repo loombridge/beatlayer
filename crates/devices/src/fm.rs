@@ -537,7 +537,11 @@ impl Core {
                 let tone = (settings.tone + first.tone).clamp(0.0, 1.0);
                 let darker = (f64::from(1.0 - tone) * 4.0).exp2();
                 for (op, s) in settings.ops.iter().enumerate() {
-                    let moves = if op == 0 { first } else { operator(voice, op, i) };
+                    let moves = if op == 0 {
+                        first
+                    } else {
+                        operator(voice, op, i)
+                    };
                     let fixed = f64::from(s.freq) * f64::from(s.multi);
                     let mut hz = if s.fixed {
                         fixed

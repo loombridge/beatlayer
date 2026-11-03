@@ -238,13 +238,21 @@ fn dragging_across_the_partials_sets_each_one_to_the_height_as_one_undo_step() {
     let levels = drawn_partials(&h, device).expect("a drawn wave");
     assert_eq!(levels.len(), 16);
     for k in 1..5 {
-        assert!((levels[k] - 0.7).abs() < 0.05, "partial {}: {}", k + 1, levels[k]);
+        assert!(
+            (levels[k] - 0.7).abs() < 0.05,
+            "partial {}: {}",
+            k + 1,
+            levels[k]
+        );
     }
     assert_eq!(levels[0], 1.0, "the first partial is as it was");
     assert_eq!(levels[8], 0.0);
     // One undo step, named for the gesture.
     assert_eq!(h.shell.editor().undo_history().len(), steps + 1);
-    assert_eq!(h.shell.editor().undo_history().next(), Some("Change Partials"));
+    assert_eq!(
+        h.shell.editor().undo_history().next(),
+        Some("Change Partials")
+    );
     h.shell.run("edit.undo", json!({})).unwrap();
     assert_eq!(drawn_partials(&h, device), None);
     // Even Only restricts a drag to the even partials, and with Normalize
@@ -259,7 +267,11 @@ fn dragging_across_the_partials_sets_each_one_to_the_height_as_one_undo_step() {
     drag(&mut h, &[at(2, 0.4), at(3, 0.4), at(4, 0.4), at(5, 0.4)]);
     let levels = drawn_partials(&h, device).expect("a drawn wave");
     assert!((levels[1] - 0.4).abs() < 0.05 && (levels[3] - 0.4).abs() < 0.05);
-    assert_eq!((levels[2], levels[4]), (0.0, 0.0), "the odd partials are left");
+    assert_eq!(
+        (levels[2], levels[4]),
+        (0.0, 0.0),
+        "the odd partials are left"
+    );
 }
 
 // Spec: operator R28 (the title bar menu's items)

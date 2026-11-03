@@ -4,8 +4,8 @@
 
 use bl_devices::operator::{
     ENV_INITIAL, ENV_PEAK, ENV_SUSTAIN, FILTER_ENV, FILTER_FREQ, FREQ_KEY, LFO_ENV, OPERATOR,
-    OSC_REPEAT, OSC_REPEAT_ON, PITCH_ENV, SHAPED_END, SHAPED_INITIAL, SHAPED_PEAK,
-    SHAPED_SUSTAIN, osc, shaped,
+    OSC_REPEAT, OSC_REPEAT_ON, PITCH_ENV, SHAPED_END, SHAPED_INITIAL, SHAPED_PEAK, SHAPED_SUSTAIN,
+    osc, shaped,
 };
 use bl_model::{Command, Device, DeviceId, DeviceKind, Document, Editor, ParamId};
 use bl_shell_spec::devices::{
@@ -263,19 +263,19 @@ impl DeviceView {
     /// even and odd partials both drawn, as a new device has them.
     #[must_use]
     pub fn harmonics(&self, device: DeviceId) -> HarmonicsView {
-        self.harmonics.get(&device).copied().unwrap_or(HarmonicsView {
-            device,
-            even_only: false,
-            odd_only: false,
-            normalize: true,
-        })
+        self.harmonics
+            .get(&device)
+            .copied()
+            .unwrap_or(HarmonicsView {
+                device,
+                even_only: false,
+                odd_only: false,
+                normalize: true,
+            })
     }
 
     /// Operator's display for `view` (operator R29).
-    pub(super) fn operator_display(
-        device: &Device,
-        view: Option<&str>,
-    ) -> bl_model::DeviceDisplay {
+    pub(super) fn operator_display(device: &Device, view: Option<&str>) -> bl_model::DeviceDisplay {
         bl_devices::operator_display::display(device.id, &device.params, &device.partials, view)
     }
 }

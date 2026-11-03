@@ -76,9 +76,9 @@ fn view_label(view: &str) -> &str {
 /// Oscillator`), those that share `shown`'s; otherwise all of them.
 fn peers<'a>(views: &'a [String], shown: Option<&str>) -> Vec<&'a String> {
     let group = |view: &str| view.rsplit_once(' ').map(|(group, _)| group.to_owned());
-    let shared = views.iter().any(|a| {
-        group(a).is_some() && views.iter().filter(|b| group(b) == group(a)).count() > 1
-    });
+    let shared = views
+        .iter()
+        .any(|a| group(a).is_some() && views.iter().filter(|b| group(b) == group(a)).count() > 1);
     match shown {
         Some(shown) if shared => views
             .iter()
@@ -390,7 +390,10 @@ fn partials(
     let sample = |pos: Pos2| {
         let index = (((pos.x - area.left()) / area.width() * count as f32).floor())
             .clamp(0.0, count as f32 - 1.0) as usize;
-        (index, ((area.bottom() - pos.y) / area.height()).clamp(0.0, 1.0))
+        (
+            index,
+            ((area.bottom() - pos.y) / area.height()).clamp(0.0, 1.0),
+        )
     };
     if started {
         // A drag starts a few points from where the pointer went down: the
@@ -420,7 +423,8 @@ fn partials(
             for k in lo..=hi {
                 // The partial's number is its place plus 1: the even ones
                 // are the odd places.
-                let allowed = (!options.even_only || k % 2 == 1) && (!options.odd_only || k % 2 == 0);
+                let allowed =
+                    (!options.even_only || k % 2 == 1) && (!options.odd_only || k % 2 == 0);
                 if allowed {
                     let t = if hi == lo {
                         1.0

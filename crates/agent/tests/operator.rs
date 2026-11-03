@@ -93,3 +93,97 @@ fn an_agent_sets_every_operator_parameter_by_id_and_reads_it_back() {
         );
     }
 }
+
+/// The query tool's `device` result for `device`.
+fn device_result(client: &mut Client<InProcess>, device: DeviceId) -> Value {
+    client
+        .call("query", json!({ "path": "device", "id": device }))
+        .unwrap()
+        .ok()
+        .unwrap_or_else(|error| panic!("query failed: {error}"))
+}
+
+// Spec: operator R27, R28, R29
+#[test]
+fn an_agent_draws_partials_runs_the_menus_commands_and_reads_the_displays() {
+    let mut client = client();
+    let track = audio_track(&client.transport().shell);
+    let added = run(
+        &mut client,
+        "device.add",
+        json!({
+            "device": {
+                "kind": { "native": { "device_type": OPERATOR } },
+                "name": "Operator",
+                "role": "instrument",
+            },
+            "track": track,
+        }),
+    );
+    let device: DeviceId = serde_json::from_value(added["results"][0]["result"]["device"].clone())
+        .expect("the new device");
+    // No wave is drawn in a new device, so none is reported.
+    assert!(device_result(&mut client, device).get("partials").is_none());
+    // device.set_partials draws osc B's wave, and the query reads it back.
+    let mut levels = vec![0.0f32; 64];
+    levels[0] = 1.0;
+    levels[4] = 0.25;
+    run(
+        &mut client,
+        "device.set_partials",
+        json!({ "device": device, "osc": 1, "levels": levels, "repeat": 30.0 }),
+    );
+    let result = device_result(&mut client, device);
+    assert_eq!(result["partials"], json!([{ "osc": 1, "levels": levels }]));
+    // Operator's menu commands are agent commands too, each read back from
+    // the device's parameters.
+    run(
+        &mut client,
+        "operator.copy_oscillator",
+        json!({ "device": device, "from": 1, "to": 3 }),
+    );
+    let result = device_result(&mut client, device);
+    let partials = result["partials"].as_array().expect("partials");
+    assert!(
+        partials
+            .iter()
+            .any(|p| p["osc"] == json!(3) && p["levels"] == json!(levels))
+    );
+    run(
+        &mut client,
+        "operator.set_envelope_levels",
+        json!({ "device": device, "envelope": "LFO", "to": "minimum" }),
+    );
+    run(
+        &mut client,
+        "operator.play_by_key",
+        json!({ "device": device }),
+    );
+    let described = run(
+        &mut client,
+        "device.parameters",
+        json!({ "device": device }),
+    );
+    let value_of = |name: &str| -> Value {
+        described["results"][0]["result"]["params"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == json!(name))
+            .unwrap_or_else(|| panic!("{name}"))["value"]
+            .clone()
+    };
+    assert_eq!(value_of("LFO Sustain"), json!(-100.0));
+    assert_eq!(value_of("Filter Freq"), json!(466.0));
+    assert_eq!(value_of("Freq < Key"), json!(100.0));
+    // device.display reports the view chosen, from the parameters.
+    run(
+        &mut client,
+        "device.set_display_view",
+        json!({ "device": device, "view": "Filter Response" }),
+    );
+    let shown = run(&mut client, "device.display", json!({ "device": device }));
+    let display = &shown["results"][0]["result"];
+    assert_eq!(display["view"], json!("Filter Response"));
+    assert_eq!(display["series"][0]["name"], json!("Filter Response"));
+}

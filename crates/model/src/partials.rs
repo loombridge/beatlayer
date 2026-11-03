@@ -44,9 +44,7 @@ pub fn check_partials(partials: &[Partials]) -> Result<(), ModelError> {
             ));
         }
         if p.levels.iter().any(|l| !(0.0..=1.0).contains(l)) {
-            return Err(ModelError::InvalidInput(
-                "a partial's level is from 0 to 1",
-            ));
+            return Err(ModelError::InvalidInput("a partial's level is from 0 to 1"));
         }
     }
     Ok(())
@@ -73,5 +71,104 @@ impl crate::Document {
             self.device_mut(device)?.partials = partials;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Command, Device, DeviceKind, Editor, TrackKind};
+
+    fn operator(editor: &mut Editor) -> DeviceId {
+        let track = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Midi,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let id = editor.new_id();
+        let kind = DeviceKind::Native {
+            device_type: "test.operator".to_owned(),
+        };
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device: Device::new(id, "", kind),
+            })
+            .unwrap();
+        id
+    }
+
+    // Spec: operator R27
+    #[test]
+    fn partials_are_16_32_or_64_levels_from_0_to_1_one_list_for_each_oscillator() {
+        let list = |osc, len, level| Partials {
+            osc,
+            levels: vec![level; len],
+        };
+        assert!(check_partials(&[list(0, 16, 1.0), list(3, 64, 0.0)]).is_ok());
+        for broken in [
+            vec![list(0, 20, 0.5)],
+            vec![list(0, 16, 1.5)],
+            vec![list(0, 16, -0.1)],
+            vec![list(0, 16, f32::NAN)],
+            vec![list(4, 16, 0.5)],
+            vec![list(1, 16, 0.5), list(1, 32, 0.5)],
+        ] {
+            assert!(check_partials(&broken).is_err());
+        }
+    }
+
+    // Spec: operator R27
+    #[test]
+    fn setting_partials_is_one_undo_step_that_the_set_saves() {
+        let mut editor = Editor::new();
+        let device = operator(&mut editor);
+        let levels = vec![0.25f32; 32];
+        editor
+            .apply(Command::SetPartials {
+                device,
+                osc: 2,
+                levels: levels.clone(),
+            })
+            .unwrap();
+        let saved = serde_json::to_value(editor.document().device(device).unwrap()).unwrap();
+        assert_eq!(
+            saved["partials"],
+            serde_json::json!([{ "osc": 2, "levels": levels }])
+        );
+        let loaded: Device = serde_json::from_value(saved).unwrap();
+        assert_eq!(
+            loaded.partials,
+            editor.document().device(device).unwrap().partials
+        );
+        // A bad list is refused and changes nothing.
+        assert!(
+            editor
+                .apply(Command::SetPartials {
+                    device,
+                    osc: 2,
+                    levels: vec![2.0; 16],
+                })
+                .is_err()
+        );
+        assert_eq!(editor.document().device(device).unwrap().partials.len(), 1);
+        editor.undo().unwrap();
+        assert!(
+            editor
+                .document()
+                .device(device)
+                .unwrap()
+                .partials
+                .is_empty()
+        );
+        // A device without any leaves the field out of the saved set.
+        let bare = serde_json::to_value(editor.document().device(device).unwrap()).unwrap();
+        assert!(bare.get("partials").is_none());
     }
 }

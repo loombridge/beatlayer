@@ -3983,6 +3983,74 @@ mod tests {
         assert!(other.data.is_empty());
     }
 
+    /// What a device with data sends: one piece each time.
+    struct Sent;
+
+    // Spec: operator R7, R27. A device's drawn partials, and a parameter its
+    // data is built from, send its data again with no new program; another
+    // parameter sends nothing.
+    #[test]
+    fn partials_and_the_params_data_is_built_from_send_a_devices_data_again() {
+        use crate::registry::{DeviceData, DeviceType};
+        const DRAWN: &str = "test.drawn";
+        let data_param = bl_model::ParamId(5);
+        let mut registry = Registry::new();
+        registry.add_device_with_data(
+            DeviceType::native(DRAWN, "Drawn", bl_model::DeviceRole::Instrument),
+            |device, config| Box::new(crate::nodes::TestTone::new(device, config)),
+            Some(std::sync::Arc::new(|_, _| DeviceData {
+                items: vec![Box::new(|gc| gc.data(Sent))],
+                missing: Vec::new(),
+            })),
+        );
+        registry.rebuilds_data_on(DRAWN, &[data_param]);
+        let collector = Collector::new();
+        let config = EngineConfig::new(bl_core::time::SampleRate::HZ_48000, 64);
+        let mut compiler = Compiler::new(config, registry, collector.handle());
+        let mut editor = Editor::new();
+        let track = track(&mut editor, TrackKind::Midi, None);
+        let device = editor.new_id();
+        let kind = DeviceKind::Native {
+            device_type: DRAWN.to_owned(),
+        };
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device: Device::new(device, "", kind),
+            })
+            .unwrap();
+        let first = compiler.sync(editor.document());
+        assert!(first.program.is_some() && !first.data.is_empty());
+        let mut edit = |command: Command| {
+            editor.apply(command).unwrap();
+            compiler.sync(editor.document())
+        };
+        let drawn = edit(Command::SetPartials {
+            device,
+            osc: 0,
+            levels: vec![0.5; 16],
+        });
+        assert!(drawn.program.is_none());
+        assert_eq!(drawn.data.len(), 1, "the partials go again");
+        let rebuilt = edit(Command::SetDeviceParam {
+            device,
+            param: data_param,
+            value: 1.0,
+        });
+        assert_eq!(
+            rebuilt.data.len(),
+            1,
+            "the parameter its data is built from"
+        );
+        let other = edit(Command::SetDeviceParam {
+            device,
+            param: bl_model::ParamId(6),
+            value: 1.0,
+        });
+        assert!(other.data.is_empty(), "another parameter sends none");
+    }
+
     // Spec: themes R27. A colour is never heard: colouring a track, a clip or a
     // scene sends the engine no program, no parameter and no clip data.
     #[test]

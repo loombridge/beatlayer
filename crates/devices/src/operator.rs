@@ -184,13 +184,7 @@ pub const GLIDE_TIME: ParamId = ParamId(261);
 pub const SPREAD: ParamId = ParamId(262);
 
 /// The global modulation sources, in the matrix's order (R25).
-pub const TARGET_SOURCES: [&str; 5] = [
-    "Velocity",
-    "Key",
-    "Aftertouch",
-    "Pitch Bend",
-    "Mod Wheel",
-];
+pub const TARGET_SOURCES: [&str; 5] = ["Velocity", "Key", "Aftertouch", "Pitch Bend", "Mod Wheel"];
 
 /// The Destination chooser (`b` false for A, true for B) and Amount of
 /// global modulation source `source` (0 to 4, [`TARGET_SOURCES`]).
@@ -811,10 +805,7 @@ fn banks() -> Vec<(String, Vec<String>)> {
                     ],
                 ),
             ),
-            (
-                format!("Osc {letter} 3"),
-                names(&p, &["Repeat On"]),
-            ),
+            (format!("Osc {letter} 3"), names(&p, &["Repeat On"])),
             (
                 format!("Env {letter}"),
                 names(
@@ -1049,14 +1040,15 @@ pub fn operator_type() -> DeviceType {
         .map(|(name, params)| (name.as_str(), params.iter().map(String::as_str).collect()))
         .collect();
     let banks: Vec<(&str, &[&str])> = banks.iter().map(|(n, p)| (*n, p.as_slice())).collect();
-    DeviceType::native(OPERATOR, "Operator", DeviceRole::Instrument).with_description(
-        DeviceDescription::new(params)
-            .with_layout(layout)
-            .with_menu_options(&[NOTE_PB])
-            .with_views(&crate::operator_display::VIEWS)
-            .with_banks(&banks),
-    )
-    .with_matrix(operator_matrix())
+    DeviceType::native(OPERATOR, "Operator", DeviceRole::Instrument)
+        .with_description(
+            DeviceDescription::new(params)
+                .with_layout(layout)
+                .with_menu_options(&[NOTE_PB])
+                .with_views(&crate::operator_display::VIEWS)
+                .with_banks(&banks),
+        )
+        .with_matrix(operator_matrix())
 }
 
 /// A factory preset: a name and the parameters it sets, the rest staying at
@@ -1154,12 +1146,7 @@ pub fn presets() -> Vec<Preset> {
 
 /// Adds Operator to `registry`.
 pub fn register(registry: &mut Registry) {
-    add_with_data(
-        registry,
-        operator_type(),
-        make,
-        Some(Arc::new(device_data)),
-    );
+    add_with_data(registry, operator_type(), make, Some(Arc::new(device_data)));
     // Repeat shapes a user wave's table (R7).
     let repeats: Vec<ParamId> = (0..OPERATORS)
         .flat_map(|op| [osc(op, OSC_REPEAT), osc(op, OSC_REPEAT_ON)])
@@ -1501,9 +1488,8 @@ impl Synth {
             loop_secs: 0.0,
             repeat: 1.0,
         };
-        let filters = [1usize, 2].map(|k| {
-            InstrumentFilter::new((rate * k as f64) as f32, MAX_VOICES, max_frames * k)
-        });
+        let filters = [1usize, 2]
+            .map(|k| InstrumentFilter::new((rate * k as f64) as f32, MAX_VOICES, max_frames * k));
         let stride = filters[0].stride();
         let per_frame = |n: usize| vec![0.0f32; max_frames * n];
         Self {
@@ -1757,9 +1743,7 @@ impl Synth {
                         self.lfos[voice].restart(0.0, LFO_SEED ^ self.started);
                     }
                 }
-                if self.filter_on
-                    && matches!(start, Start::Fresh)
-                    && self.starts.len() < MAX_STARTS
+                if self.filter_on && matches!(start, Start::Fresh) && self.starts.len() < MAX_STARTS
                 {
                     self.starts
                         .push((voice, event.time as usize * self.core.factor()));
@@ -1877,7 +1861,11 @@ impl Synth {
                     } else {
                         (lfo.rate_key * self.octaves[voice]).exp2()
                     };
-                    let pitch = if self.pitch_lfo { lane.pitch / 12.0 } else { 0.0 };
+                    let pitch = if self.pitch_lfo {
+                        lane.pitch / 12.0
+                    } else {
+                        0.0
+                    };
                     let dt = lfo::cycles(lfo.range, f64::from(rate), self.rate, self.bpm[i])
                         * f64::from(key * pitch.exp2());
                     self.lfos[voice].step(lfo.wave, dt)
@@ -1899,15 +1887,16 @@ impl Synth {
                         // Tremolo: the level swings between its whole and
                         // none, by the LFO's depth and Amount A.
                         let high = (wave + 1.0) / 2.0;
-                        let high = if lfo.amount_a >= 0.0 { high } else { 1.0 - high };
+                        let high = if lfo.amount_a >= 0.0 {
+                            high
+                        } else {
+                            1.0 - high
+                        };
                         scale[op] = 1.0 - depth.abs() * lfo.amount_a.abs() * (1.0 - high);
                     }
                 }
                 // Osc Crossfade moves level from the first to the second.
-                for (from, to, dest) in [
-                    (0, 2, DEST_CROSSFADE_AC),
-                    (1, 3, DEST_CROSSFADE_BD),
-                ] {
+                for (from, to, dest) in [(0, 2, DEST_CROSSFADE_AC), (1, 3, DEST_CROSSFADE_BD)] {
                     scale[from] *= (1.0 - e[dest]).clamp(0.0, 1.0);
                     scale[to] *= (1.0 + e[dest]).clamp(0.0, 1.0);
                 }

@@ -1754,7 +1754,11 @@ impl DeviceViewUi {
             ("Odd Only", "odd_only", harmonics.odd_only),
             ("Normalize", "normalize", harmonics.normalize),
         ] {
-            let response = ui.button(if on { format!("✔ {label}") } else { label.to_owned() });
+            let response = ui.button(if on {
+                format!("✔ {label}")
+            } else {
+                label.to_owned()
+            });
             crate::menus::register_item(ui.ctx(), &response);
             if response.clicked() {
                 invoke(

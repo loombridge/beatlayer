@@ -442,7 +442,11 @@ fn even_only_and_odd_only_exclude_each_other_and_normalize_starts_on() {
         json!({ "device": device, "odd_only": true, "normalize": false }),
     );
     assert_eq!(
-        (odd["even_only"].clone(), odd["odd_only"].clone(), odd["normalize"].clone()),
+        (
+            odd["even_only"].clone(),
+            odd["odd_only"].clone(),
+            odd["normalize"].clone()
+        ),
         (json!(false), json!(true), json!(false))
     );
 }
@@ -467,7 +471,10 @@ fn device_display_reports_the_view_a_section_starts_on_from_the_parameters() {
     assert_eq!(lfo["view"], json!("LFO Envelope"));
     assert_eq!(lfo["series"][0]["name"], json!("LFO Envelope"));
     set_page(&mut shell, device, "Filter");
-    assert_eq!(display(&mut shell)["series"][0]["name"], json!("Filter Envelope"));
+    assert_eq!(
+        display(&mut shell)["series"][0]["name"],
+        json!("Filter Envelope")
+    );
     shell
         .run(
             "device.set_display_view",
@@ -476,7 +483,10 @@ fn device_display_reports_the_view_a_section_starts_on_from_the_parameters() {
         .unwrap();
     let response = display(&mut shell);
     assert_eq!(response["series"][0]["name"], json!("Filter Response"));
-    assert_eq!(response["series"][0]["values"].as_array().unwrap().len(), 96);
+    assert_eq!(
+        response["series"][0]["values"].as_array().unwrap().len(),
+        96
+    );
     // An oscillator on User shows its partials.
     set_page(&mut shell, device, "Osc A");
     set(&mut shell, device, osc(0, OSC_WAVE), 22.0);

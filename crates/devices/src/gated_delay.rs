@@ -155,11 +155,13 @@ pub fn gated_delay_type() -> DeviceType {
 fn layout() -> DeviceLayout {
     let size = Widget::Toggle.size();
     let controls: Vec<Control> = (1..=STEP_COUNT)
-        .map(|n| Control {
-            param: step(n),
-            widget: Widget::Toggle,
-            x: PADDING + ((n - 1) % ROW_COLUMNS) as f32 * (size.width + PADDING),
-            y: PADDING + ((n - 1) / ROW_COLUMNS) as f32 * (size.height + PADDING),
+        .map(|n| {
+            Control::new(
+                step(n),
+                Widget::Toggle,
+                PADDING + ((n - 1) % ROW_COLUMNS) as f32 * (size.width + PADDING),
+                PADDING + ((n - 1) / ROW_COLUMNS) as f32 * (size.height + PADDING),
+            )
         })
         .collect();
     let row = ControlBand {

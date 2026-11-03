@@ -216,7 +216,7 @@ fn layout() -> DeviceLayout {
             ],
         )),
         LayoutNode::Cell(
-            DisplayCell::new("Gain Reduction", 170.0, BODY_HEIGHT, 1.0)
+            DisplayCell::new("Gain Reduction", 180.0, BODY_HEIGHT, 1.0)
                 .with_top(ControlBand::stacked(
                     60.0,
                     &[(THRESHOLD, Widget::Knob), (OUT, Widget::Knob)],

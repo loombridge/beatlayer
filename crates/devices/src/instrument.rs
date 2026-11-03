@@ -1012,6 +1012,13 @@ impl Section {
         self.state.reset();
     }
 
+    /// The node's frame count at the start of the next stretch: the clock the
+    /// control grid counts, which [`State::clock`] reads once it plays.
+    #[must_use]
+    pub fn clock(&self) -> u64 {
+        self.voices.clock()
+    }
+
     /// Plays a stretch: the notes of `audio`, through `instrument`, with the
     /// parts `params` set.
     pub fn process<I: Instrument>(

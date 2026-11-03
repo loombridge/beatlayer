@@ -25,11 +25,11 @@ This spec covers the device's behaviour. The device framework (parameters, smoot
 
 Everything below that the manual doesn't state (the ranges, the defaults, the delay's length and depth, the noise's level, and the filter's shape) is Beatlayer's own, listed to observe in Live.
 
-- **R1.** Freq runs from 20 Hz to 20 kHz (default 1 kHz, logarithmic) and Amount from 0 to 100 % (default 50 %). With Noise Blend at 0 %, a sine input gains sidebands at its frequency plus and minus Freq, within 1 %, and their level grows as Amount grows. The delay moves by Amount × 1.5 ms either way at most. (S1)
-- **R2.** Noise Blend runs from 0 to 100 % (default 0 %). At 100 % the modulation is band-filtered noise alone, so a sine input gains no line sidebands, only a band of noise around its frequency plus and minus Freq. Between the two the carriers are mixed in proportion. (S1)
+- **R1.** Freq runs from 20 Hz to 20 kHz (default 500 Hz, logarithmic) and Amount from 0 to 100 % (default 20 %); layout L-DEV-075. With Noise Blend at 0 %, a sine input gains sidebands at its frequency plus and minus Freq, within 1 %, and their level grows as Amount grows. The delay moves by Amount × 1.5 ms either way at most. (S1)
+- **R2.** Noise Blend runs from 0 to 100 % (default 50 %). At 100 % the modulation is band-filtered noise alone, so a sine input gains no line sidebands, only a band of noise around its frequency plus and minus Freq. Between the two the carriers are mixed in proportion. (S1)
 - **R3.** At an Amount of 0 the output is the input delayed by the reported latency alone: once the two are aligned, the difference is below −100 dB, at any Noise Blend and Stereo Width. (S1, S2)
-- **R4.** Filter Width runs from 0 to 100 % (default 50 %) and sets the noise band's width between its half-power points: a quarter of an octave at 0 %, four octaves at 100 %, geometrically between, centred on Freq. A narrower band keeps more of the noise's power near Freq. At a Noise Blend of 0 % it changes nothing. (S1)
-- **R5.** Stereo Width runs from 0 to 100 % (default 0 %). At 0 % both channels have the same modulation, so channels that hear the same input come out identical. As it rises the right channel's sine moves out of phase with the left's (opposed at 100 %) and its noise moves from the left's to an independent noise of the same level. (S1)
+- **R4.** Width runs from a quarter of an octave to four, a plain number (default 1.00, logarithmic), and sets the noise band's width between its half-power points, centred on Freq. A narrower band keeps more of the noise's power near Freq. At a Noise Blend of 0 % it changes nothing. (S1)
+- **R5.** Stereo runs from 0 to 100 % (default 25 %). At 0 % both channels have the same modulation, so channels that hear the same input come out identical. As it rises the right channel's sine moves out of phase with the left's (opposed at 100 %) and its noise moves from the left's to an independent noise of the same level. (S1)
 - **R6.** The noise follows the device's seed, so a render repeats run after run, and every value is worked out frame by frame, so a render is bit-identical at block sizes 1, 64, 512 and 4,096. (S4)
 - **R7.** The delay's centre is 2 ms, and the device reports it as its latency (96 frames at 48 kHz) for delay compensation. This matches the 12.4 figure of about 2 ms. (S2, S5)
 - **R8.** The display shows the input's spectrum, in 64 logarithmic bands from 20 Hz to 20 kHz, in decibels, once the engine has published it (`device.display`); before that it is empty. (S1)
@@ -51,5 +51,6 @@ Everything below that the manual doesn't state (the ranges, the defaults, the de
 
 ## Not built yet
 
+- Width's and Stereo's names and defaults are as Live's panel reads them; the icons that light under the display are not drawn.
 - The display as an X–Y control: dragging horizontally to set Freq, vertically to set Amount, and with the modifier key vertically to set Filter Width. Until then the display cell is a frame that shows the spectrum, and Freq, Amount and Filter Width are ordinary controls. Live also lights icons under the display to show which carrier is dominant, and draws the sine as a line and the noise as dotted lines; this spec doesn't cover that drawing.
 - Erosion Legacy, the version before 12.4, which Live set import maps to Erosion ([Live device mapping](live-device-mapping.md) R15).

@@ -3,7 +3,7 @@
 //! times with Hi-Quality, then a DC filter, a four-band EQ, Output and
 //! Dry/Wet.
 //!
-//! Gain drives the circuit; each circuit is a clipper between two filters,
+//! Drive drives the circuit; each circuit is a clipper between two filters,
 //! and Fuzz's bias follows its own input's envelope. A change of type
 //! crossfades. The circuits, ranges and the EQ's Qs are Beatlayer's own: the
 //! manual names the controls and the EQ's frequencies but gives no numbers.
@@ -13,7 +13,7 @@ use core::f64::consts::PI;
 
 use bl_dsp::{EnvelopeFollower, Oversampler};
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, LayoutNode, Widget};
+use bl_model::device_layout::{BODY_HEIGHT, BOX_HEIGHT, Control, ControlBand, LayoutNode, Widget};
 use bl_model::{
     Device, DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit,
 };
@@ -27,19 +27,19 @@ pub const PEDAL: &str = "beatlayer.pedal";
 
 /// Type: one of [`TYPES`].
 pub const TYPE: ParamId = ParamId(0);
-/// Gain, per cent: the circuit's drive (0 to +48 dB).
+/// Drive, per cent: the circuit's drive (0 to +48 dB).
 pub const GAIN: ParamId = ParamId(1);
 /// Output: the level after the EQ.
 pub const OUTPUT: ParamId = ParamId(2);
-/// Bass: a peak at 100 Hz, in dB.
+/// Bass: a peak at 100 Hz, per cent of [`EQ_DB`].
 pub const BASS: ParamId = ParamId(3);
-/// Mid: a peak at [`MID_FREQUENCY`], in dB.
+/// Mid: a peak at [`MID_FREQUENCY`], per cent of [`EQ_DB`].
 pub const MID: ParamId = ParamId(4);
 /// Mid Frequency: one of [`MID_HZ`].
 pub const MID_FREQUENCY: ParamId = ParamId(5);
-/// Treble: a high shelf at 3.3 kHz, in dB.
+/// Treble: a high shelf at 3.3 kHz, per cent of [`EQ_DB`].
 pub const TREBLE: ParamId = ParamId(6);
-/// Sub: a low shelf at 250 Hz, in dB.
+/// Sub: a switch for a low shelf at 250 Hz of [`SUB_DB`].
 pub const SUB: ParamId = ParamId(7);
 /// Dry/Wet, per cent.
 pub const DRY_WET: ParamId = ParamId(8);
@@ -47,7 +47,7 @@ pub const DRY_WET: ParamId = ParamId(8);
 pub const HI_QUALITY: ParamId = ParamId(9);
 
 /// The types, in the chooser's order.
-pub const TYPES: [&str; 3] = ["Overdrive", "Distortion", "Fuzz"];
+pub const TYPES: [&str; 3] = ["OD", "Distort", "Fuzz"];
 const OVERDRIVE: usize = 0;
 const DISTORTION: usize = 1;
 const FUZZ: usize = 2;
@@ -55,7 +55,11 @@ const FUZZ: usize = 2;
 /// The Mid peak's centres, in Hz, in the switch's order.
 pub const MID_HZ: [f64; 3] = [500.0, 1_000.0, 2_000.0];
 
-/// Gain's span: 0 to this many dB of drive.
+/// A full Bass, Mid or Treble (100 %) is this many dB.
+pub const EQ_DB: f64 = 15.0;
+/// What Sub boosts by while it is on, in dB.
+pub const SUB_DB: f64 = 6.0;
+/// Drive's span: 0 to this many dB of drive.
 const DRIVE_DB: f32 = 48.0;
 /// Doublings of the rate: 4 times, and 8 times with Hi-Quality.
 const STAGES: [u32; 2] = [2, 3];
@@ -91,7 +95,7 @@ const SHELF_Q: f64 = 0.71;
 /// first frame, so a render doesn't depend on its block size.
 const REFRESH_FRAMES: u64 = 16;
 
-/// The circuit's drive at `gain` per cent: g = 10^(Gain × 48 / 20).
+/// The circuit's drive at `gain` per cent: g = 10^(Drive × 48 / 20).
 #[must_use]
 pub fn drive(gain: f32) -> f32 {
     10f32.powf(gain / 100.0 * DRIVE_DB / 20.0)
@@ -127,23 +131,23 @@ pub fn fuzz_bias(envelope: f32) -> f32 {
 /// The Pedal device type.
 #[must_use]
 pub fn pedal_type() -> DeviceType {
-    let boost = |id, name: &str, from| {
-        ParamDescriptor::continuous(id, name, (from, 15.0), 0.0, ParamUnit::Decibels)
+    let boost = |id, name: &str| {
+        ParamDescriptor::continuous(id, name, (-100.0, 100.0), 0.0, ParamUnit::Percent)
     };
     let params = vec![
         ParamDescriptor::choice(TYPE, "Type", &TYPES, OVERDRIVE)
             .describe("The circuit: Overdrive is warm and smooth, Distortion tighter and harder, Fuzz unstable and gated."),
-        ParamDescriptor::continuous(GAIN, "Gain", (0.0, 100.0), 50.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(GAIN, "Drive", (0.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("How hard the signal drives the circuit; even 0% distorts a little."),
         ParamDescriptor::gain(OUTPUT, "Output", 12.0, 0.0)
             .describe("The level after the EQ."),
-        boost(BASS, "Bass", -15.0).describe("Boosts or cuts around 100 Hz."),
-        boost(MID, "Mid", -15.0)
+        boost(BASS, "Bass").describe("Boosts or cuts around 100 Hz."),
+        boost(MID, "Mid")
             .describe("Boosts or cuts around the frequency Mid Frequency chooses."),
         ParamDescriptor::choice(MID_FREQUENCY, "Mid Frequency", &["500 Hz", "1 kHz", "2 kHz"], 1)
             .describe("The centre of the Mid control."),
-        boost(TREBLE, "Treble", -15.0).describe("Boosts or cuts the highs above about 3.3 kHz."),
-        boost(SUB, "Sub", 0.0).describe("Boosts the lows below about 250 Hz."),
+        boost(TREBLE, "Treble").describe("Boosts or cuts the highs above about 3.3 kHz."),
+        ParamDescriptor::toggle(SUB, "Sub", false).describe("Boosts the lows below about 250 Hz."),
         ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 100.0, ParamUnit::Percent)
             .describe("The balance between the dry signal and the pedal's."),
         ParamDescriptor::toggle(HI_QUALITY, "Hi-Quality", false).describe(
@@ -151,22 +155,21 @@ pub fn pedal_type() -> DeviceType {
              less; it delays the output a little more.",
         ),
     ];
-    let layout = DeviceLayout::new(LayoutNode::Row(vec![LayoutNode::Band(
-        ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (TYPE, Widget::Chooser),
-                (GAIN, Widget::Knob),
-                (BASS, Widget::Knob),
-                (MID, Widget::Knob),
-                (MID_FREQUENCY, Widget::Chooser),
-                (TREBLE, Widget::Knob),
-                (SUB, Widget::Knob),
-                (OUTPUT, Widget::Knob),
-                (DRY_WET, Widget::Knob),
-            ],
-        ),
-    )]));
+    let layout = DeviceLayout::new(LayoutNode::Band(ControlBand::free(
+        128.0,
+        BODY_HEIGHT,
+        vec![
+            Control::new(GAIN, Widget::SmallKnob, 24.0, 4.0),
+            Control::new(OUTPUT, Widget::SmallKnob, 65.0, 4.0),
+            Control::new(TYPE, Widget::Segments(3), 4.0, 51.0).sized(120.0, BOX_HEIGHT),
+            Control::new(BASS, Widget::SmallKnob, 9.0, 75.0),
+            Control::new(MID, Widget::SmallKnob, 48.0, 75.0),
+            Control::new(TREBLE, Widget::SmallKnob, 87.0, 75.0),
+            Control::new(MID_FREQUENCY, Widget::Pill, 51.0, 123.0),
+            Control::new(SUB, Widget::Toggle, 4.0, 143.0).sized(29.0, BOX_HEIGHT),
+            Control::new(DRY_WET, Widget::Beside(42), 48.0, 143.0).sized(76.0, BOX_HEIGHT),
+        ],
+    )));
     DeviceType::native(PEDAL, "Pedal", DeviceRole::AudioEffect).with_description(
         DeviceDescription::new(params)
             .with_layout(layout)
@@ -175,7 +178,7 @@ pub fn pedal_type() -> DeviceType {
                 (
                     "Pedal",
                     &[
-                        "Type", "Gain", "Bass", "Mid", "Treble", "Sub", "Output", "Dry/Wet",
+                        "Type", "Drive", "Bass", "Mid", "Treble", "Sub", "Output", "Dry/Wet",
                     ],
                 ),
                 ("Mid", &["Mid Frequency"]),
@@ -481,16 +484,23 @@ impl NativeDevice for Pedal {
                 if (self.ticks + i as u64).is_multiple_of(REFRESH_FRAMES) {
                     let rate = self.rate;
                     let [b, m, t, s] = &mut tone.bands;
-                    b.c = coeffs(Type::Peak, BASS_HZ, f64::from(bass[i]), BASS_Q, rate);
-                    m.c = coeffs(Type::Peak, mid_hz, f64::from(mid[i]), MID_Q, rate);
+                    let eq = EQ_DB / 100.0;
+                    b.c = coeffs(Type::Peak, BASS_HZ, f64::from(bass[i]) * eq, BASS_Q, rate);
+                    m.c = coeffs(Type::Peak, mid_hz, f64::from(mid[i]) * eq, MID_Q, rate);
                     t.c = coeffs(
                         Type::HighShelf,
                         TREBLE_HZ,
-                        f64::from(treble[i]),
+                        f64::from(treble[i]) * eq,
                         SHELF_Q,
                         rate,
                     );
-                    s.c = coeffs(Type::LowShelf, SUB_HZ, f64::from(sub[i]), SHELF_Q, rate);
+                    s.c = coeffs(
+                        Type::LowShelf,
+                        SUB_HZ,
+                        f64::from(sub[i]) * SUB_DB,
+                        SHELF_Q,
+                        rate,
+                    );
                 }
                 let mut v = tone.dc.process(f64::from(work[i])) as f32;
                 for band in &mut tone.bands {

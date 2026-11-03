@@ -15,6 +15,7 @@ mod electric;
 mod engine_host;
 mod export;
 mod fades;
+mod granulator_capture;
 mod grooves;
 mod http;
 mod instrument_filter;

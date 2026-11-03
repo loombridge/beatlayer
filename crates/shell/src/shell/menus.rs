@@ -63,7 +63,7 @@ impl Shell {
         match self.focused_window {
             WindowKind::Settings => vec![Context::Settings, Context::Dialog, Context::Global],
             // The floating assistant: only the global keys work in it.
-            WindowKind::Assistant => vec![Context::Global],
+            WindowKind::Assistant | WindowKind::Video => vec![Context::Global],
             // A floating device's window: its device is selected, so the
             // Device View's keys act on it (Float's among them), and the
             // global ones work.
@@ -238,6 +238,7 @@ impl Shell {
             arranger_ids::ARRANGER_TRACK => Some(self.editor.document().settings().arranger_track),
             ids::VIEW_FULL_SCREEN => Some(self.full_screen_of(self.acting_window())),
             ids::VIEW_TOGGLE_SECOND_WINDOW => Some(self.second.open),
+            bl_shell_spec::video::TOGGLE_WINDOW => Some(self.video_window_shown()),
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser_of(self.acting_window())),
             ids::VIEW_TOGGLE_FULL_HEIGHT_BROWSER => Some(self.browser_view.full_height()),
             ids::VIEW_TUNING_SECTION => Some(self.tuning_section),
@@ -812,6 +813,9 @@ impl Shell {
             // main window open, Close Window is disabled (M-FILE-004).
             // Live's Plug-In Windows is disabled with none open (M-VIEW-028).
             ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => return self.any_plug_in_window(),
+            // Spec: video R16. Live's Video Window is disabled in a new set:
+            // enabled while the Arrangement has a video clip.
+            bl_shell_spec::video::TOGGLE_WINDOW => return self.editor.document().has_video_clip(),
             // IMP-25. Close All Plug-in Windows is disabled with no editor
             // open: it never closes a floating native device window.
             ids::CLOSE_PLUG_IN_WINDOWS => return self.any_plug_in_editor(),
@@ -827,6 +831,7 @@ impl Shell {
                         .device(device)
                         .is_some_and(|d| d.floating),
                     WindowKind::Second => self.second.open,
+                    WindowKind::Video => self.video_window_shown(),
                     WindowKind::Main => false,
                 };
             }
@@ -846,6 +851,9 @@ impl Shell {
         }
         if bl_shell_spec::cv::handles(id) {
             return self.can_cv(id, args);
+        }
+        if bl_shell_spec::granulator::handles(id) {
+            return self.can_granulator(args);
         }
         if slice_ids::handles(id) {
             // Spec: slice-to-midi R1. The menus' enabled states: one audio

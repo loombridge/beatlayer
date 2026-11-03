@@ -260,6 +260,14 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ),
         ("clip.transients", Exception(Query)),
         ("video.frame_at", Exception(Query)),
+        ("video.window_state", Exception(Query)),
+        (
+            "video.set_window",
+            Exception(Equivalent(
+                "the Video Window's double-click and Esc are the mouse's and the key's way; \
+                 View \u{25b8} Video Window (`view.toggle_video_window`) shows and hides it",
+            )),
+        ),
         (
             "clip.shift_warp_marker",
             Exception(Live(

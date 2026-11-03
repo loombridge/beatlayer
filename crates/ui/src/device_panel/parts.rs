@@ -51,6 +51,19 @@ pub fn font() -> FontId {
     FontId::proportional(DEVICE_TEXT)
 }
 
+/// How a chooser's box looks.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ChooserStyle {
+    /// A dark box.
+    Plain,
+    /// Filled like a lit number box.
+    Lit,
+    /// No box: the value in the accent colour and a small ▼.
+    Unboxed,
+    /// A dark box with no name row.
+    Nameless,
+}
+
 /// What a control's face is made of while lit and while not, by the look of
 /// the button.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -65,15 +78,24 @@ impl Control<'_> {
     /// The name above the control, in a row of [`LABEL_HEIGHT`]; it stays as
     /// it is when the device is switched off (observed). Returns the rest.
     pub(super) fn label(&self, ui: &Ui, theme: &Theme) -> Rect {
+        if self.unnamed {
+            return self.rect;
+        }
         let top = Rect::from_min_size(self.rect.min, vec2(self.rect.width(), LABEL_HEIGHT));
         ui.painter().text(
             top.center(),
             Align2::CENTER_CENTER,
-            short_name(&self.descriptor.name),
+            self.name(),
             font(),
             theme.colors.text.0,
         );
         Rect::from_min_max(pos2(self.rect.left(), top.bottom()), self.rect.max)
+    }
+
+    /// The name the control shows: its caption where the layout gives one.
+    pub(super) fn name(&self) -> &str {
+        self.caption
+            .unwrap_or_else(|| short_name(&self.descriptor.name))
     }
 
     /// Whether the value is a lit (on) one of a switch.
@@ -187,6 +209,214 @@ impl Control<'_> {
     ) {
         let below = self.label(ui, theme);
         let field = Rect::from_min_size(below.min, vec2(below.width(), BOX_HEIGHT));
+        self.number_field(ui, theme, events, field, (lit, marked));
+    }
+
+    /// A box with its name at its left on the same line, `label_width`
+    /// points of the control for the name: lit, with the name in the text
+    /// colour, or plain with the name dim.
+    pub(super) fn beside(
+        &self,
+        ui: &mut Ui,
+        theme: &Theme,
+        events: &mut Vec<UiEvent>,
+        (label_width, lit): (f32, bool),
+    ) {
+        ui.painter().text(
+            pos2(self.rect.left(), self.rect.center().y),
+            Align2::LEFT_CENTER,
+            self.name(),
+            font(),
+            if lit {
+                theme.colors.text.0
+            } else {
+                theme.colors.text_dim.0
+            },
+        );
+        let field = Rect::from_min_max(
+            pos2(self.rect.left() + label_width, self.rect.top()),
+            self.rect.max,
+        );
+        self.number_field(ui, theme, events, field, (lit, false));
+    }
+
+    /// A button reading On or Off, lit while on, with the name at its left.
+    pub(super) fn beside_switch(
+        &self,
+        ui: &mut Ui,
+        theme: &Theme,
+        events: &mut Vec<UiEvent>,
+        label_width: f32,
+    ) {
+        ui.painter().text(
+            pos2(self.rect.left(), self.rect.center().y),
+            Align2::LEFT_CENTER,
+            self.name(),
+            font(),
+            theme.colors.text_dim.0,
+        );
+        let button = Rect::from_min_max(
+            pos2(self.rect.left() + label_width, self.rect.top()),
+            self.rect.max,
+        );
+        let on = self.on();
+        let text = self.descriptor.format(self.value);
+        let response = self.button(
+            ui,
+            theme,
+            (button, self.id()),
+            (Look::Dark, on),
+            Face::Text(&text),
+        );
+        if Self::chosen(ui, &response) {
+            self.change(if on { 0.0 } else { 1.0 }, events);
+        }
+        self.describe_switch(ui, &response);
+    }
+
+    /// A small square, filled while on, with the name after it.
+    pub(super) fn check(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
+        let response = ui.interact(self.rect, self.id(), Sense::click());
+        crate::focus::register(ui.ctx(), self.id(), bl_shell::Area::Detail, None);
+        let on = self.on();
+        let c = &theme.colors;
+        let painter = ui.painter();
+        let square = Rect::from_center_size(
+            pos2(self.rect.left() + 4.5, self.rect.center().y),
+            vec2(8.0, 8.0),
+        );
+        painter.rect_stroke(
+            square,
+            BOX_CORNER,
+            Stroke::new(1.0, self.lit(theme)),
+            StrokeKind::Inside,
+        );
+        if on {
+            painter.rect_filled(square.shrink(2.0), 0.0, self.lit(theme));
+        }
+        painter.text(
+            pos2(square.right() + 4.0, self.rect.center().y),
+            Align2::LEFT_CENTER,
+            self.name(),
+            font(),
+            c.text_dim.0,
+        );
+        if Self::chosen(ui, &response) {
+            self.change(if on { 0.0 } else { 1.0 }, events);
+        }
+        focus_ring(ui, theme, self.rect, &response);
+        self.describe_switch(ui, &response);
+    }
+
+    /// The dim name over the value, both from the control's left: the name
+    /// of a bare control, in the row above the value's.
+    fn dim_label(&self, ui: &Ui, theme: &Theme) -> Rect {
+        if self.unnamed {
+            return self.rect;
+        }
+        let top = Rect::from_min_size(self.rect.min, vec2(self.rect.width(), LABEL_HEIGHT));
+        ui.painter().text(
+            top.left_center(),
+            Align2::LEFT_CENTER,
+            self.name(),
+            font(),
+            theme.colors.text_dim.0,
+        );
+        Rect::from_min_max(pos2(self.rect.left(), top.bottom()), self.rect.max)
+    }
+
+    /// A number with no box: the value in the accent from the left, under its
+    /// dim name.
+    pub(super) fn bare(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
+        let below = self.dim_label(ui, theme);
+        let field = Rect::from_min_size(below.min, vec2(below.width(), BOX_HEIGHT));
+        let response = ui.interact(field, self.id(), Sense::click_and_drag());
+        crate::focus::register(ui.ctx(), self.id(), bl_shell::Area::Detail, None);
+        self.value_input(ui, &response, events);
+        ui.painter().text(
+            field.left_center(),
+            Align2::LEFT_CENTER,
+            self.text
+                .clone()
+                .unwrap_or_else(|| self.descriptor.format(self.value)),
+            font(),
+            self.lit(theme),
+        );
+        focus_ring(ui, theme, field, &response);
+        self.describe(ui, &response, Role::SpinButton);
+    }
+
+    /// A name in the dim colour with the value after it in the accent: no box.
+    pub(super) fn readout(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
+        let c = &theme.colors;
+        let painter = ui.painter();
+        let name = self.name();
+        let value = self.descriptor.format(self.value);
+        let mid = pos2(self.rect.left(), self.rect.center().y);
+        let used = painter
+            .text(mid, Align2::LEFT_CENTER, name, font(), c.text_dim.0)
+            .width();
+        let field = Rect::from_min_max(
+            pos2(self.rect.left() + used + 4.0, self.rect.top()),
+            self.rect.max,
+        );
+        let response = ui.interact(field, self.id(), Sense::click_and_drag());
+        crate::focus::register(ui.ctx(), self.id(), bl_shell::Area::Detail, None);
+        self.value_input(ui, &response, events);
+        ui.painter().text(
+            pos2(field.left(), field.center().y),
+            Align2::LEFT_CENTER,
+            value,
+            font(),
+            self.lit(theme),
+        );
+        focus_ring(ui, theme, field, &response);
+        self.describe(ui, &response, Role::SpinButton);
+    }
+
+    /// A pill with a dot: where the dot sits shows which choice is chosen,
+    /// and a click moves it to the next, round to the first.
+    pub(super) fn pill(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
+        let response = ui.interact(self.rect, self.id(), Sense::click());
+        crate::focus::register(ui.ctx(), self.id(), bl_shell::Area::Detail, None);
+        let c = &theme.colors;
+        let painter = ui.painter();
+        painter.rect_filled(self.rect, self.rect.height() / 2.0, c.window.0);
+        let steps = match &self.descriptor.kind {
+            bl_model::ParamKind::Choice { choices } => choices.len().max(2),
+            _ => 2,
+        };
+        let radius = self.rect.height() / 2.0 - 2.0;
+        let span = self.rect.width() - 2.0 * (radius + 2.0);
+        let at = self.value.round().clamp(0.0, (steps - 1) as f64) as f32 / (steps - 1) as f32;
+        painter.circle_filled(
+            pos2(
+                self.rect.left() + radius + 2.0 + span * at,
+                self.rect.center().y,
+            ),
+            radius,
+            c.text_dim.0,
+        );
+        if Self::chosen(ui, &response) {
+            self.change(((self.value.round() as usize + 1) % steps) as f64, events);
+        }
+        focus_ring(ui, theme, self.rect, &response);
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_role(Role::Button);
+            node.set_label(self.descriptor.name.clone());
+            node.set_value(self.descriptor.format(self.value));
+        });
+    }
+
+    /// The box of a number control at `field`.
+    fn number_field(
+        &self,
+        ui: &mut Ui,
+        theme: &Theme,
+        events: &mut Vec<UiEvent>,
+        field: Rect,
+        (lit, marked): (bool, bool),
+    ) {
         let response = ui.interact(field, self.id(), Sense::click_and_drag());
         crate::focus::register(ui.ctx(), self.id(), bl_shell::Area::Detail, None);
         self.value_input(ui, &response, events);
@@ -234,32 +464,62 @@ impl Control<'_> {
         ui: &mut Ui,
         theme: &Theme,
         events: &mut Vec<UiEvent>,
-        named: bool,
+        style: ChooserStyle,
     ) {
-        let below = if named {
-            self.label(ui, theme)
-        } else {
-            self.rect
+        let below = match style {
+            ChooserStyle::Unboxed => self.dim_label(ui, theme),
+            ChooserStyle::Nameless => self.rect,
+            ChooserStyle::Plain | ChooserStyle::Lit => self.label(ui, theme),
         };
         let field = Rect::from_min_size(below.min, vec2(below.width(), BOX_HEIGHT));
         let response = ui.interact(field, self.id(), Sense::click());
         crate::focus::register(ui.ctx(), self.id(), bl_shell::Area::Detail, None);
         let c = &theme.colors;
         let painter = ui.painter();
-        painter.rect_filled(field, BOX_CORNER, c.window.0);
-        painter.text(
-            pos2(field.left() + 3.0, field.center().y),
-            Align2::LEFT_CENTER,
-            self.descriptor.format(self.value),
-            font(),
-            c.text.0,
-        );
-        paint_glyph(
-            painter,
-            Rect::from_center_size(pos2(field.right() - 6.0, field.center().y), vec2(5.0, 5.0)),
-            Glyph::Down,
-            c.text.0,
-        );
+        let (fill, ink) = match style {
+            ChooserStyle::Plain | ChooserStyle::Nameless => (Some(c.window.0), c.text.0),
+            ChooserStyle::Lit => (Some(c.value_fill.0), c.text.0),
+            ChooserStyle::Unboxed => (None, c.value_fill.0),
+        };
+        if let Some(fill) = fill {
+            painter.rect_filled(field, BOX_CORNER, fill);
+        }
+        let text = self.descriptor.format(self.value);
+        if style == ChooserStyle::Unboxed {
+            // The value from the box's left, the ▼ after it.
+            let used = painter
+                .text(
+                    pos2(field.left(), field.center().y),
+                    Align2::LEFT_CENTER,
+                    &text,
+                    font(),
+                    ink,
+                )
+                .width();
+            paint_glyph(
+                painter,
+                Rect::from_center_size(
+                    pos2(field.left() + used + 8.0, field.center().y),
+                    vec2(4.0, 4.0),
+                ),
+                Glyph::Down,
+                c.text.0,
+            );
+        } else {
+            painter.text(
+                pos2(field.left() + 3.0, field.center().y),
+                Align2::LEFT_CENTER,
+                text,
+                font(),
+                ink,
+            );
+            paint_glyph(
+                painter,
+                Rect::from_center_size(pos2(field.right() - 6.0, field.center().y), vec2(5.0, 5.0)),
+                Glyph::Down,
+                c.text.0,
+            );
+        }
         focus_ring(ui, theme, field, &response);
         if let bl_model::ParamKind::Choice { choices } = &self.descriptor.kind {
             egui::Popup::menu(&response).show(|ui| {
@@ -349,7 +609,7 @@ impl Control<'_> {
     ) {
         let look = if outlined { Look::Outlined } else { Look::Dark };
         let on = self.on();
-        let name = short_name(&self.descriptor.name);
+        let name = self.name();
         let name = chars.map_or(name, |n| {
             name.char_indices()
                 .nth(n)
@@ -368,6 +628,36 @@ impl Control<'_> {
         self.describe_switch(ui, &response);
     }
 
+    /// A single button showing the chosen choice, lit: a click takes the next.
+    pub(super) fn cycle(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
+        let text = self.descriptor.format(self.value);
+        let response = self.button(
+            ui,
+            theme,
+            (self.rect, self.id()),
+            (
+                Look::Dark,
+                !matches!(self.descriptor.kind, bl_model::ParamKind::Toggle) || self.on(),
+            ),
+            Face::Text(&text),
+        );
+        if Self::chosen(ui, &response) {
+            let count = match &self.descriptor.kind {
+                bl_model::ParamKind::Choice { choices } => choices.len().max(1),
+                bl_model::ParamKind::Toggle => 2,
+                _ => 1,
+            };
+            self.change(((self.value.round() as usize + 1) % count) as f64, events);
+        }
+        let name = self.descriptor.name.clone();
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &name));
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_role(Role::Button);
+            node.set_label(self.descriptor.name.clone());
+            node.set_value(text.clone());
+        });
+    }
+
     /// An icon button or a round one: lit while on.
     pub(super) fn icon_toggle(
         &self,
@@ -382,7 +672,7 @@ impl Control<'_> {
         } else if let Some(glyph) = glyph {
             Face::Glyph(glyph)
         } else {
-            Face::Text(short_name(&self.descriptor.name))
+            Face::Text(self.name())
         };
         let response = self.button(ui, theme, (self.rect, self.id()), (Look::Dark, on), face);
         if Self::chosen(ui, &response) {
@@ -488,29 +778,6 @@ impl Control<'_> {
         );
         focus_ring(ui, theme, field, &response);
         self.describe(ui, &response, Role::SpinButton);
-    }
-
-    /// A lit text button holding the chosen name of a two-choice parameter:
-    /// a press switches to the other.
-    pub(super) fn cycle(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
-        let text = self.descriptor.format(self.value);
-        let response = self.button(
-            ui,
-            theme,
-            (self.rect, self.id()),
-            (Look::Dark, true),
-            Face::Text(&text),
-        );
-        if Self::chosen(ui, &response) {
-            self.change(if self.value >= 0.5 { 0.0 } else { 1.0 }, events);
-        }
-        let name = self.descriptor.name.clone();
-        response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &name));
-        ui.ctx().accesskit_node_builder(response.id, |node| {
-            node.set_role(Role::Button);
-            node.set_label(self.descriptor.name.clone());
-            node.set_value(text);
-        });
     }
 
     /// The name and the value on one line, the value in the accent.
@@ -659,6 +926,16 @@ pub fn glyph_for(choice: &str) -> Option<Glyph> {
         Some(Glyph::BandPass)
     } else if name.contains("notch") || name == "n" {
         Some(Glyph::Notch)
+    } else if name == "sync" {
+        Some(Glyph::Metronome)
+    } else if name == "crossfade" {
+        Some(Glyph::Crossfade)
+    } else if name == "envelope" {
+        Some(Glyph::Envelope)
+    } else if name == "phase" {
+        Some(Glyph::Phase)
+    } else if name == "spin" {
+        Some(Glyph::Spin)
     } else {
         None
     }
@@ -698,6 +975,19 @@ pub fn paint_glyph(painter: &Painter, rect: Rect, glyph: Glyph, ink: Color32) {
         ));
     };
     match glyph {
+        Glyph::Crossfade => {
+            line(&[(-0.9, -0.6), (0.9, 0.6)]);
+            line(&[(-0.9, 0.6), (0.9, -0.6)]);
+        }
+        Glyph::Envelope => line(&[(-0.9, 0.6), (0.0, -0.6), (0.9, 0.6)]),
+        Glyph::Phase => {
+            painter.circle_stroke(c, s * 0.7, stroke);
+            line(&[(-0.9, 0.9), (0.9, -0.9)]);
+        }
+        Glyph::Spin => {
+            painter.circle_stroke(c, s * 0.7, stroke);
+            fill(&[(0.7, -0.5), (1.0, 0.0), (0.4, 0.0)]);
+        }
         Glyph::LowPass => line(&[(-0.9, -0.3), (0.0, -0.3), (0.5, -0.1), (0.9, 0.6)]),
         Glyph::HighPass => line(&[(0.9, -0.3), (0.0, -0.3), (-0.5, -0.1), (-0.9, 0.6)]),
         Glyph::LowPass24 => line(&[(-0.9, -0.3), (0.1, -0.3), (0.4, -0.1), (0.55, 0.7)]),
@@ -795,13 +1085,13 @@ pub(super) fn heading(ui: &Ui, theme: &Theme, placed: &PlacedHeading, origin: Po
         origin + vec2(placed.rect.x, placed.rect.y),
         vec2(placed.rect.width, placed.rect.height),
     );
-    ui.painter().text(
-        rect.left_center() + vec2(2.0, 0.0),
-        Align2::LEFT_CENTER,
-        &placed.text,
-        font(),
-        theme.colors.text.0,
-    );
+    let (at, align) = if placed.centered {
+        (rect.center(), Align2::CENTER_CENTER)
+    } else {
+        (rect.left_center() + vec2(2.0, 0.0), Align2::LEFT_CENTER)
+    };
+    ui.painter()
+        .text(at, align, &placed.text, font(), theme.colors.text.0);
 }
 
 /// A side strip: its ▼ toggle at the top, its name up its length, a line down
@@ -1040,5 +1330,7 @@ pub(super) fn plain_control<'a>(
         under: None,
         automation: None,
         coarse: 1,
+        unnamed: false,
+        caption: None,
     }
 }

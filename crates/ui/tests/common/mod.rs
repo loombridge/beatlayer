@@ -43,6 +43,8 @@ pub enum Window {
     Device(bl_model::DeviceId),
     /// The assistant's panel in a window of its own (WP-2.23, part 3).
     Assistant,
+    /// The Video Window (WP-9.26).
+    Video,
 }
 
 /// One accessible node: role, label, value, and whether it's disabled.
@@ -93,6 +95,7 @@ pub struct Harness {
     pub device_window: bl_ui::device_view::DeviceViewUi,
     /// What the floating assistant's window draws.
     pub assistant_window: bl_ui::assistant_panel::AssistantPanelUi,
+    pub video_window: bl_ui::video_window::VideoWindowUi,
     pub window: Window,
     /// The other of the two main windows, once [`Harness::open_other`] has
     /// made it.
@@ -222,6 +225,7 @@ impl Harness {
             }
             Window::Device(_) => vec2(400.0, 300.0),
             Window::Assistant => vec2(380.0, 600.0),
+            Window::Video => vec2(640.0, 360.0),
         };
         Self {
             ctx,
@@ -238,6 +242,7 @@ impl Harness {
             settings: SettingsUi::new(),
             device_window: bl_ui::device_view::DeviceViewUi::new(),
             assistant_window: bl_ui::assistant_panel::AssistantPanelUi::default(),
+            video_window: bl_ui::video_window::VideoWindowUi::default(),
             window,
             time: 0.0,
             size,
@@ -318,6 +323,11 @@ impl Harness {
                 zoom
             }
             Window::Settings => follow_zoom(&self.ctx, self.zoom, zoom),
+            // Spec: video R17. The picture fits the window at any zoom.
+            Window::Video => {
+                apply_zoom(&self.ctx, 1.0);
+                1.0
+            }
         };
         // A press in a window gives it the focus, as the OS does.
         if self.other.is_some() && takes_focus(&events) {
@@ -363,6 +373,7 @@ impl Harness {
         let settings = &mut self.settings;
         let device_window = &mut self.device_window;
         let assistant_window = &mut self.assistant_window;
+        let video_window = &mut self.video_window;
         let window = self.window;
         let title_bar = self.title_bar;
         let drawn = self
@@ -382,6 +393,11 @@ impl Harness {
                     let mut events = Vec::new();
                     let rect = ui.max_rect();
                     assistant_window.show(ui, shell, theme, rect, false, &mut events);
+                    events
+                }
+                Window::Video => {
+                    let mut events = Vec::new();
+                    video_window.show(ui, shell, &mut events);
                     events
                 }
                 Window::Device(device) => {

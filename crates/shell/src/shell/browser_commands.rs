@@ -136,6 +136,10 @@ impl Shell {
             for clip in added.clips.iter().filter(|clip| clip.lane.is_some()) {
                 self.arrangement.show_take_lanes_of(clip.track);
             }
+            // Spec: video R16. A movie dropped in the Arrangement shows the
+            // Video Window.
+            let clips: Vec<_> = added.clips.iter().map(|clip| clip.clip).collect();
+            self.show_video_window_for(&clips);
         }
         if outcome.prefs_changed {
             self.prefs.browser = self

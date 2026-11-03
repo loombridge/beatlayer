@@ -72,6 +72,7 @@ fn view_label(view: &str) -> &str {
         "Transfer Curve" => "Curve",
         ACTIVITY => "Act",
         COLLAPSED => "Min",
+        "Perspective" => "Persp",
         other if other.ends_with(" Envelope") => "Env",
         other if other.ends_with(" Oscillator") => "Osc",
         other if other.ends_with(" Response") => "Resp",
@@ -137,6 +138,29 @@ pub fn draw(
     panel: &DevicePanel,
     events: &mut Vec<UiEvent>,
 ) {
+    draw_cell(
+        ui,
+        theme,
+        cell,
+        (id, enabled),
+        display,
+        (panel, true),
+        events,
+    );
+}
+
+/// As [`draw`], for a device whose display has several cells and views that
+/// only some of them offer: `buttons` says whether this cell draws the view
+/// buttons.
+pub fn draw_cell(
+    ui: &mut Ui,
+    theme: &Theme,
+    cell: Rect,
+    (id, enabled): (Id, bool),
+    display: &DeviceDisplay,
+    (panel, buttons): (&DevicePanel, bool),
+    events: &mut Vec<UiEvent>,
+) {
     let views = &panel.description.views;
     let c = &theme.colors;
     let painter = ui.painter_at(cell);
@@ -176,12 +200,12 @@ pub fn draw(
         painter.rect_filled(fill, 0.0, ink);
     }
     modulator_readings(&painter, theme, cell, ink, display);
-    let buttons: Vec<String> = peers(views, display.view.as_deref())
+    let shown: Vec<String> = peers(views, display.view.as_deref())
         .into_iter()
         .cloned()
         .collect();
-    if buttons.len() > 1 {
-        view_buttons(ui, theme, cell, display, &buttons, enabled, events);
+    if buttons && shown.len() > 1 {
+        view_buttons(ui, theme, cell, display, &shown, enabled, events);
     }
     if let Some(capturing) = display.reading("Capturing") {
         capture_button(
@@ -636,7 +660,8 @@ pub fn handle_center(
         .iter()
         .position(|p| p.id == handle.x)?;
     let travel = panel.description.params[index].normalize(panel.value(index)) as f32;
-    let x = area.left() + area.width() * travel;
+    let span = handle.span.unwrap_or([0.0, 1.0]);
+    let x = area.left() + area.width() * (span[0] + (span[1] - span[0]) * travel);
     let y = point(area, display.series(&marker.series)?, marker.x, marker.y).y;
     Some(pos2(x, y))
 }
@@ -708,9 +733,14 @@ fn handles(
         }
         if response.dragged() {
             let delta = response.drag_delta();
+            // A handle whose parameter's travel covers a part of the cell
+            // moves by that part of the cell's width.
+            let share = handle
+                .span
+                .map_or(1.0, |span| (span[1] - span[0]).max(0.01));
             let drag = ui.data_mut(|data| {
                 let drag = data.get_temp_mut_or_default::<HandleDrag>(drag_id);
-                drag.moved[0] += f64::from(delta.x / area.width());
+                drag.moved[0] += f64::from(delta.x / (area.width() * share));
                 drag.moved[1] -= f64::from(delta.y / area.height());
                 *drag
             });
@@ -853,7 +883,7 @@ fn activity(
 
 /// The buttons that choose the display's view, along the cell's top-right
 /// corner.
-fn view_buttons(
+pub(crate) fn view_buttons(
     ui: &mut Ui,
     theme: &Theme,
     cell: Rect,

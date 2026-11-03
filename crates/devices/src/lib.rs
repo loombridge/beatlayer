@@ -143,6 +143,7 @@ pub mod utility;
 pub mod vector_delay;
 pub mod vocoder;
 pub mod wavetable;
+pub mod wavetable_display;
 pub mod wavetable_mod;
 pub mod wavetables;
 pub mod wax;
@@ -338,6 +339,13 @@ pub fn display_in(
         LOOPER => Some(looper::display(device, description, values, data)),
         VECTOR_DELAY => Some(vector_delay::display(device, description, values, data)),
         VOCODER => Some(vocoder::display(device, description, values, data)),
+        WAVETABLE => Some(wavetable_display::display(
+            device,
+            description,
+            values,
+            view,
+            [None, None],
+        )),
         granulator_iii::GRANULATOR_III => {
             Some(granulator_iii::display(device, description, values, data))
         }

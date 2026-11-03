@@ -9164,6 +9164,52 @@ What `file_manager.delete_unused` returns.
 
 </details>
 
+### `DestinationRemoved`
+
+What `device.remove_destination` returns: the slots it emptied.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `destination` | string | yes | The destination's name. |
+| `cleared` | array of integer from 0 to 255 | yes | The numbers of the slots whose routes it cleared. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.remove_destination` returns: the slots it emptied.",
+  "properties": {
+    "cleared": {
+      "description": "The numbers of the slots whose routes it cleared.",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "destination": {
+      "description": "The destination's name.",
+      "type": "string"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    }
+  },
+  "required": [
+    "device",
+    "destination",
+    "cleared"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `DetailState`
 
 What the detail area's commands return, and `view.state` reports under `detail` (detail-views R17): which views show, where the focus is and how tall the Clip View is.
@@ -9651,6 +9697,7 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
 | `alternates` | array of [`Alternate`](#alternate) | no | The controls that show one of two parameters, as a switch says. Both parameters keep their values and their lanes whichever is shown. |
 | `banks` | array of [`Bank`](#bank) | no | The banks the type declares for control surfaces, its main controls first; empty for a type that leaves them to [`DeviceDescription::banks`]' generic ones. They hold neither the menu options nor the title switch. |
 | `display_drag` | array of [`ParamId`](#paramid) | no | The parameter a vertical drag on the display changes, one for each of `views`, in their order (Roar's shaper display drags the shown stage's Shaper Amount); empty for a display that isn't dragged. |
+| `grid_params` | array of [`ParamId`](#paramid) | no | The parameters a display cell sets by its own gestures, which the layout places no control for: a matrix grid's route amounts. |
 | `menu_options` | array of [`ParamId`](#paramid) | no | The switches the device lists as its own items in its Show Options menu, after Save as Default Preset (C-DEVICE-015), in this order. They are parameters like any other, but the layout places no control for them. |
 | `relabels` | array of [`Relabel`](#relabel) | no | The parameters whose names follow another parameter's value. |
 | `spectrogram` | [`SpectrogramGrid`](#spectrogramgrid) or null | no | The grid of the spectrogram its display holds, if it holds one (the device framework spec, R46). |
@@ -9679,6 +9726,13 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
     },
     "display_drag": {
       "description": "The parameter a vertical drag on the display changes, one for each of `views`, in their order (Roar's shaper display drags the shown stage's Shaper Amount); empty for a display that isn't dragged.",
+      "items": {
+        "$ref": "#/$defs/ParamId"
+      },
+      "type": "array"
+    },
+    "grid_params": {
+      "description": "The parameters a display cell sets by its own gestures, which the layout places no control for: a matrix grid's route amounts.",
       "items": {
         "$ref": "#/$defs/ParamId"
       },
@@ -10572,6 +10626,7 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
 | `learning` | integer or null | no | The articulation whose Learn button is lit, counted from 0: the panel's state, not the set's. |
 | `loaded_slots` | array of boolean | no | For a device with sample slots: whether each slot holds a sample. |
 | `locked` | array of [`ParamId`](#paramid) | no | The parameters drawn disabled because the device takes them from its current scale: Scale's Base and Scale Name and Arpeggiator's Root and Scale, while Use Current Scale is on (the scales spec, R16). |
+| `matrix_grid` | [`MatrixGrid`](#matrixgrid) or null | no | For an instrument whose Matrix tab draws its routes as a grid (the wavetable spec, R39): the grid's columns, its rows and what can still be added. None for any other device. |
 | `matrix_routes` | array of [`MatrixRoutes`](#matrixroutes) | no | For each parameter an instrument's modulation matrix moves, the sources routed into it, in slot order (the instrument modulation spec, R12): what assistive technology reads beside the control's value. Empty for a device without a matrix or with no route. |
 | `pages` | array of [`PagesFrame`](#pagesframe) | no | Each pages node of the device's layout with its pages and the one shown (device framework R43): view state, saved with the set but no undo step. Empty for a device with none. |
 | `slot_keys` | array of string | no | For a device with sample slots: the key each slot plays, as Live names notes (`C3`). |
@@ -10643,6 +10698,17 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
         "$ref": "#/$defs/ParamId"
       },
       "type": "array"
+    },
+    "matrix_grid": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MatrixGrid"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "For an instrument whose Matrix tab draws its routes as a grid (the wavetable spec, R39): the grid's columns, its rows and what can still be added. None for any other device."
     },
     "matrix_routes": {
       "description": "For each parameter an instrument's modulation matrix moves, the sources routed into it, in slot order (the instrument modulation spec, R12): what assistive technology reads beside the control's value. Empty for a device without a matrix or with no route.",
@@ -11327,6 +11393,7 @@ What dragging a marker sets: where the marker sits across the cell is the horizo
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `x` | [`ParamId`](#paramid) | yes | The parameter its horizontal place is. |
+| `span` | array or null | no | The part of the cell's width, from 0 to 1 across it, that the horizontal parameter's travel covers (the whole width without one): an envelope's stages each take a share of the cell. |
 | `y` | [`ParamId`](#paramid) or null | no | The parameter its vertical place is, if it has one. |
 
 <details><summary>JSON Schema</summary>
@@ -11335,6 +11402,19 @@ What dragging a marker sets: where the marker sits across the cell is the horizo
 {
   "description": "What dragging a marker sets: where the marker sits across the cell is the horizontal parameter's travel, and up the cell is the marker's place on its series (with a vertical parameter, a drag moves that too), so a drag is the parameters' own control at another place.",
   "properties": {
+    "span": {
+      "description": "The part of the cell's width, from 0 to 1 across it, that the horizontal parameter's travel covers (the whole width without one): an envelope's stages each take a share of the cell.",
+      "items": {
+        "format": "float",
+        "type": "number"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": [
+        "array",
+        "null"
+      ]
+    },
     "x": {
       "$ref": "#/$defs/ParamId",
       "description": "The parameter its horizontal place is."
@@ -15238,6 +15318,94 @@ A condition that greys a control: while parameter `param`'s value, rounded, is `
   "required": [
     "param",
     "value"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `GridCell`
+
+A route a grid cell shows.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `slot` | integer from 0 to 255 | yes | The slot's number. |
+| `amount_param` | [`ParamId`](#paramid) | yes | Its amount's parameter. |
+| `amount` | number | yes | Its amount, in per cent from -100 to 100. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A route a grid cell shows.",
+  "properties": {
+    "amount": {
+      "description": "Its amount, in per cent from -100 to 100.",
+      "format": "double",
+      "type": "number"
+    },
+    "amount_param": {
+      "$ref": "#/$defs/ParamId",
+      "description": "Its amount's parameter."
+    },
+    "slot": {
+      "description": "The slot's number.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "slot",
+    "amount_param",
+    "amount"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `GridRow`
+
+One destination's row of a matrix grid.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `destination` | string | yes | The destination's name. |
+| `cells` | array of [`GridCell`](#gridcell) or null | yes | One cell for each of the grid's sources: the free slot that routes it here, or none while no slot does. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One destination's row of a matrix grid.",
+  "properties": {
+    "cells": {
+      "description": "One cell for each of the grid's sources: the free slot that routes it here, or none while no slot does.",
+      "items": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/GridCell"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "type": "array"
+    },
+    "destination": {
+      "description": "The destination's name.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "destination",
+    "cells"
   ],
   "type": "object"
 }
@@ -21149,6 +21317,55 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `MatrixGrid`
+
+An instrument's matrix as its grid draws it (the wavetable spec, R39): the sources as columns, the destinations shown as rows.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `sources` | array of string | yes | The sources, one for each column. |
+| `rows` | array of [`GridRow`](#gridrow) | yes | The destinations shown: those with a route and those added, in the matrix's order. |
+| `addable` | array of string | yes | The destinations not shown, in the matrix's order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An instrument's matrix as its grid draws it (the wavetable spec, R39): the sources as columns, the destinations shown as rows.",
+  "properties": {
+    "addable": {
+      "description": "The destinations not shown, in the matrix's order.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "rows": {
+      "description": "The destinations shown: those with a route and those added, in the matrix's order.",
+      "items": {
+        "$ref": "#/$defs/GridRow"
+      },
+      "type": "array"
+    },
+    "sources": {
+      "description": "The sources, one for each column.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "sources",
+    "rows",
+    "addable"
+  ],
+  "type": "object"
 }
 ```
 

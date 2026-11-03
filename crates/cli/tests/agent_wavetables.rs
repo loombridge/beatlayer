@@ -303,3 +303,109 @@ fn an_agent_routes_wavetables_matrix_and_reads_the_routes_and_settings_back() {
         assert_eq!(read, json!(value), "{name}");
     }
 }
+
+// Spec: wavetable R35, R38, R39
+#[test]
+fn an_agent_reads_wavetables_displays_and_adds_and_removes_a_destination() {
+    let mut client = bl_cli_mcp(&["--autonomous"]);
+    let tracks = call(&mut client, "query", json!({ "path": "tracks" }));
+    let midi = tracks["tracks"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["kind"] == "midi")
+        .expect("a MIDI track")["id"]
+        .clone();
+    outcome(
+        &mut client,
+        "arrangement.select_tracks",
+        json!({ "tracks": [midi] }),
+    );
+    let device = outcome(
+        &mut client,
+        "device.add",
+        json!({ "device": {
+            "kind": { "native": { "device_type": "beatlayer.wavetable" } },
+            "name": "Wavetable",
+            "role": "instrument",
+        } }),
+    )["result"]["device"]
+        .clone();
+    outcome(
+        &mut client,
+        "device.load_wavetable",
+        json!({ "device": device, "oscillator": 1, "category": "Shape Morphs", "name": "Sine Folds" }),
+    );
+    outcome(
+        &mut client,
+        "device.set_param",
+        json!({ "device": device, "param": 1, "value": 50.0 }),
+    );
+    let shown =
+        outcome(&mut client, "device.display", json!({ "device": device }))["result"].clone();
+    let series = shown["series"].as_array().unwrap();
+    let names = |prefix: &str| {
+        series
+            .iter()
+            .filter(|s| s["name"].as_str().unwrap().starts_with(prefix))
+            .count()
+    };
+    assert_eq!(names("Osc 1 Table "), 32, "32 of the table's 48 frames");
+    assert_eq!(
+        names("Osc 2 Table "),
+        32,
+        "the default table's 64 frames, decimated"
+    );
+    let frame = series.iter().find(|s| s["name"] == "Osc 1 Frame").unwrap();
+    assert_eq!(frame["values"].as_array().unwrap().len(), 128);
+    let readings = shown["readings"].as_array().unwrap();
+    let position = readings
+        .iter()
+        .find(|r| r["name"] == "Osc 1 Position")
+        .unwrap();
+    assert_eq!(position["text"], "50.0 %, frame 25 of 48");
+    assert!(series.iter().any(|s| s["name"] == "Filter"));
+    assert!(
+        shown["markers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["name"] == "Amp Envelope Attack")
+    );
+    assert_eq!(shown["view"], "Perspective");
+
+    // A destination is shown, routed into and removed, each by command.
+    outcome(
+        &mut client,
+        "device.add_destination",
+        json!({ "device": device, "destination": "Osc 1 Position" }),
+    );
+    outcome(
+        &mut client,
+        "device.set_route",
+        json!({ "device": device, "source": "LFO 1", "destination": "Osc 1 Position", "amount": 30.0 }),
+    );
+    let removed = outcome(
+        &mut client,
+        "device.remove_destination",
+        json!({ "device": device, "destination": "Osc 1 Position" }),
+    );
+    assert_eq!(removed["result"]["cleared"], json!([0]), "{removed}");
+    let read = call(&mut client, "query", json!({ "id": device }));
+    let routed = read["matrix"]["slots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|slot| slot["source"].is_string())
+        .count();
+    assert_eq!(routed, 0, "{read}");
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "device.add_destination",
+                "args": { "device": device, "destination": "No Such Thing" } }] }),
+        )
+        .expect("the call reaches the server")
+        .ok();
+    assert!(refused.is_err(), "an unknown destination is refused");
+}

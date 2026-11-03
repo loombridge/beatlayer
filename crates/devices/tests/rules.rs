@@ -77,6 +77,16 @@ fn every_gain_parameter_reaches_minus_infinity() {
                     .filter(same)
                     .map(|p| p.id)
                     .collect()
+            } else if device_type.name == "Roar" && param.name.ends_with(" Level") {
+                // Multi Band routing runs the three stages on their own bands.
+                let level = |p: &&bl_model::ParamDescriptor| p.name.ends_with(" Level");
+                device_type
+                    .description
+                    .params
+                    .iter()
+                    .filter(level)
+                    .map(|p| p.id)
+                    .collect()
             } else if device_type.name == "Resonators" && param.name != "Gain" {
                 // Each resonator's gain acts on one of five.
                 let resonator = |p: &&bl_model::ParamDescriptor| p.is_gain() && p.name != "Gain";
@@ -90,14 +100,22 @@ fn every_gain_parameter_reaches_minus_infinity() {
             } else {
                 vec![param.id]
             };
-            let mut silenced: Vec<_> = group.iter().map(|id| (*id, 0.0)).collect();
+            // The dry signal isn't what a gain silences, so a device starts
+            // with its Dry/Wet all wet (some start half way, as Live's do).
+            let mut held: Vec<_> = device_type
+                .description
+                .params
+                .iter()
+                .filter(|p| p.name == "Dry/Wet")
+                .map(|p| (p.id, p.max()))
+                .collect();
             // Gate's Floor is the gain of a shut gate: keep it shut.
-            let mut shut_gate = vec![];
             if device_type.name == "Gate" {
-                shut_gate.push((bl_devices::gate::THRESHOLD, 0.0));
-                silenced.extend(shut_gate.iter().copied());
+                held.push((bl_devices::gate::THRESHOLD, 0.0));
             }
-            let mut at_default = node(&registry, &device(&device_type, &shut_gate), 256);
+            let mut silenced: Vec<_> = group.iter().map(|id| (*id, 0.0)).collect();
+            silenced.extend_from_slice(&held);
+            let mut at_default = node(&registry, &device(&device_type, &held), 256);
             let mut at_silence = node(&registry, &device(&device_type, &silenced), 256);
             let open = run(at_default.as_mut(), &input, &[]);
             let shut = run(at_silence.as_mut(), &input, &[]);

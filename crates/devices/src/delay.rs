@@ -334,7 +334,7 @@ fn channel(
         vec![
             at(switch, Widget::Toggle, PADDING, 0.0)
                 .sized(CHANNEL, BOX_HEIGHT)
-                .labelled("Sync"),
+                .captioned("Sync"),
             at(
                 sixteenths,
                 Widget::Grid {
@@ -407,10 +407,10 @@ fn layout() -> DeviceLayout {
             at(WIDTH, Widget::Inline, 136.0, 4.0).sized(56.0, BOX_HEIGHT),
             at(LFO_DELAY, Widget::Inline, 50.0, 23.0)
                 .sized(70.0, BOX_HEIGHT)
-                .labelled("Delay"),
+                .captioned("Delay"),
             at(LFO_FILTER, Widget::Inline, 128.0, 23.0)
                 .sized(64.0, BOX_HEIGHT)
-                .labelled("Filter"),
+                .captioned("Filter"),
         ],
     );
     let display = DisplayCell::new("Delay", 196.0, BODY_HEIGHT, 1.0).with_bottom(foot);

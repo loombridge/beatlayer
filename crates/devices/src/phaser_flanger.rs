@@ -325,13 +325,13 @@ pub fn phaser_flanger_type() -> DeviceType {
 /// Feedback with its Ø; at the right Output, Warmth and Dry/Wet. The title
 /// bar's expand toggle shows the rest of the LFOs, the envelope and Safe Bass.
 fn layout() -> DeviceLayout {
-    use Widget::{Readout, SmallKnob, Tabs, Toggle};
+    use Widget::{SmallKnob, Stacked, Tabs, Toggle};
     const CELL: f32 = 197.0;
     const CELL_HEIGHT: f32 = 102.0;
     const FOOT: f32 = 46.0;
     let at = Control::new;
     let phaser = |control: Control| control.shown_only_while(MODE, 0);
-    let readout = |param, x| at(param, Readout, x, 16.0).sized(40.0, 2.0 * BOX_HEIGHT);
+    let readout = |param, x| at(param, Stacked, x, 16.0).sized(40.0, 2.0 * BOX_HEIGHT);
     let foot = ControlBand::free(
         CELL,
         FOOT,
@@ -352,12 +352,12 @@ fn layout() -> DeviceLayout {
         vec![
             at(LFO_HZ, SmallKnob, 10.0, 6.0)
                 .with_unit(LFO_MODE, [Unit::Hz, Unit::Sync])
-                .labelled("Rate"),
+                .captioned("Rate"),
             at(AMOUNT, SmallKnob, 85.5, 6.0),
             at(FEEDBACK, SmallKnob, 133.0, 6.0),
             at(FEEDBACK_INVERT, Toggle, 177.6, 22.0)
                 .sized(14.0, BOX_HEIGHT)
-                .labelled("Ø"),
+                .captioned("Ø"),
         ],
     );
     let output = ControlBand::free(

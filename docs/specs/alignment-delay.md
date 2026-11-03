@@ -29,7 +29,7 @@ The device takes Live's name, Align Delay. It runs on the device framework with 
 - **R6.** The device reports no latency. In a set with delay compensation, a track through the alignment delay reaches Main later than a track without it by the delay, and the other tracks are not held back to meet it. (S2; Beatlayer's own rule, because the delay is the effect: compensating would undo it)
 - **R7.** Renders are bit-identical at any block size and run after run, and nothing the device does on the audio thread allocates, locks or blocks: the delay lines are made with the device at their longest. (S3)
 - **R8.** Every parameter is automatable; an agent inserts the device with `device.insert`, sets any parameter by ID with `device.set_param` and reads them all with `device.parameters`; and the set saves and reopens with every value. (S3)
-- **R9.** The panel is Live's (observed in Live 12.4.16, 2 November 2026): the display of the two sides' readings at the top, the Delay Mode chooser under it, and under that a box for each side's delay (L and R) with the link button between them. A new Align Delay is in Time mode with no delay and the sides unlinked. The Samples and Distance modes' boxes take the Time boxes' places. (Layout L-DEV-071)
+- **R9.** The panel is Live's (observed in Live 12.4.16, 2 November 2026): the display of the two sides' readings at the top, the Delay Mode chooser under it, and under that a box for each side's delay (L and R) with the link button between them. A new Align Delay is in Time mode with no delay and the sides unlinked. The Samples and Distance modes' boxes take the Time boxes' places. (Layout L-DEV-086)
 
 ## Tests
 

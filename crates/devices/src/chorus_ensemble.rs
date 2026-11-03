@@ -141,7 +141,7 @@ pub fn chorus_ensemble_type() -> DeviceType {
 /// Rate, Amount and Feedback with its Ø; at the right Output, Warmth and
 /// Dry/Wet.
 fn layout() -> DeviceLayout {
-    use Widget::{Chooser, Readout, SmallKnob, Tabs, Toggle};
+    use Widget::{Chooser, SmallKnob, Stacked, Tabs, Toggle};
     const CELL: f32 = 171.0;
     const CELL_HEIGHT: f32 = 97.0;
     const FOOT: f32 = 44.0;
@@ -155,16 +155,16 @@ fn layout() -> DeviceLayout {
             at(MODE, Tabs(3), 1.0, 3.0).sized(166.0, BOX_HEIGHT),
             at(HP_FREQ, Widget::Inline, 1.0, 31.0)
                 .sized(40.0, BOX_HEIGHT)
-                .labelled(""),
-            at(WIDTH, Readout, 47.0, 19.0).sized(38.0, 2.0 * BOX_HEIGHT),
+                .captioned(""),
+            at(WIDTH, Stacked, 47.0, 19.0).sized(38.0, 2.0 * BOX_HEIGHT),
             chorus(at(CHORUS_TIME, Chooser, 89.0, 19.0).sized(42.0, 21.0)),
             chorus(
                 at(CHORUS_TAPS, Widget::Segments(2), 135.0, 19.0)
                     .titled()
                     .sized(32.0, 21.0),
             ),
-            vibrato(at(VIBRATO_OFFSET, Readout, 89.0, 19.0).sized(42.0, 2.0 * BOX_HEIGHT)),
-            vibrato(at(VIBRATO_SHAPE, Readout, 135.0, 19.0).sized(32.0, 2.0 * BOX_HEIGHT)),
+            vibrato(at(VIBRATO_OFFSET, Stacked, 89.0, 19.0).sized(42.0, 2.0 * BOX_HEIGHT)),
+            vibrato(at(VIBRATO_SHAPE, Stacked, 135.0, 19.0).sized(32.0, 2.0 * BOX_HEIGHT)),
         ],
     );
     let cell = DisplayCell::new("Chorus-Ensemble", CELL, CELL_HEIGHT, 1.0).with_bottom(foot);
@@ -177,7 +177,7 @@ fn layout() -> DeviceLayout {
             at(FEEDBACK, SmallKnob, 104.0, 10.0),
             at(FEEDBACK_INVERT, Toggle, 149.0, 26.0)
                 .sized(14.0, BOX_HEIGHT)
-                .labelled("Ø"),
+                .captioned("Ø"),
         ],
     );
     let output = ControlBand::free(

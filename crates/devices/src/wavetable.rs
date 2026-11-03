@@ -22,7 +22,8 @@ use std::sync::{Arc, OnceLock};
 
 use bl_engine::{DeviceType, NodeConfig, NodeData, NodeEvent, Registry};
 use bl_model::device_layout::{
-    BODY_HEIGHT, ControlBand, LayoutNode, Page, PageStyle, PagesNode, TAB_HEIGHT, Widget,
+    BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Page, PageStyle, PagesNode, TAB_HEIGHT,
+    Widget,
 };
 use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 use lspk_dsp::filter::pitch_of;
@@ -41,6 +42,7 @@ use crate::instrument::matrix::{
 use crate::instrument::{self, Instrument, Parts, Section, Sources, State};
 use crate::instrument_filter::{CIRCUITS, InstrumentFilter, Per, PerFrame, Setup};
 use crate::sampler::FILTER_TYPE_CHOICES;
+use crate::wavetable_display::{ENVELOPE_CELLS, FILTER_CELL, LFO_CELLS, OSC_CELLS, VIEWS};
 use crate::wavetable_mod::{
     self as m, DIVISIONS, EnvParams, Envelope, LFO_WAVES, LOOP_MODES, Lfo, LfoParams, Loop,
     UNISON_MODES,
@@ -373,6 +375,9 @@ pub const ROUTINGS: [&str; 3] = ["Serial", "Parallel", "Split"];
 pub const PAGES: [&str; 4] = ["Oscillator", "Matrix", "Mod Sources", "MIDI"];
 /// The pages node's name.
 pub const TABS: &str = "Tabs";
+
+/// The display cell that draws the matrix as a grid (R39).
+pub const MATRIX_CELL: &str = "Matrix";
 
 const FX_NONE: usize = 0;
 const FX_FM: usize = 1;
@@ -948,6 +953,8 @@ fn wavetable_description() -> DeviceDescription {
             (lfo(n, LFO_RETRIGGER), Widget::Toggle),
         ])
     };
+    // The displays (R35, R38): each grows with the room the device has.
+    let cell = |name: &str, width: f32| LayoutNode::Cell(DisplayCell::new(name, width, tab, 1.0));
     let pages = PagesNode::new(
         TABS,
         PageStyle::Tabs,
@@ -955,7 +962,9 @@ fn wavetable_description() -> DeviceDescription {
             Page::new(
                 PAGES[0],
                 LayoutNode::Row(vec![
+                    cell(OSC_CELLS[0], 140.0),
                     oscillator(1),
+                    cell(OSC_CELLS[1], 140.0),
                     oscillator(2),
                     band(&[
                         (SUB_ON, Widget::Toggle),
@@ -963,6 +972,7 @@ fn wavetable_description() -> DeviceDescription {
                         (SUB_TONE, Widget::Knob),
                         (SUB_OCTAVE, Widget::Number),
                     ]),
+                    cell(FILTER_CELL, 150.0),
                     filters(1),
                     filters(2),
                     band(&[
@@ -978,27 +988,27 @@ fn wavetable_description() -> DeviceDescription {
                     ]),
                 ]),
             ),
-            Page::new(PAGES[1], {
-                // The slots' amounts, eight to a band, until part 3's grid.
-                let mut bands = vec![band(&[
-                    (MATRIX_TIME, Widget::Knob),
-                    (MATRIX_AMOUNT, Widget::Knob),
-                ])];
-                bands.extend((0..SLOTS / 8).map(|bank| {
-                    let slots: Vec<_> = (0..8)
-                        .map(|i| (slot_amount(bank * 8 + i), Widget::Knob))
-                        .collect();
-                    band(&slots)
-                }));
-                LayoutNode::Row(bands)
-            }),
+            Page::new(
+                PAGES[1],
+                LayoutNode::Row(vec![
+                    band(&[(MATRIX_TIME, Widget::Knob), (MATRIX_AMOUNT, Widget::Knob)]),
+                    // The grid of routes (R39): its cells set the slots'
+                    // amounts, which the layout places no control for.
+                    LayoutNode::Cell(DisplayCell::new(MATRIX_CELL, 520.0, tab, 3.0)),
+                ]),
+            ),
             Page::new(
                 PAGES[2],
                 LayoutNode::Row(vec![
+                    cell(ENVELOPE_CELLS[0], 120.0),
                     envelopes(0),
+                    cell(ENVELOPE_CELLS[1], 120.0),
                     envelopes(1),
+                    cell(ENVELOPE_CELLS[2], 120.0),
                     envelopes(2),
+                    cell(LFO_CELLS[0], 100.0),
                     lfos(1),
+                    cell(LFO_CELLS[1], 100.0),
                     lfos(2),
                 ]),
             ),
@@ -1135,6 +1145,8 @@ fn wavetable_description() -> DeviceDescription {
         .collect();
     DeviceDescription::new(params)
         .with_layout(layout)
+        .with_views(&VIEWS)
+        .with_grid_params((0..SLOTS).map(slot_amount).collect())
         .with_banks(&banks)
         .with_menu_options(&[HI_QUALITY])
 }

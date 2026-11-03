@@ -1270,15 +1270,22 @@ fn resonators() -> Scene {
             device_type: RESONATORS.to_owned(),
         },
     );
+    // The settings are the ones the fixture was made with, in the units a
+    // new device reads them in: Decay's 0.8 s, Color's 30 % of its law, and
+    // the pitches and switches a new device started with.
     for (param, value) in [
         (resonators::MODE, 1.0),
-        (resonators::DECAY, 0.8),
+        (resonators::DECAY, resonators::decay_value(0.8)),
         (resonators::CONST, 1.0),
-        (resonators::COLOR, 30.0),
+        (resonators::COLOR, 30.0 / 2.0 + 50.0),
         (resonators::FILTER_FREQ, 2_000.0),
         (voice_param(0, resonators::PITCH), 48.0),
         (voice_param(0, resonators::FINE), 10.0),
-        (voice_param(3, resonators::ON), 1.0),
+        (voice_param(1, resonators::PITCH), 12.0),
+        (voice_param(2, resonators::PITCH), 19.0),
+        (voice_param(3, resonators::PITCH), 24.0),
+        (voice_param(4, resonators::PITCH), -12.0),
+        (voice_param(4, resonators::ON), 0.0),
         (resonators::GAIN, 0.5),
         (resonators::DRY_WET, 60.0),
     ] {

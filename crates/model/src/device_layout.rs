@@ -214,7 +214,7 @@ pub enum Widget {
     Tick,
     /// The name over the value, both centred, the value in blue and dragged
     /// or typed, with no box (Reverb's Amount and Rate).
-    Readout,
+    Stacked,
     /// The name at the left and the value at the right of one line, the
     /// value in blue (Reverb's Shape).
     Spread,
@@ -222,6 +222,42 @@ pub enum Widget {
     /// outlined in orange while off and filled while on (Chorus-Ensemble's
     /// Chorus, Ensemble and Vibrato).
     Tabs(u8),
+    /// A lit number box with its name to its left on the same line (Pedal's
+    /// Dry/Wet, Overdrive's Dynamics): the number is the points the name has
+    /// before the box.
+    Beside(u8),
+    /// A plain number box with its name in dim text to its left on the same
+    /// line (Spectral Resonator's Glide and PB): the number is the points the
+    /// name has before the box.
+    BesideDim(u8),
+    /// A button that reads On or Off, lit while on, with its name in dim text
+    /// to its left (Spectral Resonator's MIDI Gate): the number is the points
+    /// the name has before the button.
+    BesideSwitch(u8),
+    /// A small square that is filled while on, with the name after it
+    /// (Spectral Resonator's Quantize).
+    Check,
+    /// A small pill that shows which of a choice parameter's choices is
+    /// chosen by where its dot sits, a click moving it on (Pedal's Mid
+    /// frequency).
+    Pill,
+    /// A column of that many icon buttons, one for each choice of a choice
+    /// parameter, the chosen one lit (Resonators' filter types).
+    IconColumn(u8),
+    /// A chooser whose box is filled blue like a lit number box (Saturator's
+    /// curve).
+    LitChooser,
+    /// A chooser with no box: the value in the blue text and a small ▼ after
+    /// it, its name in dim text above (Vocoder's Bands) unless the control is
+    /// [`unnamed`](Control::unnamed) (Saturator's Post Clip).
+    UnboxedChooser,
+    /// A number with no box: the value in the accent colour from the left,
+    /// its name in dim text above unless the control is
+    /// [`unnamed`](Control::unnamed) (Vocoder's Range).
+    Unboxed,
+    /// A name in the dim text colour with the value after it in the accent,
+    /// no box, dragged or typed (Saturator's Amt Lo along the display's foot).
+    Readout,
     /// The Drum Synths' large display numbers: the name above, the value in
     /// large figures in the accent, and its unit under them.
     Large,
@@ -240,9 +276,9 @@ pub enum Widget {
     /// A [`Chooser`](Self::Chooser) with no name row: the device's own label
     /// is beside it, or it needs none (the Drum Sampler's effect type).
     BareChooser,
-    /// A lit text button holding the chosen name of a two-choice parameter,
-    /// which a press switches to the other (the Drum Sampler's modulation
-    /// source).
+    /// A lit text button holding the chosen choice's name, a press taking
+    /// the next choice and the last going round to the first (the Drum
+    /// Sampler's modulation source, Resonators' Mode).
     Cycle,
 }
 
@@ -271,7 +307,11 @@ impl Widget {
                 Size::new(53.0, LABEL_HEIGHT + BOX_HEIGHT)
             }
             Self::Inline | Self::Tick | Self::Spread => Size::new(53.0, BOX_HEIGHT),
-            Self::Readout => Size::new(40.0, 2.0 * BOX_HEIGHT),
+            Self::Stacked => Size::new(40.0, 2.0 * BOX_HEIGHT),
+            Self::LitChooser | Self::UnboxedChooser | Self::Unboxed => {
+                Size::new(53.0, LABEL_HEIGHT + BOX_HEIGHT)
+            }
+            Self::IconColumn(n) => Size::new(CELL_WIDTH, rows(n)),
             Self::Toggle | Self::Outlined => Size::new(SEGMENT_WIDTH, BOX_HEIGHT),
             Self::IconToggle => Size::new(CELL_WIDTH, BOX_HEIGHT),
             Self::Round => Size::new(BOX_HEIGHT, BOX_HEIGHT),
@@ -288,6 +328,12 @@ impl Widget {
                 f32::from(n) * CELL_WIDTH + f32::from(n.saturating_sub(1)) * BUTTON_GAP,
                 BOX_HEIGHT,
             ),
+            Self::Beside(label) | Self::BesideDim(label) | Self::BesideSwitch(label) => {
+                Size::new(f32::from(label) + 34.0, BOX_HEIGHT)
+            }
+            Self::Check => Size::new(60.0, BOX_HEIGHT),
+            Self::Readout => Size::new(90.0, BOX_HEIGHT),
+            Self::Pill => Size::new(26.0, 10.0),
             Self::Large => Size::new(LARGE_WIDTH, LARGE_HEIGHT),
             Self::Bare | Self::BareSlider | Self::Framed | Self::BareChooser => {
                 Size::new(FRAMED_WIDTH, BOX_HEIGHT)
@@ -301,10 +347,11 @@ impl Widget {
     #[must_use]
     pub fn choice_capacity(self) -> Option<usize> {
         match self {
-            Self::Segments(n) | Self::Stack(n) | Self::IconSegments(n) | Self::Tabs(n) => {
-                Some(usize::from(n))
-            }
-            Self::Cycle => Some(2),
+            Self::Segments(n)
+            | Self::Stack(n)
+            | Self::IconSegments(n)
+            | Self::Tabs(n)
+            | Self::IconColumn(n) => Some(usize::from(n)),
             Self::Grid { columns, rows } => Some(usize::from(columns) * usize::from(rows)),
             _ => None,
         }
@@ -352,6 +399,14 @@ pub enum Glyph {
     Record,
     /// A filled square: stop.
     Stop,
+    /// Two lines crossing: a crossfade.
+    Crossfade,
+    /// A rise and a fall: an envelope's shape.
+    Envelope,
+    /// A circle cut by a line: a phase.
+    Phase,
+    /// A circle with an arrow round it: a spin.
+    Spin,
     /// A low-pass filter's response at 24 dB per octave.
     LowPass24,
     /// A high-pass filter's response at 24 dB per octave.
@@ -426,7 +481,7 @@ pub struct GreyWhen {
 
 /// One control in a band: a parameter, drawn by a widget, at a place in the
 /// band.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Control {
     /// The parameter.
     pub param: ParamId,
@@ -460,12 +515,6 @@ pub struct Control {
     /// three modes' boxes in the same place).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub only: Option<GreyWhen>,
-    /// The text the control shows in place of its parameter's name, where
-    /// Live's panel reads differently from the parameter (the two Sync
-    /// buttons of Delay are the left and right channels' parameters). The
-    /// parameter's name stays what a screen reader and the undo history say.
-    #[serde(default, skip_serializing_if = "Option::is_none", skip_deserializing)]
-    pub label: Option<&'static str>,
     /// For a grid, row or stack of buttons over a whole-number parameter, the
     /// values its buttons set, in order (Delay's 1 2 3 4 5 6 8 16 of the
     /// sixteen steps its time takes): the button for the value the parameter
@@ -481,6 +530,11 @@ pub struct Control {
     /// it, left-aligned (Chorus-Ensemble's Taps).
     #[serde(default, skip_serializing_if = "is_false")]
     pub titled: bool,
+    /// The name the control shows in place of its parameter's, where a
+    /// section's own heading makes the full name redundant (Vinyl
+    /// Distortion's Freq and B in each section).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
 }
 
 fn is_false(flag: &bool) -> bool {
@@ -502,10 +556,10 @@ impl Control {
             grey: None,
             hide: None,
             only: None,
-            label: None,
             steps: None,
             unnamed: false,
             titled: false,
+            caption: None,
         }
     }
 
@@ -513,6 +567,13 @@ impl Control {
     #[must_use]
     pub const fn titled(mut self) -> Self {
         self.titled = true;
+        self
+    }
+
+    /// The same control showing `caption` in place of its parameter's name.
+    #[must_use]
+    pub fn captioned(mut self, caption: &str) -> Self {
+        self.caption = Some(caption.to_owned());
         self
     }
 
@@ -527,13 +588,6 @@ impl Control {
     #[must_use]
     pub const fn with_steps(mut self, steps: &'static [i32]) -> Self {
         self.steps = Some(steps);
-        self
-    }
-
-    /// The same control, showing `label` in place of its parameter's name.
-    #[must_use]
-    pub const fn labelled(mut self, label: &'static str) -> Self {
-        self.label = Some(label);
         self
     }
 
@@ -897,6 +951,9 @@ pub struct Heading {
     pub text: String,
     /// The width its text needs, in points: the least it takes.
     pub width: f32,
+    /// Set for a heading whose text is centred over its group.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub centered: bool,
 }
 
 impl Heading {
@@ -906,7 +963,15 @@ impl Heading {
         Self {
             text: text.to_owned(),
             width,
+            centered: false,
         }
+    }
+
+    /// The same heading, its text centred over its group.
+    #[must_use]
+    pub const fn centered(mut self) -> Self {
+        self.centered = true;
+        self
     }
 }
 
@@ -1302,6 +1367,7 @@ impl LayoutNode {
             Self::Pages(pages) => pages.place(at, slot, placed),
             Self::Heading(heading) => placed.headings.push(PlacedHeading {
                 text: heading.text.clone(),
+                centered: heading.centered,
                 rect: Rect::new(at.x, at.y, at.width.max(heading.width), HEADING_HEIGHT),
             }),
         }
@@ -1387,10 +1453,10 @@ fn place_band(band: &ControlBand, x: f32, y: f32, slot: u32, placed: &mut Placed
             }),
             hide: control.hide,
             only: control.only,
-            label: control.label,
             steps: control.steps,
             unnamed: control.unnamed,
             titled: control.titled,
+            caption: control.caption.clone(),
         }));
     placed
         .labels
@@ -1484,7 +1550,7 @@ impl Default for DeviceLayout {
 }
 
 /// A control where a layout placed it.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PlacedControl {
     /// The parameter.
     pub param: ParamId,
@@ -1507,9 +1573,6 @@ pub struct PlacedControl {
     /// What puts the control away unless it holds.
     #[serde(default)]
     pub only: Option<GreyWhen>,
-    /// The text it shows in place of its parameter's name.
-    #[serde(default, skip_serializing_if = "Option::is_none", skip_deserializing)]
-    pub label: Option<&'static str>,
     /// The values its buttons set, over a whole-number parameter.
     #[serde(default, skip_serializing_if = "Option::is_none", skip_deserializing)]
     pub steps: Option<&'static [i32]>,
@@ -1519,6 +1582,9 @@ pub struct PlacedControl {
     /// Whether its buttons have its name above them.
     #[serde(default)]
     pub titled: bool,
+    /// The name it shows in place of its parameter's.
+    #[serde(default)]
+    pub caption: Option<String>,
 }
 
 /// A section heading where a layout placed it.
@@ -1526,6 +1592,9 @@ pub struct PlacedControl {
 pub struct PlacedHeading {
     /// Its text.
     pub text: String,
+    /// Whether the text is centred over its group.
+    #[serde(default)]
+    pub centered: bool,
     /// Where, from the body's top-left corner: as wide as the group under it.
     pub rect: Rect,
 }
@@ -2588,6 +2657,43 @@ mod tests {
         assert!(twice.check(&params(2)).unwrap_err().contains("twice"));
         assert_eq!(Unit::Sync.glyph(), Some(Glyph::Metronome));
         assert_eq!(Unit::Ms.text(), Some("ms"));
+    }
+
+    // Spec: device-framework R70
+    #[test]
+    fn a_control_can_leave_its_name_off_or_show_a_caption() {
+        let named = Control::new(ParamId(0), Widget::Number, 0.0, 0.0);
+        let bare = named.clone().unnamed();
+        assert_eq!(named.extent().height, LABEL_HEIGHT + BOX_HEIGHT);
+        assert_eq!(bare.extent().height, BOX_HEIGHT, "only the box's height");
+        let captioned = named.captioned("Freq");
+        assert_eq!(captioned.caption.as_deref(), Some("Freq"));
+        assert_eq!(captioned.extent(), named_size());
+        let layout = DeviceLayout::new(LayoutNode::Band(ControlBand::free(
+            60.0,
+            30.0,
+            vec![captioned, bare.clone()],
+        )));
+        let placed = layout.place(layout.docked_size());
+        assert_eq!(placed.controls[0].caption.as_deref(), Some("Freq"));
+        assert!(placed.controls[1].unnamed && placed.controls[0].caption.is_some());
+    }
+
+    fn named_size() -> Size {
+        Widget::Number.size()
+    }
+
+    // Spec: device-framework R71
+    #[test]
+    fn a_cell_can_sit_inside_its_space() {
+        let cell = DisplayCell::new("Display", 92.0, 72.0, 1.0).with_inset(4.0);
+        let layout = DeviceLayout::new(LayoutNode::Cell(cell));
+        assert_eq!(layout.docked_size(), Size::new(100.0, 80.0));
+        let placed = layout.place(layout.docked_size());
+        assert_eq!(placed.cells[0].rect, Rect::new(4.0, 4.0, 92.0, 72.0));
+        // Grown, the cell still keeps its inset on every side.
+        let grown = layout.place(Size::new(200.0, 120.0));
+        assert_eq!(grown.cells[0].rect, Rect::new(4.0, 4.0, 192.0, 112.0));
     }
 
     // Spec: device-framework R54

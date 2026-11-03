@@ -34,7 +34,7 @@ In Chorus and Ensemble modes, Width adjusts the stereo image balance from mono (
 - **R7.** The device reports 0 latency through `Node::latency`. (S1)
 - **R8.** Renders are bit-identical at block sizes 1, 64, 512, and 4096. No memory allocation, locking, or blocking calls occur on the audio thread. (S3, S4)
 - **R9.** An agent can add, configure parameters by ID, read parameters and display headlessly, and save/reopen sets containing the device. (S3, S4)
-- **R10.** The panel is Live's (observed in Live 12.4.16, 2 November 2026): the display with the three modes as tabs and, along its foot, the high-pass's frequency, Width and, in Chorus mode, Time and Taps (1 or 2); under it Rate, Amount and Feedback with its Ø; at the right Output, Warmth and Dry/Wet. In Vibrato mode Offset and Shape take Time's and Taps' places. A new Chorus-Ensemble is in Chorus mode at 0.90 Hz and 50 %, with a 50 Hz high-pass, Width 100 %, a Time of 20 ms, 2 Taps, Warmth 0 %, Output 0 dB and 50 % Dry/Wet. The taps read 1 and 2. (Layout L-DEV-077)
+- **R10.** The panel is Live's (observed in Live 12.4.16, 2 November 2026): the display with the three modes as tabs and, along its foot, the high-pass's frequency, Width and, in Chorus mode, Time and Taps (1 or 2); under it Rate, Amount and Feedback with its Ø; at the right Output, Warmth and Dry/Wet. In Vibrato mode Offset and Shape take Time's and Taps' places. A new Chorus-Ensemble is in Chorus mode at 0.90 Hz and 50 %, with a 50 Hz high-pass, Width 100 %, a Time of 20 ms, 2 Taps, Warmth 0 %, Output 0 dB and 50 % Dry/Wet. The taps read 1 and 2. (Layout L-DEV-092)
 
 ## Tests
 

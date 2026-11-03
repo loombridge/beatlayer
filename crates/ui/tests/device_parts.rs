@@ -714,7 +714,7 @@ fn a_name_and_value_on_one_line_a_tick_box_a_readout_and_a_spread_value_draw_and
     // Inline: the name and the value, the value after it.
     let inline = control(&mut h, device, PARTS_INLINE);
     assert_eq!(texts(&output, inline), ["Freq", "1.00 kHz"]);
-    // Readout: the name over the value.
+    // Stacked: the name over the value.
     let readout = control(&mut h, device, PARTS_READOUT);
     assert_eq!(texts(&output, readout), ["Diffusion", "60 %"]);
     // Spread: the name at the left, the value at the right.

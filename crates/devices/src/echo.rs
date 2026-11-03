@@ -569,7 +569,7 @@ fn line(n: usize, x: f32) -> Vec<Control> {
     let mode = line_param(n, SYNC_MODE);
     let name = ["Left", "Right"][n];
     let knob = |field, only: Option<i32>| {
-        let control = at(line_param(n, field), Widget::SmallKnob, x + 3.0, 4.0).labelled(name);
+        let control = at(line_param(n, field), Widget::SmallKnob, x + 3.0, 4.0).captioned(name);
         match only {
             Some(mode_value) => control
                 .shown_only_while(mode, mode_value)
@@ -585,7 +585,7 @@ fn line(n: usize, x: f32) -> Vec<Control> {
         knob(SIXTEENTHS, Some(3)),
         at(sync, Widget::Toggle, x, 57.0)
             .sized(42.0, BOX_HEIGHT)
-            .labelled("Sync"),
+            .captioned("Sync"),
         at(mode, Widget::Chooser, x, 72.0)
             .unnamed()
             .sized(42.0, BOX_HEIGHT),
@@ -617,10 +617,10 @@ fn layout() -> DeviceLayout {
         at(INPUT, Widget::SmallKnob, 7.0, 112.5),
         at(DRIVE, Toggle, 47.0, 121.5)
             .sized(14.0, BOX_HEIGHT)
-            .labelled("D"),
+            .captioned("D"),
         at(FEEDBACK_INVERT, Toggle, 47.0, 135.0)
             .sized(14.0, BOX_HEIGHT)
-            .labelled("Ø"),
+            .captioned("Ø"),
         at(FEEDBACK, Widget::SmallKnob, 65.0, 112.5),
     ]);
     let foot = ControlBand::free(
@@ -630,16 +630,16 @@ fn layout() -> DeviceLayout {
             at(FILTER, Widget::Tick, 21.0, 3.0).sized(48.0, BOX_HEIGHT),
             at(HP_FREQ, Widget::Inline, 58.0, 3.0)
                 .sized(60.0, BOX_HEIGHT)
-                .labelled("HP"),
+                .captioned("HP"),
             at(HP_RES, Widget::Inline, 116.0, 3.0)
                 .sized(42.0, BOX_HEIGHT)
-                .labelled("Res"),
+                .captioned("Res"),
             at(LP_FREQ, Widget::Inline, 161.0, 3.0)
                 .sized(70.0, BOX_HEIGHT)
-                .labelled("LP"),
+                .captioned("LP"),
             at(LP_RES, Widget::Inline, 219.0, 3.0)
                 .sized(42.0, BOX_HEIGHT)
-                .labelled("Res"),
+                .captioned("Res"),
         ],
     );
     let tab = BODY_HEIGHT;
@@ -1523,6 +1523,7 @@ fn tunnel_display(
             handle: Some(DisplayHandle {
                 x: time_param(get, line),
                 y: None,
+                span: None,
             }),
         });
     }
@@ -1579,6 +1580,7 @@ fn filter_display(get: &dyn Fn(ParamId) -> f64) -> (DisplaySeries, Vec<DisplayMa
             handle: Some(DisplayHandle {
                 x: hz,
                 y: Some(res),
+                span: None,
             }),
         }
     };

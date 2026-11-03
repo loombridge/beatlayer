@@ -441,6 +441,21 @@ pub fn show(
             slot_cell(ui, theme, frame, panel, (id, &name, slot, rect), events);
             continue;
         }
+        // Spec: wavetable R35 to R39. Wavetable's displays and its grid are
+        // drawn by its own panel.
+        if crate::wavetable_panel::is_wavetable(frame)
+            && crate::wavetable_panel::cell(
+                ui,
+                theme,
+                frame,
+                panel,
+                display,
+                (id, &name, rect),
+                events,
+            )
+        {
+            continue;
+        }
         // Spec: corpus R1. Corpus's X–Y control is its display cell.
         if matches!(&frame.kind, bl_model::DeviceKind::Native { device_type }
             if device_type == bl_devices::corpus::CORPUS)
@@ -540,7 +555,7 @@ pub fn show(
             }
             // Spec: roar R31. Roar's source traces have cells of their own
             // on their pages; the shaper's cell leaves them out.
-            Some(d) if index == 0 && has_drawing(d) => {
+            Some(d) if has_drawing(d) && draws_first(frame, index, &name) => {
                 let roar = frame.kind
                     == bl_model::DeviceKind::Native {
                         device_type: bl_devices::roar::ROAR.to_owned(),
@@ -689,13 +704,14 @@ pub fn show(
             } else {
                 1
             },
-            label: extra.and_then(|e| e.label),
             steps: extra.and_then(|e| e.steps),
             at_left: extra.is_some_and(|e| e.titled)
                 || matches!(
                     widget,
                     Widget::Number | Widget::Slider | Widget::Marked | Widget::Chooser
                 ),
+            unnamed: extra.is_some_and(|e| e.unnamed),
+            caption: extra.and_then(|e| e.caption.as_deref()),
         };
         // Spec: scales R16. A parameter the device takes from its current
         // scale is drawn disabled.
@@ -718,8 +734,8 @@ pub fn show(
             Widget::Marked => control.number(ui, theme, events, (false, true, named)),
             Widget::Inline => control.inline(ui, theme, events),
             Widget::Tick => control.tick(ui, theme, events),
-            Widget::Readout => control.readout(ui, theme, events, false),
-            Widget::Spread => control.readout(ui, theme, events, true),
+            Widget::Stacked => control.stacked(ui, theme, events, false),
+            Widget::Spread => control.stacked(ui, theme, events, true),
             Widget::Toggle => control.toggle(ui, theme, events, (false, None)),
             Widget::Abbreviated(n) => {
                 control.toggle(ui, theme, events, (false, Some(usize::from(n))));
@@ -727,8 +743,29 @@ pub fn show(
             Widget::Outlined => control.toggle(ui, theme, events, (true, None)),
             Widget::IconToggle => control.icon_toggle(ui, theme, events, (glyph, false)),
             Widget::Round => control.icon_toggle(ui, theme, events, (glyph, true)),
-            Widget::Chooser => control.chooser(ui, theme, events, named),
-            Widget::BareChooser => control.chooser(ui, theme, events, false),
+            Widget::Chooser => control.chooser(ui, theme, events, parts::ChooserStyle::Plain),
+            Widget::LitChooser => control.chooser(ui, theme, events, parts::ChooserStyle::Lit),
+            Widget::UnboxedChooser => {
+                control.chooser(ui, theme, events, parts::ChooserStyle::Unboxed);
+            }
+            Widget::BareChooser => {
+                control.chooser(ui, theme, events, parts::ChooserStyle::Nameless);
+            }
+            Widget::Unboxed => control.bare(ui, theme, events),
+            Widget::IconColumn(n) => {
+                let cells = button_cells(buttons, 1, usize::from(n));
+                control.choice_buttons(ui, theme, events, (&cells, true, false));
+            }
+            Widget::Beside(label) => control.beside(ui, theme, events, (f32::from(label), true)),
+            Widget::BesideDim(label) => {
+                control.beside(ui, theme, events, (f32::from(label), false));
+            }
+            Widget::BesideSwitch(label) => {
+                control.beside_switch(ui, theme, events, f32::from(label))
+            }
+            Widget::Check => control.check(ui, theme, events),
+            Widget::Pill => control.pill(ui, theme, events),
+            Widget::Readout => control.readout(ui, theme, events),
             Widget::Segments(n) | Widget::Tabs(n) | Widget::IconSegments(n) => {
                 let cells = button_cells(buttons, usize::from(n), 1);
                 let (icons, outlined) = match widget {
@@ -836,6 +873,10 @@ pub fn show(
                         | Widget::Number
                         | Widget::Slider
                         | Widget::Marked
+                        | Widget::Beside(_)
+                        | Widget::BesideDim(_)
+                        | Widget::Unboxed
+                        | Widget::Readout
                         | Widget::Large
                         | Widget::Bare
                         | Widget::BareSlider
@@ -907,9 +948,10 @@ fn display_drag(
         under: None,
         automation: None,
         coarse: 1,
-        label: None,
         steps: None,
         at_left: false,
+        unnamed: false,
+        caption: None,
     };
     let response = ui.interact(rect, id.with("drag"), Sense::click_and_drag());
     control.value_input(ui, &response, events);
@@ -1141,6 +1183,25 @@ fn has_drawing(display: &DeviceDisplay) -> bool {
     !(display.series.is_empty() && display.readings.is_empty() && display.spectrograms.is_empty())
 }
 
+/// Whether cell `index`, named `name`, is the one a device's own drawing
+/// fills: the first, or for Roar the shaper's and for the Vocoder the band
+/// display, which have another cell before them.
+fn draws_first(frame: &DeviceFrame, index: usize, name: &str) -> bool {
+    let native = |device_type: &str| {
+        frame.kind
+            == bl_model::DeviceKind::Native {
+                device_type: device_type.to_owned(),
+            }
+    };
+    if native(bl_devices::roar::ROAR) {
+        name == "Shaper"
+    } else if native(bl_devices::vocoder::VOCODER) {
+        name == "Band Display"
+    } else {
+        index == 0
+    }
+}
+
 /// One control being drawn.
 struct Control<'a> {
     device: DeviceId,
@@ -1175,22 +1236,18 @@ struct Control<'a> {
     /// How many steps Shift with Up or Down moves it: 12 for Roar's
     /// Feedback Note, an octave (the roar spec, R26), else 1.
     coarse: i32,
-    /// The text the layout gives the control in place of its parameter's name.
-    label: Option<&'static str>,
     /// The values the buttons of a whole-number parameter set.
     steps: Option<&'static [i32]>,
     /// Whether the name above the control is set at its left (a box or a
     /// chooser) rather than centred (a knob).
     at_left: bool,
+    /// Whether the layout leaves the name off a box or a chooser.
+    unnamed: bool,
+    /// The name the layout shows in place of the parameter's.
+    caption: Option<&'a str>,
 }
 
 impl Control<'_> {
-    /// The name the control shows: its layout's label, or the parameter's.
-    fn name(&self) -> &str {
-        self.label
-            .unwrap_or_else(|| short_name(&self.descriptor.name))
-    }
-
     fn id(&self) -> Id {
         param_control_id(self.device, self.descriptor.id)
     }

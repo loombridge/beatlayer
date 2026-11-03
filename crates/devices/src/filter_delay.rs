@@ -256,10 +256,10 @@ fn layout() -> DeviceLayout {
         inputs.extend([
             at(id(ON), Widget::Toggle, 4.0, y)
                 .sized(CELL_WIDTH, BOX_HEIGHT)
-                .labelled(name),
+                .captioned(name),
             at(id(FILTER), Widget::Toggle, 29.0, y)
                 .sized(44.0, BOX_HEIGHT)
-                .labelled("On"),
+                .captioned("On"),
             at(id(FREQ), Widget::Slider, 29.0, y + 15.0)
                 .unnamed()
                 .sized(44.0, BOX_HEIGHT),
@@ -285,7 +285,7 @@ fn layout() -> DeviceLayout {
                 .shown_only_while(id(SYNC), 0),
             at(id(SYNC), Widget::Toggle, 4.0, y + 31.0)
                 .sized(CELL_WIDTH, BOX_HEIGHT)
-                .labelled("Sync"),
+                .captioned("Sync"),
             at(id(PERCENT), Widget::Number, 51.0, y + 31.0)
                 .unnamed()
                 .sized(47.0, BOX_HEIGHT),

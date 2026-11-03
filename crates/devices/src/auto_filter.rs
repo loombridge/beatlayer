@@ -497,21 +497,21 @@ fn layout() -> DeviceLayout {
                 .sized(34.0, BOX_HEIGHT),
             at(LFO_PHASE, Inline, 84.0, 0.0)
                 .sized(44.0, BOX_HEIGHT)
-                .labelled("Ø")
+                .captioned("Ø")
                 .shown_only_while(LFO_STEREO, 0),
             at(LFO_SPIN, Inline, 84.0, 0.0)
                 .sized(44.0, BOX_HEIGHT)
-                .labelled("Spin")
+                .captioned("Spin")
                 .shown_only_while(LFO_STEREO, 1),
             at(LFO_OFFSET, Inline, 138.0, 0.0)
                 .sized(44.0, BOX_HEIGHT)
-                .labelled(""),
+                .captioned(""),
             at(LFO_QUANTIZE, Chooser, 204.0, 0.0)
                 .unnamed()
                 .sized(38.0, BOX_HEIGHT),
             at(LFO_STEPS, Inline, 245.0, 0.0)
                 .sized(24.0, BOX_HEIGHT)
-                .labelled("")
+                .captioned("")
                 .greyed_while(LFO_QUANTIZE, 0)
                 .hidden_while(LFO_QUANTIZE, 2),
             at(LFO_SH, Chooser, 245.0, 0.0)
@@ -525,14 +525,14 @@ fn layout() -> DeviceLayout {
     // The rate knob is one place for the four rates.
     let rate = |param, mode: i32| {
         at(param, SmallKnob, 63.0, 4.5)
-            .labelled("Rate")
+            .captioned("Rate")
             .shown_only_while(LFO_MODE, mode)
     };
     let under = ControlBand::free(
         CELL,
         BODY_HEIGHT - CELL_HEIGHT - PADDING,
         vec![
-            at(LFO_AMOUNT, SmallKnob, 10.7, 4.5).labelled("Amount"),
+            at(LFO_AMOUNT, SmallKnob, 10.7, 4.5).captioned("Amount"),
             rate(LFO_HZ, 0),
             rate(LFO_TIME, 1),
             rate(LFO_DIVISION, 2),
@@ -546,7 +546,7 @@ fn layout() -> DeviceLayout {
             at(LFO_MODE, Chooser, 145.0, 36.5)
                 .unnamed()
                 .sized(48.0, BOX_HEIGHT),
-            at(ENV_AMOUNT, SmallKnob, 221.0, 4.5).labelled("Envelope"),
+            at(ENV_AMOUNT, SmallKnob, 221.0, 4.5).captioned("Envelope"),
         ],
     )
     .with_captions(vec![

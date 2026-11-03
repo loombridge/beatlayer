@@ -51,6 +51,14 @@ const METER_RANGE_DB: f32 = 24.0;
 const HISTORY: usize = 240;
 /// The view buttons' size, in points.
 const VIEW_BUTTON: egui::Vec2 = vec2(26.0, 12.0);
+/// Granulator III's Capture button's size, in points.
+const CAPTURE_BUTTON: egui::Vec2 = vec2(46.0, 14.0);
+
+/// The ID of Granulator III's Capture button.
+#[must_use]
+pub fn capture_button_id(device: DeviceId) -> Id {
+    Id::new(("granulator-capture", device))
+}
 
 /// The ID of a view button in a device's panel.
 #[must_use]
@@ -64,6 +72,7 @@ fn view_label(view: &str) -> &str {
         "Transfer Curve" => "Curve",
         ACTIVITY => "Act",
         COLLAPSED => "Min",
+        "Perspective" => "Persp",
         other if other.ends_with(" Envelope") => "Env",
         other if other.ends_with(" Oscillator") => "Osc",
         other if other.ends_with(" Response") => "Resp",
@@ -129,6 +138,29 @@ pub fn draw(
     panel: &DevicePanel,
     events: &mut Vec<UiEvent>,
 ) {
+    draw_cell(
+        ui,
+        theme,
+        cell,
+        (id, enabled),
+        display,
+        (panel, true),
+        events,
+    );
+}
+
+/// As [`draw`], for a device whose display has several cells and views that
+/// only some of them offer: `buttons` says whether this cell draws the view
+/// buttons.
+pub fn draw_cell(
+    ui: &mut Ui,
+    theme: &Theme,
+    cell: Rect,
+    (id, enabled): (Id, bool),
+    display: &DeviceDisplay,
+    (panel, buttons): (&DevicePanel, bool),
+    events: &mut Vec<UiEvent>,
+) {
     let views = &panel.description.views;
     let c = &theme.colors;
     let painter = ui.painter_at(cell);
@@ -168,13 +200,71 @@ pub fn draw(
         painter.rect_filled(fill, 0.0, ink);
     }
     modulator_readings(&painter, theme, cell, ink, display);
-    let buttons: Vec<String> = peers(views, display.view.as_deref())
+    let shown: Vec<String> = peers(views, display.view.as_deref())
         .into_iter()
         .cloned()
         .collect();
-    if buttons.len() > 1 {
-        view_buttons(ui, theme, cell, display, &buttons, enabled, events);
+    if buttons && shown.len() > 1 {
+        view_buttons(ui, theme, cell, display, &shown, enabled, events);
     }
+    if let Some(capturing) = display.reading("Capturing") {
+        capture_button(
+            ui,
+            theme,
+            cell,
+            display.device,
+            capturing.value > 0.0,
+            enabled,
+            events,
+        );
+    }
+}
+
+/// Spec: granulator iii R19, R25. The Capture button along the cell's
+/// bottom-left corner: it starts a capture, and while one runs it stops it.
+fn capture_button(
+    ui: &mut Ui,
+    theme: &Theme,
+    cell: Rect,
+    device: DeviceId,
+    capturing: bool,
+    enabled: bool,
+    events: &mut Vec<UiEvent>,
+) {
+    let c = &theme.colors;
+    let rect = Rect::from_min_size(
+        pos2(cell.left() + 3.0, cell.bottom() - CAPTURE_BUTTON.y - 3.0),
+        CAPTURE_BUTTON,
+    );
+    let button = capture_button_id(device);
+    let response = ui.interact(rect, button, Sense::click());
+    crate::focus::register(ui.ctx(), button, bl_shell::Area::Detail, None);
+    if response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+    {
+        events.push(UiEvent::Invoke(Invocation::new(
+            "granulator.capture",
+            json!({ "device": device, "action": if capturing { "stop" } else { "start" } }),
+        )));
+    }
+    let face = match (capturing, enabled) {
+        (true, true) => c.accent.0,
+        (true, false) => c.inactive.0,
+        _ => c.control.0,
+    };
+    let ink = if capturing { c.accent_text.0 } else { c.text.0 };
+    ui.painter().rect_filled(rect, theme.sizes.corner, face);
+    ui.painter().text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        if capturing { "Stop" } else { "Capture" },
+        theme.small_font(),
+        ink,
+    );
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(Role::Button);
+        node.set_label("Capture");
+        node.set_selected(capturing);
+    });
 }
 
 /// Gated Delay's step row (the gated-delay spec, R9): the switches are the
@@ -570,7 +660,8 @@ pub fn handle_center(
         .iter()
         .position(|p| p.id == handle.x)?;
     let travel = panel.description.params[index].normalize(panel.value(index)) as f32;
-    let x = area.left() + area.width() * travel;
+    let span = handle.span.unwrap_or([0.0, 1.0]);
+    let x = area.left() + area.width() * (span[0] + (span[1] - span[0]) * travel);
     let y = point(area, display.series(&marker.series)?, marker.x, marker.y).y;
     Some(pos2(x, y))
 }
@@ -642,9 +733,14 @@ fn handles(
         }
         if response.dragged() {
             let delta = response.drag_delta();
+            // A handle whose parameter's travel covers a part of the cell
+            // moves by that part of the cell's width.
+            let share = handle
+                .span
+                .map_or(1.0, |span| (span[1] - span[0]).max(0.01));
             let drag = ui.data_mut(|data| {
                 let drag = data.get_temp_mut_or_default::<HandleDrag>(drag_id);
-                drag.moved[0] += f64::from(delta.x / area.width());
+                drag.moved[0] += f64::from(delta.x / (area.width() * share));
                 drag.moved[1] -= f64::from(delta.y / area.height());
                 *drag
             });
@@ -787,7 +883,7 @@ fn activity(
 
 /// The buttons that choose the display's view, along the cell's top-right
 /// corner.
-fn view_buttons(
+pub(crate) fn view_buttons(
     ui: &mut Ui,
     theme: &Theme,
     cell: Rect,

@@ -609,7 +609,7 @@ fn layout() -> DeviceLayout {
     let cell = DisplayCell::new("Pan", WIDTH, CELL_HEIGHT, 1.0).with_bottom(foot);
     let rate_knob = |param, only: i32| {
         at(param, SmallKnob, 73.0, 23.0)
-            .labelled("Rate")
+            .captioned("Rate")
             .shown_only_while(TIME_MODE, only)
     };
     let row = BOX_HEIGHT;
@@ -624,18 +624,18 @@ fn layout() -> DeviceLayout {
                 .sized(34.0, row),
             at(PHASE, Inline, 125.0, 2.0)
                 .sized(30.0, row)
-                .labelled("")
+                .captioned("")
                 .shown_only_while(STEREO_MODE, 0),
             at(SPIN, Inline, 125.0, 2.0)
                 .sized(30.0, row)
-                .labelled("")
+                .captioned("")
                 .shown_only_while(STEREO_MODE, 1),
             at(INVERT, Widget::IconToggle, 158.0, 2.0)
                 .sized(20.0, row)
                 .with_glyph(Glyph::PhaseInvert),
             at(PHASE_OFFSET, Inline, 181.0, 2.0)
                 .sized(36.0, row)
-                .labelled(""),
+                .captioned(""),
             at(AMOUNT, SmallKnob, 13.0, 23.0),
             rate_knob(RATE_HZ, 0),
             rate_knob(TIME_SECS, 1),
@@ -643,7 +643,7 @@ fn layout() -> DeviceLayout {
             rate_knob(DOTTED_DIVISION, 3),
             rate_knob(TRIPLET_DIVISION, 4),
             rate_knob(SIXTEENTHS, 5),
-            at(SHAPE, SmallKnob, 132.5, 23.0).labelled("Morph"),
+            at(SHAPE, SmallKnob, 132.5, 23.0).captioned("Morph"),
             at(ATTACK_TIME, Number, 183.0, 36.0)
                 .unnamed()
                 .sized(43.0, row),

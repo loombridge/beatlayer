@@ -298,7 +298,11 @@ pub fn display(
         x: hz as f32,
         y: -10.0,
         text: format!("{name} {hz:.0} Hz"),
-        handle: Some(DisplayHandle { x: param, y: None }),
+        handle: Some(DisplayHandle {
+            x: param,
+            y: None,
+            span: None,
+        }),
     };
     DeviceDisplay {
         device,

@@ -48,8 +48,8 @@ pub struct Alternate {
     pub switch: ParamId,
     /// For a switch that is a choice: the choice, by its number, that puts
     /// `on` in place (the Drum Sampler's Res is its Peak filter's gain while
-    /// the type is Peak). Left out, the switch is a toggle and `on` takes
-    /// over while it is on.
+    /// the type is Peak). Left out, `on` takes over while the switch is on: a
+    /// toggle, or a choice past its first (Shifter's Freq and Ring modes).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub at: Option<u32>,
     /// The parameter the control is while the switch is off.
@@ -178,6 +178,10 @@ pub struct DeviceDescription {
     /// device framework spec, R46).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spectrogram: Option<SpectrogramGrid>,
+    /// The parameters a display cell sets by its own gestures, which the
+    /// layout places no control for: a matrix grid's route amounts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub grid_params: Vec<ParamId>,
     /// The controls that show one of two parameters, as a switch says. Both
     /// parameters keep their values and their lanes whichever is shown.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -206,9 +210,18 @@ impl DeviceDescription {
             title_switch: None,
             banks: Vec::new(),
             spectrogram: None,
+            grid_params: Vec::new(),
             alternates: Vec::new(),
             relabels: Vec::new(),
         }
+    }
+
+    /// The same, with `params` set by a display cell's gestures: the layout
+    /// places no control for them.
+    #[must_use]
+    pub fn with_grid_params(mut self, params: Vec<ParamId>) -> Self {
+        self.grid_params = params;
+        self
     }
 
     /// The same, with a display that holds a spectrogram of `grid`.
@@ -477,6 +490,7 @@ impl DeviceDescription {
             .filter(|p| {
                 !self.menu_options.contains(&p.id)
                     && self.title_switch != Some(p.id)
+                    && !self.grid_params.contains(&p.id)
                     && !self.alternates.iter().any(|a| a.on == p.id)
             })
             .cloned()
@@ -549,7 +563,7 @@ impl DeviceDescription {
         for a in &self.alternates {
             let toggle = self.param(a.switch).is_some_and(|p| match &p.kind {
                 ParamKind::Toggle => a.at.is_none(),
-                ParamKind::Choice { choices } => a.at.is_some_and(|n| (n as usize) < choices.len()),
+                ParamKind::Choice { choices } => a.at.is_none_or(|n| (n as usize) < choices.len()),
                 _ => false,
             });
             if !toggle
@@ -769,13 +783,10 @@ mod tests {
         assert_eq!(described.drawn(&at(3.0), id(1)), id(2));
         assert!(described.shown(&at(3.0), id(2)) && !described.shown(&at(3.0), id(1)));
         assert!(described.shown(&at(0.0), id(1)) && !described.shown(&at(0.0), id(2)));
-        // A choice number past its choices, or a plain switch that is a
-        // choice, is refused.
-        let past =
-            DeviceDescription::new(params.clone()).with_alternate_at((id(0), 4), id(1), id(2));
+        // A choice number past its choices is refused; a choice with no
+        // number is a switch, its first choice off (R72).
+        let past = DeviceDescription::new(params).with_alternate_at((id(0), 4), id(1), id(2));
         assert!(past.check().is_err());
-        let toggle_with_choice = DeviceDescription::new(params).with_alternate(id(0), id(1), id(2));
-        assert!(toggle_with_choice.check().is_err());
     }
 
     // Spec: device-framework R51
@@ -923,5 +934,14 @@ mod tests {
                 .check()
                 .is_err()
         );
+        // A choice serves as a switch: its first choice is off, the rest on.
+        let mut choice = params();
+        choice[0] = ParamDescriptor::choice(id(0), "Switch", &["A", "B", "C"], 0);
+        let mode = DeviceDescription::new(choice).with_alternate(id(0), id(1), id(2));
+        mode.check().unwrap();
+        let mut values = OrdMap::new();
+        assert_eq!(mode.drawn(&values, id(1)), id(1));
+        values.insert(id(0), 2.0);
+        assert_eq!(mode.drawn(&values, id(1)), id(2));
     }
 }

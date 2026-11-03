@@ -668,7 +668,7 @@ pub fn parts_type() -> DeviceType {
         vec![
             at(PARTS_INLINE, Widget::Inline, 4.0, 4.0).sized(70.0, 12.0),
             at(PARTS_TICK, Widget::Tick, 80.0, 4.0).sized(48.0, 12.0),
-            at(PARTS_READOUT, Widget::Readout, 4.0, 20.0).sized(40.0, 24.0),
+            at(PARTS_READOUT, Widget::Stacked, 4.0, 20.0).sized(40.0, 24.0),
             at(PARTS_SPREAD, Widget::Spread, 50.0, 20.0).sized(76.0, 12.0),
             at(PARTS_TABS, Widget::Tabs(3), 4.0, 48.0).sized(120.0, 12.0),
             at(PARTS_BARE_KNOB, Widget::SmallKnob, 4.0, 64.0).unnamed(),
@@ -698,7 +698,7 @@ pub fn parts_type() -> DeviceType {
                 .hidden_while(PARTS_HOLD, 1),
             at(PARTS_NAMED, Widget::Toggle, 4.0, 134.0)
                 .sized(60.0, 12.0)
-                .labelled("Shown as"),
+                .captioned("Shown as"),
             at(PARTS_TITLED, Widget::Segments(2), 130.0, 134.0)
                 .titled()
                 .sized(60.0, 21.0),

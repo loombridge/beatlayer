@@ -179,6 +179,13 @@ pub const SET_ROUTE: &str = "device.set_route";
 /// matrix.
 pub const CLEAR_ROUTE: &str = "device.clear_route";
 
+/// `device.add_destination`: shows a destination as a row of an instrument's
+/// matrix grid.
+pub const ADD_DESTINATION: &str = "device.add_destination";
+/// `device.remove_destination`: clears every route into a destination and
+/// takes its row off an instrument's matrix grid.
+pub const REMOVE_DESTINATION: &str = "device.remove_destination";
+
 /// `collision.copy_resonator`: copies every setting of one of Collision's
 /// resonators to the other.
 pub const COPY_RESONATOR: &str = "collision.copy_resonator";
@@ -263,6 +270,8 @@ pub const IDS: &[&str] = &[
     RACK_SELECT_VARIATION,
     SET_ROUTE,
     CLEAR_ROUTE,
+    ADD_DESTINATION,
+    REMOVE_DESTINATION,
     COPY_RESONATOR,
     SET_PARTIALS,
     COPY_OSCILLATOR,
@@ -496,11 +505,21 @@ pub fn body_width(frame: &DeviceFrame) -> f32 {
 /// choosers and Hardware Latency (Beatlayer's own; to observe).
 pub const EXTERNAL_SECTION_WIDTH: f32 = 92.0;
 
-/// The width at 100% of an external device's section: 0 for any other
-/// device.
+/// The width at 100%, in points, of the External Audio Effect's section, the
+/// strip of its choosers down the left of its panel (observed in Live 12.4.16,
+/// 2 November 2026; layout L-DEV-077).
+pub const EXTERNAL_EFFECT_WIDTH: f32 = 86.0;
+
+/// The width at 100% of an external device's section, which sits left of its
+/// body: 0 for any other device, and for the External Audio Effect, whose
+/// layout holds its section's room itself (its Phase switch sits in it).
 #[must_use]
 pub fn external_width(frame: &DeviceFrame) -> f32 {
-    if frame.external.is_some() {
+    if frame
+        .external
+        .as_ref()
+        .is_some_and(|section| !section.output)
+    {
         EXTERNAL_SECTION_WIDTH
     } else {
         0.0
@@ -636,6 +655,11 @@ pub struct DevicePanel {
     /// value. Empty for a device without a matrix or with no route.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub matrix_routes: Vec<MatrixRoutes>,
+    /// For an instrument whose Matrix tab draws its routes as a grid (the
+    /// wavetable spec, R39): the grid's columns, its rows and what can still
+    /// be added. None for any other device.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matrix_grid: Option<MatrixGrid>,
     /// An Operator's harmonics editor options, which a drag across its
     /// partials follows (operator R27): view state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -645,6 +669,40 @@ pub struct DevicePanel {
     /// Scale, while Use Current Scale is on (the scales spec, R16).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub locked: Vec<ParamId>,
+}
+
+/// An instrument's matrix as its grid draws it (the wavetable spec, R39):
+/// the sources as columns, the destinations shown as rows.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MatrixGrid {
+    /// The sources, one for each column.
+    pub sources: Vec<String>,
+    /// The destinations shown: those with a route and those added, in the
+    /// matrix's order.
+    pub rows: Vec<GridRow>,
+    /// The destinations not shown, in the matrix's order.
+    pub addable: Vec<String>,
+}
+
+/// One destination's row of a matrix grid.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct GridRow {
+    /// The destination's name.
+    pub destination: String,
+    /// One cell for each of the grid's sources: the free slot that routes
+    /// it here, or none while no slot does.
+    pub cells: Vec<Option<GridCell>>,
+}
+
+/// A route a grid cell shows.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct GridCell {
+    /// The slot's number.
+    pub slot: u8,
+    /// Its amount's parameter.
+    pub amount_param: ParamId,
+    /// Its amount, in per cent from -100 to 100.
+    pub amount: f64,
 }
 
 /// The harmonics editor's options in a device's panel (operator R27).
@@ -1465,6 +1523,28 @@ pub struct ClearRouteArgs {
     /// The destination of the route to clear, with its source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub destination: Option<String>,
+}
+
+/// Arguments of `device.add_destination` and `device.remove_destination`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DestinationArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The destination's name, as the device's `matrix` lists it.
+    pub destination: String,
+}
+
+/// What `device.remove_destination` returns: the slots it emptied.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct DestinationRemoved {
+    /// The device.
+    pub device: DeviceId,
+    /// The destination's name.
+    pub destination: String,
+    /// The numbers of the slots whose routes it cleared.
+    pub cleared: Vec<u8>,
 }
 
 /// Arguments of `collision.copy_resonator`.
@@ -3264,6 +3344,32 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .args::<ClearRouteArgs>()
             .result::<RouteChanged>(),
+        CommandSpec::new(ADD_DESTINATION, "Add Destination")
+            .description(
+                "Shows a destination of an instrument's matrix as a row of its grid, as the \
+                 Add Destination chooser under the grid does: the device by ID and the \
+                 destination by the name its `matrix` lists. A destination with a route \
+                 always has its row; this adds one without. `device_view.state` gives the \
+                 rows in the panel's `matrix_grid`. An unknown destination, and a device \
+                 whose matrix has no grid, are refused. It changes only the view: it isn't \
+                 an undo step and doesn't mark the set changed.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<DestinationArgs>()
+            .result::<DeviceViewState>(),
+        CommandSpec::new(REMOVE_DESTINATION, "Remove Destination")
+            .description(
+                "Takes a destination off an instrument's matrix grid and clears every free \
+                 slot that routes into it, setting their amounts to 0 %, as a row's Remove \
+                 item does: the device by ID and the destination by the name its `matrix` \
+                 lists. One undo step (Remove Destination) restoring every route, and the \
+                 result lists the slots cleared. An unknown destination is refused.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<DestinationArgs>()
+            .result::<DestinationRemoved>(),
         CommandSpec::new(COPY_RESONATOR, "Copy Resonator")
             .description(
                 "Copies every setting of one of Collision's two resonators to the other, as \

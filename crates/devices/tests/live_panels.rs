@@ -105,7 +105,6 @@ const STILL_GENERIC: &[&str] = &[
     "Arpeggiator",
     "CC Control",
     "Chord",
-    "External Audio Effect",
     "External Instrument",
     "MPE Control",
     "Note Echo",
@@ -175,8 +174,9 @@ fn panel(name: &str) -> Vec<String> {
         })
         .map(|c| {
             let shown = c
-                .label
-                .map_or_else(|| description.param(c.param).unwrap().name.as_str(), |l| l);
+                .caption
+                .as_deref()
+                .unwrap_or_else(|| description.param(c.param).unwrap().name.as_str());
             let kind = match (c.unnamed, c.titled) {
                 (true, _) => "unnamed ",
                 (_, true) => "titled ",
@@ -377,7 +377,7 @@ fn echo_holds_lives_controls_in_lives_order() {
         placed
             .controls
             .iter()
-            .filter(|c| c.label == Some("Left"))
+            .filter(|c| c.caption.as_deref() == Some("Left"))
             .filter(|c| {
                 let at =
                     |g: bl_model::device_layout::GreyWhen| value(g.param).round() as i32 == g.value;
@@ -552,18 +552,18 @@ fn reverb_holds_lives_controls_in_lives_order() {
             ": Inline",
             ": Inline",
             "Spin: Toggle",
-            "Amount: Readout",
-            "Rate: Readout",
+            "Amount: Stacked",
+            "Rate: Stacked",
             "Shape: Spread",
             "High: Toggle",
             ": Inline",
             "Low: Outlined",
             ": Inline",
-            "Diffusion: Readout",
-            "Scale: Readout",
+            "Diffusion: Stacked",
+            "Scale: Stacked",
             "Chorus: Toggle",
-            "Amount: Readout",
-            "Rate: Readout",
+            "Amount: Stacked",
+            "Rate: Stacked",
             "Predelay: SmallKnob",
             "Smooth: Chooser",
             "Size: SmallKnob",
@@ -619,7 +619,7 @@ fn chorus_ensemble_holds_lives_controls_in_lives_order() {
         [
             "Mode: Tabs(3)",
             ": Inline",
-            "Width: Readout",
+            "Width: Stacked",
             "Time: Chooser",
             "Taps: titled Segments(2)",
             "Rate: SmallKnob",
@@ -665,10 +665,10 @@ fn phaser_flanger_holds_lives_controls_in_lives_order() {
         panel("Phaser-Flanger"),
         [
             "Mode: Tabs(3)",
-            "Notches: Readout",
-            "Center: Readout",
-            "Spread: Readout",
-            "Blend: Readout",
+            "Notches: Stacked",
+            "Center: Stacked",
+            "Spread: Stacked",
+            "Blend: Stacked",
             "Rate: SmallKnob",
             "Amount: SmallKnob",
             "Feedback: SmallKnob",

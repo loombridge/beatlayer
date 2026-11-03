@@ -217,7 +217,7 @@ fn layout() -> DeviceLayout {
         at(REPEAT, Toggle, 4.0, 68.0).sized(36.0, BOX_HEIGHT),
         at(NO_TRIPLETS, Toggle, 108.0, 68.0)
             .sized(40.0, BOX_HEIGHT)
-            .labelled("No Trpl"),
+            .captioned("No Trpl"),
         at(VARIATION_MODE, Chooser, 157.0, 68.0)
             .unnamed()
             .sized(43.0, BOX_HEIGHT),

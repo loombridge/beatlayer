@@ -160,6 +160,18 @@ pub fn drums(name: &str) -> String {
         .into_owned()
 }
 
+/// Saturator at the settings the set was made with, before a new one took
+/// Live's panel defaults (Drive 0 dB, Color on): the renders the known
+/// failures describe depend on them.
+fn saturator() -> Value {
+    let mut device = native("saturator", SATURATOR, "audio_effect");
+    device["params"] = json!([
+        [bl_devices::saturator::DRIVE.0, 5.0],
+        [bl_devices::saturator::COLOR.0, 0.0]
+    ]);
+    device
+}
+
 /// A native device as `device.insert` takes it, its ID the new name `name`.
 #[must_use]
 pub fn native(name: &str, device_type: &str, role: &str) -> Value {
@@ -304,7 +316,7 @@ pub fn build(driver: &mut impl Driver) -> Ids {
         "id": { "$new": "rack" }, "name": "Audio Effect Rack", "enabled": true, "params": [],
         "role": "audio_effect", "kind": { "rack": { "kind": "audio_effect" } },
         "chains": [{ "id": { "$new": "chain" }, "name": "Colour", "devices": [
-            native("saturator", SATURATOR, "audio_effect"),
+            saturator(),
             native("utility", UTILITY, "audio_effect"),
         ] }],
     });

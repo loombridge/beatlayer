@@ -322,14 +322,14 @@ fn gap(width: f32) -> LayoutNode {
 /// and a display; under them Predelay, Smooth, Size, Decay, Freeze with Flat
 /// and Cut, Stereo and Density; at the right Reflect, Diffuse and Dry/Wet.
 fn layout() -> DeviceLayout {
-    use Widget::{Chooser, Outlined, Readout, SmallKnob, Toggle};
+    use Widget::{Chooser, Outlined, SmallKnob, Stacked, Toggle};
     let at = Control::new;
     // A value alone, as Live prints the frequencies and amounts under a
     // display: no name, no box.
     let value = |param, x, y, width: f32| {
         at(param, Widget::Inline, x, y)
             .sized(width, BOX_HEIGHT)
-            .labelled("")
+            .captioned("")
     };
     let input = section(
         "Input Filter",
@@ -338,10 +338,10 @@ fn layout() -> DeviceLayout {
         vec![
             at(LOW_CUT, Outlined, 3.7, 18.7)
                 .sized(42.0, BOX_HEIGHT)
-                .labelled("Lo Cut"),
+                .captioned("Lo Cut"),
             at(HIGH_CUT, Outlined, 49.4, 18.7)
                 .sized(42.0, BOX_HEIGHT)
-                .labelled("Hi Cut"),
+                .captioned("Hi Cut"),
             value(LOW_CUT_HZ, 1.0, 92.0, 40.0),
             value(HIGH_CUT_HZ, 55.0, 92.0, 40.0),
         ],
@@ -352,12 +352,12 @@ fn layout() -> DeviceLayout {
         vec![Caption::new("Early Reflections", 2.0, 2.0, 88.0)],
         vec![
             at(SPIN, Toggle, 26.5, 29.0).sized(39.0, BOX_HEIGHT),
-            at(SPIN_AMOUNT, Readout, 4.0, 47.5)
+            at(SPIN_AMOUNT, Stacked, 4.0, 47.5)
                 .sized(40.0, 2.0 * BOX_HEIGHT)
-                .labelled("Amount"),
-            at(SPIN_RATE, Readout, 47.0, 47.5)
+                .captioned("Amount"),
+            at(SPIN_RATE, Stacked, 47.0, 47.5)
                 .sized(41.0, 2.0 * BOX_HEIGHT)
-                .labelled("Rate"),
+                .captioned("Rate"),
             at(SHAPE, Widget::Spread, 8.0, 92.0).sized(76.0, BOX_HEIGHT),
         ],
     );
@@ -368,14 +368,14 @@ fn layout() -> DeviceLayout {
         vec![
             at(HIGH_DAMP, Toggle, 3.7, 18.0)
                 .sized(26.5, BOX_HEIGHT)
-                .labelled("High"),
+                .captioned("High"),
             value(HIGH, 108.0, 18.0, 30.0),
             at(LOW_DAMP, Outlined, 3.7, 91.8)
                 .sized(26.5, BOX_HEIGHT)
-                .labelled("Low"),
+                .captioned("Low"),
             value(LOW, 108.0, 92.0, 30.0),
-            at(DIFFUSION, Readout, 137.0, 31.3).sized(35.0, 2.0 * BOX_HEIGHT),
-            at(SCALE, Readout, 137.0, 64.3).sized(35.0, 2.0 * BOX_HEIGHT),
+            at(DIFFUSION, Stacked, 137.0, 31.3).sized(35.0, 2.0 * BOX_HEIGHT),
+            at(SCALE, Stacked, 137.0, 64.3).sized(35.0, 2.0 * BOX_HEIGHT),
         ],
     );
     let chorus = section(
@@ -384,12 +384,12 @@ fn layout() -> DeviceLayout {
         Vec::new(),
         vec![
             at(CHORUS, Toggle, 3.4, 3.7).sized(42.5, BOX_HEIGHT),
-            at(CHORUS_AMOUNT, Readout, 3.0, 31.7)
+            at(CHORUS_AMOUNT, Stacked, 3.0, 31.7)
                 .sized(43.0, 2.0 * BOX_HEIGHT)
-                .labelled("Amount"),
-            at(CHORUS_RATE, Readout, 3.0, 64.5)
+                .captioned("Amount"),
+            at(CHORUS_RATE, Stacked, 3.0, 64.5)
                 .sized(43.0, 2.0 * BOX_HEIGHT)
-                .labelled("Rate"),
+                .captioned("Rate"),
         ],
     );
     let bottom = ControlBand::free(

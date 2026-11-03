@@ -3027,7 +3027,7 @@ fn an_agent_inserts_pedal_and_sets_and_reads_back_its_parameters() {
             set(TYPE, 2.0),
             set(GAIN, 80.0),
             set(MID_FREQUENCY, 2.0),
-            set(SUB, 9.0),
+            set(SUB, 1.0),
             set(OUTPUT, 0.5),
             set(HI_QUALITY, 1.0),
         ] }),
@@ -3057,7 +3057,7 @@ fn an_agent_inserts_pedal_and_sets_and_reads_back_its_parameters() {
             json!(2.0),
             json!(80.0),
             json!(2.0),
-            json!(9.0),
+            json!(1.0),
             json!(0.5),
             json!(1.0)
         ]
@@ -3238,7 +3238,7 @@ fn an_agent_inserts_veer_sets_its_parameters_and_points_its_midi_sidechain_at_a_
         json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
     );
     let params = read["results"][0]["result"]["params"].as_array().unwrap();
-    assert_eq!(params.len(), 34, "every parameter is listed");
+    assert_eq!(params.len(), 35, "every parameter is listed");
     let value = |id: bl_model::ParamId| {
         params
             .iter()
@@ -4127,12 +4127,12 @@ fn an_agent_sets_the_vocoder_by_id_reads_its_bands_and_finds_it_after_a_reopen()
         (vocoder::DEPTH, 150.0),
         (vocoder::ATTACK, 20.0),
         (vocoder::RELEASE, 400.0),
-        (vocoder::UNVOICED, 60.0),
+        (vocoder::UNVOICED, 0.6),
         (vocoder::RANGE_LOW, 100.0),
         (vocoder::RANGE_HIGH, 6_400.0),
         (vocoder::BW, 140.0),
         (vocoder::FILTER_MODE, 1.0),
-        (vocoder::GATE, -40.0),
+        (vocoder::GATE, 0.01),
         (vocoder::ENHANCE, 1.0),
         (vocoder::CHANNEL_MODE, 2.0),
         (vocoder::NOISE_X, 20.0),
@@ -4302,7 +4302,7 @@ fn an_agent_loads_a_sample_into_granulator_iii_reads_its_display_and_finds_it_af
     }
     let read = one(&mut client, "device.parameters", json!({ "device": id }));
     let params = read["params"].as_array().unwrap();
-    assert_eq!(params.len(), 30);
+    assert_eq!(params.len(), 31);
     assert!(params.iter().all(|p| p["automatable"] == json!(true)));
     for (param, value) in &sets {
         let found = params.iter().find(|p| p["id"] == param.0).unwrap();
@@ -5877,7 +5877,7 @@ fn an_agent_adds_sets_and_reads_the_saturation_devices_by_id_and_reopens_them() 
     };
     assert_eq!(parameters(&mut client, singe).as_array().unwrap().len(), 19);
     assert_eq!(parameters(&mut client, grit).as_array().unwrap().len(), 6);
-    assert_eq!(parameters(&mut client, valve).as_array().unwrap().len(), 9);
+    assert_eq!(parameters(&mut client, valve).as_array().unwrap().len(), 10);
 
     let set = |client: &mut Client<InProcess>, device: &Value, param: u32, value: f64| {
         call(
@@ -7108,7 +7108,7 @@ fn an_agent_adds_sets_and_reads_resonators_by_id_and_reopens_it() {
     let parameters = |client: &mut Client<InProcess>| {
         run(client, "device.parameters", json!({ "device": device }))["params"].clone()
     };
-    assert_eq!(parameters(&mut client).as_array().unwrap().len(), 30);
+    assert_eq!(parameters(&mut client).as_array().unwrap().len(), 31);
 
     // Every parameter moved to the other end of its range, and read back.
     let mut wanted = Vec::new();

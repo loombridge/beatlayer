@@ -117,6 +117,8 @@ pub mod tuning_layout_dialog;
 pub mod tuning_section;
 pub mod undo_history_panel;
 pub mod utilities_panel;
+pub mod video_window;
+pub mod wavetable_panel;
 pub mod wheel;
 pub mod widgets;
 pub mod window;

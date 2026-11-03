@@ -1165,14 +1165,16 @@ fn the_filter_view_draws_the_two_filters_response_with_a_handle_on_each_cutoff()
         hp.handle,
         Some(bl_model::DisplayHandle {
             x: echo::HP_FREQ,
-            y: Some(echo::HP_RES)
+            y: Some(echo::HP_RES),
+            span: None,
         })
     );
     assert_eq!(
         lp.handle,
         Some(bl_model::DisplayHandle {
             x: echo::LP_FREQ,
-            y: Some(echo::LP_RES)
+            y: Some(echo::LP_RES),
+            span: None,
         })
     );
     // Off, the curve is flat.

@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "bl-ext"
 description = "The extension host: WebAssembly components under wasmtime, extension packages and their validation, and the compiled-code cache."
 version.workspace = true
@@ -34,3 +35,7 @@ wit-parser = { version = "0.261", default-features = false, features = ["decodin
 
 [lints]
 workspace = true
+
+[[test]]
+name = "ext_tests"
+path = "tests/main.rs"

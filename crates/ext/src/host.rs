@@ -293,7 +293,7 @@ impl Host {
             self.failures.record(id, file, &reason);
             Error::Failed(reason)
         };
-        let component = self.component(&bytes).map_err(&fail)?;
+        let component = self.component(&bytes).map_err(fail)?;
         let limits = StoreLimitsBuilder::new()
             .memory_size((spec.memory_mib as usize) << 20)
             .trap_on_grow_failure(true)

@@ -157,7 +157,7 @@ struct Fm {
 
 impl Fm {
     fn new(rate: f64) -> Self {
-        let mut core = Core::with_voices(rate, 1, 0, 1);
+        let mut core = Core::with_voices(rate, 1, 0, 1, 0);
         core.settings.algorithm = ALGORITHM;
         core.settings.tone = 1.0;
         Self {
@@ -170,7 +170,7 @@ impl Fm {
 
 impl Hit for Fm {
     fn start(&mut self, _seed: u64) {
-        self.core.start(0, Start::Fresh);
+        self.core.start(0, Start::Fresh, 0.0);
         self.filter.clear();
     }
 

@@ -14,7 +14,9 @@ use core::f64::consts::TAU;
 
 use bl_dsp::EnvelopeFollower;
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{
+    BODY_HEIGHT, Control, ControlBand, DisplayCell, Glyph, LayoutNode, Widget,
+};
 use bl_model::param::db_to_gain;
 use bl_model::{
     Device, DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayReading,
@@ -97,9 +99,13 @@ const HARD_SHELF_DB: f64 = 6.0;
 const CRUNCH_TOP_DB: f64 = 18.0;
 const CRUNCH_HZ: f64 = 200.0;
 
-/// Damp's corner at 0 % and 100 %, in Hz.
-const DAMP_OPEN_HZ: f64 = 20_000.0;
-const DAMP_CLOSED_HZ: f64 = 200.0;
+/// Damp's range, in Hz, and its corner at first.
+const DAMP_RANGE: (f64, f64) = (200.0, 20_000.0);
+const DAMP_DEFAULT_HZ: f64 = 9_200.0;
+
+/// Decay's range, in ms, which its 0 % to 100 % spans evenly in octaves.
+/// Beatlayer's own: Live's panel reads it in per cent.
+const DECAY_MS: (f64, f64) = (10.0, 2_000.0);
 
 /// Transients' crossover, in Hz, its two followers' times, in seconds, and
 /// how much the attack and the sustain are shaped at full settings.
@@ -133,39 +139,27 @@ pub fn drum_buss_type() -> DeviceType {
             "The distortion's character: Soft waveshapes, Medium limits, Hard clips \
              with a bass boost.",
         ),
-        ParamDescriptor::continuous(DRIVE, "Drive", (0.0, 100.0), 0.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(DRIVE, "Drive", (0.0, 100.0), 20.0, ParamUnit::Percent)
             .describe("How much the input is driven before distorting."),
         ParamDescriptor::continuous(CRUNCH, "Crunch", (0.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("Adds a sine-shaped distortion to mid-high frequencies."),
-        ParamDescriptor::continuous(DAMP, "Damp", (0.0, 100.0), 0.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(DAMP, "Damp", DAMP_RANGE, DAMP_DEFAULT_HZ, ParamUnit::Hertz)
+            .logarithmic()
             .describe("Low-passes the signal after the distortion, removing the highs it added."),
-        ParamDescriptor::continuous(
-            TRANSIENTS,
-            "Transients",
-            (-100.0, 100.0),
-            0.0,
-            ParamUnit::Percent,
-        )
-        .describe(
-            "Shapes the transients above 100 Hz: positive adds attack and sustain, \
+        ParamDescriptor::continuous(TRANSIENTS, "Transients", (-1.0, 1.0), 0.0, ParamUnit::None)
+            .describe(
+                "Shapes the transients above 100 Hz: positive adds attack and sustain, \
              negative adds attack with less sustain.",
-        ),
+            ),
         ParamDescriptor::continuous(BOOM, "Boom", (0.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("How much low-end enhancement the tuned resonator adds."),
-        ParamDescriptor::continuous(FREQ, "Freq", (20.0, 200.0), 60.0, ParamUnit::Hertz)
+        ParamDescriptor::continuous(FREQ, "Freq", (20.0, 200.0), 50.0, ParamUnit::Hertz)
             .logarithmic()
             .describe("The frequency of the low-end enhancer."),
         ParamDescriptor::toggle(FORCE_TO_NOTE, "Force To Note", false)
             .describe("Tunes the low-end enhancer to the nearest note at A = 440 Hz."),
-        ParamDescriptor::continuous(
-            DECAY,
-            "Decay",
-            (10.0, 2_000.0),
-            200.0,
-            ParamUnit::Milliseconds,
-        )
-        .logarithmic()
-        .describe("The decay rate of the low frequencies, and the enhancer's ring-down time."),
+        ParamDescriptor::continuous(DECAY, "Decay", (0.0, 100.0), 100.0, ParamUnit::Percent)
+            .describe("The decay rate of the low frequencies, and the enhancer's ring-down time."),
         ParamDescriptor::toggle(BOOM_AUDITION, "Boom Audition", false)
             .describe("Solo the result of the low-frequency enhancer."),
         ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 100.0, ParamUnit::Percent)
@@ -173,38 +167,51 @@ pub fn drum_buss_type() -> DeviceType {
         ParamDescriptor::gain(OUTPUT, "Output", 24.0, 0.0)
             .describe("The output level, down to silence."),
     ];
+    // As Live lays it out (L-DEV-055): Drive over the distortion's type, Trim
+    // and Comp; the mid-high shaping's three knobs; the low-end enhancer;
+    // and the bass and output meters with Dry/Wet under them.
+    let at = Control::new;
     let layout = DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Band(ControlBand::stacked(
+        LayoutNode::Band(ControlBand::free(
+            52.0,
             BODY_HEIGHT,
-            &[(TRIM, Widget::Knob), (COMP, Widget::Toggle)],
-        )),
-        LayoutNode::Cell(
-            DisplayCell::new("Bass Meter", 150.0, BODY_HEIGHT, 1.0)
-                .with_top(ControlBand::stacked(
-                    60.0,
-                    &[(BOOM, Widget::Knob), (FREQ, Widget::Knob)],
-                ))
-                .with_bottom(ControlBand::stacked(
-                    76.0,
-                    &[
-                        (FORCE_TO_NOTE, Widget::Toggle),
-                        (BOOM_AUDITION, Widget::Toggle),
-                    ],
-                )),
-        ),
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (TYPE, Widget::Chooser),
-                (DRIVE, Widget::Knob),
-                (CRUNCH, Widget::Knob),
-                (DAMP, Widget::Knob),
-                (TRANSIENTS, Widget::Knob),
-                (DECAY, Widget::Knob),
-                (DRY_WET, Widget::Knob),
-                (OUTPUT, Widget::Knob),
+            vec![
+                at(DRIVE, Widget::Knob, 6.0, 4.0),
+                at(TYPE, Widget::Stack(3), 4.0, 60.0).sized(44.0, 42.0),
+                at(TRIM, Widget::Slider, 4.0, 112.0).sized(44.0, 21.0),
+                at(COMP, Widget::Toggle, 4.0, 142.0).sized(44.0, 12.0),
             ],
         )),
+        LayoutNode::Band(ControlBand::free(
+            56.0,
+            BODY_HEIGHT,
+            vec![
+                at(CRUNCH, Widget::SmallKnob, 12.0, 8.0),
+                at(DAMP, Widget::SmallKnob, 12.0, 60.0),
+                at(TRANSIENTS, Widget::SmallKnob, 12.0, 112.0),
+            ],
+        )),
+        LayoutNode::Band(ControlBand::free(
+            56.0,
+            BODY_HEIGHT,
+            vec![
+                at(BOOM, Widget::Knob, 8.0, 4.0),
+                at(FREQ, Widget::Knob, 8.0, 58.0),
+                at(DECAY, Widget::Slider, 4.0, 112.0).sized(48.0, 21.0),
+                at(FORCE_TO_NOTE, Widget::Toggle, 4.0, 142.0).sized(30.0, 12.0),
+                at(BOOM_AUDITION, Widget::Round, 38.0, 142.0).with_glyph(Glyph::Headphones),
+            ],
+        )),
+        LayoutNode::Cell(
+            DisplayCell::new("Bass Meter", 88.0, BODY_HEIGHT, 1.0).with_bottom(ControlBand::free(
+                88.0,
+                54.0,
+                vec![
+                    at(OUTPUT, Widget::Marked, 4.0, 4.0).sized(80.0, 21.0),
+                    at(DRY_WET, Widget::Slider, 4.0, 29.0).sized(80.0, 21.0),
+                ],
+            )),
+        ),
     ]));
     DeviceType::native(DRUM_BUSS, "Drum Buss", DeviceRole::AudioEffect).with_description(
         DeviceDescription::new(params)
@@ -253,9 +260,9 @@ fn crunch_gain(amount: f32) -> f32 {
     db_to_gain(CRUNCH_TOP_DB * f64::from(amount)) as f32
 }
 
-/// Damp's corner for `percent`.
-fn damp_corner(percent: f64) -> f64 {
-    DAMP_OPEN_HZ * (DAMP_CLOSED_HZ / DAMP_OPEN_HZ).powf(percent / 100.0)
+/// The resonator's ring-down time for Decay `percent`, in milliseconds.
+fn decay_ms(percent: f64) -> f64 {
+    DECAY_MS.0 * (DECAY_MS.1 / DECAY_MS.0).powf(percent / 100.0)
 }
 
 /// The nearest equal-tempered note's frequency to `hz`, at A = 440 Hz.
@@ -428,8 +435,8 @@ impl NativeDevice for Buss {
                 } else {
                     hz
                 };
-                let seconds = f64::from(decay[i]) * 0.001;
-                let corner = damp_corner(f64::from(damp[i]));
+                let seconds = decay_ms(f64::from(decay[i])) * 0.001;
+                let corner = f64::from(damp[i]).clamp(DAMP_RANGE.0, DAMP_RANGE.1);
                 let corner_changed = self.last_corner != Some(corner);
                 let resonator_changed = self.last_resonator != Some((hz, seconds));
                 self.last_corner = Some(corner);
@@ -495,7 +502,7 @@ impl NativeDevice for Buss {
             }
 
             // Transients on the band above 100 Hz.
-            let t = transients[i] / 100.0;
+            let t = transients[i];
             for (channel, value) in work.iter_mut().enumerate().take(channels) {
                 let (low, high) = self.transient_split[channel].split(*value);
                 let fast = self.transient_fast[channel].process(high) as f32;

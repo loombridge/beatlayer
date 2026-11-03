@@ -23,7 +23,22 @@ fn registry() -> Registry {
 /// A Drum Buss of `params`, up to `max_frames` at a time.
 fn buss(params: &[(ParamId, f64)], max_frames: usize) -> Box<dyn Node> {
     let device_type: DeviceType = drum_buss_type();
-    node(&registry(), &device(&device_type, params), max_frames)
+    // Over the settings these tests were written against, not the defaults a
+    // new Drum Buss has (Live's, tested on their own): `params` override them.
+    let mut all = vec![
+        (DRIVE, 0.0),
+        (DAMP, 20_000.0),
+        (FREQ, 60.0),
+        (DECAY, decay_percent(200.0)),
+    ];
+    all.extend_from_slice(params);
+    node(&registry(), &device(&device_type, &all), max_frames)
+}
+
+/// The Decay setting, in per cent, whose ring-down is `ms` milliseconds:
+/// the 0 % to 100 % span 10 ms to 2 s evenly in octaves.
+fn decay_percent(ms: f64) -> f64 {
+    100.0 * (ms / 10.0).ln() / 200f64.ln()
 }
 
 /// A sine of `hz` and `amplitude`, `frames` long.
@@ -194,9 +209,8 @@ fn crunch_adds_harmonics_to_the_mid_highs_only() {
 // Spec: drum-bus R7
 #[test]
 fn damps_corner_is_where_the_spec_puts_it() {
-    for damp in [25.0, 50.0, 100.0] {
-        let params = [(DAMP, damp)];
-        let corner = 20_000.0 * (200.0f64 / 20_000.0).powf(damp / 100.0);
+    for corner in [10_000.0f64, 2_000.0, 200.0] {
+        let params = [(DAMP, corner)];
         // Where the response falls 3 dB below its low-frequency gain.
         let steps = 160;
         let from = corner / 8.0;
@@ -213,7 +227,7 @@ fn damps_corner_is_where_the_spec_puts_it() {
         let found = (at(first - 1).ln() + t * (at(first).ln() - at(first - 1).ln())).exp();
         assert!(
             (found / corner - 1.0).abs() < 0.02,
-            "Damp {damp}: corner {found} against {corner}"
+            "Damp {corner} Hz: corner {found}"
         );
     }
 }
@@ -240,8 +254,8 @@ fn transients_raises_the_attack_to_sustain_ratio_above_a_hundred_hertz() {
         (rms(&out[0][attack.clone()]), rms(&out[0][sustain.clone()]))
     };
     let (attack_0, sustain_0) = shape(0.0);
-    let (attack_pos, sustain_pos) = shape(100.0);
-    let (_, sustain_neg) = shape(-100.0);
+    let (attack_pos, sustain_pos) = shape(1.0);
+    let (_, sustain_neg) = shape(-1.0);
     assert!(
         attack_pos / sustain_pos > attack_0 / sustain_0,
         "positive raises the attack-to-sustain ratio"
@@ -253,7 +267,7 @@ fn transients_raises_the_attack_to_sustain_ratio_above_a_hundred_hertz() {
     // A tone below 100 Hz is left within half a dB.
     let low = sine_of(50.0, 0.3, frames);
     let clean = run(buss(&[], frames).as_mut(), &low, &[]);
-    let shaped = run(buss(&[(TRANSIENTS, 100.0)], frames).as_mut(), &low, &[]);
+    let shaped = run(buss(&[(TRANSIENTS, 1.0)], frames).as_mut(), &low, &[]);
     let tail = |s: &[f32]| rms(&s[s.len() - 9_600..]);
     assert!(
         (20.0 * (tail(&shaped[0]) / tail(&clean[0])).log10()).abs() < 0.5,
@@ -264,7 +278,7 @@ fn transients_raises_the_attack_to_sustain_ratio_above_a_hundred_hertz() {
 // Spec: drum-bus R9, R10
 #[test]
 fn booms_resonator_rings_at_freq_and_force_to_note_snaps_it() {
-    let params = [(BOOM, 100.0), (FREQ, 80.0), (DECAY, 500.0)];
+    let params = [(BOOM, 100.0), (FREQ, 80.0), (DECAY, decay_percent(500.0))];
     let found = ring_frequency(&params, 80.0);
     assert!(
         (found / 80.0 - 1.0).abs() < 0.01,
@@ -284,7 +298,11 @@ fn booms_resonator_rings_at_freq_and_force_to_note_snaps_it() {
 #[test]
 fn decay_sets_the_resonators_ring_down_time() {
     for decay_ms in [100.0, 300.0] {
-        let params = [(BOOM, 100.0), (FREQ, 80.0), (DECAY, decay_ms)];
+        let params = [
+            (BOOM, 100.0),
+            (FREQ, 80.0),
+            (DECAY, decay_percent(decay_ms)),
+        ];
         let found = ring_down_seconds(&params);
         let want = decay_ms * 0.001;
         assert!(
@@ -320,7 +338,10 @@ fn boom_audition_outputs_only_the_enhancer() {
 fn the_bass_meter_is_readable_headlessly() {
     let frames = 8_192;
     let input = sine_of(60.0, 0.5, frames);
-    let mut node = buss(&[(BOOM, 100.0), (FREQ, 60.0), (DECAY, 500.0)], 4_096);
+    let mut node = buss(
+        &[(BOOM, 100.0), (FREQ, 60.0), (DECAY, decay_percent(500.0))],
+        4_096,
+    );
     let mut reader = node.display().expect("the device has a display");
     run(node.as_mut(), &input[..4_096], &[]);
     run(node.as_mut(), &input[4_096..], &[]);
@@ -371,11 +392,11 @@ fn renders_are_bit_identical_at_any_block_size() {
         (TYPE, 2.0),
         (DRIVE, 60.0),
         (CRUNCH, 40.0),
-        (DAMP, 30.0),
-        (TRANSIENTS, 50.0),
+        (DAMP, 5_000.0),
+        (TRANSIENTS, 0.5),
         (BOOM, 60.0),
         (FREQ, 70.0),
-        (DECAY, 300.0),
+        (DECAY, 50.0),
         (DRY_WET, 80.0),
         (OUTPUT, db_to_gain(-2.0)),
     ];
@@ -425,12 +446,12 @@ fn a_set_with_drum_buss_saves_and_reopens() {
         (TYPE, 2.0),
         (DRIVE, 70.0),
         (CRUNCH, 30.0),
-        (DAMP, 20.0),
-        (TRANSIENTS, -40.0),
+        (DAMP, 4_000.0),
+        (TRANSIENTS, -0.4),
         (BOOM, 80.0),
         (FREQ, 90.0),
         (FORCE_TO_NOTE, 1.0),
-        (DECAY, 400.0),
+        (DECAY, 70.0),
         (BOOM_AUDITION, 1.0),
         (DRY_WET, 90.0),
         (OUTPUT, -6.0),
@@ -458,7 +479,7 @@ fn a_set_with_drum_buss_saves_and_reopens() {
     assert_eq!(reopened_dev.params.get(&TRIM), Some(&-4.0));
     assert_eq!(reopened_dev.params.get(&TYPE), Some(&2.0));
     assert_eq!(reopened_dev.params.get(&DRIVE), Some(&70.0));
-    assert_eq!(reopened_dev.params.get(&TRANSIENTS), Some(&-40.0));
+    assert_eq!(reopened_dev.params.get(&TRANSIENTS), Some(&-0.4));
     assert_eq!(reopened_dev.params.get(&FORCE_TO_NOTE), Some(&1.0));
     assert_eq!(reopened_dev.params.get(&BOOM_AUDITION), Some(&1.0));
     assert_eq!(reopened_dev.params.get(&OUTPUT), Some(&-6.0));

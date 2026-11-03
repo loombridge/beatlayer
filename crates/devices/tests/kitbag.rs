@@ -30,10 +30,33 @@ fn registry() -> Registry {
     registry
 }
 
+/// What every slot opened with before it took Live's values: the filter at
+/// 1 kHz with no resonance, the longest decay, Volume Velocity following the
+/// velocity fully. A test names the settings it changes;
+/// `a_new_impulse_opens_as_live_shows_it` reads the defaults.
+fn plain() -> Vec<(ParamId, f64)> {
+    (0..SLOTS)
+        .flat_map(|s| {
+            [
+                (param(s, slot::FILTER_FREQ), 1_000.0),
+                (param(s, slot::FILTER_RES), 0.0),
+                (param(s, slot::DECAY), 10_000.0),
+                (param(s, slot::VOLUME_VELOCITY), 100.0),
+            ]
+        })
+        .collect()
+}
+
 /// A drum sampler of `params`, up to `max_frames` at a time.
 fn kitbag(params: &[(ParamId, f64)], max_frames: usize) -> Box<dyn Node> {
     let device_type: DeviceType = kitbag_type();
-    node(&registry(), &device(&device_type, params), max_frames)
+    let all: Vec<(ParamId, f64)> = plain().into_iter().chain(params.iter().copied()).collect();
+    node(&registry(), &device(&device_type, &all), max_frames)
+}
+
+/// The Time that scales by `factor`, in the per cent its knob reads.
+fn time_for(factor: f64) -> f64 {
+    100.0 * factor.ln() / 4f64.ln()
 }
 
 /// Decoded audio of `frames` frames at the engine's rate, one channel.
@@ -516,9 +539,9 @@ fn the_saturator_adds_harmonics_and_its_drive_boosts_the_level() {
         run(node.as_mut(), 24_000, &[on(0, 0)], &[])
     };
     let clean = heard(&[]);
-    let off = heard(&[(p(0, slot::DRIVE), 100.0)]);
+    let off = heard(&[(p(0, slot::DRIVE), 1.0)]);
     assert_eq!(clean, off, "with the saturator off, Drive does nothing");
-    let driven = heard(&[(p(0, slot::SATURATOR), 1.0), (p(0, slot::DRIVE), 100.0)]);
+    let driven = heard(&[(p(0, slot::SATURATOR), 1.0), (p(0, slot::DRIVE), 1.0)]);
     let window = 8_000..16_000;
     let third = |out: &[Vec<f32>]| amplitude_at(&out[0][window.clone()], 1_500.0);
     assert!(third(&clean) < 1e-3, "a sine has no third harmonic");
@@ -728,7 +751,7 @@ fn a_changed_slot_parameter_reaches_the_next_note_and_leaves_the_sounding_one() 
 // Spec: eight-slot-drum-sampler R13
 #[test]
 fn time_scales_the_decay_and_the_stretch() {
-    let time = (TIME, 200.0);
+    let time = (TIME, time_for(2.0));
     // Decay 100 ms is 200 ms at a Time of 200 %.
     let mut node = kitbag(&[(p(0, slot::DECAY), 100.0), time], 24_000);
     give(node.as_mut(), 0, &flat(96_000));
@@ -745,7 +768,7 @@ fn time_scales_the_decay_and_the_stretch() {
     let heard = peak_near(&out[0][6_000..18_000], 440.0);
     assert!((heard - 440.0).abs() < 5.0, "{heard}");
     // At 50 % it halves them.
-    let mut node = kitbag(&[(TIME, 50.0), (p(0, slot::DECAY), 100.0)], 24_000);
+    let mut node = kitbag(&[(TIME, time_for(0.5)), (p(0, slot::DECAY), 100.0)], 24_000);
     give(node.as_mut(), 0, &flat(96_000));
     let out = run(node.as_mut(), 24_000, &[on(0, 0)], &[]);
     assert!(out[0][2_500..].iter().all(|v| v.abs() < 1e-3));
@@ -784,7 +807,7 @@ fn pattern(block: usize, total: usize) -> Vec<Vec<f32>> {
         params.push((p(s, slot::STRETCH_MODE), (s / 2 % 2) as f64));
         params.push((p(s, slot::FILTER), (s % 3 == 0) as u8 as f64));
         params.push((p(s, slot::SATURATOR), (s % 2 == 1) as u8 as f64));
-        params.push((p(s, slot::DRIVE), 60.0));
+        params.push((p(s, slot::DRIVE), 0.6));
         params.push((p(s, slot::PAN_RANDOM), 80.0));
         params.push((p(s, slot::TRANSPOSE_RANDOM), 10.0));
         params.push((p(s, slot::TRANSPOSE_VELOCITY), 20.0));
@@ -945,14 +968,16 @@ fn the_engine_plays_the_eight_samples_the_set_names() {
     });
     assert_eq!(offline.heap_operations(), 0, "no allocation in a block");
     // Each slot's note sounds its own level and the hits ring on, so the
-    // sum climbs. Velocity 100 of 127 scales the level, and the decay,
-    // ten seconds at its default, takes a linear share off each hit.
+    // sum climbs. Velocity 100 of 127 scales the level by the default
+    // Volume Velocity, 70 %, and the decay, two seconds at its default,
+    // takes a linear share off each hit.
     let at = |s: usize| s * quarter as usize + quarter as usize - 100;
+    let velocity = 1.0 - 0.7 * (1.0 - 100.0 / 127.0);
     for s in 0..SLOTS {
         let want: f32 = (0..=s)
             .map(|k| {
                 let age = (at(s) - k * quarter as usize) as f32;
-                0.1 * (k + 1) as f32 * (1.0 - age / 480_000.0) * 100.0 / 127.0
+                0.1 * (k + 1) as f32 * (1.0 - age / 96_000.0).max(0.0) * velocity
             })
             .sum();
         assert!(
@@ -990,4 +1015,44 @@ fn a_missing_sample_leaves_its_slot_silent_and_the_rest_playing() {
         (out[40_000] - out[23_000]).abs() < 0.1,
         "slot 2 adds nothing: the note retriggers nothing"
     );
+}
+
+// Spec: eight-slot-drum-sampler R1, R22
+#[test]
+fn a_new_impulse_opens_as_live_shows_it() {
+    let description = kitbag_type().description;
+    let read = |id: ParamId| description.param(id).expect("a parameter").default;
+    let text = |id: ParamId| {
+        let param = description.param(id).expect("a parameter");
+        description.text(&read, param, read(id))
+    };
+    let slot = |local| param(0, local);
+    // The values and units of Live's panel, as the capture shows them.
+    assert_eq!(text(slot(slot::START)), "0.00 ms");
+    assert_eq!(text(slot(slot::TRANSPOSE)), "0 st");
+    assert_eq!(text(slot(slot::STRETCH)), "0.0 %");
+    assert_eq!(text(slot(slot::DRIVE)), "0.00");
+    assert_eq!(text(slot(slot::FILTER_FREQ)), "18.5 kHz");
+    assert_eq!(text(slot(slot::FILTER_RES)), "0.70");
+    assert_eq!(text(slot(slot::DECAY)), "2.00 s");
+    assert_eq!(text(slot(slot::PAN_VELOCITY)), "0.00 %");
+    assert_eq!(text(slot(slot::PAN_RANDOM)), "0.00 %");
+    assert_eq!(text(slot(slot::TRANSPOSE_VELOCITY)), "0.0 %");
+    assert_eq!(text(slot(slot::FILTER_RANDOM)), "0.0 %");
+    assert_eq!(text(slot(slot::VOLUME)), "0.00 dB");
+    assert_eq!(text(slot(slot::VOLUME_VELOCITY)), "70.0 %");
+    assert_eq!(text(VOLUME), "0.00 dB");
+    assert_eq!(text(TIME), "0.0 %");
+    assert_eq!(text(TRANSPOSE), "0 st");
+    // The buttons: the filter and the saturator off, Mode A, Trig.
+    for off in [
+        slot::FILTER,
+        slot::SATURATOR,
+        slot::STRETCH_MODE,
+        slot::DECAY_MODE,
+    ] {
+        assert_eq!(read(slot(off)), 0.0);
+    }
+    assert_eq!(bl_devices::kitbag::DECAY_MODES[0], "Trig");
+    assert_eq!(bl_devices::kitbag::STRETCH_MODES[0], "A");
 }

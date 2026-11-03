@@ -33,7 +33,21 @@ fn registry() -> Registry {
 /// of its display.
 fn rig(params: &[(ParamId, f64)], max_frames: usize) -> (Box<dyn Node>, DisplayReader) {
     let device_type: DeviceType = multiband_dynamics_type();
-    let mut node = node(&registry(), &device(&device_type, params), max_frames);
+    // Over the settings these tests were written against, not the defaults
+    // a new device has (Live's, tested on their own); `params` override them.
+    let mut all = vec![(LOW_FREQ, 500.0), (HIGH_FREQ, 2_000.0), (DETECTOR, 0.0)];
+    for band in [LOW, MID, HIGH] {
+        all.extend([
+            (band_param(band, ABOVE_THRESHOLD), -12.0),
+            (band_param(band, BELOW_THRESHOLD), -48.0),
+            (band_param(band, ABOVE_ATTACK), 10.0),
+            (band_param(band, BELOW_ATTACK), 10.0),
+            (band_param(band, ABOVE_RELEASE), 100.0),
+            (band_param(band, BELOW_RELEASE), 100.0),
+        ]);
+    }
+    all.extend_from_slice(params);
+    let mut node = node(&registry(), &device(&device_type, &all), max_frames);
     let reader = node.display().expect("it has a display");
     (node, reader)
 }

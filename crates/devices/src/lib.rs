@@ -24,6 +24,7 @@
 //! `kit-examples` feature, off by default.
 
 pub mod alignment_delay;
+pub mod amp;
 pub mod analog;
 mod analogue;
 pub mod arpeggiator;
@@ -84,6 +85,7 @@ pub mod lift;
 pub mod limiter;
 pub mod looper;
 pub mod meld;
+pub mod meld_filter;
 mod meld_gen;
 mod meld_osc;
 pub mod midi_cc;
@@ -139,6 +141,7 @@ pub mod wavetables;
 pub mod wax;
 
 pub use alignment_delay::{ALIGNMENT_DELAY, alignment_delay_type};
+pub use amp::{AMP, amp_type};
 pub use analog::{ANALOG, Analog, analog_type};
 pub use arpeggiator::{ARPEGGIATOR, arpeggiator_type};
 pub use auto_filter::{AUTO_FILTER, AutoFilter, auto_filter_type};
@@ -419,6 +422,7 @@ pub fn register(registry: &mut Registry) {
     drum_bus::register(registry);
     overdrive::register(registry);
     tube::register(registry);
+    amp::register(registry);
     roar::register(registry);
     pedal::register(registry);
     resonators::register(registry);

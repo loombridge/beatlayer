@@ -145,7 +145,7 @@ const SIZED_FOR_RATE: f64 = 192_000.0;
 pub fn resonators_type() -> DeviceType {
     let mut params = vec![
         ParamDescriptor::choice(FILTER_TYPE, "Filter Type", &FILTER_TYPES, 2)
-            .describe("The input filter: low-pass, band-pass, high-pass or notch."),
+            .describe("The input filter: low-pass, high-pass, band-pass or notch."),
         ParamDescriptor::continuous(
             FILTER_FREQ,
             "Filter Frequency",

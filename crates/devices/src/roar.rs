@@ -842,8 +842,8 @@ fn part_two_params(existing: &[ParamDescriptor]) -> Vec<ParamDescriptor> {
         ParamDescriptor::continuous(id, name, (min, max), default, ParamUnit::Milliseconds)
             .logarithmic()
     };
-    let octaves = |id, name: &str, default| {
-        ParamDescriptor::continuous(id, name, (0.1, 8.0), default, ParamUnit::None)
+    let octaves = |id, name: &str, max, default| {
+        ParamDescriptor::continuous(id, name, (0.1, max), default, ParamUnit::None)
     };
     let strings = |names: &[&str]| names.iter().map(|n| (*n).to_owned()).collect::<Vec<_>>();
     let mut params = vec![
@@ -888,7 +888,7 @@ fn part_two_params(existing: &[ParamDescriptor]) -> Vec<ParamDescriptor> {
             .describe("Fades the feedback out once the input has stopped."),
         hertz(FB_FREQUENCY, "Feedback Frequency", (20.0, 20_000.0), 1_000.0)
             .describe("The centre of the band-pass the feedback path passes."),
-        octaves(FB_WIDTH, "Feedback Width", 8.0)
+        octaves(FB_WIDTH, "Feedback Width", 8.0, 8.0)
             .describe("The width of the feedback band-pass, in octaves."),
         percent(COMPRESSION, "Compression Amount", 25.0)
             .describe("A compressor on the output, and so on the feedback: more lowers its threshold and raises its ratio."),
@@ -971,7 +971,7 @@ fn part_two_params(existing: &[ParamDescriptor]) -> Vec<ParamDescriptor> {
         .describe("Raises or lowers what Env's detector hears."),
         hertz(ENV_FREQUENCY, "Env Frequency", (20.0, 20_000.0), 1_000.0)
             .describe("The centre of the band Env's detector hears."),
-        octaves(ENV_WIDTH, "Env Width", 4.0)
+        octaves(ENV_WIDTH, "Env Width", 4.0, 4.0)
             .describe("The width of the band Env's detector hears, in octaves."),
         ParamDescriptor::toggle(INPUT_LISTEN, "Input Listen", false)
             .describe("Sends what Env's detector hears to the output."),

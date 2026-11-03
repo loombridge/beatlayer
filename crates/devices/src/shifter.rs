@@ -52,7 +52,8 @@ pub const SPREAD: ParamId = ParamId(6);
 pub const WIDE: ParamId = ParamId(7);
 /// Delay: whether the delay is on.
 pub const DELAY_ON: ParamId = ParamId(8);
-/// Delay Mode: whether its time is free, in Hz, or synced to the tempo.
+/// Delay Mode: whether its time is free, in milliseconds, or synced to the
+/// tempo.
 pub const DELAY_MODE: ParamId = ParamId(9);
 /// Delay Time: the free delay time, in milliseconds.
 pub const DELAY_MS: ParamId = ParamId(10);
@@ -244,7 +245,7 @@ pub fn shifter_type() -> DeviceType {
         ParamDescriptor::toggle(DELAY_ON, "Delay", false)
             .describe("Adds repeats of the shifted signal."),
         ParamDescriptor::choice(DELAY_MODE, "Delay Mode", &DELAY_MODES, 1)
-            .describe("Whether the delay time is a rate in Hz or a beat division."),
+            .describe("Whether the delay time is a time in milliseconds or a beat division."),
         ParamDescriptor::continuous(
             DELAY_MS,
             "Delay Time",

@@ -714,7 +714,7 @@ fn renders_are_bit_identical_at_every_block_size_and_run_after_run() {
 fn the_longest_decay_never_grows() {
     let rate = SampleRate::HZ_48000;
     let params = [
-        (DECAY, decay_value(30.0)),
+        (DECAY, 100.0),
         (CONST, 1.0),
         (MODE, 1.0),
         (voice_param(3, ON), 1.0),

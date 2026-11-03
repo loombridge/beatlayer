@@ -212,6 +212,12 @@ pub struct Device {
     /// free slots or with none set, and left out of the saved set then.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub routes: Vec<crate::matrix::ModRoute>,
+    /// The partials of the user waves an Operator's oscillators play (the
+    /// Operator spec, R27), by oscillator; one that isn't listed has the
+    /// first partial alone. Empty for a device without drawn waves, and left
+    /// out of the saved set then.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub partials: Vec<crate::partials::Partials>,
     /// The user's own info text (Edit Info Text), which the Info View shows while the pointer is over the device; empty for none, and left out of the saved set then (the Info View spec, R9).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub info_text: String,
@@ -534,6 +540,7 @@ impl Device {
             slices: Vec::new(),
             articulations,
             routes: Vec::new(),
+            partials: Vec::new(),
             info_text: String::new(),
         }
     }

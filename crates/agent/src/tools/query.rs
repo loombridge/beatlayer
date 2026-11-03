@@ -561,6 +561,11 @@ impl View<'_> {
         if !wavetables.is_empty() {
             value["wavetables"] = json!(wavetables);
         }
+        // Spec: operator R27. The partials of the user waves an Operator's
+        // oscillators play, which `device.set_partials` changes.
+        if !device.partials.is_empty() {
+            value["partials"] = json!(device.partials);
+        }
         // Spec: modulation R18. A modulator's mappings, which
         // `modulator.map` and `modulator.unmap` change.
         if bl_model::modulator::is_modulator_kind(&device.kind) {

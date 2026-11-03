@@ -43,6 +43,8 @@ fn base(params: &[(ParamId, f64)]) -> Vec<(ParamId, f64)> {
         (FREEZER_ON, 0.0),
         (DELAY_ON, 0.0),
         (FREEZE, 0.0),
+        (DELAY_DRY_WET, 100.0),
+        (DRY_WET, 100.0),
     ];
     for &(param, value) in params {
         all.retain(|(p, _)| *p != param);
@@ -225,6 +227,7 @@ fn zero_dry_signal_latency_passes_the_dry_signal_undelayed_and_reports_none() {
     // The wet signal arrives late by the frame less one.
     let mut wet = zero.clone();
     wet.retain(|(p, _)| *p != DRY_WET);
+    wet.push((DRY_WET, 100.0));
     let out = render(&wet, &impulse(100, 4_096), 512);
     assert_eq!(peak(&out[0]), 100 + LATENCY);
 }
@@ -662,7 +665,7 @@ fn mask_limits_the_delay_to_the_highs_or_the_lows() {
     input.resize(seconds(1.5), 0.0);
     // The delay is 0.4 s; the part left out comes through at once.
     for (mask, early, late) in [(50.0, 200.0, 5_000.0), (-50.0, 5_000.0, 200.0)] {
-        let out = render(&delay(&[(TIME, 400.0), (MASK, mask)]), &input, 512);
+        let out = render(&delay(&[(TIME, 400.0), (MASK, mask / 100.0)]), &input, 512);
         let first = seconds(0.2);
         assert!(
             at(&out[0], early, first, 4_800) > 0.3,
@@ -910,7 +913,7 @@ fn a_render_is_the_same_to_the_bit_at_blocks_of_1_64_512_and_4096_and_run_after_
         (TIME, 120.0),
         (TILT, 40.0),
         (SPRAY, 30.0),
-        (MASK, -20.0),
+        (MASK, -0.2),
         (FEEDBACK, 60.0),
         (SHIFT, 5.0),
         (STEREO, 50.0),

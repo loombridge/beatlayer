@@ -10,9 +10,10 @@ use std::sync::Arc;
 use bl_core::id::Id;
 use bl_core::time::{Bpm, Frames, TempoMap};
 use bl_devices::granulator_iii::{
-    ATTACK, CLASSIC, CLOUD, DENSITY, DISPLAY_LEN, FILTER, FILTER_FREQ, LOOP, MODE, MODES, PAGES,
-    POOL, POSITION, PRESSURE_SIZE, RATE, RELEASE, SHAPE, SIZE, SLIDE_AMOUNT, SPRAY, SUSTAIN,
-    VARIATION, VOICES, VOLUME, WIDTH, display, granulator_iii_type,
+    ATTACK, CAPTURE_LENGTH, CLASSIC, CLOUD, CaptureBuffer, CaptureCommand, DENSITY, DISPLAY_LEN,
+    FILTER, FILTER_FREQ, LOOP, MODE, MODES, PAGES, POOL, POSITION, PRESSURE_SIZE, RATE, RELEASE,
+    SHAPE, SIZE, SLIDE_AMOUNT, SPRAY, SUSTAIN, VARIATION, VOICES, VOLUME, WIDTH, display,
+    granulator_iii_type,
 };
 use bl_engine::{
     Block, Collector, DisplayReader, Node, NoteBuffer, NoteEvent, NoteExpression, NoteKind,
@@ -610,4 +611,115 @@ fn a_stream_that_waited_for_a_sample_or_the_song_starts_where_it_is_not_with_a_b
     render(&mut node, &Play::song(512, 0), 96_000, &[on(0, 60)]);
     let (_, data) = render(&mut node, &STOPPED, 2_000, &[]);
     assert_eq!(data[0], 0.0, "no grain was dropped");
+}
+
+/// Plays `frames` frames of a note on key 60 in blocks of `block`, feeding
+/// `key` (planar, a block's frames per channel) as the sidechain, and returns
+/// the left channel.
+fn render_keyed(
+    (node, _): &mut (Box<dyn Node>, DisplayReader),
+    frames: usize,
+    block: usize,
+    key: &dyn Fn(usize) -> f32,
+) -> Vec<f32> {
+    let tempo = tempo();
+    let mut out = Vec::new();
+    let mut done = 0;
+    while done < frames {
+        let length = block.min(frames - done);
+        let keyed: Vec<f32> = (0..2 * length).map(|n| key(done + n % length)).collect();
+        let mut data = vec![0.0f32; CHANNELS * length];
+        let mut sent = NoteBuffer::with_capacity(1);
+        let on = [on(0, 60)];
+        let notes: &[NoteEvent] = if done == 0 { &on } else { &[] };
+        {
+            let mut block = Block::new(
+                &mut data,
+                CHANNELS,
+                length,
+                length,
+                &[],
+                TransportInfo::default(),
+                common::RATE,
+            )
+            .with_notes(notes, &mut sent)
+            .with_tempo(&tempo)
+            .with_sidechain(&keyed);
+            bl_rt::rt_test!({ node.process(&mut block) });
+        }
+        out.extend_from_slice(&data[..length]);
+        done += length;
+    }
+    out
+}
+
+fn start_capture(node: &mut Box<dyn Node>, frames: usize) -> Arc<CaptureBuffer> {
+    let buffer = Arc::new(CaptureBuffer::new(frames));
+    node.receive_data(
+        Collector::new()
+            .handle()
+            .data(CaptureCommand::Start(Arc::clone(&buffer))),
+    );
+    buffer
+}
+
+// Spec: granulator iii R18, R19, R20
+#[test]
+fn grains_play_from_what_a_capture_holds_so_far_and_it_stops_at_length() {
+    let mut granulator = granulator(
+        &[(CAPTURE_LENGTH, 1.0), (SIZE, 20.0), (POSITION, 90.0)],
+        None,
+    );
+    let buffer = start_capture(&mut granulator.0, 48_000);
+    // Silence for 10,000 frames, then a steady level: the grains read what
+    // is written and nothing ahead of it, so Main is silent until it comes.
+    let key = |frame: usize| if frame < 10_000 { 0.0 } else { 0.5 };
+    let out = render_keyed(&mut granulator, 48_000 + 512, 256, &key);
+    assert!(out[..10_000].iter().all(|s| s.abs() < 1e-9));
+    assert!(
+        out[12_000..].iter().any(|s| s.abs() > 1e-3),
+        "grains play while it fills"
+    );
+    assert!(buffer.finished());
+    assert_eq!(buffer.filled(), 48_000);
+    let [left, _] = buffer.read();
+    assert!(left.iter().enumerate().all(|(n, s)| *s == key(n)));
+    // The reading says it is no longer capturing.
+    let data = granulator.1.read().values.clone();
+    let shown = display(
+        DeviceId(Id::new(1).unwrap()),
+        &granulator_iii_type().description,
+        &OrdMap::new(),
+        Some(&data),
+    );
+    assert_eq!(shown.reading("Capturing").unwrap().value, 0.0);
+    assert_eq!(shown.reading("Captured").unwrap().value, 1.0);
+}
+
+// Spec: granulator iii R19
+#[test]
+fn a_capture_without_a_sidechain_signal_holds_silence() {
+    let mut granulator = granulator(&[(CAPTURE_LENGTH, 1.0)], None);
+    let buffer = start_capture(&mut granulator.0, 48_000);
+    // (No `with_sidechain` here: the node hears none.)
+    let (node, _) = &mut granulator;
+    let tempo = tempo();
+    let mut data = vec![0.0f32; CHANNELS * 512];
+    let mut sent = NoteBuffer::with_capacity(1);
+    {
+        let mut block = Block::new(
+            &mut data,
+            CHANNELS,
+            512,
+            512,
+            &[],
+            TransportInfo::default(),
+            common::RATE,
+        )
+        .with_notes(&[], &mut sent)
+        .with_tempo(&tempo);
+        node.process(&mut block);
+    }
+    assert_eq!(buffer.filled(), 512);
+    assert!(buffer.read()[0].iter().all(|s| *s == 0.0));
 }

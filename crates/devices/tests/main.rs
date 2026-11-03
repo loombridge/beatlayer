@@ -14,6 +14,7 @@ mod arpeggiator;
 mod articulation_map;
 mod auto_filter;
 mod auto_pan_tremolo;
+mod auto_shift;
 mod automation;
 mod banks;
 mod bass;

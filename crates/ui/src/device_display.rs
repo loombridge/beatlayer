@@ -51,6 +51,14 @@ const METER_RANGE_DB: f32 = 24.0;
 const HISTORY: usize = 240;
 /// The view buttons' size, in points.
 const VIEW_BUTTON: egui::Vec2 = vec2(26.0, 12.0);
+/// Granulator III's Capture button's size, in points.
+const CAPTURE_BUTTON: egui::Vec2 = vec2(46.0, 14.0);
+
+/// The ID of Granulator III's Capture button.
+#[must_use]
+pub fn capture_button_id(device: DeviceId) -> Id {
+    Id::new(("granulator-capture", device))
+}
 
 /// The ID of a view button in a device's panel.
 #[must_use]
@@ -199,6 +207,64 @@ pub fn draw_cell(
     if buttons && shown.len() > 1 {
         view_buttons(ui, theme, cell, display, &shown, enabled, events);
     }
+    if let Some(capturing) = display.reading("Capturing") {
+        capture_button(
+            ui,
+            theme,
+            cell,
+            display.device,
+            capturing.value > 0.0,
+            enabled,
+            events,
+        );
+    }
+}
+
+/// Spec: granulator iii R19, R25. The Capture button along the cell's
+/// bottom-left corner: it starts a capture, and while one runs it stops it.
+fn capture_button(
+    ui: &mut Ui,
+    theme: &Theme,
+    cell: Rect,
+    device: DeviceId,
+    capturing: bool,
+    enabled: bool,
+    events: &mut Vec<UiEvent>,
+) {
+    let c = &theme.colors;
+    let rect = Rect::from_min_size(
+        pos2(cell.left() + 3.0, cell.bottom() - CAPTURE_BUTTON.y - 3.0),
+        CAPTURE_BUTTON,
+    );
+    let button = capture_button_id(device);
+    let response = ui.interact(rect, button, Sense::click());
+    crate::focus::register(ui.ctx(), button, bl_shell::Area::Detail, None);
+    if response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+    {
+        events.push(UiEvent::Invoke(Invocation::new(
+            "granulator.capture",
+            json!({ "device": device, "action": if capturing { "stop" } else { "start" } }),
+        )));
+    }
+    let face = match (capturing, enabled) {
+        (true, true) => c.accent.0,
+        (true, false) => c.inactive.0,
+        _ => c.control.0,
+    };
+    let ink = if capturing { c.accent_text.0 } else { c.text.0 };
+    ui.painter().rect_filled(rect, theme.sizes.corner, face);
+    ui.painter().text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        if capturing { "Stop" } else { "Capture" },
+        theme.small_font(),
+        ink,
+    );
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(Role::Button);
+        node.set_label("Capture");
+        node.set_selected(capturing);
+    });
 }
 
 /// Gated Delay's step row (the gated-delay spec, R9): the switches are the

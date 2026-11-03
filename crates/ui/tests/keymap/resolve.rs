@@ -185,11 +185,13 @@ fn platform_items_and_corrected_keys_follow_the_reference() {
         assert!(matches!(entry.status, Status::System(_)), "{id}");
     }
     // The video window's keys as Live 12.4.3's View menu shows them, not
-    // the manual's (S-VIEW-009, corrected in WP-0.13b). It comes in M9.
+    // the manual's (S-VIEW-009, corrected in WP-0.13b), bound to the Video
+    // Window's command in WP-9.26 (video R16).
     let video = keymap.entry_for("S-VIEW-009").unwrap();
     assert_eq!(video.mac, ["Cmd+Option+Shift+V"]);
     assert_eq!(video.win, ["Ctrl+Alt+Shift+V"]);
-    assert!(matches!(video.status, Status::Pending { .. }));
+    assert_eq!(video.status, Status::Bound);
+    assert_eq!(video.commands[0].id, "view.toggle_video_window");
 }
 
 #[test]

@@ -12,7 +12,7 @@ use core::f64::consts::{LN_2, TAU};
 
 use bl_dsp::EnvelopeFollower;
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{BOX_HEIGHT, Control, ControlBand, DisplayCell, LayoutNode, Widget};
 use bl_model::param::db_to_gain;
 use bl_model::{
     Device, DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayMarker,
@@ -32,13 +32,17 @@ pub const DRIVE: ParamId = ParamId(0);
 pub const TONE: ParamId = ParamId(1);
 /// Frequency: the band-pass's centre, in Hz.
 pub const FREQUENCY: ParamId = ParamId(2);
-/// Width: the band-pass's width between its −3 dB points, in octaves.
+/// Width, unitless: the band-pass's width between its −3 dB points, in
+/// [`WIDTH_OCTAVES`] octaves a unit.
 pub const WIDTH: ParamId = ParamId(3);
 /// Dynamics, per cent: 0 levels the output as Drive rises, 100 doesn't.
 pub const DYNAMICS: ParamId = ParamId(4);
 /// Dry/Wet, per cent.
 pub const DRY_WET: ParamId = ParamId(5);
 
+/// How many octaves one unit of Width is: Live's 6.5 is a band 1.5 octaves
+/// wide.
+pub const WIDTH_OCTAVES: f64 = 1.5 / 6.5;
 /// The Drive gain at 0 % and 100 %, in dB.
 const DRIVE_FROM_DB: f64 = 6.0;
 const DRIVE_TO_DB: f64 = 36.0;
@@ -86,34 +90,37 @@ pub fn overdrive_type() -> DeviceType {
             FREQUENCY,
             "Frequency",
             (80.0, 8_000.0),
-            1_200.0,
+            1_250.0,
             ParamUnit::Hertz,
         )
         .logarithmic()
         .describe("The centre of the band that reaches the distortion."),
-        ParamDescriptor::continuous(WIDTH, "Width", (0.2, 4.0), 1.5, ParamUnit::None)
-            .describe("The width of the band that reaches the distortion, in octaves."),
+        ParamDescriptor::continuous(WIDTH, "Width", (1.0, 18.0), 6.5, ParamUnit::None)
+            .describe("The width of the band that reaches the distortion."),
         ParamDescriptor::continuous(DYNAMICS, "Dynamics", (0.0, 100.0), 50.0, ParamUnit::Percent)
             .describe(
                 "How much the distortion's level follows Drive: at low settings more Drive \
                  means more compression and make-up gain, at high settings less.",
             ),
-        ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 100.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 50.0, ParamUnit::Percent)
             .describe("The balance between the dry signal and the distorted one."),
     ];
-    let layout = DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Cell(
-            DisplayCell::new("Drive Curve", 150.0, BODY_HEIGHT, 1.0).with_bottom(
-                ControlBand::stacked(60.0, &[(FREQUENCY, Widget::Knob), (WIDTH, Widget::Knob)]),
-            ),
-        ),
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (DRIVE, Widget::Knob),
-                (TONE, Widget::Knob),
-                (DYNAMICS, Widget::Knob),
-                (DRY_WET, Widget::Knob),
+    let layout = DeviceLayout::new(LayoutNode::Column(vec![
+        LayoutNode::Cell(DisplayCell::new("Drive Curve", 103.0, 56.0, 1.0).with_inset(4.0)),
+        LayoutNode::Band(ControlBand::free(
+            111.0,
+            94.0,
+            vec![
+                Control::new(FREQUENCY, Widget::Number, 4.0, 0.0)
+                    .unnamed()
+                    .sized(49.0, BOX_HEIGHT),
+                Control::new(WIDTH, Widget::Number, 57.0, 0.0)
+                    .unnamed()
+                    .sized(50.0, BOX_HEIGHT),
+                Control::new(DRIVE, Widget::SmallKnob, 11.0, 14.0),
+                Control::new(TONE, Widget::SmallKnob, 64.0, 14.0),
+                Control::new(DYNAMICS, Widget::Beside(53), 4.0, 62.0).sized(97.0, BOX_HEIGHT),
+                Control::new(DRY_WET, Widget::Beside(53), 4.0, 77.0).sized(97.0, BOX_HEIGHT),
             ],
         )),
     ]));
@@ -227,7 +234,7 @@ impl NativeDevice for Grit {
                 for channel in 0..channels {
                     self.band[channel].design(
                         f64::from(frequency[i]),
-                        f64::from(width[i]),
+                        f64::from(width[i]) * WIDTH_OCTAVES,
                         self.rate,
                     );
                     self.tone[channel].c = coeffs(

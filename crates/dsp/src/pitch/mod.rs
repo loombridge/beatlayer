@@ -22,7 +22,7 @@ mod tracker;
 mod voice;
 
 pub use tracker::{Config, Pitch, Tracker};
-pub use voice::VoiceShifter;
+pub use voice::{Ask, Grain, VoiceShifter};
 
 #[cfg(test)]
 mod tests;

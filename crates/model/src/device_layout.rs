@@ -286,6 +286,9 @@ pub enum Glyph {
     Minus,
     /// A flat and a sharp: Use Current Scale.
     FlatSharp,
+    /// Headphones: a device's audition button (Boom Audition, Utility's
+    /// Bass Mono, EQ Eight's Audition).
+    Headphones,
 }
 
 /// A unit a knob's two parameters read in.

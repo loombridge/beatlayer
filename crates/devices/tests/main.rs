@@ -39,6 +39,7 @@ mod digital_degradation;
 mod drum_bus;
 mod drum_sampler;
 mod drum_synths;
+mod dynamics_panels;
 mod echo;
 mod effect_parts;
 mod electric;

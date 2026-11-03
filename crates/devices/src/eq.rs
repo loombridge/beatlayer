@@ -20,7 +20,9 @@ use std::f64::consts::TAU;
 
 use bl_dsp::Oversampler;
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{
+    BODY_HEIGHT, Control, ControlBand, DisplayCell, Heading, LayoutNode, SlotGroup, Widget,
+};
 use bl_model::{
     DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayMarker, OrdMap,
     ParamDescriptor, ParamId, ParamUnit,
@@ -272,11 +274,9 @@ pub fn eq_type() -> DeviceType {
     DeviceType::native(EQ, "EQ Eight", DeviceRole::AudioEffect).with_description(
         DeviceDescription::new(params)
             .with_layout(layout())
+            .with_menu_options(&[OVERSAMPLE])
             .with_banks(&[
-                (
-                    "EQ",
-                    &["Mode", "Adaptive Q", "Oversample", "Analyze", "Gain"],
-                ),
+                ("EQ", &["Mode", "Adaptive Q", "Analyze", "Gain"]),
                 (
                     "Band A1",
                     &["A1 On", "A1 Type", "A1 Freq", "A1 Gain", "A1 Q"],
@@ -345,42 +345,85 @@ pub fn eq_type() -> DeviceType {
     )
 }
 
-/// Every control of `curve`'s bands, in band order.
-fn band_controls(curve: usize) -> Vec<(ParamId, Widget)> {
-    (0..BANDS)
-        .flat_map(|band| {
-            [
-                (band_param(curve, band, ON), Widget::Toggle),
-                (band_param(curve, band, TYPE), Widget::Chooser),
-                (band_param(curve, band, FREQ), Widget::Knob),
-                (band_param(curve, band, GAIN_SLOT), Widget::Knob),
-                (band_param(curve, band, Q), Widget::Knob),
-            ]
-        })
-        .collect()
+/// The knobs for the selected band of `curve`: its Frequency, Gain and Q,
+/// whichever band the panel has selected (a band's cell selects it).
+fn selected_band(curve: usize) -> ControlBand {
+    let at = Control::new;
+    ControlBand::free(
+        48.0,
+        BODY_HEIGHT,
+        vec![
+            at(band_param(curve, 0, FREQ), Widget::SmallKnob, 8.0, 4.0),
+            at(
+                band_param(curve, 0, GAIN_SLOT),
+                Widget::SmallKnob,
+                8.0,
+                56.0,
+            ),
+            at(band_param(curve, 0, Q), Widget::SmallKnob, 8.0, 108.0),
+        ],
+    )
+    .for_slots(SlotGroup {
+        stride: SLOTS as u32,
+        count: BANDS as u32,
+    })
 }
 
-/// The layout: the globals, the first curve, the display, the second curve.
-/// The display grows; the bands are the framework's generic columns, since
-/// EQ Eight's own panel (one band at a time, edited in the display) needs
-/// the device's own drawing, which the framework doesn't have yet.
+/// A row of `curve`'s bands' cells, each with its filter type and its
+/// switch, a click on one selecting that band.
+fn band_cells(curve: usize) -> LayoutNode {
+    let at = Control::new;
+    LayoutNode::Row(
+        (0..BANDS)
+            .map(|band| {
+                LayoutNode::Cell(
+                    DisplayCell::new(&format!("Band {}", band + 1), 46.0, 62.0, 1.0)
+                        .for_slot(band as u32)
+                        .with_bottom(ControlBand::free(
+                            46.0,
+                            46.0,
+                            vec![
+                                at(band_param(curve, band, TYPE), Widget::Chooser, 2.0, 2.0)
+                                    .sized(42.0, 21.0),
+                                at(band_param(curve, band, ON), Widget::Toggle, 2.0, 30.0)
+                                    .sized(42.0, 12.0),
+                            ],
+                        )),
+                )
+            })
+            .collect(),
+    )
+}
+
+/// The layout as Live draws it (L-DEV-056): the selected band's Frequency,
+/// Gain and Q at the left, the display over the eight band cells, and the
+/// mode, Adaptive Q and Output at the right. The second curve (Live's Edit
+/// L and R) is the expanded part.
 fn layout() -> DeviceLayout {
-    let globals = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (MODE, Widget::Chooser),
-            (ADAPTIVE_Q, Widget::Toggle),
-            (OVERSAMPLE, Widget::Toggle),
-            (ANALYZE, Widget::Toggle),
-            (GAIN, Widget::Knob),
-        ],
-    );
-    let curve = |which: usize| ControlBand::stacked(BODY_HEIGHT, &band_controls(which));
+    let at = Control::new;
     DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Band(globals),
-        LayoutNode::Band(curve(0)),
-        LayoutNode::Cell(DisplayCell::new("EQ Curve", 200.0, BODY_HEIGHT, 2.0)),
-        LayoutNode::Band(curve(1)),
+        LayoutNode::Band(selected_band(0)),
+        LayoutNode::Column(vec![
+            LayoutNode::Cell(DisplayCell::new("EQ Curve", 320.0, 96.0, 2.0)),
+            band_cells(0),
+        ]),
+        LayoutNode::Band(ControlBand::free(
+            64.0,
+            BODY_HEIGHT,
+            vec![
+                at(ANALYZE, Widget::Toggle, 4.0, 4.0).sized(56.0, 12.0),
+                at(MODE, Widget::Chooser, 4.0, 22.0).sized(56.0, 21.0),
+                at(ADAPTIVE_Q, Widget::Toggle, 4.0, 62.0).sized(56.0, 12.0),
+                at(GAIN, Widget::Number, 4.0, 126.0).sized(56.0, 21.0),
+            ],
+        )),
+    ]))
+    .with_expanded(LayoutNode::Row(vec![
+        LayoutNode::Band(selected_band(1)),
+        LayoutNode::Column(vec![
+            LayoutNode::Heading(Heading::new("Second curve", 320.0)),
+            band_cells(1),
+        ]),
     ]))
 }
 

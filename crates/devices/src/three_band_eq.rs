@@ -10,7 +10,7 @@
 //! slight colouring the manual describes (see `docs/specs/three-band-eq.md`).
 
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, LayoutNode, Widget};
+use bl_model::device_layout::{BODY_HEIGHT, Control, ControlBand, LayoutNode, Widget};
 use bl_model::{
     DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayReading, OrdMap,
     ParamDescriptor, ParamId, ParamUnit,
@@ -110,7 +110,7 @@ pub fn three_band_eq_type() -> DeviceType {
         )
         .logarithmic()
         .describe("Where the mid band ends and the high band begins."),
-        ParamDescriptor::choice(SLOPE, "Slope", &SLOPES, 0)
+        ParamDescriptor::choice(SLOPE, "Slope", &SLOPES, 1)
             .describe("How steeply the bands part: 24 or 48 dB per octave."),
     ];
     DeviceType::native(THREE_BAND_EQ, "EQ Three", DeviceRole::AudioEffect).with_description(
@@ -133,27 +133,25 @@ pub fn three_band_eq_type() -> DeviceType {
     )
 }
 
-/// The three bands as columns, low to high, and the crossovers beside them.
+/// The panel as Live draws it (L-DEV-054): the bands' gains in a row over
+/// their switches, and the crossovers either side of the slope under them.
 fn layout() -> DeviceLayout {
-    let column = |gain, on| {
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[(gain, Widget::Knob), (on, Widget::Toggle)],
-        ))
-    };
-    DeviceLayout::new(LayoutNode::Row(vec![
-        column(GAIN_LOW, ON_LOW),
-        column(GAIN_MID, ON_MID),
-        column(GAIN_HIGH, ON_HIGH),
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (FREQ_LOW, Widget::Knob),
-                (FREQ_HIGH, Widget::Knob),
-                (SLOPE, Widget::Chooser),
-            ],
-        )),
-    ]))
+    let at = Control::new;
+    DeviceLayout::new(LayoutNode::Row(vec![LayoutNode::Band(ControlBand::free(
+        176.0,
+        BODY_HEIGHT,
+        vec![
+            at(GAIN_LOW, Widget::Knob, 8.0, 8.0),
+            at(ON_LOW, Widget::Toggle, 12.0, 66.0).sized(32.0, 12.0),
+            at(GAIN_MID, Widget::Knob, 68.0, 8.0),
+            at(ON_MID, Widget::Toggle, 72.0, 66.0).sized(32.0, 12.0),
+            at(GAIN_HIGH, Widget::Knob, 128.0, 8.0),
+            at(ON_HIGH, Widget::Toggle, 132.0, 66.0).sized(32.0, 12.0),
+            at(FREQ_LOW, Widget::SmallKnob, 12.0, 112.0),
+            at(SLOPE, Widget::Stack(2), 66.0, 120.0).sized(44.0, 27.0),
+            at(FREQ_HIGH, Widget::SmallKnob, 132.0, 112.0),
+        ],
+    ))]))
 }
 
 /// Adds EQ Three to `registry`.

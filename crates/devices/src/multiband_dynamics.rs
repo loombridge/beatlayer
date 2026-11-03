@@ -19,7 +19,9 @@
 use core::f64::consts::{FRAC_1_SQRT_2, TAU};
 
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{
+    BODY_HEIGHT, Control, ControlBand, DisplayCell, HEADING_HEIGHT, Heading, LayoutNode, Widget,
+};
 use bl_model::param::db_to_gain;
 use bl_model::{
     DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayMarker,
@@ -70,7 +72,6 @@ pub const BELOW_THRESHOLD: u32 = 8;
 pub const BELOW_RATIO: u32 = 9;
 pub const BELOW_ATTACK: u32 = 10;
 pub const BELOW_RELEASE: u32 = 11;
-const FIELDS: u32 = 12;
 
 /// Where the bands' parameters start, and how far apart they are.
 const BANDS_FROM: u32 = 16;
@@ -85,6 +86,10 @@ pub const fn band_param(band: usize, field: u32) -> ParamId {
 /// The Detector choices, by their indices.
 const DETECTOR_RMS: usize = 1;
 
+/// Each band's attack and release at first, in ms, as Live's panel reads
+/// them (Low, Mid, High).
+const BAND_TIMES: [(f64, f64); 3] = [(50.0, 300.0), (10.0, 200.0), (5.0, 100.0)];
+
 /// The soft knee's width, in dB, centred on each threshold. Beatlayer's own.
 const KNEE_DB: f64 = 6.0;
 
@@ -94,7 +99,7 @@ const FLOOR_DB: f64 = -120.0;
 /// The deepest cut and the highest boost one side asks for, in dB.
 /// Beatlayer's own.
 const MIN_GAIN_DB: f64 = -120.0;
-const MAX_BOOST_DB: f64 = 24.0;
+const MAX_BOOST_DB: f64 = 18.0;
 
 /// The RMS detector's averaging time, in milliseconds (as Compressor's).
 const RMS_MS: f64 = 10.0;
@@ -122,7 +127,7 @@ pub fn multiband_dynamics_type() -> DeviceType {
             LOW_FREQ,
             "Low Freq",
             (20.0, 20_000.0),
-            500.0,
+            120.0,
             ParamUnit::Hertz,
         )
         .logarithmic()
@@ -131,14 +136,14 @@ pub fn multiband_dynamics_type() -> DeviceType {
             HIGH_FREQ,
             "High Freq",
             (20.0, 20_000.0),
-            2000.0,
+            2500.0,
             ParamUnit::Hertz,
         )
         .logarithmic()
         .describe("The crossover between the mid and high bands; never below the low one."),
         ParamDescriptor::toggle(SOFT_KNEE, "Soft Knee", false)
             .describe("Makes the thresholds take hold gradually."),
-        ParamDescriptor::choice(DETECTOR, "Detector", &["Peak", "RMS"], 0).describe(
+        ParamDescriptor::choice(DETECTOR, "Detector", &["Peak", "RMS"], DETECTOR_RMS).describe(
             "Whether the detectors follow short peaks, or an RMS level that short peaks \
              barely move.",
         ),
@@ -259,9 +264,9 @@ fn band_descriptors(band: usize) -> Vec<ParamDescriptor> {
     let param = |field| band_param(band, field);
     let side = |above: bool| {
         let (side, first, threshold) = if above {
-            ("Above", ABOVE_THRESHOLD, -12.0)
+            ("Above", ABOVE_THRESHOLD, -20.0)
         } else {
-            ("Below", BELOW_THRESHOLD, -48.0)
+            ("Below", BELOW_THRESHOLD, -60.0)
         };
         [
             ParamDescriptor::continuous(
@@ -295,7 +300,7 @@ fn band_descriptors(band: usize) -> Vec<ParamDescriptor> {
                 param(first + 2),
                 &name(&format!("{side} Attack")),
                 (0.1, 500.0),
-                10.0,
+                BAND_TIMES[band].0,
                 ParamUnit::Milliseconds,
             )
             .logarithmic()
@@ -304,7 +309,7 @@ fn band_descriptors(band: usize) -> Vec<ParamDescriptor> {
                 param(first + 3),
                 &name(&format!("{side} Release")),
                 (1.0, 5000.0),
-                100.0,
+                BAND_TIMES[band].1,
                 ParamUnit::Milliseconds,
             )
             .logarithmic()
@@ -326,45 +331,81 @@ fn band_descriptors(band: usize) -> Vec<ParamDescriptor> {
     out
 }
 
-/// The device's layout: the crossovers and band switches, the display, the
-/// three bands' controls, and the global controls.
+/// The device's layout as Live draws it (L-DEV-051): Split Freq with each
+/// band's switches, the bands' Input knobs, the Below values, the display,
+/// the Above values and the times, the bands' Output knobs and the global
+/// column. The bands run High, Mid, Low from the top, as Live's rows do.
 fn layout() -> DeviceLayout {
-    let band = |band: usize| {
-        let controls: Vec<_> = (0..FIELDS)
-            .map(|field| {
-                let widget = match field {
-                    ACTIVE | SOLO => Widget::Toggle,
-                    _ => Widget::Knob,
-                };
-                (band_param(band, field), widget)
+    let at = Control::new;
+    // The bands, top row first.
+    let rows = [HIGH, MID, LOW];
+    let column = |width: f32, controls: Vec<Control>| {
+        LayoutNode::Band(ControlBand::free(width, BODY_HEIGHT, controls))
+    };
+    // Two boxes a band, one under the other, in each band's row.
+    let pairs = |first: u32| {
+        let mut controls = Vec::new();
+        for (row, band) in rows.into_iter().enumerate() {
+            let y = 4.0 + 52.0 * row as f32;
+            controls.push(at(band_param(band, first), Widget::Number, 4.0, y).sized(84.0, 21.0));
+            controls.push(
+                at(band_param(band, first + 1), Widget::Number, 4.0, y + 23.0).sized(84.0, 21.0),
+            );
+        }
+        column(92.0, controls)
+    };
+    let knobs = |field: u32| {
+        let controls = rows
+            .into_iter()
+            .enumerate()
+            .map(|(row, band)| {
+                at(
+                    band_param(band, field),
+                    Widget::SmallKnob,
+                    20.0,
+                    4.0 + 55.0 * row as f32,
+                )
             })
             .collect();
-        LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, &controls))
+        column(72.0, controls)
     };
     DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (LOW_ON, Widget::Toggle),
-                (HIGH_ON, Widget::Toggle),
-                (LOW_FREQ, Widget::Knob),
-                (HIGH_FREQ, Widget::Knob),
+        LayoutNode::Column(vec![
+            LayoutNode::Heading(Heading::new("Split Freq", 78.0)),
+            LayoutNode::Band(ControlBand::free(
+                78.0,
+                BODY_HEIGHT - HEADING_HEIGHT,
+                vec![
+                    at(HIGH_ON, Widget::Toggle, 4.0, 4.0).sized(30.0, 12.0),
+                    at(band_param(HIGH, ACTIVE), Widget::Toggle, 38.0, 4.0).sized(14.0, 12.0),
+                    at(HIGH_FREQ, Widget::Slider, 4.0, 18.0),
+                    at(band_param(HIGH, SOLO), Widget::Toggle, 60.0, 27.0).sized(14.0, 12.0),
+                    at(band_param(MID, ACTIVE), Widget::Toggle, 38.0, 66.0).sized(14.0, 12.0),
+                    at(band_param(MID, SOLO), Widget::Toggle, 38.0, 81.0).sized(14.0, 12.0),
+                    at(LOW_ON, Widget::Toggle, 4.0, 108.0).sized(30.0, 12.0),
+                    at(band_param(LOW, ACTIVE), Widget::Toggle, 38.0, 108.0).sized(14.0, 12.0),
+                    at(LOW_FREQ, Widget::Slider, 4.0, 122.0),
+                    at(band_param(LOW, SOLO), Widget::Toggle, 60.0, 131.0).sized(14.0, 12.0),
+                ],
+            )),
+        ]),
+        knobs(INPUT),
+        pairs(BELOW_THRESHOLD),
+        pairs(BELOW_ATTACK),
+        LayoutNode::Cell(DisplayCell::new("Bands", 150.0, BODY_HEIGHT, 1.0)),
+        pairs(ABOVE_THRESHOLD),
+        pairs(ABOVE_ATTACK),
+        knobs(BAND_OUTPUT),
+        column(
+            60.0,
+            vec![
+                at(OUTPUT, Widget::SmallKnob, 10.0, 4.0),
+                at(TIME, Widget::SmallKnob, 10.0, 45.0),
+                at(AMOUNT, Widget::SmallKnob, 10.0, 86.0),
+                at(SOFT_KNEE, Widget::Toggle, 4.0, 128.0).sized(52.0, 12.0),
+                at(DETECTOR, Widget::Segments(2), 4.0, 142.0).sized(52.0, 12.0),
             ],
-        )),
-        LayoutNode::Cell(DisplayCell::new("Bands", 200.0, BODY_HEIGHT, 1.0)),
-        band(LOW),
-        band(MID),
-        band(HIGH),
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (SOFT_KNEE, Widget::Toggle),
-                (DETECTOR, Widget::Chooser),
-                (TIME, Widget::Knob),
-                (AMOUNT, Widget::Knob),
-                (OUTPUT, Widget::Knob),
-            ],
-        )),
+        ),
     ]))
 }
 

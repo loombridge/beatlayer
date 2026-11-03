@@ -10,7 +10,7 @@
 use std::f64::consts::TAU;
 
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{BODY_HEIGHT, Control, ControlBand, DisplayCell, LayoutNode, Widget};
 use bl_model::{
     DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplaySeries, OrdMap,
     ParamDescriptor, ParamId, ParamUnit,
@@ -71,7 +71,7 @@ pub const SPECTRUM_FLOOR_DB: f32 = -150.0;
 #[must_use]
 pub fn spectrum_type() -> DeviceType {
     let params = vec![
-        ParamDescriptor::choice(BLOCK, "Block", &BLOCK_LABELS, 3)
+        ParamDescriptor::choice(BLOCK, "Block", &BLOCK_LABELS, 5)
             .describe("The number of samples analyzed in each measurement."),
         ParamDescriptor::choice(CHANNEL, "Channel", &CHANNELS, 2)
             .describe("Which audio channel is analyzed: Left, Right, or Both."),
@@ -79,7 +79,7 @@ pub fn spectrum_type() -> DeviceType {
             REFRESH,
             "Refresh",
             (10.0, 1000.0),
-            50.0,
+            60.0,
             ParamUnit::Milliseconds,
         )
         .describe("How often frequency analysis is performed."),
@@ -87,11 +87,11 @@ pub fn spectrum_type() -> DeviceType {
             .describe("How many blocks of samples are averaged for each update."),
         ParamDescriptor::choice(GRAPH, "Graph", &GRAPH_MODES, 0)
             .describe("Displays the spectrum as an interpolated line or discrete bins."),
-        ParamDescriptor::toggle(MAX, "Max", false)
+        ParamDescriptor::toggle(MAX, "Max", true)
             .describe("Retains the accumulated maximum amplitude on the display."),
         ParamDescriptor::choice(SCALE_X, "Scale X", &SCALE_X_MODES, 1)
             .describe("Scaling of the frequency display: Linear, Logarithmic, or Semitone."),
-        ParamDescriptor::choice(RANGE_MODE, "Range", &RANGE_MODES, 0)
+        ParamDescriptor::choice(RANGE_MODE, "Range", &RANGE_MODES, 1)
             .describe("Toggles between manual and automatic dynamic range scaling."),
         ParamDescriptor::continuous(
             RANGE_MIN,
@@ -113,37 +113,33 @@ pub fn spectrum_type() -> DeviceType {
             .describe("Clears the accumulated peak-hold curve."),
     ];
 
+    // As Live lays it out (L-DEV-057): the measurement's controls in a column
+    // at the left, the display filling the rest.
+    let at = Control::new;
     let layout = DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Band(ControlBand::stacked(
+        LayoutNode::Band(ControlBand::free(
+            140.0,
             BODY_HEIGHT,
-            &[
-                (BLOCK, Widget::Chooser),
-                (CHANNEL, Widget::Chooser),
-                (REFRESH, Widget::Knob),
-                (AVG, Widget::Knob),
+            vec![
+                at(BLOCK, Widget::Chooser, 4.0, 2.0).sized(132.0, 21.0),
+                at(CHANNEL, Widget::Segments(3), 4.0, 30.0).sized(132.0, 12.0),
+                at(REFRESH, Widget::Slider, 4.0, 50.0).sized(132.0, 21.0),
+                at(AVG, Widget::Number, 4.0, 74.0).sized(132.0, 21.0),
+                at(GRAPH, Widget::Segments(2), 4.0, 102.0).sized(86.0, 12.0),
+                at(MAX, Widget::Toggle, 94.0, 102.0).sized(42.0, 12.0),
+                at(SCALE_X, Widget::Segments(3), 4.0, 118.0).sized(132.0, 12.0),
+                at(RANGE_MODE, Widget::Segments(2), 4.0, 134.0).sized(44.0, 12.0),
+                at(RANGE_MAX, Widget::Number, 52.0, 126.0).sized(40.0, 21.0),
+                at(RANGE_MIN, Widget::Number, 96.0, 126.0).sized(40.0, 21.0),
             ],
         )),
         LayoutNode::Cell(
-            DisplayCell::new("Spectrum", 240.0, BODY_HEIGHT, 1.0).with_bottom(
-                ControlBand::stacked(
-                    40.0,
-                    &[
-                        (GRAPH, Widget::Chooser),
-                        (MAX, Widget::Toggle),
-                        (SCALE_X, Widget::Chooser),
-                        (RANGE_MODE, Widget::Chooser),
-                    ],
-                ),
-            ),
+            DisplayCell::new("Spectrum", 240.0, BODY_HEIGHT, 1.0).with_top(ControlBand::free(
+                240.0,
+                20.0,
+                vec![at(CLEAR_MAX, Widget::Toggle, 4.0, 4.0).sized(60.0, 12.0)],
+            )),
         ),
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (RANGE_MIN, Widget::Knob),
-                (RANGE_MAX, Widget::Knob),
-                (CLEAR_MAX, Widget::Toggle),
-            ],
-        )),
     ]));
 
     DeviceType::native(SPECTRUM, "Spectrum", DeviceRole::AudioEffect).with_description(

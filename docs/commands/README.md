@@ -14926,6 +14926,7 @@ One of:
 - `"plus"`: A plus sign.
 - `"minus"`: A minus sign.
 - `"flat_sharp"`: A flat and a sharp: Use Current Scale.
+- `"headphones"`: Headphones: a device's audition button (Boom Audition, Utility's Bass Mono, EQ Eight's Audition).
 
 <details><summary>JSON Schema</summary>
 
@@ -14996,6 +14997,11 @@ One of:
     {
       "const": "flat_sharp",
       "description": "A flat and a sharp: Use Current Scale.",
+      "type": "string"
+    },
+    {
+      "const": "headphones",
+      "description": "Headphones: a device's audition button (Boom Audition, Utility's Bass Mono, EQ Eight's Audition).",
       "type": "string"
     }
   ]

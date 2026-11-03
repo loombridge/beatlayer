@@ -9,7 +9,7 @@
 
 use bl_dsp::pitch::{Config, Pitch, Tracker};
 use bl_engine::{DeviceType, KeyPitches, NodeConfig, NodeData, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{BODY_HEIGHT, Control, ControlBand, DisplayCell, LayoutNode, Widget};
 use bl_model::{
     DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayMarker,
     DisplayReading, DisplaySeries, OrdMap, ParamDescriptor, ParamId, ParamUnit,
@@ -90,18 +90,21 @@ pub fn tuner_type() -> DeviceType {
             .describe("Spell chromatic notes with both sharps and flats."),
     ];
 
-    let layout = DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (REFERENCE, Widget::Knob),
-                (HERTZ_CENTS, Widget::Chooser),
-                (CLASSIC_MODE, Widget::Chooser),
-                (AUTO, Widget::Toggle),
+    // As Live lays it out (L-DEV-061): one display, the mode, the readout
+    // and the reference along its foot.
+    let at = Control::new;
+    let layout = DeviceLayout::new(LayoutNode::Row(vec![LayoutNode::Cell(
+        DisplayCell::new("Tuner", 300.0, BODY_HEIGHT, 1.0).with_bottom(ControlBand::free(
+            300.0,
+            29.0,
+            vec![
+                at(CLASSIC_MODE, Widget::Segments(2), 60.0, 8.0).sized(76.0, 12.0),
+                at(HERTZ_CENTS, Widget::Segments(2), 140.0, 8.0).sized(76.0, 12.0),
+                at(AUTO, Widget::Toggle, 220.0, 8.0).sized(30.0, 12.0),
+                at(REFERENCE, Widget::Number, 254.0, 4.0).sized(44.0, 21.0),
             ],
         )),
-        LayoutNode::Cell(DisplayCell::new("Tuner", 200.0, BODY_HEIGHT, 1.0)),
-    ]));
+    )]));
 
     DeviceType::native(TUNER, "Tuner", DeviceRole::AudioEffect).with_description(
         DeviceDescription::new(params)

@@ -864,7 +864,7 @@ impl Voices {
             rate,
             seed,
             banks,
-            fm: fm::Core::with_voices(rate, 1, seed, SLOTS),
+            fm: fm::Core::with_voices(rate, 1, seed, SLOTS, 0),
             gens: (0..SLOTS).map(|_| Gen::new(rate as f32)).collect(),
             top: 69.0 + 12.0 * (0.45 * rate as f32 / 440.0).log2(),
             levels: [
@@ -1030,7 +1030,7 @@ impl Voices {
             10..=13 => {
                 if reset {
                     self.fm.settings.ops[0].phase = s.phase / 360.0;
-                    self.fm.start(slot, Start::Fresh);
+                    self.fm.start(slot, Start::Fresh, 0.0);
                 }
             }
             kind if meld_gen::plays(kind) => self.gens[slot].start(s.seed),

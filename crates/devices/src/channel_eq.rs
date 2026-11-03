@@ -11,7 +11,7 @@
 //! high-pass's order are Beatlayer's own (see `docs/specs/channel-eq.md`).
 
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{Control, ControlBand, DisplayCell, Glyph, LayoutNode, Widget};
 use bl_model::{
     DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayMarker, OrdMap,
     ParamDescriptor, ParamId, ParamUnit,
@@ -47,7 +47,7 @@ pub const LOW_SHELF_HZ: f64 = 100.0;
 /// The mid band's frequency range and default, in Hz.
 pub const MID_MIN_HZ: f64 = 120.0;
 pub const MID_MAX_HZ: f64 = 7_500.0;
-pub const MID_DEFAULT_HZ: f64 = 1_000.0;
+pub const MID_DEFAULT_HZ: f64 = 1_500.0;
 /// The high shelf's corner (its midpoint), in Hz. Beatlayer's own.
 pub const HIGH_SHELF_HZ: f64 = 6_000.0;
 /// The gains' ranges, in dB.
@@ -135,21 +135,32 @@ pub fn channel_eq_type() -> DeviceType {
     )
 }
 
-/// The controls on the left, the display growing to their right.
+/// The panel as Live draws it (L-DEV-056): the display with the high-pass
+/// button and the mid frequency along its foot, and the bands' knobs under
+/// it, Output set apart.
 fn layout() -> DeviceLayout {
-    DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (HIGH_PASS, Widget::Toggle),
-                (LOW, Widget::Knob),
-                (MID, Widget::Knob),
-                (MID_FREQ, Widget::Knob),
-                (HIGH, Widget::Knob),
-                (OUTPUT, Widget::Knob),
+    let at = Control::new;
+    DeviceLayout::new(LayoutNode::Column(vec![
+        LayoutNode::Cell(DisplayCell::new("EQ Curve", 232.0, 113.0, 1.0).with_bottom(
+            ControlBand::free(
+                232.0,
+                29.0,
+                vec![
+                    at(HIGH_PASS, Widget::IconToggle, 4.0, 4.0).with_glyph(Glyph::HighPass),
+                    at(MID_FREQ, Widget::Number, 40.0, 4.0),
+                ],
+            ),
+        )),
+        LayoutNode::Band(ControlBand::free(
+            232.0,
+            45.0,
+            vec![
+                at(LOW, Widget::SmallKnob, 19.0, 2.0),
+                at(MID, Widget::SmallKnob, 67.0, 2.0),
+                at(HIGH, Widget::SmallKnob, 115.0, 2.0),
+                at(OUTPUT, Widget::SmallKnob, 187.0, 2.0),
             ],
         )),
-        LayoutNode::Cell(DisplayCell::new("EQ Curve", 150.0, BODY_HEIGHT, 1.0)),
     ]))
 }
 

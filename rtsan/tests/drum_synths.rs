@@ -1,6 +1,5 @@
 //! The Drum Synths' audio-thread work under RealtimeSanitizer (WP-8.24): a
-//! MIDI clip on each of four tracks plays DS Kick, DS Snare, DS Tom and DS
-//! Clap at several velocities, retriggering well inside each hit's length so
+//! MIDI clip on each of eight tracks plays each Drum Synth at several velocities, retriggering well inside each hit's length so
 //! the 2 ms cut runs, while parameters change between blocks and a preview
 //! arrives as node data. RTSan stops the process at the first allocation,
 //! free, lock, or blocking call in any of it, and the allocation trap,
@@ -11,7 +10,7 @@ bl_rt::install_trap!();
 
 use bl_core::time::{SampleRate, Ticks};
 use bl_devices::drum_synth::{DECAY, PreviewHit};
-use bl_devices::{ds_clap, ds_kick, ds_snare, ds_tom};
+use bl_devices::{ds_clang, ds_clap, ds_cymbal, ds_fm, ds_hh, ds_kick, ds_snare, ds_tom};
 use bl_engine::{Collector, Compiler, EngineConfig, NodeKey, Registry, TransportCommand, channel};
 use bl_model::{
     Clip, ClipData, Command, Device, DeviceKind, DeviceRole, Editor, MidiData, Note, ParamId,
@@ -28,11 +27,15 @@ const _: () = assert!(
 fn the_drum_synths_hits_and_cuts_pass_under_rtsan() {
     let mut editor = Editor::new();
     // Each device type, and the parameter a hand moves between blocks.
-    let synths: [(&str, ParamId); 4] = [
+    let synths: [(&str, ParamId); 8] = [
         (ds_kick::DS_KICK, ds_kick::PITCH),
         (ds_snare::DS_SNARE, ds_snare::COLOR),
         (ds_tom::DS_TOM, ds_tom::BEND),
         (ds_clap::DS_CLAP, ds_clap::SPREAD),
+        (ds_hh::DS_HH, ds_hh::ATTACK),
+        (ds_cymbal::DS_CYMBAL, DECAY),
+        (ds_fm::DS_FM, ds_fm::AMNT),
+        (ds_clang::DS_CLANG, ds_clang::NOISE),
     ];
     let mut devices = Vec::new();
     for (device_type, _) in synths {
@@ -102,7 +105,7 @@ fn the_drum_synths_hits_and_cuts_pass_under_rtsan() {
         // Parameters change between blocks, as automation or a hand would,
         // and a preview arrives now and then.
         if round % 10 == 3 {
-            let n = (round / 10 % 4) as usize;
+            let n = (round / 10 % 8) as usize;
             let (_, param) = synths[n];
             editor
                 .apply(Command::SetDeviceParam {
@@ -115,7 +118,7 @@ fn the_drum_synths_hits_and_cuts_pass_under_rtsan() {
         }
         if round % 40 == 7 {
             let data = collector.handle().data(PreviewHit);
-            sender.send_data(NodeKey::Device(devices[(round / 40 % 4) as usize]), data);
+            sender.send_data(NodeKey::Device(devices[(round / 40 % 8) as usize]), data);
         }
         if round % 300 == 150 {
             sender.transport(TransportCommand::Locate(Ticks::ZERO));

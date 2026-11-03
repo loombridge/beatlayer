@@ -7,7 +7,7 @@ use bl_core::time::SampleRate;
 use bl_devices::bus_compressor::{
     ATTACK as BUS_ATTACK, BUS_COMPRESSOR, THRESHOLD as BUS_THRESHOLD,
 };
-use bl_devices::compressor::{ATTACK, COMPRESSOR, THRESHOLD};
+use bl_devices::compressor::{ATTACK, COMPRESSOR, ENVELOPE, MODE, SC_FILTER, THRESHOLD};
 use bl_devices::limiter::{CEILING, LIMITER};
 use bl_engine::nodes::{TEST_TONE, test_tone};
 use bl_engine::{Collector, Compiler, EngineConfig, Monitor, Processor, Registry, channel};
@@ -100,8 +100,16 @@ fn most_reduction(
 fn a_compressor_publishes_its_reduction_on_its_track_at_every_block_size() {
     for block in [1usize, 64, 512, 4096] {
         // A 4:1 ratio over a -14 dB threshold turns a -6 dBFS tone down 6 dB.
-        let (mut processor, mut monitor, track) =
-            running(&[(COMPRESSOR, &[(THRESHOLD, -14.0), (ATTACK, 0.01)])]);
+        let (mut processor, mut monitor, track) = running(&[(
+            COMPRESSOR,
+            &[
+                (THRESHOLD, -14.0),
+                (ATTACK, 0.01),
+                (MODE, 0.0),
+                (ENVELOPE, 0.0),
+                (SC_FILTER, 0.0),
+            ],
+        )]);
         let most = most_reduction(&mut processor, &mut monitor, track, block);
         assert!(
             (most + 6.0).abs() < 0.5,
@@ -128,7 +136,16 @@ fn two_reducing_devices_combine_as_the_most_reduction() {
     // limiter's -18 dB ceiling then takes 10.5 dB off its input. The track
     // reads the most of the two, not their sum.
     let (mut processor, mut monitor, track) = running(&[
-        (COMPRESSOR, &[(THRESHOLD, -8.0), (ATTACK, 0.01)]),
+        (
+            COMPRESSOR,
+            &[
+                (THRESHOLD, -8.0),
+                (ATTACK, 0.01),
+                (MODE, 0.0),
+                (ENVELOPE, 0.0),
+                (SC_FILTER, 0.0),
+            ],
+        ),
         (LIMITER, &[(CEILING, -18.0)]),
     ]);
     let most = most_reduction(&mut processor, &mut monitor, track, 512);

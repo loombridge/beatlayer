@@ -97,6 +97,7 @@ pub mod midi_cc;
 mod midi_fx;
 pub mod midi_monitor;
 pub mod midi_mpe;
+pub mod modular;
 pub mod modulator;
 pub mod multiband_dynamics;
 pub mod multisampler;
@@ -403,6 +404,7 @@ pub fn register(registry: &mut Registry) {
     ds_clang::register(registry);
     kitbag::register(registry);
     modulator::register(registry);
+    modular::register(registry);
     level_mod::register(registry);
     gate_mod::register(registry);
     strike_mod::register(registry);

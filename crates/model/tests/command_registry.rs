@@ -70,7 +70,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        292,
+        299,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -110,7 +110,7 @@ fn every_document_command_is_registered() {
              set_global_groove_amount, set_auto_load_groove and set_clip_groove, WP-6.9 \
              five for tunings: set_tuning, remove_tuning, set_tuning_reference, \
              set_tuning_range and set_tuning_bypass, WP-6.9b the two for tunings on plug-ins and controllers: set_plugin_tuning and set_tuning_layout, WP-6.22 move_clip_to_lane, and WP-6.24b \
-             the two for time: insert_time and delete_time, and WP-6.23 set_track_links, and WP-6.30b the five for colours: set_track_colour, assign_colour_to_clips, assign_colour_to_grouped, set_clip_colour and set_scene_colour, and WP-6.57 the two for clearing envelopes: clear_track_automation and clear_device_automation, and WP-6.58 the four for info text: set_track_info_text, set_clip_info_text, set_scene_info_text and set_device_info_text, and WP-7.1 set_remote_mappings, and WP-7.32 set_record_quantization, and WP-7.33 set_device_region, and WP-7.17 set_cv_calibration, and WP-8.8 set_device_wavetable, and the copy fixes set_automation_enabled, and WP-7.21 set_chain_push_colour, and WP-7.22 set_pad_layout, and WP-8.4 the two for modulation routes: set_mod_route and clear_mod_route, and WP-9.10 set_similarity_reference, and WP-6.45 the four for the arranger track: add_section, remove_section, edit_section and set_arranger_track, and WP-6.48 the five for the chord lane: add_chord_region, move_chord_region, set_chord_region, delete_chord_region and set_follow_chord_lane, and WP-6.44 the two for linked clips: link_clips and unlink_clips, and WP-8.13 set_partials"
+             the two for time: insert_time and delete_time, and WP-6.23 set_track_links, and WP-6.30b the five for colours: set_track_colour, assign_colour_to_clips, assign_colour_to_grouped, set_clip_colour and set_scene_colour, and WP-6.57 the two for clearing envelopes: clear_track_automation and clear_device_automation, and WP-6.58 the four for info text: set_track_info_text, set_clip_info_text, set_scene_info_text and set_device_info_text, and WP-7.1 set_remote_mappings, and WP-7.32 set_record_quantization, and WP-7.33 set_device_region, and WP-7.17 set_cv_calibration, and WP-8.8 set_device_wavetable, and the copy fixes set_automation_enabled, and WP-7.21 set_chain_push_colour, and WP-7.22 set_pad_layout, and WP-8.4 the two for modulation routes: set_mod_route and clear_mod_route, and WP-9.10 set_similarity_reference, and WP-6.45 the four for the arranger track: add_section, remove_section, edit_section and set_arranger_track, and WP-6.48 the five for the chord lane: add_chord_region, move_chord_region, set_chord_region, delete_chord_region and set_follow_chord_lane, and WP-6.44 the two for linked clips: link_clips and unlink_clips, and WP-8.13 set_partials, and WP-9.36 the seven for Modular's patch: modular_add_block, modular_remove_block, modular_connect, modular_disconnect, modular_move_block, modular_set and modular_expose"
     );
 
     for op in &ops {
@@ -1738,6 +1738,45 @@ fn every_command_runs_by_id() {
         agent.editor.document().device(map).unwrap().partials.len(),
         1
     );
+
+    // A Modular's patch built block by block (modular-device R9).
+    let modular: DeviceId = agent.new_id();
+    agent.run(
+        "device.insert",
+        json!({ "track": reverb, "index": 0, "device": {
+            "id": modular, "name": "Modular", "enabled": true, "params": [],
+            "kind": { "native": { "device_type": "beatlayer.modular_effect" } },
+            "patch": { "blocks": [], "cables": [] },
+        } }),
+    );
+    for (kind, id) in [("oscillator", 1), ("amplifier", 2)] {
+        agent.run(
+            "modular.add_block",
+            json!({ "device": modular, "block_type": kind, "id": id, "x": 0.0, "y": 0.0 }),
+        );
+    }
+    let cable = json!({ "device": modular, "from": 1, "from_port": "out", "to": 2, "to_port": "in" });
+    agent.run("modular.connect", cable.clone());
+    agent.run("modular.disconnect", cable);
+    agent.run(
+        "modular.move_block",
+        json!({ "device": modular, "block": 2, "x": 40.0, "y": 8.0 }),
+    );
+    agent.run(
+        "modular.set",
+        json!({ "device": modular, "block": 1, "setting": "coarse", "value": 7.0 }),
+    );
+    agent.run(
+        "modular.expose",
+        json!({ "device": modular, "block": 1, "setting": "coarse", "exposed": true }),
+    );
+    let patch = agent.editor.document().device(modular).unwrap().patch.clone().unwrap();
+    assert_eq!((patch.blocks.len(), patch.params.len()), (2, 1));
+    agent.run(
+        "modular.remove_block",
+        json!({ "device": modular, "block": 1 }),
+    );
+    assert!(agent.editor.document().device(modular).unwrap().patch.as_ref().unwrap().params.is_empty());
 
     // A device with a sidechain input (WP-2.19b), listening to another
     // track.
@@ -4199,6 +4238,70 @@ fn schemas_match_what_commands_serialise() {
                 device,
                 osc: 0,
                 levels: vec![0.5; 16],
+            },
+        ),
+        (
+            "modular.add_block",
+            Command::ModularAddBlock {
+                device,
+                block_type: "mixer".to_owned(),
+                id: None,
+                x: 0.0,
+                y: 0.0,
+            },
+        ),
+        (
+            "modular.remove_block",
+            Command::ModularRemoveBlock {
+                device,
+                block: bl_model::modular::BlockId(1),
+            },
+        ),
+        (
+            "modular.connect",
+            Command::ModularConnect {
+                device,
+                from: bl_model::modular::BlockId(1),
+                from_port: "out".to_owned(),
+                to: bl_model::modular::BlockId(2),
+                to_port: "in".to_owned(),
+            },
+        ),
+        (
+            "modular.disconnect",
+            Command::ModularDisconnect {
+                device,
+                from: bl_model::modular::BlockId(1),
+                from_port: "out".to_owned(),
+                to: bl_model::modular::BlockId(2),
+                to_port: "in".to_owned(),
+            },
+        ),
+        (
+            "modular.move_block",
+            Command::ModularMoveBlock {
+                device,
+                block: bl_model::modular::BlockId(1),
+                x: 1.0,
+                y: 2.0,
+            },
+        ),
+        (
+            "modular.set",
+            Command::ModularSet {
+                device,
+                block: bl_model::modular::BlockId(1),
+                setting: "cutoff".to_owned(),
+                value: 440.0,
+            },
+        ),
+        (
+            "modular.expose",
+            Command::ModularExpose {
+                device,
+                block: bl_model::modular::BlockId(1),
+                setting: "cutoff".to_owned(),
+                exposed: true,
             },
         ),
         (

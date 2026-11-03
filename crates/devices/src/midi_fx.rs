@@ -76,7 +76,7 @@ pub(crate) fn seed(device: &Device) -> u64 {
 }
 
 /// A note's identity: its channel, key and ID.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Key {
     pub(crate) channel: u8,
     pub(crate) key: u8,

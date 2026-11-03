@@ -218,6 +218,11 @@ pub struct Device {
     /// out of the saved set then.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub partials: Vec<crate::partials::Partials>,
+    /// A Modular device's patch (the modular device spec, R2, R8): its
+    /// blocks, cables and patch parameters. `None` for every device that
+    /// isn't Modular, and left out of the saved set then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub patch: Option<crate::modular::Patch>,
     /// The user's own info text (Edit Info Text), which the Info View shows while the pointer is over the device; empty for none, and left out of the saved set then (the Info View spec, R9).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub info_text: String,
@@ -507,6 +512,11 @@ impl Device {
             }
             _ => Vec::new(),
         };
+        // Spec: modular-device R1. A new Modular holds its kind's patch.
+        let patch = match &kind {
+            DeviceKind::Native { device_type } => crate::modular::Patch::new_for(device_type),
+            _ => None,
+        };
         Self {
             id,
             name: name.into(),
@@ -541,6 +551,7 @@ impl Device {
             articulations,
             routes: Vec::new(),
             partials: Vec::new(),
+            patch,
             info_text: String::new(),
         }
     }

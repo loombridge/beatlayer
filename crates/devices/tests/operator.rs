@@ -133,7 +133,7 @@ impl Run {
         device.partials.clone_from(&self.partials);
         let mut node = common::node(&common::registry(), &device, block);
         let collector = bl_engine::Collector::new();
-        for item in operator::device_data(&device, &|_| None).items {
+        for item in operator::device_data(&device, &common::config(block), &|_| None).items {
             node.receive_data(item(&collector.handle()));
         }
         let mut out = [Vec::with_capacity(frames), Vec::with_capacity(frames)];

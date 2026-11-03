@@ -2134,6 +2134,93 @@ pub enum Command {
         /// The levels of its first partials.
         levels: Vec<f32>,
     },
+    /// Adds a block to a Modular device's patch (the modular device spec,
+    /// R9).
+    ModularAddBlock {
+        /// The Modular device.
+        device: DeviceId,
+        /// The block type's ID, such as `oscillator`.
+        block_type: String,
+        /// The new block's ID in the patch; the next free one if `null`.
+        id: Option<crate::modular::BlockId>,
+        /// Where the block sits in the editor.
+        x: f32,
+        /// Where the block sits in the editor.
+        y: f32,
+    },
+    /// Removes a block from a Modular device's patch, with its cables and
+    /// patch parameters (the modular device spec, R9).
+    ModularRemoveBlock {
+        /// The Modular device.
+        device: DeviceId,
+        /// The block.
+        block: crate::modular::BlockId,
+    },
+    /// Joins a block's output port to another's input port in a Modular
+    /// device's patch (the modular device spec, R2, R3, R9).
+    ModularConnect {
+        /// The Modular device.
+        device: DeviceId,
+        /// The block the cable leaves.
+        from: crate::modular::BlockId,
+        /// The output port it leaves, by ID.
+        from_port: String,
+        /// The block it enters.
+        to: crate::modular::BlockId,
+        /// The input port it enters, by ID.
+        to_port: String,
+    },
+    /// Takes a cable out of a Modular device's patch (the modular device
+    /// spec, R9).
+    ModularDisconnect {
+        /// The Modular device.
+        device: DeviceId,
+        /// The block the cable leaves.
+        from: crate::modular::BlockId,
+        /// The output port it leaves, by ID.
+        from_port: String,
+        /// The block it enters.
+        to: crate::modular::BlockId,
+        /// The input port it enters, by ID.
+        to_port: String,
+    },
+    /// Moves a block in a Modular device's editor (the modular device spec,
+    /// R9).
+    ModularMoveBlock {
+        /// The Modular device.
+        device: DeviceId,
+        /// The block.
+        block: crate::modular::BlockId,
+        /// Where the block sits in the editor.
+        x: f32,
+        /// Where the block sits in the editor.
+        y: f32,
+    },
+    /// Sets a block's setting in a Modular device's patch (the modular
+    /// device spec, R9).
+    ModularSet {
+        /// The Modular device.
+        device: DeviceId,
+        /// The block.
+        block: crate::modular::BlockId,
+        /// The setting's ID, such as `cutoff`.
+        setting: String,
+        /// Its value: a choice's number from 0, or a number in the setting's
+        /// own unit.
+        value: f64,
+    },
+    /// Makes a block's setting a patch parameter of a Modular device, or
+    /// stops (the modular device spec, R6, R9).
+    ModularExpose {
+        /// The Modular device.
+        device: DeviceId,
+        /// The block.
+        block: crate::modular::BlockId,
+        /// The setting's ID.
+        setting: String,
+        /// Whether it is a patch parameter.
+        exposed: bool,
+    },
     /// Sets the media a device plays, by content hash (WP-2.16): the
     /// sampler's sample, which the media store holds like a clip's audio.
     SetDeviceSample {
@@ -3315,6 +3402,14 @@ impl Command {
             Self::SetModRoute { .. } => "Change Modulation Route",
             Self::ClearModRoute { .. } => "Clear Modulation Route",
             Self::SetPartials { .. } => "Change Partials",
+            // WP-9.36: Beatlayer's own names.
+            Self::ModularAddBlock { .. } => "Add Block",
+            Self::ModularRemoveBlock { .. } => "Remove Block",
+            Self::ModularConnect { .. } => "Connect Blocks",
+            Self::ModularDisconnect { .. } => "Disconnect Blocks",
+            Self::ModularMoveBlock { .. } => "Move Block",
+            Self::ModularSet { .. } => "Change Block Setting",
+            Self::ModularExpose { .. } => "Change Patch Parameter",
             Self::SetDeviceSample { media: Some(_), .. } => "Load Sample",
             Self::SetDeviceSample { media: None, .. } => "Clear Sample",
             // Spec: sound-similarity R23.
@@ -5237,6 +5332,51 @@ impl Document {
                 osc,
                 levels,
             } => self.set_partials(*device, *osc, levels),
+            Command::ModularAddBlock {
+                device,
+                block_type,
+                id,
+                x,
+                y,
+            } => self.modular_add_block(*device, block_type, *id, *x, *y),
+            Command::ModularRemoveBlock { device, block } => {
+                self.modular_remove_block(*device, *block)
+            }
+            Command::ModularConnect {
+                device,
+                from,
+                from_port,
+                to,
+                to_port,
+            } => self.modular_connect(
+                *device,
+                &crate::modular::Cable::of(*from, from_port, *to, to_port),
+            ),
+            Command::ModularDisconnect {
+                device,
+                from,
+                from_port,
+                to,
+                to_port,
+            } => self.modular_disconnect(
+                *device,
+                &crate::modular::Cable::of(*from, from_port, *to, to_port),
+            ),
+            Command::ModularMoveBlock { device, block, x, y } => {
+                self.modular_move_block(*device, *block, *x, *y)
+            }
+            Command::ModularSet {
+                device,
+                block,
+                setting,
+                value,
+            } => self.modular_set(*device, *block, setting, *value),
+            Command::ModularExpose {
+                device,
+                block,
+                setting,
+                exposed,
+            } => self.modular_expose(*device, *block, setting, *exposed),
             Command::CompareSwitch { device } => {
                 if !self.device_ref(*device)?.can_compare() {
                     return Err(ModelError::NoCompare(*device));
@@ -9798,6 +9938,11 @@ fn check_one_device(device: &Device) -> Result<(), ModelError> {
     // slot or name nothing doesn't load.
     crate::matrix::check_routes(&device.routes)?;
     crate::partials::check_partials(&device.partials)?;
+    // Spec: modular-device R2, R3, R11. A saved patch that breaks a rule
+    // doesn't load.
+    if let Some(patch) = &device.patch {
+        patch.check()?;
+    }
     if !device.can_compare() && (device.b_active || device.other_params.is_some()) {
         return Err(ModelError::NoCompare(device.id));
     }

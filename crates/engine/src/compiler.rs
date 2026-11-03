@@ -650,6 +650,16 @@ impl Compiler {
             {
                 self.send_device_data(document, id, &mut update);
             }
+            // A Modular whose patch changed, or its voice count, gets its
+            // schedule compiled again, with no new program (modular-device
+            // R4).
+            if let (Change::Modified, Some(before), Some(after)) =
+                (change, old.device(id), document.device(id))
+                && (before.patch != after.patch
+                    || self.registry.data_params_changed(before, after))
+            {
+                self.send_device_data(document, id, &mut update);
+            }
             // A sampler whose sample's edits, warp or slices changed gets the
             // edited sample again as node data, with no new program (R57);
             // so does one that swaps samples in place, for another sample.
@@ -938,7 +948,7 @@ impl Compiler {
         };
         let library = self.registry.media();
         let file = |media| library.and_then(|library| library.file(media));
-        let Some(data) = self.registry.data(device_ref, &file) else {
+        let Some(data) = self.registry.data(device_ref, &self.config.node_config(), &file) else {
             return;
         };
         update.missing.extend(data.missing);

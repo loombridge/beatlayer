@@ -87,6 +87,7 @@ use bl_shell_spec::session_strip as session_strip_ids;
 use bl_shell_spec::session_view as session_ids;
 use bl_shell_spec::set_exchange as set_exchange_ids;
 use bl_shell_spec::settings::STATE as SETTINGS_STATE;
+use bl_shell_spec::modular as modular_ids;
 use bl_shell_spec::slice as slice_ids;
 use bl_shell_spec::stems as stems_ids;
 use bl_shell_spec::sync as sync_ids;
@@ -166,6 +167,7 @@ mod step_input;
 mod tap_tempo;
 mod tempo_follower;
 mod track_commands;
+mod modular;
 mod tunings;
 mod video;
 mod view_commands;
@@ -2326,6 +2328,9 @@ impl Shell {
         }
         if tuning_ids::handles(id) {
             return self.run_tunings(id, args);
+        }
+        if modular_ids::handles(id) {
+            return self.run_modular(id, args);
         }
         if dawproject_ids::handles(id) {
             return self.run_dawproject(id, args);

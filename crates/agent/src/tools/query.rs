@@ -566,6 +566,11 @@ impl View<'_> {
         if !device.partials.is_empty() {
             value["partials"] = json!(device.partials);
         }
+        // Spec: modular-device R9. A Modular's patch, which the `modular.`
+        // commands change.
+        if let Some(patch) = &device.patch {
+            value["patch"] = json!(patch);
+        }
         // Spec: modulation R18. A modulator's mappings, which
         // `modulator.map` and `modulator.unmap` change.
         if bl_model::modulator::is_modulator_kind(&device.kind) {

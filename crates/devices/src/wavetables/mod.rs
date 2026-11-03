@@ -320,6 +320,7 @@ pub fn default_source() -> Source {
 #[must_use]
 pub fn device_data(
     device: &bl_model::Device,
+    _config: &bl_engine::NodeConfig,
     file: bl_engine::FileOf<'_>,
 ) -> bl_engine::DeviceData {
     let mut data = bl_engine::DeviceData::default();

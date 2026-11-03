@@ -193,3 +193,113 @@ fn an_agent_loads_a_table_into_wavetable_and_sets_position() {
     assert_eq!(read["wavetables"][0]["name"], "Sine Folds", "{read}");
     assert_eq!(read["wavetables"][0]["frames"], 48, "{read}");
 }
+
+// Spec: wavetable R25, R32, R34
+#[test]
+fn an_agent_routes_wavetables_matrix_and_reads_the_routes_and_settings_back() {
+    let mut client = bl_cli_mcp(&["--autonomous"]);
+    let tracks = call(&mut client, "query", json!({ "path": "tracks" }));
+    let midi = tracks["tracks"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["kind"] == "midi")
+        .expect("a MIDI track")["id"]
+        .clone();
+    outcome(
+        &mut client,
+        "arrangement.select_tracks",
+        json!({ "tracks": [midi] }),
+    );
+    let device = outcome(
+        &mut client,
+        "device.add",
+        json!({ "device": {
+            "kind": { "native": { "device_type": "beatlayer.wavetable" } },
+            "name": "Wavetable",
+            "role": "instrument",
+        } }),
+    )["result"]["device"]
+        .clone();
+    let matrix = |client: &mut Client<Stdio>| {
+        call(client, "query", json!({ "id": device }))["matrix"].clone()
+    };
+
+    let before = matrix(&mut client);
+    assert_eq!(
+        before["sources"].as_array().map(Vec::len),
+        Some(13),
+        "{before}"
+    );
+    assert_eq!(before["destinations"].as_array().map(Vec::len), Some(69));
+    assert_eq!(before["slots"].as_array().map(Vec::len), Some(64));
+
+    // Routes from the three kinds of source, into the first free slots.
+    for (source, destination, amount) in [
+        ("LFO 1", "Osc 1 Position", 40.0),
+        ("Env 2", "Filter 1 Freq", -25.0),
+        ("Pressure", "Osc 2 Gain", 100.0),
+    ] {
+        outcome(
+            &mut client,
+            "device.set_route",
+            json!({ "device": device, "source": source, "destination": destination,
+                    "amount": amount }),
+        );
+    }
+    let after = matrix(&mut client);
+    for (slot, source, destination, amount) in [
+        (0, "LFO 1", "Osc 1 Position", 40.0),
+        (1, "Env 2", "Filter 1 Freq", -25.0),
+        (2, "Pressure", "Osc 2 Gain", 100.0),
+    ] {
+        let read = &after["slots"][slot];
+        assert_eq!(read["kind"], "free");
+        assert_eq!(read["source"], source);
+        assert_eq!(read["destination"], destination);
+        assert_eq!(read["amount"], amount);
+    }
+
+    // The settings of part 2 are parameters, read back by name.
+    let settings = [
+        ("LFO 1 Wave", 3.0),
+        ("LFO 1 Retrigger", 1.0),
+        ("Env 2 Loop Mode", 2.0),
+        ("Unison Mode", 6.0),
+        ("Hi-Quality", 1.0),
+        ("Matrix Time", -50.0),
+    ];
+    let parameters = outcome(
+        &mut client,
+        "device.parameters",
+        json!({ "device": device }),
+    );
+    let params = parameters["result"]["params"].as_array().unwrap().clone();
+    for (name, value) in settings {
+        let id = params
+            .iter()
+            .find(|p| p["name"] == name)
+            .unwrap_or_else(|| panic!("Wavetable has {name}"))["id"]
+            .clone();
+        outcome(
+            &mut client,
+            "device.set_param",
+            json!({ "device": device, "param": id, "value": value }),
+        );
+    }
+    let parameters = outcome(
+        &mut client,
+        "device.parameters",
+        json!({ "device": device }),
+    );
+    for (name, value) in settings {
+        let read = parameters["result"]["params"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == name)
+            .expect("read back")["value"]
+            .clone();
+        assert_eq!(read, json!(value), "{name}");
+    }
+}

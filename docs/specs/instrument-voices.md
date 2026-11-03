@@ -57,7 +57,7 @@ This spec covers what the instruments share. The plug-in kit's voices themselves
 
 - **R11.** A device with unison stacks a number of copies of each voice, from the counts its spec gives (Analog and Tension 2 or 4, Wavetable its Voices, Meld its Stacked Voices). The copies of a voice play its note together. With n copies and a detune of d cents, copy i (from 0) is tuned (2i / (n − 1) − 1) × d cents from the note, so the copies spread evenly and symmetrically, and their mean pitch is the note's. (S1, S3, S5, S6; the law is Beatlayer's own)
 - **R12.** A device whose unison has a Delay starts copy i a share i / (n − 1) of the Delay time after copy 0, measured from the note's frame. Copies pan alternately left and right, copy 0 left, by the device's spread (centre where it has none), so an even count sums to the centre; a device's own spread law, such as Wavetable's modes, is in its spec. (S1, S3, S5; Beatlayer's own)
-- **R13.** A voice with n copies counts as one voice towards Voices and is stolen and released whole; its copies' sum is scaled by 1 / √n, so stacking copies keeps the voice's level for uncorrelated copies (Beatlayer's own). (S5, S6)
+- **R13.** A voice with n copies counts as one voice towards Voices and is stolen and released whole; its copies' sum is scaled by 1 / √n, so stacking copies keeps the voice's level for uncorrelated copies (Beatlayer's own); Drift's Voices, which counts copies, is [polysynth](polysynth.md) R26's. (S5, S6)
 
 **Pitch bend, Note PB and the sources**
 

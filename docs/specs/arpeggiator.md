@@ -11,7 +11,7 @@ Arpeggiator turns held chords and notes into rhythmic sequences. The sequence fo
 
 Offset shifts pattern sequence starting positions. Retrigger restarts the pattern on note arrivals or beat grid intervals. Repeats sets the number of pattern cycles before playback ceases. Pitch transposition can cycle through multiple Steps spaced by Distance, in semitones, or in degrees of a scale: the one its own Root and Scale choosers name, or, with Use Current Scale on in its title bar, the device's current scale ([scales.md](scales.md)). Velocity controls decay notes toward a Target level over time, optionally restarting with pattern retriggering.
 
-The device takes Live's name, Arpeggiator; its panel is laid out as Live draws it (layout L-DEV-088). Notes held for playback wait in an internal queue made with the device; when the device is deactivated, moved, or deleted, sounding notes terminate cleanly without hanging.
+The device takes Live's name, Arpeggiator; its panel is laid out as Live draws it (layout L-DEV-101). Notes held for playback wait in an internal queue made with the device; when the device is deactivated, moved, or deleted, sounding notes terminate cleanly without hanging.
 
 ## Sources
 

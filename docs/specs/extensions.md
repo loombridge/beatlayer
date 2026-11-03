@@ -26,12 +26,12 @@ Beatlayer's own bundled extensions (the MIDI Tools Pack's tools, the sequencer, 
 
 ### Packages and the host (WP-9.29)
 
-- **R1.** An extension package is a ZIP file with the extension `.blext`, holding `extension.toml` at its root and the components it names. The manifest gives the extension's ID (reverse-domain, such as `org.example.tools`), name, version, author, licence, description, and for each component its file, its kind (`midi-tool`, `control-surface`, `audio-effect`, `instrument`, `midi-effect`), the world version it targets, and the imports it asks for (R38). (S1, S4)
+- **R1.** An extension package is a ZIP file with the extension `.blext`, holding `extension.toml` at its root and the components it names. The manifest gives the extension's ID (reverse-domain, such as `org.example.tools`), name, version, author, licence, description, and for each component its file, its kind (`midi-tool`, `control-surface`, `audio-effect`, `instrument`, `midi-effect`), the world version it targets, the imports it asks for (R38), and the memory it asks for in MiB (R9; 16 when it doesn't say). (S1, S4)
 - **R2.** Worlds are versioned as WIT packages, `beatlayer:ext@<version>`. Beatlayer accepts every world version of the same major version up to its own; a component targeting a later minor version or another major version is refused, naming the version. (S1, S4)
 - **R3.** Installing (`extension.install`, `external`) checks the package before anything is kept: an unsafe path in the ZIP, a manifest that doesn't parse or lacks a field, a component it doesn't name or that's missing, a component that isn't valid or doesn't export its kind's world, or a duplicate ID with an equal or later version installed, refuses the whole package with the reason and keeps nothing. (S4)
 - **R4.** An installed extension goes in the User Library's `Extensions` folder, unpacked, one folder per ID. Installing a later version of an installed extension replaces it; its devices in open sets reload with their state (R28). (S3; Beatlayer's own)
 - **R5.** Beatlayer compiles each component ahead of time with `wasmtime` and keeps the compiled code in its cache folder, keyed by the component's hash and `wasmtime`'s version; a restart reuses it, a changed component or a new `wasmtime` compiles again. (S4)
-- **R6.** `extension.set_enabled` (`edit`) switches an extension on and off, kept in the preferences; a disabled extension's tools and surfaces aren't listed and its devices in a set become silent placeholders that keep their state (R30). `extension.remove` (`destructive`) removes it and its compiled code. (S4)
+- **R6.** `extension.set_enabled` (`edit`) switches an extension on and off, kept in the preferences (a new install is on); a disabled extension's tools and surfaces aren't listed and its devices in a set become silent placeholders that keep their state (R30). `extension.remove` (`destructive`) removes it and its compiled code. (S4)
 - **R7.** `extension.list` (`read`) gives each installed extension's ID, name, version, kinds, whether it's on, and its last failure; `extension.describe` (`read`) gives one extension's manifest, components and every call it may make (R44). (S4)
 - **R8.** A component reaches only its world's imports. It has no file system, network, environment, process or clock imports; the time it sees is the time its calls are given. (S1, S4)
 - **R9.** Each instance gets a memory reserved up front, of the size its manifest asks for up to 64 MiB, in a pooling allocator, so no call allocates in the host. (S4; the limit is Beatlayer's own)
@@ -99,7 +99,7 @@ Beatlayer's own bundled extensions (the MIDI Tools Pack's tools, the sequencer, 
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 to R16 | to be written in WP-9.29: `crates/ext/tests/host.rs` with test components; `cargo xtask layers` | unit, agent API |
+| R1 to R16 | `crates/ext/tests/host.rs` (packages, refusals, the cache, failures and limits, with test components written as WebAssembly text), `crates/ext/tests/wit.rs` (the worlds under `wit/`), the tests in `crates/shell/src/shell/extensions.rs` (the commands, headless); `cargo xtask layers` | unit, agent API |
 | R17 to R20 | to be written in WP-9.30: `crates/shell/tests/extension_tools.rs` | shell test |
 | R21 to R23 | to be written in WP-9.31: the native test surface's scenario run against a component, message for message | unit |
 | R24 to R31 | to be written in WP-9.32: renders at block sizes 1, 61 and 512 under the allocation trap and RealtimeSanitizer | engine test, RealtimeSanitizer |

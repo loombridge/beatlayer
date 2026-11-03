@@ -13,7 +13,7 @@
 //! What the manual leaves open — the exact curve laws, the smoothing's time
 //! constants, and what Default does to a note that carries no expression — is
 //! Beatlayer's own, written into the spec. Its panel is laid out as Live
-//! draws it (layout L-DEV-087): a column of tabs for the three sources with
+//! draws it (layout L-DEV-100): a column of tabs for the three sources with
 //! the shown source's curve knobs under them, a transfer curve whose foot
 //! holds the curve type, Min, Max, X and Y, and, in the expanded part, the
 //! shown source's settings.

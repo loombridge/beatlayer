@@ -51,6 +51,7 @@ The commands, by the part of their ID before its first dot:
 - [`edit`](edit.md)
 - [`envelope`](envelope.md)
 - [`export`](export.md)
+- [`extension`](extension.md)
 - [`file_manager`](file_manager.md)
 - [`focus`](focus.md)
 - [`granulator`](granulator.md)
@@ -4507,6 +4508,62 @@ A file a missing file could be relinked to (R14).
 
 </details>
 
+### `Caption`
+
+A line of text in a band, which names nothing and sets nothing: the L beside Align Delay's left box.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `text` | string | yes | The text. |
+| `x` | number | yes | Its left edge, from the band's. |
+| `y` | number | yes | Its top edge, from the band's. |
+| `width` | number | yes | The width it is set in: left-aligned in it, or centred. |
+| `centered` | boolean | yes | Whether the text is centred in its width. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A line of text in a band, which names nothing and sets nothing: the L beside Align Delay's left box.",
+  "properties": {
+    "centered": {
+      "default": false,
+      "description": "Whether the text is centred in its width.",
+      "type": "boolean"
+    },
+    "text": {
+      "description": "The text.",
+      "type": "string"
+    },
+    "width": {
+      "description": "The width it is set in: left-aligned in it, or centred.",
+      "format": "float",
+      "type": "number"
+    },
+    "x": {
+      "description": "Its left edge, from the band's.",
+      "format": "float",
+      "type": "number"
+    },
+    "y": {
+      "description": "Its top edge, from the band's.",
+      "format": "float",
+      "type": "number"
+    }
+  },
+  "required": [
+    "text",
+    "x",
+    "y",
+    "width",
+    "centered"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `CaptureResult`
 
 What `perception.capture_view` returns, beside the image.
@@ -7829,6 +7886,63 @@ Changes to Complex Pro's controls.
 
 </details>
 
+### `ComponentRow`
+
+A component of an extension, as its manifest gives it (R1).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `file` | string | yes | Its file in the extension's folder. |
+| `kind` | string | yes | What it does. |
+| `world` | string | yes | The version of the `beatlayer:ext` world it targets. |
+| `imports` | array of string | yes | The imports it asks for. |
+| `memory_mib` | integer, at least 0 | yes | The memory its instances reserve up front, in MiB. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A component of an extension, as its manifest gives it (R1).",
+  "properties": {
+    "file": {
+      "description": "Its file in the extension's folder.",
+      "type": "string"
+    },
+    "imports": {
+      "description": "The imports it asks for.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "kind": {
+      "description": "What it does.",
+      "type": "string"
+    },
+    "memory_mib": {
+      "description": "The memory its instances reserve up front, in MiB.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "world": {
+      "description": "The version of the `beatlayer:ext` world it targets.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "file",
+    "kind",
+    "world",
+    "imports",
+    "memory_mib"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ConditionArgs`
 
 The Condition filter's controls in `clip_view.note_filters`.
@@ -8131,12 +8245,14 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
 | `caption` | string or null | no | The name the control shows in place of its parameter's, where a section's own heading makes the full name redundant (Vinyl Distortion's Freq and B in each section). |
 | `glyph` | [`Glyph`](#glyph) or null | no | The icon of an icon button or a round button. |
 | `grey` | [`GreyWhen`](#greywhen) or null | no | The condition that greys the control. |
-| `hidden` | [`GreyWhen`](#greywhen) or null | no | The condition that leaves the control out of the panel (MPE Control's second curve knob while its curve is linear). |
+| `hide` | [`GreyWhen`](#greywhen) or null | no | The condition that puts the control away, so another control of a different kind can take its place (Delay's time grid and its millisecond box). |
+| `only` | [`GreyWhen`](#greywhen) or null | no | The condition that puts the control away unless it holds: the control shows only while the parameter's value, rounded, is the value (one of three modes' boxes in the same place). |
 | `size` | [`Size`](#size) or null | no | Its size where the device sets it, in place of the widget's: the width of a box, a row of buttons or a unit pair's control. |
+| `steps` | array or null | no | For a grid, row or stack of buttons over a whole-number parameter, the values its buttons set, in order (Delay's 1 2 3 4 5 6 8 16 of the sixteen steps its time takes): the button for the value the parameter has is lit, and none is while it has another. Over a choice parameter, the indexes of the choices that have a button, in order. |
 | `target` | [`ParamId`](#paramid) or null | no | The parameter a [`Widget::Stepper`]'s buttons move. |
-| `titled` | boolean | no | Set for a row, stack or grid of buttons with its parameter's name above it, left-aligned (Note Echo's Delay Time). |
+| `titled` | boolean | no | Set for a row, stack or grid of buttons with its parameter's name above it, left-aligned (Chorus-Ensemble's Taps). |
 | `unit` | [`UnitPair`](#unitpair) or null | no | The unit pair beside a knob, which makes the knob show one of two parameters. |
-| `unnamed` | boolean | no | Set for a box drawn without its name above it (Chord's amounts under their knobs): the control is its box alone. |
+| `unnamed` | boolean | no | Set for a box drawn without its name above it: its place says what it is (Delay's offset under its grid), and the control is its box alone. |
 
 <details><summary>JSON Schema</summary>
 
@@ -8173,7 +8289,7 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
       ],
       "description": "The condition that greys the control."
     },
-    "hidden": {
+    "hide": {
       "anyOf": [
         {
           "$ref": "#/$defs/GreyWhen"
@@ -8182,7 +8298,18 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
           "type": "null"
         }
       ],
-      "description": "The condition that leaves the control out of the panel (MPE Control's second curve knob while its curve is linear)."
+      "description": "The condition that puts the control away, so another control of a different kind can take its place (Delay's time grid and its millisecond box)."
+    },
+    "only": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/GreyWhen"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The condition that puts the control away unless it holds: the control shows only while the parameter's value, rounded, is the value (one of three modes' boxes in the same place)."
     },
     "param": {
       "$ref": "#/$defs/ParamId",
@@ -8199,6 +8326,18 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
       ],
       "description": "Its size where the device sets it, in place of the widget's: the width of a box, a row of buttons or a unit pair's control."
     },
+    "steps": {
+      "description": "For a grid, row or stack of buttons over a whole-number parameter, the values its buttons set, in order (Delay's 1 2 3 4 5 6 8 16 of the sixteen steps its time takes): the button for the value the parameter has is lit, and none is while it has another. Over a choice parameter, the indexes of the choices that have a button, in order.",
+      "items": {
+        "format": "int32",
+        "type": "integer"
+      },
+      "readOnly": true,
+      "type": [
+        "array",
+        "null"
+      ]
+    },
     "target": {
       "anyOf": [
         {
@@ -8211,7 +8350,7 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
       "description": "The parameter a [`Widget::Stepper`]'s buttons move."
     },
     "titled": {
-      "description": "Set for a row, stack or grid of buttons with its parameter's name above it, left-aligned (Note Echo's Delay Time).",
+      "description": "Set for a row, stack or grid of buttons with its parameter's name above it, left-aligned (Chorus-Ensemble's Taps).",
       "type": "boolean"
     },
     "unit": {
@@ -8226,7 +8365,7 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
       "description": "The unit pair beside a knob, which makes the knob show one of two parameters."
     },
     "unnamed": {
-      "description": "Set for a box drawn without its name above it (Chord's amounts under their knobs): the control is its box alone.",
+      "description": "Set for a box drawn without its name above it: its place says what it is (Delay's offset under its grid), and the control is its box alone.",
       "type": "boolean"
     },
     "widget": {
@@ -8265,6 +8404,7 @@ A band of controls, of a fixed size.
 | `width` | number | yes | Its width. |
 | `height` | number | yes | Its height. |
 | `controls` | array of [`Control`](#control) | yes | Its controls. |
+| `captions` | array of [`Caption`](#caption) | no | Lines of text among the controls: an L beside a box, an ms after it. |
 | `labels` | array of [`BandLabel`](#bandlabel) | no | Its text labels, drawn beside the controls they name. |
 | `slots` | [`SlotGroup`](#slotgroup) or null | no | Set for a band that shows the selected sample slot's controls: its controls name the first slot's parameters, and the band is placed for the selected slot ([`DeviceLayout::place_for`]). |
 
@@ -8274,6 +8414,13 @@ A band of controls, of a fixed size.
 {
   "description": "A band of controls, of a fixed size.",
   "properties": {
+    "captions": {
+      "description": "Lines of text among the controls: an L beside a box, an ms after it.",
+      "items": {
+        "$ref": "#/$defs/Caption"
+      },
+      "type": "array"
+    },
     "controls": {
       "description": "Its controls.",
       "items": {
@@ -10604,8 +10751,8 @@ A device's layout (IMP-14): bands of controls and display cells in rows and colu
 |---|---|---|---|
 | `root` | [`LayoutNode`](#layoutnode) | yes | The whole body. |
 | `expanded` | [`LayoutNode`](#layoutnode) or null | no | The part the device adds to its body while it is expanded (L-DEV-004, L-DEV-007), if it has one: placed to the right of [`root`](Self::root). It places its parameters' controls like the rest of the layout. |
-| `opens_expanded` | boolean | no | Whether a new device shows its expanded part, as Arpeggiator does (L-DEV-088). |
-| `points_right_when_shown` | boolean | no | Whether the expand toggle's triangle points right while the expanded part shows and down while it is hidden, as Arpeggiator's and MPE Control's do (L-DEV-087, L-DEV-088); otherwise it points right while the part is hidden. |
+| `opens_expanded` | boolean | no | Whether a new device shows its expanded part, as Arpeggiator does (L-DEV-101). |
+| `points_right_when_shown` | boolean | no | Whether the expand toggle's triangle points right while the expanded part shows and down while it is hidden, as Arpeggiator's and MPE Control's do (L-DEV-100, L-DEV-101); otherwise it points right while the part is hidden. |
 | `title` | array of [`TitlePart`](#titlepart) | no | What the device adds to its title bar. |
 
 <details><summary>JSON Schema</summary>
@@ -10626,11 +10773,11 @@ A device's layout (IMP-14): bands of controls and display cells in rows and colu
       "description": "The part the device adds to its body while it is expanded (L-DEV-004, L-DEV-007), if it has one: placed to the right of [`root`](Self::root). It places its parameters' controls like the rest of the layout."
     },
     "opens_expanded": {
-      "description": "Whether a new device shows its expanded part, as Arpeggiator does (L-DEV-088).",
+      "description": "Whether a new device shows its expanded part, as Arpeggiator does (L-DEV-101).",
       "type": "boolean"
     },
     "points_right_when_shown": {
-      "description": "Whether the expand toggle's triangle points right while the expanded part shows and down while it is hidden, as Arpeggiator's and MPE Control's do (L-DEV-087, L-DEV-088); otherwise it points right while the part is hidden.",
+      "description": "Whether the expand toggle's triangle points right while the expanded part shows and down while it is hidden, as Arpeggiator's and MPE Control's do (L-DEV-100, L-DEV-101); otherwise it points right while the part is hidden.",
       "type": "boolean"
     },
     "root": {
@@ -13026,7 +13173,7 @@ Type: one of `"maximum"`, `"minimum"`, `"middle"`.
 
 ### `ExportChoices`
 
-The Export Audio/Video dialog's controls, as the export spec's R29 to R37 list them, with a new install's values as their defaults. Render Start and Render Length aren't here: they're the dialog's alone (R39). The Video section has no choices, since it is drawn disabled (R38).
+The Export Audio/Video dialog's controls, as the export spec's R29 to R37 list them, with a new install's values as their defaults. Render Start and Render Length aren't here: they're the dialog's alone (R39).
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -13042,12 +13189,15 @@ The Export Audio/Video dialog's controls, as the export spec's R29 to R37 list t
 | `bit_depth` | integer from 0 to 255 | yes | Bit Depth. |
 | `dither` | [`Dither`](#dither) | yes | Dither Options. |
 | `encode_mp3` | boolean | yes | Encode MP3. |
+| `create_video` | boolean | yes | Create Video (R46). |
+| `video_encoder` | [`VideoEncoder`](#videoencoder) or null | yes | Video Encoder; none in a new install, when it shows H.264 where the computer has it and Motion JPEG otherwise (R47). |
+| `video_settings` | [`VideoSettings`](#videosettings) | yes | Encoder Settings (R48). |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "The Export Audio/Video dialog's controls, as the export spec's R29 to R37 list them, with a new install's values as their defaults. Render Start and Render Length aren't here: they're the dialog's alone (R39). The Video section has no choices, since it is drawn disabled (R38).",
+  "description": "The Export Audio/Video dialog's controls, as the export spec's R29 to R37 list them, with a new install's values as their defaults. Render Start and Render Length aren't here: they're the dialog's alone (R39).",
   "properties": {
     "bit_depth": {
       "default": 24,
@@ -13065,6 +13215,11 @@ The Export Audio/Video dialog's controls, as the export spec's R29 to R37 list t
     "create_analysis_file": {
       "default": false,
       "description": "Create Analysis File.",
+      "type": "boolean"
+    },
+    "create_video": {
+      "default": false,
+      "description": "Create Video (R46).",
       "type": "boolean"
     },
     "dither": {
@@ -13116,6 +13271,23 @@ The Export Audio/Video dialog's controls, as the export spec's R29 to R37 list t
         "integer",
         "null"
       ]
+    },
+    "video_encoder": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/VideoEncoder"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Video Encoder; none in a new install, when it shows H.264 where the computer has it and Motion JPEG otherwise (R47)."
+    },
+    "video_settings": {
+      "$ref": "#/$defs/VideoSettings",
+      "default": {},
+      "description": "Encoder Settings (R48)."
     }
   },
   "required": [
@@ -13130,7 +13302,10 @@ The Export Audio/Video dialog's controls, as the export spec's R29 to R37 list t
     "file_type",
     "bit_depth",
     "dither",
-    "encode_mp3"
+    "encode_mp3",
+    "create_video",
+    "video_encoder",
+    "video_settings"
   ],
   "type": "object"
 }
@@ -13183,6 +13358,7 @@ The open dialog, as `export.status` reports it (R44).
 | `length` | [`Ticks`](#ticks) | yes | Render Length, in ticks. |
 | `can_export` | boolean | yes | Whether Export is enabled. |
 | `disabled` | array of [`Disabled`](#disabled) | yes | The controls drawn disabled, with their reasons. |
+| `video_encoders` | array of [`VideoEncoder`](#videoencoder) | yes | The encoders the Video Encoder chooser lists on this computer, in its order (R47). |
 | `reason` | string or null | no | Why Export is disabled. |
 
 <details><summary>JSON Schema</summary>
@@ -13220,6 +13396,14 @@ The open dialog, as `export.status` reports it (R44).
     "start": {
       "$ref": "#/$defs/Ticks",
       "description": "Render Start, in ticks from 1.1.1."
+    },
+    "video_encoders": {
+      "default": [],
+      "description": "The encoders the Video Encoder chooser lists on this computer, in its order (R47).",
+      "items": {
+        "$ref": "#/$defs/VideoEncoder"
+      },
+      "type": "array"
     }
   },
   "required": [
@@ -13227,7 +13411,8 @@ The open dialog, as `export.status` reports it (R44).
     "start",
     "length",
     "can_export",
-    "disabled"
+    "disabled",
+    "video_encoders"
   ],
   "type": "object"
 }
@@ -13262,6 +13447,7 @@ What `export.audio` returns.
 | `attempts` | integer, at least 0 | yes | How many times the render started: more than one when a dropout spoiled it and it started again. |
 | `dropouts` | array of [`Dropout`](#dropout) | no | The dropouts the render found, each with the song position it happened at. |
 | `files` | array of string | no | Every file written by the export: one for Main or a single track, or one per track for all-tracks or selected-tracks exports. |
+| `movie` | string or null | no | The movie written beside the first file, if `video` was given (the movies of a multi-file export are in `files`). |
 | `silenced_external_devices` | array of string | no | The devices that work with hardware (an external instrument or an external effect), by the name their title bar shows and their ID: they send nothing to hardware in an offline render and bring back silence. |
 
 <details><summary>JSON Schema</summary>
@@ -13334,6 +13520,13 @@ What `export.audio` returns.
         "type": "string"
       },
       "type": "array"
+    },
+    "movie": {
+      "description": "The movie written beside the first file, if `video` was given (the movies of a multi-file export are in `files`).",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "path": {
       "description": "The file written (or the base path if multiple files were written).",
@@ -13572,6 +13765,196 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `ExtensionDescription`
+
+What `extension.describe` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | Its ID. |
+| `name` | string | yes | Its name. |
+| `version` | string | yes | Its version. |
+| `author` | string | yes | Who made it. |
+| `licence` | string | yes | The licence it's under. |
+| `description` | string | yes | What it does. |
+| `enabled` | boolean | yes | Whether it is on. |
+| `components` | array of [`ComponentRow`](#componentrow) | yes | Its components. |
+| `calls` | array of string | yes | The registered commands it may call, each with its permission class (R44). None until extensions reach the set (R38). |
+| `last_failure` | string or null | no | Why a component of it was stopped, if one was. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `extension.describe` returns.",
+  "properties": {
+    "author": {
+      "description": "Who made it.",
+      "type": "string"
+    },
+    "calls": {
+      "description": "The registered commands it may call, each with its permission class (R44). None until extensions reach the set (R38).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "components": {
+      "description": "Its components.",
+      "items": {
+        "$ref": "#/$defs/ComponentRow"
+      },
+      "type": "array"
+    },
+    "description": {
+      "description": "What it does.",
+      "type": "string"
+    },
+    "enabled": {
+      "description": "Whether it is on.",
+      "type": "boolean"
+    },
+    "id": {
+      "description": "Its ID.",
+      "type": "string"
+    },
+    "last_failure": {
+      "description": "Why a component of it was stopped, if one was.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "licence": {
+      "description": "The licence it's under.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "version": {
+      "description": "Its version.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "version",
+    "author",
+    "licence",
+    "description",
+    "enabled",
+    "components",
+    "calls"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ExtensionList`
+
+What `extension.list` and the commands that change the list return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `folder` | string | yes | The User Library folder the extensions are installed in. |
+| `extensions` | array of [`ExtensionRow`](#extensionrow) | yes | The installed extensions, by ID. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `extension.list` and the commands that change the list return.",
+  "properties": {
+    "extensions": {
+      "description": "The installed extensions, by ID.",
+      "items": {
+        "$ref": "#/$defs/ExtensionRow"
+      },
+      "type": "array"
+    },
+    "folder": {
+      "description": "The User Library folder the extensions are installed in.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "folder",
+    "extensions"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ExtensionRow`
+
+An installed extension, as `extension.list` gives it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | Its ID, which the other commands take. |
+| `name` | string | yes | Its name. |
+| `version` | string | yes | Its version. |
+| `kinds` | array of string | yes | What its components do, once each: `midi-tool`, `control-surface`, `audio-effect`, `instrument` or `midi-effect`. |
+| `enabled` | boolean | yes | Whether it is on. |
+| `last_failure` | string or null | no | Why a component of it was stopped, if one was (R10 to R12): kept until the extension is switched on again or Beatlayer restarts. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An installed extension, as `extension.list` gives it.",
+  "properties": {
+    "enabled": {
+      "description": "Whether it is on.",
+      "type": "boolean"
+    },
+    "id": {
+      "description": "Its ID, which the other commands take.",
+      "type": "string"
+    },
+    "kinds": {
+      "description": "What its components do, once each: `midi-tool`, `control-surface`, `audio-effect`, `instrument` or `midi-effect`.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "last_failure": {
+      "description": "Why a component of it was stopped, if one was (R10 to R12): kept until the extension is switched on again or Beatlayer restarts.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "version": {
+      "description": "Its version.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "version",
+    "kinds",
+    "enabled"
+  ],
+  "type": "object"
 }
 ```
 
@@ -15433,6 +15816,11 @@ One of:
 - `"flat_sharp"`: A flat and a sharp: Use Current Scale.
 - `"line"`: A straight line rising to the right: a linear curve.
 - `"s_curve"`: A line rising in an S: an S-shaped curve.
+- `"link"`: Two linked rings: the link between a device's two channels, or a curve's two knobs moving together (MPE Control's Curve Link).
+- `"freeze"`: An asterisk: Freeze.
+- `"phase_invert"`: A circle struck through: invert the phase.
+- `"record"`: A filled circle: record.
+- `"stop"`: A filled square: stop.
 - `"crossfade"`: Two lines crossing: a crossfade.
 - `"envelope"`: A rise and a fall: an envelope's shape.
 - `"phase"`: A circle cut by a line: a phase.
@@ -15441,7 +15829,6 @@ One of:
 - `"high_pass24"`: A high-pass filter's response at 24 dB per octave.
 - `"peak"`: A peak filter's response.
 - `"headphones"`: Headphones: a device's audition button (Boom Audition, Utility's Bass Mono, EQ Eight's Audition).
-- `"link"`: Two joined links: a curve's two knobs moving together (MPE Control's Curve Link).
 
 <details><summary>JSON Schema</summary>
 
@@ -15525,6 +15912,31 @@ One of:
       "type": "string"
     },
     {
+      "const": "link",
+      "description": "Two linked rings: the link between a device's two channels, or a curve's two knobs moving together (MPE Control's Curve Link).",
+      "type": "string"
+    },
+    {
+      "const": "freeze",
+      "description": "An asterisk: Freeze.",
+      "type": "string"
+    },
+    {
+      "const": "phase_invert",
+      "description": "A circle struck through: invert the phase.",
+      "type": "string"
+    },
+    {
+      "const": "record",
+      "description": "A filled circle: record.",
+      "type": "string"
+    },
+    {
+      "const": "stop",
+      "description": "A filled square: stop.",
+      "type": "string"
+    },
+    {
       "const": "crossfade",
       "description": "Two lines crossing: a crossfade.",
       "type": "string"
@@ -15562,11 +15974,6 @@ One of:
     {
       "const": "headphones",
       "description": "Headphones: a device's audition button (Boom Audition, Utility's Bass Mono, EQ Eight's Audition).",
-      "type": "string"
-    },
-    {
-      "const": "link",
-      "description": "Two joined links: a curve's two knobs moving together (MPE Control's Curve Link).",
       "type": "string"
     }
   ]
@@ -43486,6 +43893,190 @@ One of:
 
 </details>
 
+### `VideoEncoder`
+
+The encoders the Video Encoder chooser lists (the export spec, R47). A computer lists the ones it has: Motion JPEG is on every one.
+
+One of:
+
+- `"h264"`: H.264.
+- `"hevc"`: HEVC.
+- `"prores_422"`: Apple ProRes 422.
+- `"motion_jpeg"`: Motion JPEG, Beatlayer's own.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The encoders the Video Encoder chooser lists (the export spec, R47). A computer lists the ones it has: Motion JPEG is on every one.",
+  "oneOf": [
+    {
+      "const": "h264",
+      "description": "H.264.",
+      "type": "string"
+    },
+    {
+      "const": "hevc",
+      "description": "HEVC.",
+      "type": "string"
+    },
+    {
+      "const": "prores_422",
+      "description": "Apple ProRes 422.",
+      "type": "string"
+    },
+    {
+      "const": "motion_jpeg",
+      "description": "Motion JPEG, Beatlayer's own.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `VideoOptions`
+
+The `video` argument of `export.audio` (the export spec, R52): write a QuickTime movie beside each audio file, named as it is with `.mov`, of the Arrangement's picture over the range with the rendered audio as its sound. It needs a PCM file type and a video clip in the range.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | A video clip: with it, and `start` and `length` left out, the range is the whole of the clip's movie, the part of it before the clip's start as pre-roll (R50). |
+| `encoder` | [`VideoEncoder`](#videoencoder) or null | no | The encoder. Left out, H.264 where this computer has it, else Motion JPEG. |
+| `settings` | [`VideoSettings`](#videosettings) | no | The encoder's settings. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The `video` argument of `export.audio` (the export spec, R52): write a QuickTime movie beside each audio file, named as it is with `.mov`, of the Arrangement's picture over the range with the rendered audio as its sound. It needs a PCM file type and a video clip in the range.",
+  "properties": {
+    "clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A video clip: with it, and `start` and `length` left out, the range is the whole of the clip's movie, the part of it before the clip's start as pre-roll (R50)."
+    },
+    "encoder": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/VideoEncoder"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The encoder. Left out, H.264 where this computer has it, else Motion JPEG."
+    },
+    "settings": {
+      "$ref": "#/$defs/VideoSettings",
+      "default": {},
+      "description": "The encoder's settings."
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `VideoSettings`
+
+The settings Encoder Settings' Edit opens (the export spec, R48). A setting left out is the source movie's own, or for the quality 85.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `frame_rate` | number or null | no | Frames a second, such as 24, 25 or 29.97. The source movie's rate when left out. |
+| `quality` | integer or null | no | From 1 to 100: how much of the picture the encoder keeps. 85 unless given. ProRes 422 has no quality and ignores it. |
+| `size` | [`VideoSize`](#videosize) or null | no | The picture's size. The source movie's when left out; an odd width or height is rounded down to even. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The settings Encoder Settings' Edit opens (the export spec, R48). A setting left out is the source movie's own, or for the quality 85.",
+  "properties": {
+    "frame_rate": {
+      "description": "Frames a second, such as 24, 25 or 29.97. The source movie's rate when left out.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "quality": {
+      "description": "From 1 to 100: how much of the picture the encoder keeps. 85 unless given. ProRes 422 has no quality and ignores it.",
+      "format": "uint8",
+      "maximum": 100,
+      "minimum": 1,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "size": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/VideoSize"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The picture's size. The source movie's when left out; an odd width or height is rounded down to even."
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `VideoSize`
+
+A picture size in pixels.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `width` | integer, at least 0 | yes | Width. |
+| `height` | integer, at least 0 | yes | Height. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A picture size in pixels.",
+  "properties": {
+    "height": {
+      "description": "Height.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "width": {
+      "description": "Width.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "width",
+    "height"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `View`
 
 A view to capture.
@@ -44116,6 +44707,11 @@ One of:
 - `"switch"`: A box under the parameter's name that reads On or Off and turns the switch when pressed (Arpeggiator's Velocity).
 - `"square"`: A small square button under the parameter's name, lit while on (CC Control's Custom A).
 - `"stepper"`: A number box with a round − at its left and a round + at its right: the box is the control's parameter, the amount the buttons step, and the buttons move the parameter its [`Control::target`] names by it (Pitch's Step Width).
+- `"inline"`: A name and the value after it on one line, the value in blue, dragged or typed (Freq and Width along the foot of Delay's display).
+- `"tick"`: A small box that is filled while the switch is on, with the name after it (the Filter switch along the foot of a display).
+- `"stacked"`: The name over the value, both centred, the value in blue and dragged or typed, with no box (Reverb's Amount and Rate).
+- `"spread"`: The name at the left and the value at the right of one line, the value in blue (Reverb's Shape).
+- an object with `tabs` (integer from 0 to 255): A row of that many tabs, one for each choice of a choice parameter, outlined in orange while off and filled while on (Chorus-Ensemble's Chorus, Ensemble and Vibrato).
 - an object with `beside` (integer from 0 to 255): A lit number box with its name to its left on the same line (Pedal's Dry/Wet, Overdrive's Dynamics): the number is the points the name has before the box.
 - an object with `beside_dim` (integer from 0 to 255): A plain number box with its name in dim text to its left on the same line (Spectral Resonator's Glide and PB): the number is the points the name has before the box.
 - an object with `beside_switch` (integer from 0 to 255): A button that reads On or Off, lit while on, with its name in dim text to its left (Spectral Resonator's MIDI Gate): the number is the points the name has before the button.
@@ -44134,7 +44730,6 @@ One of:
 - `"bare_chooser"`: A [`Chooser`](Self::Chooser) with no name row: the device's own label is beside it, or it needs none (the Drum Sampler's effect type).
 - `"cycle"`: A lit text button holding the chosen choice's name, a press taking the next choice and the last going round to the first (the Drum Sampler's modulation source, Resonators' Mode).
 - `"mode"`: A text button holding the chosen name of a two-choice parameter, lit while its second choice is chosen; a press switches to the other (Note Echo's Sync, which reads Time while it is off).
-- `"inline"`: The name and the value on one line, the value in the accent, dragged or typed (the Drum Sampler's Start, Length and Gain under its sample).
 
 <details><summary>JSON Schema</summary>
 
@@ -44289,6 +44884,42 @@ One of:
       "type": "string"
     },
     {
+      "const": "inline",
+      "description": "A name and the value after it on one line, the value in blue, dragged or typed (Freq and Width along the foot of Delay's display).",
+      "type": "string"
+    },
+    {
+      "const": "tick",
+      "description": "A small box that is filled while the switch is on, with the name after it (the Filter switch along the foot of a display).",
+      "type": "string"
+    },
+    {
+      "const": "stacked",
+      "description": "The name over the value, both centred, the value in blue and dragged or typed, with no box (Reverb's Amount and Rate).",
+      "type": "string"
+    },
+    {
+      "const": "spread",
+      "description": "The name at the left and the value at the right of one line, the value in blue (Reverb's Shape).",
+      "type": "string"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A row of that many tabs, one for each choice of a choice parameter, outlined in orange while off and filled while on (Chorus-Ensemble's Chorus, Ensemble and Vibrato).",
+      "properties": {
+        "tabs": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "tabs"
+      ],
+      "type": "object"
+    },
+    {
       "additionalProperties": false,
       "description": "A lit number box with its name to its left on the same line (Pedal's Dry/Wet, Overdrive's Dynamics): the number is the points the name has before the box.",
       "properties": {
@@ -44431,11 +45062,6 @@ One of:
     {
       "const": "mode",
       "description": "A text button holding the chosen name of a two-choice parameter, lit while its second choice is chosen; a press switches to the other (Note Echo's Sync, which reads Time while it is off).",
-      "type": "string"
-    },
-    {
-      "const": "inline",
-      "description": "The name and the value on one line, the value in the accent, dragged or typed (the Drum Sampler's Start, Length and Gain under its sample).",
       "type": "string"
     }
   ]

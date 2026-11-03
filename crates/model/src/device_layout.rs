@@ -239,6 +239,22 @@ pub enum Widget {
     /// the buttons move the parameter its [`Control::target`] names by it
     /// (Pitch's Step Width).
     Stepper,
+    /// A name and the value after it on one line, the value in blue, dragged
+    /// or typed (Freq and Width along the foot of Delay's display).
+    Inline,
+    /// A small box that is filled while the switch is on, with the name
+    /// after it (the Filter switch along the foot of a display).
+    Tick,
+    /// The name over the value, both centred, the value in blue and dragged
+    /// or typed, with no box (Reverb's Amount and Rate).
+    Stacked,
+    /// The name at the left and the value at the right of one line, the
+    /// value in blue (Reverb's Shape).
+    Spread,
+    /// A row of that many tabs, one for each choice of a choice parameter,
+    /// outlined in orange while off and filled while on (Chorus-Ensemble's
+    /// Chorus, Ensemble and Vibrato).
+    Tabs(u8),
     /// A lit number box with its name to its left on the same line (Pedal's
     /// Dry/Wet, Overdrive's Dynamics): the number is the points the name has
     /// before the box.
@@ -301,9 +317,6 @@ pub enum Widget {
     /// while its second choice is chosen; a press switches to the other
     /// (Note Echo's Sync, which reads Time while it is off).
     Mode,
-    /// The name and the value on one line, the value in the accent, dragged
-    /// or typed (the Drum Sampler's Start, Length and Gain under its sample).
-    Inline,
 }
 
 impl Widget {
@@ -330,6 +343,8 @@ impl Widget {
             Self::Number | Self::Slider | Self::Marked | Self::Chooser | Self::Switch => {
                 Size::new(53.0, LABEL_HEIGHT + BOX_HEIGHT)
             }
+            Self::Inline | Self::Tick | Self::Spread => Size::new(53.0, BOX_HEIGHT),
+            Self::Stacked => Size::new(40.0, 2.0 * BOX_HEIGHT),
             Self::LitChooser | Self::UnboxedChooser | Self::Unboxed => {
                 Size::new(53.0, LABEL_HEIGHT + BOX_HEIGHT)
             }
@@ -337,7 +352,7 @@ impl Widget {
             Self::Toggle | Self::Outlined => Size::new(SEGMENT_WIDTH, BOX_HEIGHT),
             Self::IconToggle => Size::new(CELL_WIDTH, BOX_HEIGHT),
             Self::Round => Size::new(BOX_HEIGHT, BOX_HEIGHT),
-            Self::Segments(n) => Size::new(
+            Self::Segments(n) | Self::Tabs(n) => Size::new(
                 f32::from(n) * SEGMENT_WIDTH + f32::from(n.saturating_sub(1)) * BUTTON_GAP,
                 BOX_HEIGHT,
             ),
@@ -362,9 +377,7 @@ impl Widget {
             Self::Bare | Self::BareSlider | Self::Framed | Self::BareChooser => {
                 Size::new(FRAMED_WIDTH, BOX_HEIGHT)
             }
-            Self::Cycle | Self::Mode | Self::Inline | Self::Abbreviated(_) => {
-                Size::new(SEGMENT_WIDTH, BOX_HEIGHT)
-            }
+            Self::Cycle | Self::Mode | Self::Abbreviated(_) => Size::new(SEGMENT_WIDTH, BOX_HEIGHT),
         }
     }
 
@@ -373,9 +386,11 @@ impl Widget {
     #[must_use]
     pub fn choice_capacity(self) -> Option<usize> {
         match self {
-            Self::Segments(n) | Self::Stack(n) | Self::IconSegments(n) | Self::IconColumn(n) => {
-                Some(usize::from(n))
-            }
+            Self::Segments(n)
+            | Self::Stack(n)
+            | Self::IconSegments(n)
+            | Self::Tabs(n)
+            | Self::IconColumn(n) => Some(usize::from(n)),
             Self::Grid { columns, rows } => Some(usize::from(columns) * usize::from(rows)),
             _ => None,
         }
@@ -417,6 +432,17 @@ pub enum Glyph {
     Line,
     /// A line rising in an S: an S-shaped curve.
     SCurve,
+    /// Two linked rings: the link between a device's two channels, or a
+    /// curve's two knobs moving together (MPE Control's Curve Link).
+    Link,
+    /// An asterisk: Freeze.
+    Freeze,
+    /// A circle struck through: invert the phase.
+    PhaseInvert,
+    /// A filled circle: record.
+    Record,
+    /// A filled square: stop.
+    Stop,
     /// Two lines crossing: a crossfade.
     Crossfade,
     /// A rise and a fall: an envelope's shape.
@@ -434,9 +460,6 @@ pub enum Glyph {
     /// Headphones: a device's audition button (Boom Audition, Utility's
     /// Bass Mono, EQ Eight's Audition).
     Headphones,
-    /// Two joined links: a curve's two knobs moving together (MPE Control's
-    /// Curve Link).
-    Link,
 }
 
 /// A unit a knob's two parameters read in.
@@ -530,18 +553,31 @@ pub struct Control {
     /// The condition that greys the control.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grey: Option<GreyWhen>,
-    /// The condition that leaves the control out of the panel (MPE
-    /// Control's second curve knob while its curve is linear).
+    /// The condition that puts the control away, so another control of a
+    /// different kind can take its place (Delay's time grid and its
+    /// millisecond box).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub hidden: Option<GreyWhen>,
-    /// Set for a row, stack or grid of buttons with its parameter's name above
-    /// it, left-aligned (Note Echo's Delay Time).
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub titled: bool,
-    /// Set for a box drawn without its name above it (Chord's amounts under
-    /// their knobs): the control is its box alone.
+    pub hide: Option<GreyWhen>,
+    /// The condition that puts the control away unless it holds: the control
+    /// shows only while the parameter's value, rounded, is the value (one of
+    /// three modes' boxes in the same place).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub only: Option<GreyWhen>,
+    /// For a grid, row or stack of buttons over a whole-number parameter, the
+    /// values its buttons set, in order (Delay's 1 2 3 4 5 6 8 16 of the
+    /// sixteen steps its time takes): the button for the value the parameter
+    /// has is lit, and none is while it has another. Over a choice parameter,
+    /// the indexes of the choices that have a button, in order.
+    #[serde(default, skip_serializing_if = "Option::is_none", skip_deserializing)]
+    pub steps: Option<&'static [i32]>,
+    /// Set for a box drawn without its name above it: its place says what it
+    /// is (Delay's offset under its grid), and the control is its box alone.
     #[serde(default, skip_serializing_if = "is_false")]
     pub unnamed: bool,
+    /// Set for a row, stack or grid of buttons with its parameter's name above
+    /// it, left-aligned (Chorus-Ensemble's Taps).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub titled: bool,
     /// The parameter a [`Widget::Stepper`]'s buttons move.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<ParamId>,
@@ -569,9 +605,11 @@ impl Control {
             glyph: None,
             unit: None,
             grey: None,
-            hidden: None,
-            titled: false,
+            hide: None,
+            only: None,
+            steps: None,
             unnamed: false,
+            titled: false,
             target: None,
             caption: None,
         }
@@ -591,10 +629,17 @@ impl Control {
         self
     }
 
-    /// The same box or chooser without the name above it.
+    /// The same box without its name above it.
     #[must_use]
     pub const fn unnamed(mut self) -> Self {
         self.unnamed = true;
+        self
+    }
+
+    /// The same control, its buttons setting `steps`.
+    #[must_use]
+    pub const fn with_steps(mut self, steps: &'static [i32]) -> Self {
+        self.steps = Some(steps);
         self
     }
 
@@ -649,11 +694,17 @@ impl Control {
         self
     }
 
-    /// The same control, left out of the panel while `param`'s value rounds
-    /// to `value`.
+    /// The same control, shown only while `param`'s value rounds to `value`.
+    #[must_use]
+    pub const fn shown_only_while(mut self, param: ParamId, value: i32) -> Self {
+        self.only = Some(GreyWhen { param, value });
+        self
+    }
+
+    /// The same control, put away while `param`'s value rounds to `value`.
     #[must_use]
     pub const fn hidden_while(mut self, param: ParamId, value: i32) -> Self {
-        self.hidden = Some(GreyWhen { param, value });
+        self.hide = Some(GreyWhen { param, value });
         self
     }
 
@@ -750,9 +801,51 @@ pub struct ControlBand {
     /// for the selected slot ([`DeviceLayout::place_for`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slots: Option<SlotGroup>,
+    /// Lines of text among the controls: an L beside a box, an ms after it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub captions: Vec<Caption>,
     /// Its text labels, drawn beside the controls they name.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub labels: Vec<BandLabel>,
+}
+
+/// A line of text in a band, which names nothing and sets nothing: the L
+/// beside Align Delay's left box.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Caption {
+    /// The text.
+    pub text: String,
+    /// Its left edge, from the band's.
+    pub x: f32,
+    /// Its top edge, from the band's.
+    pub y: f32,
+    /// The width it is set in: left-aligned in it, or centred.
+    pub width: f32,
+    /// Whether the text is centred in its width.
+    #[serde(default)]
+    pub centered: bool,
+}
+
+impl Caption {
+    /// A caption reading `text` at `x`, `y` in `width` points, left-aligned,
+    /// [`BOX_HEIGHT`] tall.
+    #[must_use]
+    pub fn new(text: &str, x: f32, y: f32, width: f32) -> Self {
+        Self {
+            text: text.to_owned(),
+            x,
+            y,
+            width,
+            centered: false,
+        }
+    }
+
+    /// The same caption, centred in its width.
+    #[must_use]
+    pub fn centered(mut self) -> Self {
+        self.centered = true;
+        self
+    }
 }
 
 impl ControlBand {
@@ -780,6 +873,7 @@ impl ControlBand {
             height,
             controls: placed,
             slots: None,
+            captions: Vec::new(),
             labels: Vec::new(),
         }
     }
@@ -794,8 +888,16 @@ impl ControlBand {
             height,
             controls,
             slots: None,
+            captions: Vec::new(),
             labels: Vec::new(),
         }
+    }
+
+    /// The same band, with `captions` among its controls.
+    #[must_use]
+    pub fn with_captions(mut self, captions: Vec<Caption>) -> Self {
+        self.captions = captions;
+        self
     }
 
     /// The same band with `labels` drawn in it.
@@ -1285,6 +1387,18 @@ impl PagesNode {
 }
 
 impl LayoutNode {
+    /// The part with `left`, `top`, `right` and `bottom` points of space
+    /// around it: a display cell inset from its device's frame.
+    #[must_use]
+    pub fn inset(self, left: f32, top: f32, right: f32, bottom: f32) -> Self {
+        let space = |width, height| Self::Band(ControlBand::free(width, height, Vec::new()));
+        Self::Column(vec![
+            space(0.0, top),
+            Self::Row(vec![space(left, 0.0), self, space(right, 0.0)]),
+            space(0.0, bottom),
+        ])
+    }
+
     /// Its docked size.
     fn natural(&self) -> Size {
         match self {
@@ -1462,6 +1576,18 @@ fn place_band(band: &ControlBand, x: f32, y: f32, slot: u32, placed: &mut Placed
     let rect = Rect::new(x, y, band.width, band.height);
     placed.bands.push(rect);
     placed
+        .captions
+        .extend(band.captions.iter().map(|caption| PlacedCaption {
+            text: caption.text.clone(),
+            rect: Rect::new(
+                rect.x + caption.x,
+                rect.y + caption.y,
+                caption.width,
+                BOX_HEIGHT,
+            ),
+            centered: caption.centered,
+        }));
+    placed
         .controls
         .extend(band.controls.iter().map(|control| PlacedControl {
             param: ParamId(control.param.0 + offset),
@@ -1479,12 +1605,18 @@ fn place_band(band: &ControlBand, x: f32, y: f32, slot: u32, placed: &mut Placed
                 param: ParamId(grey.param.0 + offset),
                 ..grey
             }),
-            hidden: control.hidden.map(|hidden| GreyWhen {
-                param: ParamId(hidden.param.0 + offset),
-                ..hidden
+            // And put away by the same slot's parameter.
+            hide: control.hide.map(|hide| GreyWhen {
+                param: ParamId(hide.param.0 + offset),
+                ..hide
             }),
-            titled: control.titled,
+            only: control.only.map(|only| GreyWhen {
+                param: ParamId(only.param.0 + offset),
+                ..only
+            }),
+            steps: control.steps,
             unnamed: control.unnamed,
+            titled: control.titled,
             target: control.target,
             caption: control.caption.clone(),
         }));
@@ -1572,12 +1704,12 @@ pub struct DeviceLayout {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expanded: Option<LayoutNode>,
     /// Whether a new device shows its expanded part, as Arpeggiator does
-    /// (L-DEV-088).
+    /// (L-DEV-101).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub opens_expanded: bool,
     /// Whether the expand toggle's triangle points right while the expanded
     /// part shows and down while it is hidden, as Arpeggiator's and MPE
-    /// Control's do (L-DEV-087, L-DEV-088); otherwise it points right while
+    /// Control's do (L-DEV-100, L-DEV-101); otherwise it points right while
     /// the part is hidden.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub points_right_when_shown: bool,
@@ -1607,15 +1739,21 @@ pub struct PlacedControl {
     /// What greys the control.
     #[serde(default)]
     pub grey: Option<GreyWhen>,
-    /// What leaves the control out of the panel.
+    /// What puts the control away.
     #[serde(default)]
-    pub hidden: Option<GreyWhen>,
-    /// Whether the buttons have their name above them.
+    pub hide: Option<GreyWhen>,
+    /// What puts the control away unless it holds.
     #[serde(default)]
-    pub titled: bool,
-    /// Whether the box has no name above it.
+    pub only: Option<GreyWhen>,
+    /// The values its buttons set, over a whole-number parameter.
+    #[serde(default, skip_serializing_if = "Option::is_none", skip_deserializing)]
+    pub steps: Option<&'static [i32]>,
+    /// Whether it is drawn without its name above it.
     #[serde(default)]
     pub unnamed: bool,
+    /// Whether its buttons have its name above them.
+    #[serde(default)]
+    pub titled: bool,
     /// The parameter a stepper's buttons move.
     #[serde(default)]
     pub target: Option<ParamId>,
@@ -1634,6 +1772,18 @@ pub struct PlacedHeading {
     pub centered: bool,
     /// Where, from the body's top-left corner: as wide as the group under it.
     pub rect: Rect,
+}
+
+/// A caption where a layout placed it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PlacedCaption {
+    /// Its text.
+    pub text: String,
+    /// Where, from the body's top-left corner.
+    pub rect: Rect,
+    /// Whether the text is centred in the rectangle.
+    #[serde(default)]
+    pub centered: bool,
 }
 
 /// A band's text label where a layout placed it.
@@ -1695,6 +1845,9 @@ pub struct Placed {
     /// Its section headings, in the layout's order.
     #[serde(default)]
     pub headings: Vec<PlacedHeading>,
+    /// Its captions, band by band.
+    #[serde(default)]
+    pub captions: Vec<PlacedCaption>,
     /// Its bands' text labels, in the layout's order.
     #[serde(default)]
     pub labels: Vec<PlacedLabel>,
@@ -2050,7 +2203,22 @@ fn check_band(
             (control.widget.choice_capacity(), described(control.param))
         {
             match &descriptor.kind {
-                ParamKind::Choice { choices } if choices.len() <= room => {}
+                // A choice whose buttons are some of its choices, in the order
+                // given: Grain Delay's axes leave out the one the other offers.
+                ParamKind::Choice { choices }
+                    if control.steps.is_some_and(|steps| {
+                        steps.len() <= room
+                            && steps
+                                .iter()
+                                .all(|s| usize::try_from(*s).is_ok_and(|s| s < choices.len()))
+                    }) => {}
+                ParamKind::Choice { choices }
+                    if control.steps.is_none() && choices.len() <= room => {}
+                ParamKind::Integer { min, max, .. }
+                    if control.steps.is_some_and(|steps| {
+                        steps.len() <= room
+                            && steps.iter().all(|s| (*min..=*max).contains(&i64::from(*s)))
+                    }) => {}
                 _ => {
                     *problem = Some(format!(
                         "parameter {}'s buttons need a choice with at most {room} choices",
@@ -2071,6 +2239,17 @@ fn check_band(
             *problem = Some(format!(
                 "parameter {}'s control is greyed by parameter {}, which the device doesn't have",
                 control.param.0, grey.param.0
+            ));
+        }
+        if let Some(hide) = control
+            .hide
+            .into_iter()
+            .chain(control.only)
+            .find(|g| described(g.param).is_none())
+        {
+            *problem = Some(format!(
+                "parameter {}'s control is put away by parameter {}, which the device doesn't have",
+                control.param.0, hide.param.0
             ));
         }
     }
@@ -2766,6 +2945,48 @@ mod tests {
 
     // Spec: device-framework R56
     #[test]
+    fn a_control_is_put_away_by_a_parameter_the_device_has() {
+        let layout = |by| {
+            DeviceLayout::new(LayoutNode::Band(ControlBand::free(
+                100.0,
+                60.0,
+                vec![
+                    Control::new(ParamId(0), Widget::Knob, 4.0, 4.0).hidden_while(ParamId(by), 1),
+                    Control::new(ParamId(1), Widget::Toggle, 50.0, 4.0),
+                    Control::new(ParamId(2), Widget::Toggle, 50.0, 20.0)
+                        .shown_only_while(ParamId(by), 1),
+                ],
+            )))
+        };
+        layout(1).check(&params(3)).unwrap();
+        assert!(
+            layout(9)
+                .check(&params(3))
+                .unwrap_err()
+                .contains("put away by"),
+            "a switch the device doesn't have"
+        );
+        let placed = layout(1).place(layout(1).docked_size());
+        let when = Some(GreyWhen {
+            param: ParamId(1),
+            value: 1,
+        });
+        assert_eq!(
+            (placed.controls[0].hide, placed.controls[0].only),
+            (when, None)
+        );
+        assert_eq!(
+            (placed.controls[1].hide, placed.controls[1].only),
+            (None, None)
+        );
+        assert_eq!(
+            (placed.controls[2].hide, placed.controls[2].only),
+            (None, when)
+        );
+    }
+
+    // Spec: device-framework R56
+    #[test]
     fn a_control_is_greyed_by_a_parameter_the_device_has() {
         let layout = |by| {
             DeviceLayout::new(LayoutNode::Band(ControlBand::free(
@@ -2971,9 +3192,9 @@ mod tests {
         )));
         layout.check(&params(2)).unwrap();
         let placed = layout.place(layout.docked_size());
-        assert_eq!(placed.controls[0].hidden, None);
+        assert_eq!(placed.controls[0].hide, None);
         assert_eq!(
-            placed.controls[1].hidden,
+            placed.controls[1].hide,
             Some(GreyWhen {
                 param: ParamId(0),
                 value: 0

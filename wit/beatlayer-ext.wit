@@ -1,0 +1,36 @@
+// The worlds an extension targets (extensions R1, R2). The package's version
+// is the world version a manifest names; a host accepts every version of the
+// same major version up to its own.
+//
+// A component exports the interface named for its kind and imports only what
+// its manifest asks for. The interfaces' functions arrive with the packages
+// that build each kind: MIDI tools (R17), control surfaces (R21), devices
+// (R24), and the set (R38).
+package beatlayer:ext@0.1.0;
+
+interface midi-tool {}
+interface control-surface {}
+interface audio-effect {}
+interface instrument {}
+interface midi-effect {}
+interface set {}
+
+world midi-tool-world {
+    export midi-tool;
+}
+
+world control-surface-world {
+    export control-surface;
+}
+
+world audio-effect-world {
+    export audio-effect;
+}
+
+world instrument-world {
+    export instrument;
+}
+
+world midi-effect-world {
+    export midi-effect;
+}

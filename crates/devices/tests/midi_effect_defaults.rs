@@ -1,6 +1,6 @@
 //! A new MIDI effect starts as Live's panel reads in a new set (observed in
 //! Live 12.4.16 on 2 November 2026; layout L-DEV-063 to L-DEV-069 and
-//! L-DEV-085 to L-DEV-088): each parameter's default, as its control reads it. Live writes a few of these
+//! L-DEV-098 to L-DEV-101): each parameter's default, as its control reads it. Live writes a few of these
 //! with a sign (`+12 st`) or with `∞`, which the parameter formats don't.
 
 use bl_devices::device_types;

@@ -3,7 +3,7 @@
 //! divisions with swing or in free milliseconds, with per-repeat transposition,
 //! velocity decay, feedback, Thru/Mute input modes, and MPE expression feedback.
 //!
-//! Its panel is laid out as Live draws it (layout L-DEV-086): the delay time
+//! Its panel is laid out as Live draws it (layout L-DEV-099): the delay time
 //! as a grid of eight buttons with Sync, Swing, Input and Pitch, the Delay and
 //! Fback knobs, and the MPE button with its three amounts in a column at the
 //! right.

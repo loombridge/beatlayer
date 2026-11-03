@@ -13,7 +13,8 @@
 
 use bl_shell::Shell;
 use bl_shell::export_commands::{
-    self as ids, Disabled, ExportDialogStatus, FileType, RenderedTrack, RunningStatus, SAMPLE_RATES,
+    self as ids, Disabled, ExportDialogStatus, FileType, RenderedTrack, RunningStatus,
+    SAMPLE_RATES, VideoEncoder, VideoSettings, VideoSize,
 };
 use bl_shell::export_dialog::{self as fields, Field, Range};
 use egui::accesskit::{self, Role};
@@ -53,6 +54,49 @@ fn entry_id() -> Id {
     Id::new("export-dialog-entry")
 }
 
+/// The Encoder Settings dialog while it is open (the export spec, R48): the
+/// values it is editing, which `OK` sends and Cancel drops.
+#[derive(Clone, Debug)]
+struct SettingsEdit {
+    encoder: VideoEncoder,
+    quality: u8,
+    /// The movie's own rate and size unless a box is unticked.
+    own_rate: bool,
+    rate: f64,
+    own_size: bool,
+    width: u32,
+    height: u32,
+}
+
+impl SettingsEdit {
+    fn new(encoder: VideoEncoder, settings: &VideoSettings) -> Self {
+        Self {
+            encoder,
+            quality: settings.quality(),
+            own_rate: settings.frame_rate.is_none(),
+            rate: settings.frame_rate.unwrap_or(30.0),
+            own_size: settings.size.is_none(),
+            width: settings.size.map_or(1280, |size| size.width),
+            height: settings.size.map_or(720, |size| size.height),
+        }
+    }
+
+    fn settings(&self) -> VideoSettings {
+        VideoSettings {
+            quality: Some(self.quality),
+            frame_rate: (!self.own_rate).then_some(self.rate),
+            size: (!self.own_size).then_some(VideoSize {
+                width: self.width,
+                height: self.height,
+            }),
+        }
+    }
+}
+
+fn settings_id() -> Id {
+    Id::new("export-dialog-encoder-settings")
+}
+
 /// The ID of a part of Render Start or Render Length.
 fn part_id(length: bool, part: usize) -> Id {
     Id::new(("export-dialog-part", length, part))
@@ -82,9 +126,11 @@ pub fn show(ctx: &Context, shell: &Shell, theme: &Theme, events: &mut Vec<UiEven
     if typed_in.is_some() && !typing {
         ctx.data_mut(|d| d.remove::<Entry>(entry_id()));
     }
+    // The Encoder Settings dialog takes Return and Esc for itself (R48).
+    let editing = ctx.data(|d| d.get_temp::<SettingsEdit>(settings_id()));
     // Return presses Export and Esc closes the dialog (R28), unless a value
     // is being typed, which they set and drop.
-    if !typing {
+    if !typing && editing.is_none() {
         if !egui::Popup::is_any_open(ctx) && take_key(ctx, Key::Enter) && dialog.can_export {
             invoke(events, ids::START, json!({}));
             return;
@@ -105,6 +151,101 @@ pub fn show(ctx: &Context, shell: &Shell, theme: &Theme, events: &mut Vec<UiEven
             );
         });
         contents(ui, shell, theme, &dialog, events);
+    });
+    if let Some(edit) = editing {
+        encoder_settings(ctx, theme, edit, events);
+    }
+}
+
+/// Encoder Settings (R48): the chosen encoder's quality, frame rate and
+/// size, each of the last two the source movie's own unless changed.
+fn encoder_settings(
+    ctx: &Context,
+    theme: &Theme,
+    mut edit: SettingsEdit,
+    events: &mut Vec<UiEvent>,
+) {
+    let mut done = false;
+    let mut apply = false;
+    if take_key(ctx, Key::Escape) {
+        done = true;
+    } else if take_key(ctx, Key::Enter) {
+        done = true;
+        apply = true;
+    }
+    egui::Modal::new(settings_id()).show(ctx, |ui| {
+        ui.set_width(340.0);
+        ui.vertical_centered(|ui| {
+            ui.label(
+                RichText::new(format!("{} Settings", edit.encoder.name()))
+                    .size(theme.sizes.heading)
+                    .strong(),
+            );
+        });
+        section(ui, theme, "Encoder Settings", |ui| {
+            let has_quality = edit.encoder != VideoEncoder::ProRes422;
+            let response = ui.add_enabled(
+                has_quality,
+                egui::Slider::new(&mut edit.quality, 1..=100).text("Quality"),
+            );
+            named(ui, &response, "Quality");
+            if !has_quality {
+                explain(
+                    ui,
+                    theme,
+                    &response,
+                    Some("ProRes 422 has no quality setting."),
+                );
+            }
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut edit.own_rate, "Frame Rate: same as the movie");
+            });
+            let response = ui.add_enabled(
+                !edit.own_rate,
+                egui::DragValue::new(&mut edit.rate)
+                    .range(1.0..=240.0)
+                    .speed(0.1)
+                    .suffix(" frames a second"),
+            );
+            named(ui, &response, "Frame Rate");
+            ui.checkbox(&mut edit.own_size, "Size: same as the movie");
+            ui.horizontal(|ui| {
+                let response = ui.add_enabled(
+                    !edit.own_size,
+                    egui::DragValue::new(&mut edit.width)
+                        .range(2..=8192)
+                        .suffix(" wide"),
+                );
+                named(ui, &response, "Width");
+                let response = ui.add_enabled(
+                    !edit.own_size,
+                    egui::DragValue::new(&mut edit.height)
+                        .range(2..=8192)
+                        .suffix(" high"),
+                );
+                named(ui, &response, "Height");
+            });
+        });
+        ui.add_space(12.0);
+        ui.horizontal(|ui| {
+            if ui.button("Cancel").clicked() {
+                done = true;
+            }
+            if ui.button("OK").clicked() {
+                done = true;
+                apply = true;
+            }
+        });
+    });
+    if apply {
+        set(events, json!({ "video_settings": edit.settings() }));
+    }
+    ctx.data_mut(|d| {
+        if done {
+            d.remove::<SettingsEdit>(settings_id());
+        } else {
+            d.insert_temp(settings_id(), edit);
+        }
     });
 }
 
@@ -449,25 +590,48 @@ fn contents(
         );
     });
     section(ui, theme, "Video", |ui| {
-        // R38: drawn disabled, as for a set without video clips.
-        let why = reason(dialog, "Create Video");
-        let mut off = false;
-        let response = ui.add_enabled(false, egui::Checkbox::new(&mut off, "Create Video"));
-        explain(ui, theme, &response, why);
-        let response = ui
-            .add_enabled_ui(false, |ui| {
-                egui::ComboBox::from_label("Video Encoder")
-                    .selected_text("")
-                    .show_ui(ui, |_| {})
-                    .response
-            })
-            .inner;
-        named(ui, &response, "Video Encoder");
-        explain(ui, theme, &response, reason(dialog, "Video Encoder"));
+        // R38: enabled with a video clip in the range and Encode PCM on.
+        switch(
+            ui,
+            theme,
+            "Create Video",
+            choices.create_video,
+            reason(dialog, "Create Video"),
+            events,
+            "create_video",
+        );
+        // R47: the encoders the computer has, the choice kept.
+        let shown = choices.video_encoder.unwrap_or(VideoEncoder::MotionJpeg);
+        let encoders: Vec<(VideoEncoder, String, bool)> = dialog
+            .video_encoders
+            .iter()
+            .map(|encoder| (*encoder, encoder.name().to_owned(), true))
+            .collect();
+        if let Some(encoder) = chooser(
+            ui,
+            theme,
+            "Video Encoder",
+            shown.name(),
+            &encoders,
+            &shown,
+            reason(dialog, "Video Encoder"),
+        ) {
+            set(events, json!({ "video_encoder": encoder }));
+        }
+        // R48: Edit opens the dialog of the encoder's settings.
         ui.horizontal(|ui| {
-            ui.add_enabled(false, egui::Label::new("Encoder Settings"));
-            let response = ui.add_enabled(false, egui::Button::new("Edit"));
-            explain(ui, theme, &response, reason(dialog, "Encoder Settings"));
+            ui.label("Encoder Settings");
+            let why = reason(dialog, "Encoder Settings");
+            let response = ui.add_enabled(why.is_none(), egui::Button::new("Edit"));
+            explain(ui, theme, &response, why);
+            if response.clicked() {
+                ui.ctx().data_mut(|d| {
+                    d.insert_temp(
+                        settings_id(),
+                        SettingsEdit::new(shown, &choices.video_settings),
+                    );
+                });
+            }
         });
     });
     ui.add_space(12.0);

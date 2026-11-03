@@ -6,7 +6,7 @@
 //! The display's data is published after each block through the device
 //! framework's path (R35 to R37), so the cell draws it and an agent reads
 //! the same data with `device.display`. Its panel is laid out as Live draws
-//! it (layout L-DEV-085): one display cell under an MPE label in the title bar;
+//! it (layout L-DEV-098): one display cell under an MPE label in the title bar;
 //! Freeze and Clear are items of its options menu.
 
 use bl_engine::{DeviceType, NoteExpression, NoteKind, Registry};

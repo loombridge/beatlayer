@@ -131,6 +131,7 @@ pub mod devices;
 pub mod editing;
 pub mod envelope_keys;
 pub mod export;
+pub mod extensions;
 pub mod file_manager;
 pub mod freeze;
 pub mod granulator;
@@ -227,6 +228,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     stems::register(registry)?;
     audio_to_midi::register(registry)?;
     packages::register(registry)?;
+    extensions::register(registry)?;
     sample_editor::register(registry)?;
     audio_editing::register(registry)?;
     audio_panel::register(registry)?;

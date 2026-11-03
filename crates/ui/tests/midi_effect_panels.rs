@@ -1,5 +1,5 @@
 //! The MIDI effects' panels as Live lays them out (layout L-DEV-063 to
-//! L-DEV-069 and L-DEV-085 to L-DEV-088): each device's panel holds Live's
+//! L-DEV-069 and L-DEV-098 to L-DEV-101): each device's panel holds Live's
 //! controls in Live's order and kinds and none else, and the parts new with
 //! them (the stepper, Scale's grid, Chord's Velocity and Chance buttons, the
 //! switch box, MPE Control's tab column) do what they draw.
@@ -59,7 +59,7 @@ fn panel_with(
         .controls
         .iter()
         .filter(|c| {
-            c.hidden.is_none_or(|h| {
+            c.hide.is_none_or(|h| {
                 description.param(h.param).unwrap().default.round() as i32 != h.value
             })
         })
@@ -594,7 +594,7 @@ fn arpeggiator_opens_expanded_and_its_toggle_hides_the_right_part() {
     assert!(!expanded(&h, other));
 }
 
-// Spec: device-framework R74. Note Echo's Sync button reads Time and the
+// Spec: device-framework R77. Note Echo's Sync button reads Time and the
 // delay-time box takes Swing's place while Sync is off.
 #[test]
 fn note_echos_sync_button_switches_between_sync_and_time() {
@@ -623,7 +623,7 @@ fn note_echos_sync_button_switches_between_sync_and_time() {
     assert!(shown(&h, SWING) && !shown(&h, TIME_MS));
 }
 
-// Spec: device-framework R74. Note Length's Trigger button switches between
+// Spec: device-framework R77. Note Length's Trigger button switches between
 // Note On and Note Off, which wakes the release knobs; Latch is a button of
 // its own.
 #[test]

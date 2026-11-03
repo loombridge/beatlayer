@@ -46,6 +46,7 @@ The display shows the filter's curve and, as the engine runs, the curves of the 
 - **R14.** Every block runs without allocating, locking or blocking, and a render is bit-identical at block sizes 1, 64, 512 and 4,096 and run after run, including with random waves and S&H. (S8, S9)
 - **R15.** Every parameter can be inserted, set by ID and read back through the agent API (`device.insert`, `device.set_param`, `device.parameters`), is automatable and modulatable (rule G2), and the gain (Output) reaches −∞ dB (rule G1). (S7)
 - **R16.** A set with the device saves and reopens with every parameter. (S7)
+- **R17.** The panel is Live's (observed in Live 12.4.16, 2 November 2026): Freq, the filter's type, its slope (12 or 24) and Res at the left; the response display with the LFO's stereo mode, phase or spin, offset and quantize along its foot; under it the LFO's Amount, Rate (one knob that reads the rate in the mode chosen: Rate, Time, Beats or 16ths), Wave, Morph and Mode, and the envelope's Amount; at the right Drive, the circuit, Clip, Output and Dry/Wet. The Sidechain strip at the left is the framework's. What the other filter types, the envelope and the sidechain filter add is in the part the title bar's toggle shows. A new Auto Filter is a low-pass at 10.0 kHz and 24 dB with the LFO's phase at 4 degrees; the rate modes read Rate, Time, Beats and 16ths, and the quantize's off reads None. (Layout L-DEV-095)
 
 ## Tests
 
@@ -66,6 +67,7 @@ The display shows the filter's curve and, as the engine runs, the curves of the 
 | R14 | `crates/devices/tests/auto_filter.rs`, `renders_are_bit_identical_at_block_sizes_1_64_512_and_4096_and_run_after_run`; `rtsan/tests/devices.rs`, `sweep_passes_under_rtsan` | unit, real-time trap, RTSan |
 | R15 | `crates/cli/tests/agent.rs`, `an_agent_inserts_sweep_by_its_type_and_sets_and_reads_its_parameters_by_id`; `crates/devices/tests/rules.rs` over the shipped types | MCP script, real-time trap |
 | R16 | `crates/shell/tests/auto_filter.rs`, `a_set_with_sweep_reopens_with_every_parameter` | unit |
+| R17 | `crates/devices/tests/live_panels.rs`, `auto_filter_holds_lives_controls_in_lives_order` | unit |
 
 ## Not built yet
 

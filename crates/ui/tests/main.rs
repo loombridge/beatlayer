@@ -48,6 +48,7 @@ mod fades;
 mod file_manager;
 mod floating_windows;
 mod gated_delay;
+mod granulator_panel;
 mod groove_pool;
 mod info_view;
 mod instant_mappings;

@@ -612,6 +612,7 @@ impl Vst3Host {
                     external: false,
                     midi_sidechain: false,
                     midi_tap: false,
+                    sidechain_on: false,
                     note_output,
                     outputs: Vec::new(),
                     matrix: None,

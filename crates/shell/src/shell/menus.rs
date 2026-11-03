@@ -844,6 +844,9 @@ impl Shell {
         if bl_shell_spec::cv::handles(id) {
             return self.can_cv(id, args);
         }
+        if bl_shell_spec::granulator::handles(id) {
+            return self.can_granulator(args);
+        }
         if slice_ids::handles(id) {
             // Spec: slice-to-midi R1. The menus' enabled states: one audio
             // clip selected, in either view.

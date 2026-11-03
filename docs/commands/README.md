@@ -52,6 +52,7 @@ The commands, by the part of their ID before its first dot:
 - [`export`](export.md)
 - [`file_manager`](file_manager.md)
 - [`focus`](focus.md)
+- [`granulator`](granulator.md)
 - [`groove`](groove.md)
 - [`keymap`](keymap.md)
 - [`link`](link.md)
@@ -15219,6 +15220,71 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `GranulatorCaptureAction`
+
+What `granulator.capture` does.
+
+One of:
+
+- `"start"`: Starts a capture.
+- `"stop"`: Ends the capture running now.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `granulator.capture` does.",
+  "oneOf": [
+    {
+      "const": "start",
+      "description": "Starts a capture.",
+      "type": "string"
+    },
+    {
+      "const": "stop",
+      "description": "Ends the capture running now.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `GranulatorCaptureResult`
+
+What `granulator.capture` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `capturing` | boolean | yes | Whether a capture runs now. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `granulator.capture` returns.",
+  "properties": {
+    "capturing": {
+      "description": "Whether a capture runs now.",
+      "type": "boolean"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    }
+  },
+  "required": [
+    "device",
+    "capturing"
+  ],
+  "type": "object"
 }
 ```
 

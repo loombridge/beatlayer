@@ -15,6 +15,8 @@ publish.workspace = true
 bl-commands.workspace = true
 # The transport's commands (WP-1.5).
 bl-engine.workspace = true
+# The library's manifest and package builder (WP-9.46).
+bl-library.workspace = true
 bl-model.workspace = true
 bl-project.workspace = true
 bl-shell-spec.workspace = true

@@ -29,6 +29,9 @@ const BUILT_IN: &str = include_str!("packages/manifest.json");
 /// The record of an installed package, in its folder.
 const RECORD: &str = "package.json";
 
+/// The start of the roles the library's packages fill.
+pub const LIBRARY_ROLE: &str = "library-";
+
 /// Marks a package removed while its library was loaded: its files go the
 /// next time Beatlayer starts.
 const REMOVE_AT_LAUNCH: &str = ".remove";
@@ -89,6 +92,10 @@ pub struct Package {
     /// leaves it out, until whatever it waits on is settled.
     #[serde(default)]
     pub disabled: bool,
+    /// Every file of the archive is kept, under its own path, and `files`
+    /// names only the main one: the library's packages (core library R7).
+    #[serde(default)]
+    pub keep_all: bool,
 }
 
 /// A feature that runs an on-device model, and the roles it needs.
@@ -250,9 +257,13 @@ struct RecordedFile {
 }
 
 impl Package {
-    /// Its folder under `packages`.
+    /// Its folder: under `packages`, or for the library's packages (roles
+    /// `library-…`) under `Library` beside it (core library R7).
     #[must_use]
     pub fn dir(&self, packages: &Path) -> PathBuf {
+        if self.role.starts_with(LIBRARY_ROLE) {
+            return packages.with_file_name("Library").join(&self.folder);
+        }
         packages.join(&self.folder)
     }
 
@@ -316,19 +327,44 @@ impl Package {
 
 /// Removes the files in a package's folder, record first, and the folder.
 fn clear(dir: &Path) -> std::io::Result<()> {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(e),
-    };
+    if !dir.exists() {
+        return Ok(());
+    }
     let _ = std::fs::remove_file(dir.join(RECORD));
-    for entry in entries {
+    std::fs::remove_dir_all(dir).or_else(|_| {
+        // The library's files are read-only, which Windows won't delete.
+        set_readonly(dir, false)?;
+        std::fs::remove_dir_all(dir)
+    })
+}
+
+/// Sets every file under `dir` read-only or writable.
+fn set_readonly(dir: &Path, readonly: bool) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
         let path = entry?.path();
-        if path.is_file() {
-            std::fs::remove_file(path)?;
+        if path.is_dir() {
+            set_readonly(&path, readonly)?;
+        } else {
+            let mut permissions = std::fs::metadata(&path)?.permissions();
+            permissions.set_readonly(readonly);
+            std::fs::set_permissions(&path, permissions)?;
         }
     }
-    std::fs::remove_dir(dir)
+    Ok(())
+}
+
+/// The files under `dir` as paths relative to it, `/` between folders.
+fn files_under(dir: &Path, prefix: &str, out: &mut Vec<RecordedFile>) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        let name = format!("{prefix}{}", path.file_name().unwrap_or_default().to_string_lossy());
+        if path.is_dir() {
+            files_under(&path, &format!("{name}/"), out)?;
+        } else if name != RECORD {
+            out.push(RecordedFile { name, size: std::fs::metadata(&path)?.len() });
+        }
+    }
+    Ok(())
 }
 
 /// At start: removes the packages marked for removal while their library
@@ -376,17 +412,20 @@ fn install_one(package: &Package, packages: &Path, progress: &Progress) -> Resul
         clear(&dir).map_err(|e| failed(&e))?;
         std::fs::create_dir_all(&dir).map_err(|e| failed(&e))?;
         unpack(package, &part, &dir)?;
-        let files = package
-            .files
-            .iter()
-            .filter_map(|kept| {
+        let mut files = Vec::new();
+        if package.keep_all {
+            files_under(&dir, "", &mut files).map_err(|e| failed(&e))?;
+            files.sort_by(|a, b| a.name.cmp(&b.name));
+            set_readonly(&dir, true).map_err(|e| failed(&e))?;
+        } else {
+            files.extend(package.files.iter().filter_map(|kept| {
                 let size = std::fs::metadata(dir.join(&kept.name)).ok()?.len();
                 Some(RecordedFile {
                     name: kept.name.clone(),
                     size,
                 })
-            })
-            .collect();
+            }));
+        }
         let record = Record {
             id: package.id.clone(),
             version: package.version.clone(),
@@ -505,8 +544,8 @@ fn unpack(package: &Package, part: &Path, dir: &Path) -> Result<(), String> {
                 let Some(name) = wanted(package, &path) else {
                     continue;
                 };
-                found |= name == main;
-                write_atomically(&dir.join(name), &mut entry).map_err(|e| failed(&e))?;
+                found |= name == *main;
+                put(dir, &name, &mut entry).map_err(|e| failed(&e))?;
             }
         }
         Unpack::Zip => {
@@ -521,8 +560,8 @@ fn unpack(package: &Package, part: &Path, dir: &Path) -> Result<(), String> {
                 let Some(name) = wanted(package, &path) else {
                     continue;
                 };
-                found |= name == main;
-                write_atomically(&dir.join(name), &mut entry).map_err(|e| failed(&e))?;
+                found |= name == *main;
+                put(dir, &name, &mut entry).map_err(|e| failed(&e))?;
             }
         }
     }
@@ -532,13 +571,33 @@ fn unpack(package: &Package, part: &Path, dir: &Path) -> Result<(), String> {
 }
 
 /// The name an archive's file is installed under, if it's one the package
-/// keeps: its entry's path ends with the file's `path`.
-fn wanted<'a>(package: &'a Package, path: &Path) -> Option<&'a str> {
+/// keeps: its entry's path ends with the file's `path`; or, for a package
+/// that keeps all, the entry's own path, if it stays inside the folder.
+fn wanted(package: &Package, path: &Path) -> Option<String> {
+    if package.keep_all {
+        let parts: Option<Vec<_>> = path
+            .components()
+            .map(|c| match c {
+                std::path::Component::Normal(part) => part.to_str(),
+                _ => None,
+            })
+            .collect();
+        return parts.map(|parts| parts.join("/")).filter(|name| !name.is_empty());
+    }
     package
         .files
         .iter()
         .find(|kept| path.ends_with(kept.path.as_deref().unwrap_or(&kept.name)))
-        .map(|kept| kept.name.as_str())
+        .map(|kept| kept.name.clone())
+}
+
+/// Writes an archive's file as `name` in `dir`, making the folders it's in.
+fn put(dir: &Path, name: &str, from: &mut dyn Read) -> std::io::Result<()> {
+    let to = dir.join(name);
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    write_atomically(&to, from)
 }
 
 /// Writes `from` to `to` through a temporary file beside it.
@@ -580,6 +639,7 @@ mod tests {
                 path: None,
             }],
             disabled: false,
+            keep_all: false,
         };
         (package, dir.join("Packages"))
     }

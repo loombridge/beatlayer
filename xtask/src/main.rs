@@ -13,6 +13,7 @@ mod commands;
 mod dashboard;
 mod grooves;
 mod keymap;
+mod library;
 mod private_terms;
 mod progress;
 mod test_clock;
@@ -46,6 +47,13 @@ Tasks:
                  command registry (with --check, fail instead if it's out of date)
   grooves        Write Beatlayer's bundled grooves into crates/app/resources/Grooves
                  (with --check, fail instead if the files there aren't the script's output)
+  library        Build Beatlayer's library packages from the manifest under library/ into
+                 a folder outside the repository (--out, default the temporary folder),
+                 refusing an item without an allowed licence, a checksum or tags, and
+                 write each package's Packages-manager entry beside it
+                 --manifest DIR: build the manifest in DIR instead; --url-base URL: where
+                 the packages are hosted; package names after the options build those
+                 --check: only check the manifest and that no audio is in library/
   deny-selftest  Prove that deny.toml still rejects an incompatible licence
   private-terms  Fail if a tracked file contains a word listed in .git/info/private-terms
                  (maintainers' checkouts only; skipped without it)
@@ -165,6 +173,9 @@ fn run(root: &Path, args: &[String]) -> Result<ExitCode, String> {
             [flag] if flag == "--check" => grooves::check(root).map(|()| ExitCode::SUCCESS),
             _ => Err(format!("usage: cargo xtask grooves [--check]\n\n{USAGE}")),
         },
+        Some("library") => library::Options::parse(options)
+            .and_then(|options| library::run(root, &options))
+            .map(|()| ExitCode::SUCCESS),
         Some("deny-selftest") => deny_selftest(root).map(|()| ExitCode::SUCCESS),
         Some("private-terms") => private_terms::check(root).map(|()| ExitCode::SUCCESS),
         Some("test-clock") => test_clock::check(root).map(|()| ExitCode::SUCCESS),
@@ -347,6 +358,7 @@ fn check(root: &Path, options: &CheckOptions) -> Result<(), String> {
             }),
         ),
         ("keymap", Box::new(|| keymap::check(root))),
+        ("library manifest", Box::new(|| library::check(root))),
         (
             "one test binary per crate",
             Box::new(|| test_targets::check(root)),

@@ -542,8 +542,10 @@ pub fn header(
             &section,
             false,
             |i| {
-                let top = row_top + 16.0 * i as f32;
-                (top + 14.0 <= bottom).then(|| column(IN_OUT, top, top + 14.0))
+                let sizes = crate::theme::Sizes::bundled();
+                let top = row_top + sizes.header_chooser_pitch * i as f32;
+                let end = top + sizes.header_chooser;
+                (end <= bottom).then(|| column(IN_OUT, top, end))
             },
             events,
         );

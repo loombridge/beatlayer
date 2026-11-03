@@ -1,5 +1,6 @@
-//! Meld, part 1 (spec: meld R1 to R23): two engines, each an oscillator of
-//! one of twenty-five types (the first ten built, [`meld_osc`]), a state-
+//! Meld, parts 1 and 2 (spec: meld R1 to R39): two engines, each an oscillator
+//! of one of twenty-five types ([`meld_osc`]'s tables and lanes, the FM
+//! core's four FM types, [`meld_gen`]'s noise and texture types), a state-
 //! variable filter and an amplitude envelope, mixed per voice in the Mix
 //! section under the global Mixer Drive, Limit and Volume, on the voice
 //! section. The envelopes' other parts, the LFOs, the matrix and the
@@ -31,10 +32,17 @@ use lspk_voice::unison::pan_gains;
 use lspk_voice::{Start, VoiceBlock, VoiceEvent, VoiceEventKind};
 use lspk_wavetable::osc::Onset;
 
+use crate::analogue::note_seed;
+use crate::fm;
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::instrument::{self, Instrument, Parts, Section, State};
 use crate::instrument_filter::{InstrumentFilter, Per, PerFrame, Setup};
-use crate::meld_osc::{self, Bank, CHUNK, Context, Kind, MACROS, MAX_LANES, TYPES};
+use crate::meld_gen::{self, Gen, Pitch};
+use crate::meld_osc::{
+    self, Bank, CHUNK, Context, Kind, LOOPS, MACROS, MAX_LANES, SWARM_COPIES, TYPES,
+};
+
+pub use crate::meld_osc::{shepard, shepard_width};
 
 /// Meld's device type.
 pub const MELD: &str = "beatlayer.meld";
@@ -136,6 +144,16 @@ pub const FILTER_MACROS: [(&str, &str); 17] = [
     ("Q", "Ratio"),
     ("Q", "Damp"),
 ];
+
+/// The types the voice code branches on (R4).
+const FOLD_FM: usize = 11;
+const SHEPARDS_PI: usize = 15;
+const NOISE_LOOP: usize = 18;
+
+/// Whether type `index` is one of the four that play on the FM core.
+const fn is_fm(index: usize) -> bool {
+    matches!(index, 10..=13)
+}
 
 /// The per-voice limiter's release (R18).
 const LIMIT_RELEASE: f32 = 0.05;
@@ -542,14 +560,17 @@ fn time(id: ParamId, name: &str, default_ms: f64, text: &str) -> ParamDescriptor
 
 /// Adds Meld to `registry`.
 pub fn register(registry: &mut Registry) {
-    add(registry, meld_type(), |_, config| make(config));
+    add(registry, meld_type(), |device, config| {
+        make(config, device.id.0.get())
+    });
 }
 
-/// Makes a Meld for `config`'s rate and block size. Every buffer and table
-/// it needs is made here, off the audio thread.
+/// Makes a Meld for `config`'s rate and block size, whose random draws
+/// follow `seed` (the device's ID, device framework R29). Every buffer and
+/// table it needs is made here, off the audio thread.
 #[must_use]
-pub fn make(config: &NodeConfig) -> Meld {
-    Meld::new(config)
+pub fn make(config: &NodeConfig, seed: u64) -> Meld {
+    Meld::new(config, seed)
 }
 
 /// Meld's audio-thread half.
@@ -562,11 +583,14 @@ pub struct Meld {
 }
 
 impl Meld {
-    fn new(config: &NodeConfig) -> Self {
+    fn new(config: &NodeConfig, seed: u64) -> Self {
         let rate = config.sample_rate.as_f64();
         let frames = config.max_frames.max(1);
         Self {
-            engines: [Engine::new(0, rate, frames), Engine::new(1, rate, frames)],
+            engines: [
+                Engine::new(0, rate, frames, seed),
+                Engine::new(1, rate, frames, seed),
+            ],
             rate: rate as f32,
             limiter: [1.0; SLOTS],
             out: [vec![0.0; frames], vec![0.0; frames]],
@@ -667,7 +691,7 @@ struct Engine {
 }
 
 impl Engine {
-    fn new(which: usize, rate: f64, frames: usize) -> Self {
+    fn new(which: usize, rate: f64, frames: usize, seed: u64) -> Self {
         let id = |offset| Some(param(which, offset));
         Self {
             // Spec: meld R14, R16. Both engines play the same notes under
@@ -690,9 +714,9 @@ impl Engine {
                 MAX_VOICES,
                 MAX_STACK,
                 rate,
-                0x4D45_4C44,
+                0x4D45_4C44 ^ seed,
             ),
-            voices: Voices::new(which, rate, frames),
+            voices: Voices::new(which, rate, frames, seed),
         }
     }
 }
@@ -742,6 +766,16 @@ struct Slot {
     noise_state: u32,
     fresh: bool,
     tone: f32,
+    /// The seed of the note's random draws (R30, R33, R35).
+    seed: u64,
+    /// What the grid carries on for the type: Chip's arpeggio in cycles,
+    /// Shepard's Pi's slide in octaves, Noise Loop's place among its loops.
+    run: f32,
+    /// The FM types' modulation index at the last chunk's end.
+    index: f32,
+    /// The note's frequency at the start of the chunk of the grid the
+    /// generators and FM types are in, NaN before the slot's first chunk.
+    chunk_pitch: f32,
 }
 
 impl Slot {
@@ -760,6 +794,10 @@ impl Slot {
         noise_state: 1,
         fresh: false,
         tone: 0.0,
+        seed: 0,
+        run: 0.0,
+        index: 0.0,
+        chunk_pitch: f32::NAN,
     };
 }
 
@@ -767,7 +805,12 @@ impl Slot {
 struct Voices {
     which: usize,
     rate: f64,
-    banks: [Bank; 6],
+    seed: u64,
+    banks: [Bank; Kind::ALL.len()],
+    fm: fm::Core,
+    gens: Vec<Gen>,
+    /// The pitch, in semitones, at which a lane's partial nears Nyquist.
+    top: f32,
     envelopes: [EnvelopeBank; 2],
     levels: [Vec<f32>; 2],
     filter: InstrumentFilter,
@@ -799,9 +842,15 @@ struct Voices {
 }
 
 impl Voices {
-    fn new(which: usize, rate: f64, frames: usize) -> Self {
-        let banks =
-            Kind::ALL.map(|kind| Bank::new(kind, SLOTS, rate as f32, 0x6D31 + which as u64));
+    fn new(which: usize, rate: f64, frames: usize, seed: u64) -> Self {
+        let banks = Kind::ALL.map(|kind| {
+            Bank::new(
+                kind,
+                SLOTS,
+                rate as f32,
+                0x6D31 + which as u64 + (seed << 1),
+            )
+        });
         let envelope = || EnvelopeBank::new(MAX_VOICES, EnvelopeParams::AMP, Timing::new(rate));
         let envelopes = [envelope(), envelope()];
         let envelope_stride = envelopes[0].stride();
@@ -811,7 +860,11 @@ impl Voices {
         Self {
             which,
             rate,
+            seed,
             banks,
+            fm: fm::Core::with_voices(rate, 1, seed, SLOTS),
+            gens: (0..SLOTS).map(|_| Gen::new(rate as f32)).collect(),
+            top: 69.0 + 12.0 * (0.45 * rate as f32 / 440.0).log2(),
             levels: [
                 vec![0.0; frames * envelope_stride],
                 vec![0.0; frames * envelope_stride],
@@ -824,7 +877,7 @@ impl Voices {
             held: Held::default(),
             held_valid: false,
             current: usize::MAX,
-            rng: Random::seeded(0xD1F7 + which as u64),
+            rng: Random::seeded(0xD1F7 + which as u64 + seed),
             notes: 0,
             macro_1: ramp(),
             macro_2: ramp(),
@@ -925,27 +978,63 @@ impl Voices {
         }
     }
 
-    /// Moves the sounding notes to type `kind`'s bank, as a note's start
-    /// would, and gives the swarms their wave.
+    /// Moves the sounding notes to type `kind`, as a note's start would,
+    /// and gives the swarms their wave and the FM types their operators.
     fn change_type(&mut self, kind: usize) {
         let first = self.current == usize::MAX;
         self.current = kind;
         if matches!(kind, 6..=9) {
-            self.banks[5].set_shape(meld_osc::swarm_shape(kind));
+            self.banks[Kind::Swarm.index()].set_shape(meld_osc::swarm_shape(kind));
         }
+        self.setup_fm(kind);
         if first {
             return;
         }
-        if let Some(bank) = Kind::of(kind) {
-            for (slot, s) in self.slots.iter().enumerate() {
-                if s.voice >= 0 {
-                    self.banks[bank.index()].start(
-                        slot,
-                        f32::from(s.key),
-                        Onset::Fresh,
-                        true,
-                        s.phase,
-                    );
+        for slot in 0..SLOTS {
+            if self.slots[slot].voice >= 0 {
+                let s = &mut self.slots[slot];
+                s.run = initial_run(kind, s.noise_state);
+                s.target[0] = s.run;
+                s.index = 0.0;
+                s.chunk_pitch = f32::NAN;
+                self.start_sound(slot, true);
+            }
+        }
+    }
+
+    /// Spec: meld R24 to R27. Sets the FM core's operators for FM type
+    /// `kind`: Harmonic FM, Squelch and Simple FM are B into A (algorithm 8
+    /// of Operator, with C and D silent), Fold FM is D into a sine A and a
+    /// triangle B (algorithm 9). Every wave is a band-limited table.
+    fn setup_fm(&mut self, kind: usize) {
+        let settings = &mut self.fm.settings;
+        settings.tone = 1.0;
+        settings.antialias = false;
+        let (algorithm, waves) = match kind {
+            11 => (8, [0, 19, 0, 0]),
+            _ => (7, [0, 0, 0, 0]),
+        };
+        settings.algorithm = algorithm;
+        for (op, wave) in settings.ops.iter_mut().zip(waves) {
+            op.wave = wave;
+        }
+    }
+
+    /// Starts slot `slot`'s sound for the current type: its lanes' phase
+    /// (R16) or its operators' and generators' state.
+    fn start_sound(&mut self, slot: usize, reset: bool) {
+        let s = self.slots[slot];
+        match self.current {
+            10..=13 => {
+                if reset {
+                    self.fm.settings.ops[0].phase = s.phase / 360.0;
+                    self.fm.start(slot, Start::Fresh);
+                }
+            }
+            kind if meld_gen::plays(kind) => self.gens[slot].start(s.seed),
+            _ => {
+                if let Some(bank) = self.bank() {
+                    bank.start(slot, f32::from(s.key), Onset::Fresh, reset, s.phase);
                 }
             }
         }
@@ -1066,14 +1155,21 @@ impl Voices {
                 fixed,
                 phase,
                 fresh: true,
-                noise_state: (self.notes.wrapping_mul(0x9E37_79B9) ^ (slot as u32) << 8) | 1,
+                noise_state: (self.notes.wrapping_mul(0x9E37_79B9)
+                    ^ (slot as u32) << 8
+                    ^ self.seed as u32)
+                    | 1,
+                seed: note_seed(
+                    self.seed ^ (self.which as u64 + 1) << 56,
+                    u64::from(self.notes) * SLOTS as u64 + slot as u64,
+                ),
                 ..Slot::FREE
             };
+            let s = &mut self.slots[slot];
+            s.run = initial_run(self.current, s.noise_state);
+            s.target[0] = s.run;
             self.filter.reset_voice(slot, 0);
-            let reset = self.snap.phase_reset;
-            if let Some(bank) = self.bank() {
-                bank.start(slot, f32::from(key), Onset::Fresh, reset, phase);
-            }
+            self.start_sound(slot, self.snap.phase_reset);
         }
     }
 
@@ -1140,7 +1236,11 @@ impl Voices {
                     };
                     self.held_valid = true;
                 }
-                self.chunk(voices, state, frames, at, n, used);
+                if meld_gen::plays(self.current) || is_fm(self.current) {
+                    self.voice_chunk(voices, state, frames, at, n, used);
+                } else {
+                    self.chunk(voices, state, frames, at, n, used);
+                }
                 at += n;
             }
         }
@@ -1181,7 +1281,8 @@ impl Voices {
         } else {
             Scale::default()
         };
-        let on_grid = state.clock(frames.start + at).is_multiple_of(CHUNK as u64);
+        let clock = state.clock(frames.start + at);
+        let on_grid = clock.is_multiple_of(CHUNK as u64);
         let noisy = self.current == 2;
         let config = state.config();
         let stepping = config.glissando && config.glide_secs > 0.0;
@@ -1191,11 +1292,16 @@ impl Voices {
             if self.slots[slot].voice < 0 {
                 continue;
             }
-            if kind == Kind::Swarm && on_grid {
-                self.drift(slot, motion);
+            let p0 = self.pitch(voices, state, slot, frames, at);
+            if on_grid {
+                match kind {
+                    Kind::Swarm => self.drift(slot, motion),
+                    Kind::Chip | Kind::Shepard | Kind::Loop => self.advance(slot, p0, m1, m2),
+                    _ => {}
+                }
             }
             let s = &self.slots[slot];
-            let lanes = meld_osc::lanes(
+            let mut lanes = meld_osc::lanes(
                 self.current,
                 m1,
                 m2,
@@ -1203,14 +1309,27 @@ impl Voices {
                     key: s.key,
                     scale: &scale,
                     drift: &s.drift,
+                    run: s.run,
                 },
             );
-            let p0 = self.pitch(voices, state, slot, frames, at);
+            if kind.fades_at_nyquist() {
+                for lane in &mut lanes.lane[..lanes.count] {
+                    lane.gain *= ((self.top - (p0 + lane.semitones)) * 0.5 + 1.0).clamp(0.0, 1.0);
+                }
+            }
             let step = (self.pitch(voices, state, slot, frames, at + n) - p0) / n as f32;
+            // R29: Shepard's Pi's partials slide, an octave a second at most.
+            let slide = if self.current == SHEPARDS_PI {
+                12.0 * (m1 - 0.5) * 2.0 / self.rate as f32
+            } else {
+                0.0
+            };
+            // The slide moves from where the chunk of the grid began.
+            let slid = slide * (clock % CHUNK as u64) as f32;
             let bank = &mut self.banks[bank_at];
             for (copy, lane) in lanes.lane[..lanes.count].iter().enumerate() {
-                let step = if stepping { 0.0 } else { step };
-                bank.set(slot, copy, p0 + lane.semitones, step, lane.frame);
+                let step = if stepping { 0.0 } else { step } + slide;
+                bank.set(slot, copy, p0 + lane.semitones + slid, step, lane.frame);
             }
             if modulated {
                 // A Glissando's steps and Noisy Shapes' phase noise move the
@@ -1247,8 +1366,11 @@ impl Voices {
                 continue;
             }
             let (lanes, s) = (&self.lanes[slot], &mut self.slots[slot]);
+            // A lane's gain ramps over the grid's chunk, wherever a block
+            // cuts it.
+            let done = (clock % CHUNK as u64) as usize;
             for k in 0..n {
-                let across = (k + 1) as f32 / n as f32;
+                let across = (done + k + 1) as f32 / CHUNK as f32;
                 let mut sum = 0.0f32;
                 for (copy, lane) in lanes.lane[..lanes.count].iter().enumerate() {
                     let gain = s.gains[copy] + (lane.gain - s.gains[copy]) * across;
@@ -1258,9 +1380,195 @@ impl Voices {
                 self.signal[at] = sum;
                 self.signal[at + stride] = sum;
             }
-            for (copy, lane) in lanes.lane[..lanes.count].iter().enumerate() {
-                s.gains[copy] = lane.gain;
+            if done + n >= CHUNK {
+                for (copy, lane) in lanes.lane[..lanes.count].iter().enumerate() {
+                    s.gains[copy] = lane.gain;
+                }
             }
+        }
+    }
+
+    /// Moves what slot `slot` carries on a step of the grid, for Chip,
+    /// Shepard's Pi and Noise Loop, at pitch `pitch` (R28, R29, R32).
+    fn advance(&mut self, slot: usize, pitch: f32, m1: f32, m2: f32) {
+        let rate = self.rate as f32;
+        let step = CHUNK as f32 / rate;
+        let s = &mut self.slots[slot];
+        match self.current {
+            // R28: Rate, from once to 50 times a second, cycles the arpeggio.
+            14 => s.run = (s.run + 50f32.powf(m2) * step).fract(),
+            // R29: Rate slides the partials, still at 50 %.
+            15 => s.run = (s.run + (m1 - 0.5) * 2.0 * step).rem_euclid(10.0),
+            // R32: Rate fresh loops per period; Fade ramps to the next over
+            // up to half a period, as steps of the grid.
+            _ => {
+                let hz = 440.0 * ((pitch - 69.0) / 12.0).exp2();
+                s.clock[0] += m1 * hz * step;
+                if s.clock[0] >= 1.0 {
+                    s.clock[0] = s.clock[0].fract();
+                    let frame = (s.draw() >> 8) % LOOPS as u32;
+                    s.target[0] = frame as f32;
+                    let fade = m2 * 0.5 * rate / hz / CHUNK as f32;
+                    if fade <= 1.0 {
+                        s.run = s.target[0];
+                    } else {
+                        s.clock[1] = (s.target[0] - s.run).abs() / fade;
+                    }
+                }
+                let distance = s.target[0] - s.run;
+                s.run = if distance.abs() <= s.clock[1] {
+                    s.target[0]
+                } else {
+                    s.run + distance.signum() * s.clock[1]
+                };
+            }
+        }
+    }
+
+    /// Renders `n` frames of every slot from `at` for the types that aren't
+    /// kit lanes: the FM types on the FM core (R24 to R27) and the noise and
+    /// texture types' generators (R30, R33, R35).
+    fn voice_chunk(
+        &mut self,
+        voices: &VoiceBlock,
+        state: &State,
+        frames: &std::ops::Range<usize>,
+        at: usize,
+        n: usize,
+        used: usize,
+    ) {
+        let (m1, m2) = (self.held.macro_1, self.held.macro_2);
+        let stride = self.filter_stride;
+        let hz = |pitch: f32| 440.0 * ((pitch - 69.0) / 12.0).exp2();
+        let offset = (state.clock(frames.start + at) % CHUNK as u64) as usize;
+        let config = state.config();
+        let stepping = config.glissando && config.glide_secs > 0.0;
+        for slot in 0..used {
+            if self.slots[slot].voice < 0 {
+                continue;
+            }
+            // What a chunk works out follows the pitch at its start, so a
+            // block that cuts the chunk changes nothing; a frame's own
+            // frequency follows the glide's line, or a Glissando's steps.
+            let first = self.pitch(voices, state, slot, frames, at);
+            let end = self.pitch(voices, state, slot, frames, at + n);
+            let s = &mut self.slots[slot];
+            if offset == 0 || !s.chunk_pitch.is_finite() {
+                s.chunk_pitch = hz(first);
+            }
+            let chunk = s.chunk_pitch;
+            let mut exact = [0.0f32; CHUNK];
+            if stepping {
+                for (k, hz_k) in exact[..n].iter_mut().enumerate() {
+                    *hz_k = hz(self.pitch(voices, state, slot, frames, at + k));
+                }
+            }
+            let pitch = Pitch {
+                chunk,
+                first,
+                step: (end - first) / n as f32,
+                exact: stepping.then_some(&exact[..n]),
+                offset,
+            };
+            let mut piece = [0.0f32; CHUNK];
+            if is_fm(self.current) {
+                self.fm_piece(slot, &mut piece[..n], &pitch, (m1, m2));
+            } else {
+                self.gens[slot].render(self.current, &mut piece[..n], &pitch, (m1, m2));
+            }
+            for (k, sample) in piece[..n].iter().enumerate() {
+                let at = (at + k) * 2 * stride + slot;
+                self.signal[at] = *sample;
+                self.signal[at + stride] = *sample;
+            }
+        }
+    }
+
+    /// Spec: meld R24 to R27. `out` frames of FM slot `slot` for
+    /// the note at `pitch` and macros `m`: Amount, and Ratio (Harmonic
+    /// FM's whole numbers 1 to 16, Simple FM's 0.5 to 16), Shape (Fold FM)
+    /// or Feedback (Squelch).
+    ///
+    /// The index is held to what keeps the sidebands that matter (to −80 dB)
+    /// below Nyquist (R37), the fold taking its share first.
+    fn fm_piece(
+        &mut self,
+        slot: usize,
+        out: &mut [f32],
+        pitch: &Pitch<'_>,
+        (amount, other): (f32, f32),
+    ) {
+        let rate = self.rate as f32;
+        let offset = pitch.offset;
+        let mid = pitch.chunk;
+        let (ratio, feedback) = match self.current {
+            10 => (1.0 + (other * 16.0).floor().min(15.0), 0.0),
+            11 => (1.0, 0.0),
+            12 => (2.0, other),
+            _ => (0.5 * 32f32.powf(other), 0.0),
+        };
+        let fold = self.current == FOLD_FM;
+        let wanted = 8.0 * amount;
+        let span = mid * ratio * (1.0 + 1.5 * feedback);
+        let (index, bend) = if fold {
+            // The triangle's kinks fold into harmonics that fall off as the
+            // square of their order: 0.0005 n^2 keeps the last that Nyquist
+            // allows below −80 dB.
+            let order = 0.5 * rate / mid;
+            let kinks = 5e-4 * order * order / other.max(1e-3);
+            let bend = std::f32::consts::PI.min(kinks);
+            let part = fold_share(order, bend, wanted);
+            (part * wanted, part * bend)
+        } else {
+            (wanted.min(fm_index(mid, span, 8.0, rate)), 0.0)
+        };
+        // A carrier near Nyquist fades out.
+        let carrier = ((0.5 - mid / rate) / 0.05).clamp(0.0, 1.0);
+        // Squelch's modulator keeps its own harmonics below Nyquist, which
+        // feedback widens, and its feedback speeds the phase it moves the
+        // carrier by up to 1 / (1 - k) times, which the index's room covers:
+        // the harmonics it can have, and what the index leaves of the room,
+        // set how much feedback it gets, and up to 1 radian of the 1.5.
+        let room = fm_index(mid, span, 8.0, rate).max(1e-3);
+        let feedback_cap = (((0.5 * rate / (mid * ratio)) - 4.0) / 30.0)
+            .min((1.0 - index / room).max(0.0) / 1.5)
+            .clamp(0.0, 2.0 / 3.0);
+        let before = self.slots[slot].index;
+        let reach = if fold {
+            triangle_reach(rate, mid, before.max(index))
+        } else {
+            1.0
+        };
+        let chunk = CHUNK as f32;
+        for (k, sample) in out.iter_mut().enumerate() {
+            let at = (offset + k) as f32;
+            let across = (at + 1.0) / chunk;
+            let f = pitch.at(k);
+            let level = (before + (index - before) * across) * 0.25;
+            let mut amps = [carrier, level, 0.0, 0.0];
+            let mut ops = [f, f * ratio, 0.0, 0.0];
+            let mut feedbacks = [0.0; fm::OPERATORS];
+            if fold {
+                // D modulates A (sine) and B (triangle), Shape crossfading.
+                amps = [carrier * (1.0 - other), carrier * other, 0.0, level];
+                ops = [f, f, 0.0, f];
+            } else {
+                // R26: the core's feedback grows with the operator's level,
+                // so it is divided by it to keep the radians of Feedback.
+                feedbacks[1] = feedback * feedback_cap / level.max(1e-3);
+            }
+            let mut x = self
+                .fm
+                .play(slot, &ops.map(f64::from), &amps, &feedbacks, reach);
+            if fold && bend > 1e-3 {
+                x = (bend * x).sin() / bend.min(std::f32::consts::FRAC_PI_2).sin();
+            }
+            *sample = x;
+        }
+        // The index reaches its value at the chunk's end, wherever blocks cut
+        // it.
+        if offset + out.len() >= CHUNK {
+            self.slots[slot].index = index;
         }
     }
 
@@ -1269,7 +1577,7 @@ impl Voices {
     fn drift(&mut self, slot: usize, motion: f32) {
         let step = CHUNK as f32 / self.rate as f32;
         let smooth = (motion * step * 6.0).min(1.0);
-        for i in 0..MAX_LANES {
+        for i in 0..SWARM_COPIES {
             let s = &mut self.slots[slot];
             s.clock[i] += motion * step;
             if s.clock[i] >= 1.0 {
@@ -1346,5 +1654,95 @@ impl Voices {
                 self.out[1][frame * SLOTS + slot] = x * right;
             }
         }
+    }
+}
+
+/// Spec: meld R25, R37. How much of its fold (up to `bend` radians) and
+/// of its index (up to `wanted`) Fold FM keeps, from 0 to 1, for a note
+/// with `order` harmonics below Nyquist. The fold's harmonics each carry the
+/// modulation, so their reaches multiply: both shrink together until the
+/// sidebands down to −80 dB fit.
+fn fold_share(order: f32, bend: f32, wanted: f32) -> f32 {
+    let fits = |part: f32| {
+        let g = part * bend;
+        (g + 5.0 * g.cbrt() + 3.0) * (1.0 + part * wanted) <= order
+    };
+    if fits(1.0) {
+        return 1.0;
+    }
+    let (mut low, mut high) = (0.0, 1.0);
+    for _ in 0..12 {
+        let at = 0.5 * (low + high);
+        if fits(at) {
+            low = at;
+        } else {
+            high = at;
+        }
+    }
+    low
+}
+
+/// How many times faster than its note a triangle that a modulation of index
+/// `beta` phase-modulates is read, for the table that keeps the harmonics
+/// whose sidebands still fit below Nyquist: a triangle's harmonic n carries
+/// n times the index.
+fn triangle_reach(rate: f32, note: f32, beta: f32) -> f64 {
+    let room = 0.5 * rate - 3.0 * note;
+    let mut harmonics = (room / (note + beta * note)).max(0.0);
+    for _ in 0..2 {
+        let tail = 5.0 * note * (harmonics * beta).cbrt();
+        harmonics = ((room - tail) / (note + beta * note)).max(0.0);
+    }
+    if harmonics >= 1.0 {
+        f64::from((0.8 * rate / note / harmonics).max(1.0))
+    } else {
+        1_000.0
+    }
+}
+
+/// How large an FM modulation index may be, at most `limit`, for a carrier
+/// at `carrier` hertz and a modulator at `modulator` hertz, so that the
+/// sidebands down to −80 dB stay below Nyquist: a Bessel function of index
+/// `b` is under 1e-4 past order `b + 5 b^(1/3) + 3` about.
+fn fm_index(carrier: f32, modulator: f32, limit: f32, rate: f32) -> f32 {
+    let room = (0.5 * rate - carrier) / modulator.max(1.0);
+    let reach = |b: f32| b + 5.0 * b.cbrt() + 3.0;
+    if reach(0.0) > room {
+        return 0.0;
+    }
+    if reach(limit) <= room {
+        return limit;
+    }
+    let (mut low, mut high) = (0.0, limit);
+    for _ in 0..12 {
+        let mid = 0.5 * (low + high);
+        if reach(mid) <= room {
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+    low
+}
+
+/// Where a note's `run` starts for type `kind`: Noise Loop's place among its
+/// loops from the note's draw, else zero (R32).
+fn initial_run(kind: usize, draw: u32) -> f32 {
+    if kind == NOISE_LOOP {
+        ((draw >> 8) % LOOPS as u32) as f32
+    } else {
+        0.0
+    }
+}
+
+impl Slot {
+    /// The next of the note's random draws, a 32-bit xorshift.
+    fn draw(&mut self) -> u32 {
+        let mut x = self.noise_state;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        self.noise_state = x;
+        x
     }
 }

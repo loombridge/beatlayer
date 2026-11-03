@@ -343,5 +343,5 @@ fn the_panel_scales_with_the_zoom() {
         .expect("a list box");
     let rows = panel_rows(&nodes, list.id);
     let row = rows[0].bounds.unwrap();
-    assert_eq!(row.y1 - row.y0, 18.0);
+    assert_eq!(row.y1 - row.y0, 19.0);
 }

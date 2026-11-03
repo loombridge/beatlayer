@@ -1128,7 +1128,12 @@ impl ShellLayout {
                         };
                         Rect::from_min_size(pos2(x, y(top)), vec2(width, 8.0))
                     }
-                    Strip::ControlBar => Rect::from_min_size(pos2(x, y(28.0)), vec2(width, 18.0)),
+                    // A field is `control_field` tall, centred where Live's 18-point
+                    // row was (L-CTRL).
+                    Strip::ControlBar => {
+                        let height = crate::theme::Sizes::bundled().control_field;
+                        Rect::from_min_size(pos2(x, y(37.0 - height / 2.0)), vec2(width, height))
+                    }
                     Strip::StatusBar => Rect::from_min_size(
                         pos2(x, status_bar.top() + 4.0),
                         vec2(width, status_bar.height() - 8.0),
@@ -1302,9 +1307,12 @@ impl ShellLayout {
     }
 }
 
-/// A row's height in the browser's sidebar and content pane. Not measured
-/// in Live (browser, "To observe in Live").
-pub const BROWSER_ROW: f32 = 17.0;
+/// The distance between the rows of a list: the theme's `list_row`, 19
+/// points as Live's lists are (L-WIN-010).
+#[must_use]
+pub fn list_row() -> f32 {
+    crate::theme::Sizes::bundled().list_row
+}
 
 /// The content pane's least width, which a narrowed browser keeps before
 /// its sidebar narrows, as observed in Live 12.4.6 (browser R29).
@@ -1558,9 +1566,6 @@ pub const SEARCH_WIDTH: f32 = 480.0;
 /// Show Only Matches.
 pub const SEARCH_HEADER: f32 = 30.0;
 
-/// A row of the search field's list.
-pub const SEARCH_ROW: f32 = 22.0;
-
 /// The most rows the search field's list shows before it scrolls.
 pub const SEARCH_ROWS: usize = 12;
 
@@ -1572,7 +1577,7 @@ const SEARCH_GAP: f32 = 4.0;
 /// list under its top row, which `rows` rows of at most 12 fill.
 #[must_use]
 pub fn search_field_rect(main_view: Rect, rows: usize) -> Rect {
-    let list = rows.min(SEARCH_ROWS) as f32 * SEARCH_ROW;
+    let list = rows.min(SEARCH_ROWS) as f32 * list_row();
     let width = SEARCH_WIDTH.min(main_view.width());
     Rect::from_min_size(
         pos2(

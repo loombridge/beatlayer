@@ -91,7 +91,7 @@ impl TakeLaneMenus {
         let menu = context_menus::take_lane();
         for item in shown(&menu) {
             if item.is_separator() {
-                ui.separator();
+                crate::menus::separator(ui);
                 continue;
             }
             let response =

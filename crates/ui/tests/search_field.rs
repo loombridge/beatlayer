@@ -14,7 +14,7 @@ use bl_shell::{Area, MainView};
 use bl_ui::arrangement::benchmark;
 use bl_ui::arrangement::headers::title_id;
 use bl_ui::browser::search_id;
-use bl_ui::layout::{SEARCH_ROW, SEARCH_ROWS, search_field_rect};
+use bl_ui::layout::{SEARCH_ROWS, list_row, search_field_rect};
 use common::{Harness, Window, command};
 use egui::accesskit::Role;
 use egui::epaint::Shape;
@@ -593,7 +593,7 @@ fn the_field_keeps_its_place_at_every_zoom() {
                 && (drawn.size() - expected.size()).length() < 0.5,
             "{percent}%: {drawn:?} against {expected:?}"
         );
-        assert!(rows as f32 * SEARCH_ROW > 0.0);
+        assert!(rows as f32 * list_row() > 0.0);
     }
 }
 

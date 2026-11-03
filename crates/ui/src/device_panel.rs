@@ -1348,7 +1348,7 @@ impl Control<'_> {
                     ui.close();
                 }
                 if remapped {
-                    ui.separator();
+                    crate::menus::separator(ui);
                 }
                 for entry in self.configured {
                     if ui.button(&entry.name).clicked() {

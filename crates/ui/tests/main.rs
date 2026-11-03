@@ -99,6 +99,7 @@ mod set_exchange;
 mod settings_window;
 mod signature_lane;
 mod similar_files;
+mod sizes;
 mod slice_to_midi;
 mod sound_analysis;
 mod spectral_blur;

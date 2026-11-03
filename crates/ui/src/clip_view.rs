@@ -907,7 +907,7 @@ impl NoteMenus {
         let contexts = shell.note_menu_contexts();
         for item in shown(menu) {
             if item.is_separator() {
-                ui.separator();
+                crate::menus::separator(ui);
                 continue;
             }
             if item.action == bl_shell::menus::Action::Heading {

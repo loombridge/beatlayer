@@ -65,7 +65,10 @@ fn make(
     fetch: &dyn Fn(&str, &Path) -> Result<(), String>,
 ) -> Result<Item, String> {
     let s = &item.source;
-    let out = work.join(&item.file);
+    // Each item has a folder of its own, as in the package, so two items
+    // may name the same file.
+    let out = work.join(&item.id).join(&item.file);
+    std::fs::create_dir_all(work.join(&item.id)).map_err(|e| format!("item {}: {e}", item.id))?;
     if let Some(url) = &s.url {
         let got = work.join(format!("{}.source", item.id));
         fetch(url, &got).map_err(|e| format!("item {}: {e}", item.id))?;
@@ -153,21 +156,21 @@ pub fn build(
     let result = (|| {
         let mut items = Vec::new();
         for item in manifest.item.iter().filter(|i| i.package == package) {
-            items.push((make(dir, &work, item, fetch)?, item.file.clone()));
+            items.push(make(dir, &work, item, fetch)?);
         }
-        items.sort_by(|a, b| a.0.id.cmp(&b.0.id));
+        items.sort_by(|a, b| a.id.cmp(&b.id));
         let built = Package {
             id: def.id.clone(),
             name: def.name.clone(),
             version: def.version.clone(),
-            items: items.iter().map(|(i, _)| i.clone()).collect(),
+            items,
         };
         let mut entries: Vec<(String, Vec<u8>)> = vec![(
             PACKAGE_FILE.to_owned(),
             serde_json::to_vec_pretty(&built).map_err(|e| e.to_string())?,
         )];
-        for (item, file) in &items {
-            let bytes = std::fs::read(work.join(file)).map_err(|e| e.to_string())?;
+        for item in &built.items {
+            let bytes = std::fs::read(work.join(&item.file)).map_err(|e| e.to_string())?;
             entries.push((item.file.clone(), bytes));
         }
         entries.sort();

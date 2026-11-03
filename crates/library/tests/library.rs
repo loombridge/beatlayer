@@ -87,6 +87,25 @@ fn the_same_manifest_builds_the_same_bytes() {
     );
 }
 
+// R3: two items may name the same file, each in its own folder.
+#[test]
+fn two_items_may_name_the_same_file() {
+    let manifest = changed(|t| t.replace("tone-a4.wav", "tone-a3.wav"));
+    let built = build(&manifest, &fixtures(), "core", &out("same-name"), &no_fetch).unwrap();
+    let bytes = std::fs::read(&built.archive).unwrap();
+    let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(bytes.as_slice()));
+    for entry in archive.entries().unwrap() {
+        let mut entry = entry.unwrap();
+        let name = entry.path().unwrap().to_string_lossy().into_owned();
+        let mut content = Vec::new();
+        std::io::Read::read_to_end(&mut entry, &mut content).unwrap();
+        if let Some(item) = built.package.items.iter().find(|i| i.file == name) {
+            assert_eq!(sha256_hex(&content), item.sha256, "{name}");
+        }
+    }
+    assert_ne!(built.package.items[0].sha256, built.package.items[1].sha256);
+}
+
 // R2: an item without an allowed licence, a checksum or tags refuses the
 // whole package, naming the item.
 #[test]

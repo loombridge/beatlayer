@@ -582,6 +582,18 @@ fn fixture() -> Project {
             device: modulator,
         },
     );
+    // A Granulator III, whose capture the device result reports (the
+    // Granulator III spec, R23).
+    let granular = track(&mut editor, TrackKind::Midi, "Granular", None, 4);
+    let granulator: bl_model::DeviceId = editor.new_id();
+    apply(
+        &mut editor,
+        Command::InsertDevice {
+            track: granular,
+            index: 0,
+            device: bl_devices::granulator_iii::granulator_iii_type().device(granulator),
+        },
+    );
     apply(
         &mut editor,
         Command::MapModulator {

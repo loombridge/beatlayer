@@ -4292,7 +4292,7 @@ fn an_agent_loads_a_sample_into_granulator_iii_reads_its_display_and_finds_it_af
     }
     let read = one(&mut client, "device.parameters", json!({ "device": id }));
     let params = read["params"].as_array().unwrap();
-    assert_eq!(params.len(), 30);
+    assert_eq!(params.len(), 31);
     assert!(params.iter().all(|p| p["automatable"] == json!(true)));
     for (param, value) in &sets {
         let found = params.iter().find(|p| p["id"] == param.0).unwrap();

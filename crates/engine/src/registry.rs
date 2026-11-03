@@ -104,6 +104,9 @@ pub struct DeviceType {
     /// tracks can route into it, and its node reads what its detector
     /// hears with [`Block::sidechain`](crate::Block::sidechain).
     pub sidechain: bool,
+    /// Whether that sidechain's External switch is on in a new device: the
+    /// node always hears its source (Granulator III's capture).
+    pub sidechain_on: bool,
     /// Whether its devices work with hardware outside the computer
     /// (WP-5.34): they have an output port, a channel, the interface inputs
     /// the sound comes back on, and a Hardware Latency
@@ -157,6 +160,7 @@ impl DeviceType {
             role,
             description: DeviceDescription::default(),
             sidechain: false,
+            sidechain_on: false,
             external: false,
             external_output: false,
             cv_outputs: Vec::new(),
@@ -195,6 +199,15 @@ impl DeviceType {
     #[must_use]
     pub fn with_sidechain(mut self) -> Self {
         self.sidechain = true;
+        self
+    }
+
+    /// The same device type, declaring a sidechain input whose External
+    /// switch is on in a new device, for a node that always reads its source.
+    #[must_use]
+    pub fn with_sidechain_on(mut self) -> Self {
+        self.sidechain = true;
+        self.sidechain_on = true;
         self
     }
 
@@ -278,6 +291,11 @@ impl DeviceType {
         let mut device = Device::new(id, self.name.clone(), self.kind.clone()).with_role(self.role);
         if self.sidechain {
             device = device.with_sidechain();
+            if self.sidechain_on
+                && let Some(sidechain) = &mut device.sidechain
+            {
+                sidechain.enabled = true;
+            }
         }
         if self.external {
             device = device.with_external();

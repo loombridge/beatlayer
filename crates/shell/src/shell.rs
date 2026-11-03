@@ -109,6 +109,7 @@ pub use export_dialog::ExportPrefs;
 pub use info_text::InfoTarget;
 mod file_manager;
 mod freeze;
+mod granulator;
 mod grooves;
 mod keymap;
 mod link;
@@ -974,6 +975,10 @@ pub struct Shell {
     /// How many recordings this session has started: the take number in
     /// their files' names, so two in one second don't share a file.
     recorded_takes: u32,
+    /// The Granulator III captures under way or being written (WP-8.27),
+    /// and the file of each device's last one.
+    granulator_captures: BTreeMap<bl_model::DeviceId, granulator::Capture>,
+    granulator_files: BTreeMap<bl_model::DeviceId, PathBuf>,
     /// The Session recording under way, beside `recording` (WP-3.11).
     session_run: Option<session_recording::SessionRun>,
     /// The notes monitoring MIDI tracks received, for Capture MIDI
@@ -1484,6 +1489,8 @@ impl Shell {
             pending_recording: None,
             pending_param_changes: Vec::new(),
             recorded_takes: 0,
+            granulator_captures: BTreeMap::new(),
+            granulator_files: BTreeMap::new(),
             session_run: None,
             capture: bl_engine::capture::Buffer::default(),
             automation_take: crate::automation_record::Take::default(),
@@ -1758,6 +1765,7 @@ impl Shell {
         // Spec: control-surfaces R7. The same for a surface's gesture.
         self.surface_gesture_ends_for(id);
         self.poll_capture();
+        self.poll_granulator_captures();
         self.sync_panels_height();
         // Spec: automation-editing R23. The edit a selected breakpoint
         // opens ends when another command edits the set.
@@ -2256,6 +2264,9 @@ impl Shell {
         }
         if bl_shell_spec::cv::handles(id) {
             return self.run_cv(id, args);
+        }
+        if bl_shell_spec::granulator::handles(id) {
+            return self.run_granulator(id, args);
         }
         if device_ids::handles(id) {
             return self.run_devices(id, args);

@@ -90,10 +90,7 @@ pub(crate) fn open_encoder(
     start().map_err(fail)?;
     let transform = find_encoder()
         .ok_or_else(|| fail("Media Foundation has no H.264 encoder on this computer".into()))?;
-    let rate = (
-        frame_rate.numer().max(1) as u64,
-        frame_rate.denom().max(1),
-    );
+    let rate = (frame_rate.numer().max(1) as u64, frame_rate.denom().max(1));
     // Quality 100 spends about a quarter of a bit on a pixel of a frame, and
     // 1 about a hundredth.
     let bits_per_pixel = 0.01 + f64::from(settings.quality.clamp(1, 100)) / 100.0 * 0.24;

@@ -84,6 +84,7 @@ pub mod lift;
 pub mod limiter;
 pub mod looper;
 pub mod meld;
+pub mod meld_filter;
 mod meld_gen;
 mod meld_osc;
 pub mod midi_cc;
@@ -134,6 +135,7 @@ pub mod utility;
 pub mod vector_delay;
 pub mod vocoder;
 pub mod wavetable;
+pub mod wavetable_mod;
 pub mod wavetables;
 pub mod wax;
 

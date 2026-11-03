@@ -2267,7 +2267,7 @@ fn menu_name(expression: Expression) -> &'static str {
 
 /// Clear All MPE Envelopes, in each lane's menu.
 fn clear_item(ui: &mut Ui, frame: &Frame<'_>, events: &mut Vec<UiEvent>) {
-    ui.separator();
+    crate::menus::separator(ui);
     let item = ui.add_enabled(
         !frame.selected.is_empty(),
         egui::Button::new("Clear All MPE Envelopes"),

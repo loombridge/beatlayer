@@ -1430,7 +1430,7 @@ impl DeviceViewUi {
         };
         for item in shown(menu) {
             if item.is_separator() {
-                ui.separator();
+                crate::menus::separator(ui);
                 continue;
             }
             let response = crate::menus::item(ui, item, shell, &keymap, self.platform, events);
@@ -1471,7 +1471,7 @@ impl DeviceViewUi {
         // Default Preset and before the device's own items: one item per
         // running surface that can lock, ticked while it is locked to this
         // device.
-        ui.separator();
+        crate::menus::separator(ui);
         let surfaces = shell.lockable_surfaces();
         if surfaces.is_empty() {
             let text = "No control surface that can lock to a device is running.";
@@ -1502,7 +1502,7 @@ impl DeviceViewUi {
         // Spec: multisampler R29. The multisampler's own options follow the
         // device's (C-DEVICE-015).
         if frame.multisampler.is_some() {
-            ui.separator();
+            crate::menus::separator(ui);
             let linear = shell
                 .multisampler_device(frame.id)
                 .is_some_and(|d| d.layers.linear_loop_fades);
@@ -1532,7 +1532,7 @@ impl DeviceViewUi {
             bl_model::DeviceKind::Native { device_type }
                 if device_type == bl_devices::sampler::SAMPLER
         ) {
-            ui.separator();
+            crate::menus::separator(ui);
             if ui.button("Convert to Multisampler").clicked() {
                 invoke(
                     events,
@@ -1563,7 +1563,7 @@ impl DeviceViewUi {
         // Spec: multisampler R64. Autosample… is in an instrument's title
         // bar menu, among its device-specific options.
         if frame.role == bl_model::DeviceRole::Instrument {
-            ui.separator();
+            crate::menus::separator(ui);
             let response = ui.button("Autosample…");
             crate::menus::register_item(ui.ctx(), &response);
             if response.clicked() {
@@ -1581,7 +1581,7 @@ impl DeviceViewUi {
         // turns it over, one undo step like any parameter change.
         let options = frame.menu_options();
         if !options.is_empty() {
-            ui.separator();
+            crate::menus::separator(ui);
         }
         for option in options {
             let text = if option.on {
@@ -1605,7 +1605,7 @@ impl DeviceViewUi {
         // Spec: mpe R14, R18 (C-DEVICE-015). A plug-in's MPE Mode, ticked
         // while it's on, and the MPE/Multi-channel Settings.
         if let Some(mpe) = frame.mpe {
-            ui.separator();
+            crate::menus::separator(ui);
             let response = ui.button(if mpe.on { "✔ MPE Mode" } else { "MPE Mode" });
             crate::menus::register_item(ui.ctx(), &response);
             if response.clicked() {

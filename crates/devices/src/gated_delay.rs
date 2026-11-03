@@ -170,6 +170,7 @@ fn layout() -> DeviceLayout {
         controls,
         slots: None,
         captions: Vec::new(),
+        labels: Vec::new(),
     };
     let cell = DisplayCell::new(STEP_ROW, row.width, BODY_HEIGHT, 1.0).with_top(row);
     let band = |controls: &[(ParamId, Widget)]| {

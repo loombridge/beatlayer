@@ -41,7 +41,7 @@ pub use filter_view::{
 };
 pub use labels::{collections_edit_id, label_check_id, label_rename_id, labels_edit_id};
 
-use crate::layout::{ArrangementLayout, BROWSER_ROW, BrowserLayout, BrowserParts};
+use crate::layout::{ArrangementLayout, BrowserLayout, BrowserParts, list_row};
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
 
@@ -1130,10 +1130,7 @@ impl BrowserUi {
             if !suggestions.is_empty() {
                 let rect = Rect::from_min_size(
                     pos2(layout.search.left(), layout.search.bottom() + 2.0),
-                    vec2(
-                        layout.search.width(),
-                        suggestions.len() as f32 * BROWSER_ROW,
-                    ),
+                    vec2(layout.search.width(), suggestions.len() as f32 * list_row()),
                 );
                 let painter = ui.painter_at(rect);
                 painter.rect_filled(rect, 0.0, theme.colors.panel.0);
@@ -1143,8 +1140,8 @@ impl BrowserUi {
                 );
                 for (index, suggestion) in suggestions.iter().enumerate() {
                     let row = Rect::from_min_size(
-                        pos2(rect.left(), rect.top() + index as f32 * BROWSER_ROW),
-                        vec2(rect.width(), BROWSER_ROW),
+                        pos2(rect.left(), rect.top() + index as f32 * list_row()),
+                        vec2(rect.width(), list_row()),
                     );
                     let id = Id::new(("browser-search-suggestion", suggestion.clone()));
                     let response = ui.interact(row, id, Sense::click());
@@ -1228,24 +1225,24 @@ impl BrowserUi {
         if view.cursor() != self.seen_cursor {
             self.seen_cursor = view.cursor();
             if let Some(cursor) = view.cursor() {
-                let top = cursor as f32 * BROWSER_ROW;
+                let top = cursor as f32 * list_row();
                 if top < self.list_scroll {
                     self.list_scroll = top;
-                } else if top + BROWSER_ROW > self.list_scroll + list.height() {
-                    self.list_scroll = top + BROWSER_ROW - list.height();
+                } else if top + list_row() > self.list_scroll + list.height() {
+                    self.list_scroll = top + list_row() - list.height();
                 }
             }
         }
-        self.list_scroll = scrolled(ui, list, self.list_scroll, total as f32 * BROWSER_ROW);
+        self.list_scroll = scrolled(ui, list, self.list_scroll, total as f32 * list_row());
         // Spec: view-options R1. A middle-button drag pans the list, the
         // content following the pointer.
         if let Some(delta) = crate::middle::pan(ui, list) {
             self.list_scroll = (self.list_scroll - delta.y)
-                .clamp(0.0, (total as f32 * BROWSER_ROW - list.height()).max(0.0));
+                .clamp(0.0, (total as f32 * list_row() - list.height()).max(0.0));
         }
-        let first = (self.list_scroll / BROWSER_ROW).floor() as usize;
+        let first = (self.list_scroll / list_row()).floor() as usize;
         let shown =
-            ((list.height() / BROWSER_ROW).ceil() as usize + 1).min(total.saturating_sub(first));
+            ((list.height() / list_row()).ceil() as usize + 1).min(total.saturating_sub(first));
         let mut list_ui = ui.new_child(egui::UiBuilder::new().max_rect(list));
         list_ui.set_clip_rect(list);
         let modifiers = ui.input(|i| i.modifiers);
@@ -1253,8 +1250,8 @@ impl BrowserUi {
             let Some(item) = view.row(index) else {
                 break;
             };
-            let top = list.top() + index as f32 * BROWSER_ROW - self.list_scroll;
-            let rect = Rect::from_min_size(pos2(list.left(), top), vec2(list.width(), BROWSER_ROW));
+            let top = list.top() + index as f32 * list_row() - self.list_scroll;
+            let rect = Rect::from_min_size(pos2(list.left(), top), vec2(list.width(), list_row()));
             self.item_row(
                 &mut list_ui,
                 shell,
@@ -1366,22 +1363,17 @@ impl BrowserUi {
         if list_response.clicked() {
             ui.memory_mut(|m| m.request_focus(tag_editor_list_id()));
         }
-        self.tag_scroll = scrolled(
-            ui,
-            list,
-            self.tag_scroll,
-            visible.len() as f32 * BROWSER_ROW,
-        );
+        self.tag_scroll = scrolled(ui, list, self.tag_scroll, visible.len() as f32 * list_row());
         // Spec: view-options R1. A middle-button drag pans the list, the
         // content following the pointer.
         if let Some(delta) = crate::middle::pan(ui, list) {
             self.tag_scroll = (self.tag_scroll - delta.y).clamp(
                 0.0,
-                (visible.len() as f32 * BROWSER_ROW - list.height()).max(0.0),
+                (visible.len() as f32 * list_row() - list.height()).max(0.0),
             );
         }
-        let first = (self.tag_scroll / BROWSER_ROW).floor() as usize;
-        let shown = ((list.height() / BROWSER_ROW).ceil() as usize + 1)
+        let first = (self.tag_scroll / list_row()).floor() as usize;
+        let shown = ((list.height() / list_row()).ceil() as usize + 1)
             .min(visible.len().saturating_sub(first));
         // The keys the Tag Editor reads itself (spec: browser-tags R17):
         // Up and Down move through its rows, and Left and Right fold and
@@ -1445,9 +1437,9 @@ impl BrowserUi {
             let row_rect = Rect::from_min_size(
                 pos2(
                     list.left(),
-                    list.top() + (index - first) as f32 * BROWSER_ROW - self.tag_scroll,
+                    list.top() + (index - first) as f32 * list_row() - self.tag_scroll,
                 ),
-                vec2(list.width(), BROWSER_ROW),
+                vec2(list.width(), list_row()),
             );
             let over = dragging.is_some() && row_rect.contains(pointer);
             if over {
@@ -1946,12 +1938,12 @@ impl BrowserUi {
         let add_height = 20.0;
         let tags = view.quick_tags();
         let rows = rect.height() - add_height;
-        let shown = ((rows / BROWSER_ROW).floor() as usize).min(tags.len());
+        let shown = ((rows / list_row()).floor() as usize).min(tags.len());
         let mut hint: Option<String> = None;
         for (index, tag) in tags.iter().take(shown).enumerate() {
             let row = Rect::from_min_size(
-                pos2(rect.left(), rect.top() + index as f32 * BROWSER_ROW),
-                vec2(rect.width(), BROWSER_ROW),
+                pos2(rect.left(), rect.top() + index as f32 * list_row()),
+                vec2(rect.width(), list_row()),
             );
             let id = quick_tag_id(&tag.full_name);
             let response = ui.interact(row, id, Sense::click());

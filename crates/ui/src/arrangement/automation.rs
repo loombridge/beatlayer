@@ -1900,7 +1900,7 @@ pub(super) fn lane_menu(
             );
             ui.close();
         }
-        ui.separator();
+        crate::menus::separator(ui);
         let shown_has = choice.target.is_some_and(|target| {
             owner.is_some_and(|owner| owner.automation_for(&target).is_some())
         });

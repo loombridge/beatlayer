@@ -9,9 +9,7 @@
 bl_rt::install_trap!();
 
 use bl_core::time::{SampleRate, Ticks};
-use bl_devices::analog::{
-    self, ANALOG, DESTINATIONS, MPE, amp, filter, lfo, noise, osc,
-};
+use bl_devices::analog::{self, ANALOG, DESTINATIONS, MPE, amp, filter, lfo, noise, osc};
 use bl_engine::{Collector, Compiler, EngineConfig, TransportCommand, channel};
 use bl_model::{
     Clip, ClipData, Command, Device, DeviceKind, DeviceRole, Editor, MidiData, Note, ParamId,
@@ -140,13 +138,22 @@ fn the_lfos_vibrato_unison_glide_voices_and_mpe_routings_pass_under_rtsan() {
             12 => Some(set(analog::GLIDE_MODE, (step % 2) as f64)),
             13 => Some(set(analog::OCTAVE, (step % 3) as f64 - 1.0)),
             14 => Some(set(analog::ERROR, (step % 4) as f64 * 30.0)),
-            15 => Some(set(MPE[step % 4].0, 1.0 + ((step * 3) % DESTINATIONS.len()) as f64)),
+            15 => Some(set(
+                MPE[step % 4].0,
+                1.0 + ((step * 3) % DESTINATIONS.len()) as f64,
+            )),
             16 => Some(set(MPE[step % 4].1, (step % 5) as f64 * 40.0 - 80.0)),
             17 => Some(set(analog::MPE_ON, (step % 3 != 0) as u8 as f64)),
             18 => Some(set(analog::NOTE_PB, (step % 5) as f64 * 12.0)),
-            19 => Some(set(osc::id(step % 2, osc::BALANCE), (step % 5) as f64 * 25.0)),
+            19 => Some(set(
+                osc::id(step % 2, osc::BALANCE),
+                (step % 5) as f64 * 25.0,
+            )),
             20 => Some(set(noise::id(noise::ON), (step % 2) as f64)),
-            21 => Some(set(amp::id(step % 2, amp::ON), (step % 3 != 0) as u8 as f64)),
+            21 => Some(set(
+                amp::id(step % 2, amp::ON),
+                (step % 3 != 0) as u8 as f64,
+            )),
             22 => Some(set(filter::id(1, filter::ON), (step % 2) as f64)),
             _ => None,
         };

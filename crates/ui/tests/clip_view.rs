@@ -1202,9 +1202,11 @@ fn the_context_menu_lists_the_items_in_order() {
     // Spec: piano-roll R30. Right-clicking a note opens the editor's
     // context menu: Live's rows in Live's order, the items whose commands
     // exist running them and the rest drawn disabled.
+    // A long note, clicked in its middle, so the menu opens right of the
+    // footer's buttons, which are as tall as its rows.
     let step = n_step();
-    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
-    let at = n.at(60, step / 2);
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, 4 * step, 100)]);
+    let at = n.at(60, 2 * step);
     let nodes = right_click(&mut n, at);
     // The note the menu opened on is selected alone.
     assert_eq!(n.selected(), [0]);

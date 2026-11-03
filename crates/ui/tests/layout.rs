@@ -63,10 +63,10 @@ fn the_panes_sit_where_live_puts_them() {
         (status.top(), status.bottom(), status.width()),
         (y(968.0), y(993.0), 1600.0)
     );
-    // L-WIN-003: the Control Bar's controls are 18 points tall, centred about
-    // 37 points from the window's top.
+    // L-WIN-003: the Control Bar's fields are 16 points tall, centred about
+    // 37 points from the window's top (the theme's `control_field`).
     let tempo = layout.rect(Element::Tempo);
-    assert_eq!(tempo.height(), 18.0);
+    assert_eq!(tempo.height(), 16.0);
     assert!(
         (tempo.center().y - y(37.0)).abs() <= 1.0,
         "{}",

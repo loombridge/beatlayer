@@ -63,7 +63,10 @@ fn fixtures() -> PathBuf {
 const LIST_TOP: f32 = 227.0;
 
 fn row(index: usize) -> Pos2 {
-    pos2(160.0, LIST_TOP + 17.0 * index as f32 + 8.5)
+    pos2(
+        160.0,
+        LIST_TOP + bl_ui::layout::list_row() * (index as f32 + 0.5),
+    )
 }
 
 /// A harness whose User Library holds a 19-step and a 12-note tuning file,

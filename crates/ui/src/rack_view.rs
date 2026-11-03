@@ -2212,7 +2212,7 @@ impl DeviceViewUi {
         let macro_args = json!({ "rack": frame.id, "macro_number": item.number });
         for entry in bl_shell::menus::shown(&context_menus::macro_knob()) {
             if entry.is_separator() {
-                ui.separator();
+                crate::menus::separator(ui);
                 continue;
             }
             let row = entry.row;
@@ -3397,7 +3397,7 @@ impl DeviceViewUi {
         contexts.extend(shell.active_contexts());
         for item in bl_shell::menus::shown(&self.chain_menu) {
             if item.is_separator() {
-                ui.separator();
+                crate::menus::separator(ui);
                 continue;
             }
             if item.row == CHAIN_COLOUR_ROW {

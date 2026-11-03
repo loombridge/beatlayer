@@ -169,11 +169,13 @@ mod tempo_follower;
 mod track_commands;
 mod tunings;
 mod video;
+mod video_window;
 mod view_commands;
 mod warping;
 mod windows;
 
 use file_manager::FileManager;
+pub use video_window::VideoView;
 
 /// The argument a key in a range (F1 to F8) adds to a toggling mixer
 /// command for the track it numbers, counting the mixer's columns from 1;
@@ -214,6 +216,9 @@ pub enum WindowKind {
     Device(bl_model::DeviceId),
     /// The assistant's panel in a window of its own (WP-2.23, part 3; D24).
     Assistant,
+    /// The Video Window (WP-9.26): the frame at the playhead, floating above
+    /// the main window.
+    Video,
 }
 
 /// An area of the main window that can hold the keyboard focus.
@@ -356,6 +361,10 @@ pub enum Effect {
     SetFullScreen(bool),
     /// Enter or leave full-screen mode in the second window.
     SetSecondFullScreen(bool),
+    /// Enter or leave full-screen mode in the Video Window (video R20).
+    SetVideoFullScreen(bool),
+    /// Move and size the Video Window (video R17, R21).
+    PlaceVideoWindow(bl_model::WindowFrame),
     /// Move the keyboard focus to an area of the main window.
     FocusArea(Area),
     /// Move the keyboard focus to an area of the second window, and bring
@@ -780,6 +789,8 @@ pub struct Shell {
     media: Arc<MediaStore>,
     /// The movies the set's video clips name (WP-9.25).
     movies: video::Movies,
+    /// The Video Window (WP-9.26).
+    video_window: video_window::VideoWindow,
     /// Processed files being written, with the edits that land when each is
     /// whole (WP-4.20).
     processed: Vec<processed_files::Pending>,
@@ -1343,6 +1354,7 @@ impl Shell {
             browser_view,
             media,
             movies: video::Movies::default(),
+            video_window: video_window::VideoWindow::default(),
             processed: Vec::new(),
             stems: stems::StemsState::default(),
             packages: packages::PackagesState::default(),
@@ -2289,7 +2301,10 @@ impl Shell {
             return self.run_warping(id, args);
         }
         if bl_shell_spec::video::handles(id) {
-            return self.run_video(id, args);
+            return match id {
+                bl_shell_spec::video::FRAME_AT => self.run_video(id, args),
+                _ => self.run_video_window(id, args),
+            };
         }
         if bl_shell_spec::groove::handles(id) {
             return self.run_grooves(id, args);

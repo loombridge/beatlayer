@@ -248,11 +248,13 @@ pub use bl_shell_spec::tracks as track_commands;
 pub use bl_shell_spec::transport as transport_commands;
 pub use bl_shell_spec::tunings as tuning_commands;
 pub use bl_shell_spec::{
-    audio_editing, bounce, commands, context_menus, freeze, keymap, menus, register,
+    audio_editing, bounce, commands, context_menus, freeze, keymap, menus, register, video,
 };
+/// A decoded picture the Video Window draws (WP-9.26).
+pub use bl_video::Frame as VideoFrame;
 /// The autosampler's progress (WP-5.16).
 pub use shell::autosample::Status as AutosampleStatus;
 pub use shell::{
     Area, Effect, ExportPrefs, GesturePhase, InfoTarget, Invocation, KEY_TRACK_NUMBER, MainView,
-    Message, Shell, ShellError, TransientList, WindowKind,
+    Message, Shell, ShellError, TransientList, VideoView, WindowKind,
 };

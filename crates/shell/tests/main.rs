@@ -184,6 +184,7 @@ mod tunings;
 mod tunings_browser;
 mod undo_history;
 mod video_clips;
+mod video_window;
 mod view_options;
 mod warping;
 mod wavetables;

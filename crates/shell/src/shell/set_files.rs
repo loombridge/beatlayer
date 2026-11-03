@@ -1125,6 +1125,15 @@ impl Shell {
                     self.touch();
                     return Ok(Value::Null);
                 }
+                if self.focused_window == WindowKind::Video {
+                    // Spec: video R16. Close Window hides the Video Window
+                    // with it in front.
+                    self.focused_window = WindowKind::Main;
+                    return self.run_video_window(
+                        bl_shell_spec::video::SET_WINDOW,
+                        json!({ "shown": false }),
+                    );
+                }
                 if self.focused_window == WindowKind::Second {
                     // Spec: second-window R1. Close Window closes the second
                     // window with it in front.

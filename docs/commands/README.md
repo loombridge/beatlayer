@@ -54,6 +54,7 @@ The commands, by the part of their ID before its first dot:
 - [`focus`](focus.md)
 - [`groove`](groove.md)
 - [`keymap`](keymap.md)
+- [`library`](library.md)
 - [`link`](link.md)
 - [`locator`](locator.md)
 - [`midi`](midi.md)
@@ -8654,6 +8655,83 @@ What `set.create_pack` returns.
 
 </details>
 
+### `Credit`
+
+One item's credit.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | The item's ID in the library. |
+| `name` | string | yes | Its name. |
+| `credit` | string | yes | Its credit: title, creator, licence and its link, source and changes. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One item's credit.",
+  "properties": {
+    "credit": {
+      "description": "Its credit: title, creator, licence and its link, source and changes.",
+      "type": "string"
+    },
+    "id": {
+      "description": "The item's ID in the library.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "credit"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Credits`
+
+What `library.credits` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `packages` | array of [`PackageCredits`](#packagecredits) | yes | The credits by package. |
+| `text` | string | yes | The same, as the text Export Credits writes. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `library.credits` returns.",
+  "properties": {
+    "packages": {
+      "description": "The credits by package.",
+      "items": {
+        "$ref": "#/$defs/PackageCredits"
+      },
+      "type": "array"
+    },
+    "text": {
+      "description": "The same, as the text Export Credits writes.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "packages",
+    "text"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `CropResult`
 
 What `clip.crop` did.
@@ -13154,6 +13232,42 @@ What `export.status` returns (R44).
   "required": [
     "dialog",
     "export"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ExportedCredits`
+
+What `library.export_credits` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The file written. |
+| `items` | integer, at least 0 | yes | How many items it credits. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `library.export_credits` returns.",
+  "properties": {
+    "items": {
+      "description": "How many items it credits.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "path": {
+      "description": "The file written.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path",
+    "items"
   ],
   "type": "object"
 }
@@ -17803,6 +17917,7 @@ A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, 
 One of:
 
 - `"all"`: Everything: the places as folders, searched together.
+- `"core_library"`: Beatlayer's own sound library (core library R8): its items once it's installed, its download page before.
 - `"sounds"`: Instrument presets.
 - `"drums"`: Drum kits.
 - `"instruments"`: Instruments.
@@ -17830,6 +17945,11 @@ One of:
     {
       "const": "all",
       "description": "Everything: the places as folders, searched together.",
+      "type": "string"
+    },
+    {
+      "const": "core_library",
+      "description": "Beatlayer's own sound library (core library R8): its items once it's installed, its download page before.",
       "type": "string"
     },
     {
@@ -19605,6 +19725,69 @@ The Library page's settings (L-SET-016).
   "required": [
     "collect_files_on_export",
     "user_library"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `LibraryState`
+
+What `library.state` and the commands that change it return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `folder` | string | yes | The folder the installed packages' items are in, read-only. |
+| `installed` | boolean | yes | Whether any package is installed: the browser's Core Library label lists items once it is, and shows the download page before. |
+| `packages` | array of [`PackageStatus`](#packagestatus) | yes | The library's packages for this platform, installed or not, each with its item count (`items`). |
+| `install` | [`JobStatus`](#jobstatus) | yes | How the download is going. |
+| `credits_open` | boolean | yes | Whether the Library Credits window is open. |
+| `missing` | array of [`MissingItem`](#missingitem) | no | The library items the open set uses whose files aren't there: the set refers to each by the package, version and ID its file's place names, and by its content hash. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `library.state` and the commands that change it return.",
+  "properties": {
+    "credits_open": {
+      "description": "Whether the Library Credits window is open.",
+      "type": "boolean"
+    },
+    "folder": {
+      "description": "The folder the installed packages' items are in, read-only.",
+      "type": "string"
+    },
+    "install": {
+      "$ref": "#/$defs/JobStatus",
+      "description": "How the download is going."
+    },
+    "installed": {
+      "description": "Whether any package is installed: the browser's Core Library label lists items once it is, and shows the download page before.",
+      "type": "boolean"
+    },
+    "missing": {
+      "description": "The library items the open set uses whose files aren't there: the set refers to each by the package, version and ID its file's place names, and by its content hash.",
+      "items": {
+        "$ref": "#/$defs/MissingItem"
+      },
+      "type": "array"
+    },
+    "packages": {
+      "description": "The library's packages for this platform, installed or not, each with its item count (`items`).",
+      "items": {
+        "$ref": "#/$defs/PackageStatus"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "folder",
+    "installed",
+    "packages",
+    "install",
+    "credits_open"
   ],
   "type": "object"
 }
@@ -22058,6 +22241,46 @@ What `midi_tool.state` returns, and what the commands that change a tool's choic
     "stacks",
     "target",
     "application"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `MissingItem`
+
+A library item the open set uses that isn't installed.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `item` | string | yes | The item's ID in the library. |
+| `package` | string | yes | The package it's in, as `packages.list` names it. |
+| `version` | string | yes | The package's version the set used. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A library item the open set uses that isn't installed.",
+  "properties": {
+    "item": {
+      "description": "The item's ID in the library.",
+      "type": "string"
+    },
+    "package": {
+      "description": "The package it's in, as `packages.list` names it.",
+      "type": "string"
+    },
+    "version": {
+      "description": "The package's version the set used.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "item",
+    "package",
+    "version"
   ],
   "type": "object"
 }
@@ -24540,6 +24763,49 @@ What `set.pack_status` returns.
 
 </details>
 
+### `PackageCredits`
+
+The credits of one installed package's items.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `package` | string | yes | The package's ID in the library. |
+| `name` | string | yes | Its name. |
+| `items` | array of [`Credit`](#credit) | yes | Its items' credits, in ID order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The credits of one installed package's items.",
+  "properties": {
+    "items": {
+      "description": "Its items' credits, in ID order.",
+      "items": {
+        "$ref": "#/$defs/Credit"
+      },
+      "type": "array"
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "package": {
+      "description": "The package's ID in the library.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "package",
+    "name",
+    "items"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `PackageState`
 
 Where a package is.
@@ -24606,6 +24872,7 @@ A package of the manifest, as `packages.list` and `stems.status` give it.
 | `state` | [`PackageState`](#packagestate) | yes | Where it is. |
 | `features` | array of string | yes | The features that need it, by ID. |
 | `at_next_launch` | boolean | no | Installed, but a library in its role is already loaded, so it takes effect the next time Beatlayer starts. |
+| `items` | integer, at least 0 | no | For a library package, how many items it holds: counted once it's installed, as its manifest entry says before (core library R13). |
 | `progress` | number | no | While it downloads, how far it is, from 0 to 1. |
 
 <details><summary>JSON Schema</summary>
@@ -24632,6 +24899,12 @@ A package of the manifest, as `packages.list` and `stems.status` give it.
     "installed": {
       "description": "Whether it's installed.",
       "type": "boolean"
+    },
+    "items": {
+      "description": "For a library package, how many items it holds: counted once it's installed, as its manifest entry says before (core library R13).",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
     },
     "name": {
       "description": "Its name.",

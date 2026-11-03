@@ -58,6 +58,7 @@ Menu-bar order on macOS: Live (application menu), File, Edit, Create, Playback, 
 | M-FILE-015 | Export Audio/Video... | ⇧⌘R | S-FILE-007 | | Opens the Export Audio/Video dialog (L-OTH-003; [export](../specs/export.md) R28) |
 | M-FILE-016 | Export MIDI Clip... | | S-FILE-008 | disabled | Live shows no key here or in the clip context menus; the manual's binding (S-FILE-008) is unconfirmed. Beatlayer adds Export DAWproject... straight after it ([dawproject](../specs/dawproject.md) R86; not in Live), with no key |
 | DAWPROJECT-export | Export DAWproject... | | | | Beatlayer addition, straight after Export MIDI Clip...: opens a save dialog and writes the set as a DAWproject file, then lists what the format couldn't carry ([dawproject](../specs/dawproject.md) R86, R87); built in WP-6.37b |
+| LIBRARY-export | Export Library Credits... | | | | Beatlayer addition, straight after Export DAWproject...: opens a save dialog and writes the credits of the library items the set uses as a text file ([core library](../specs/core-library.md) R12); built in WP-9.46 |
 
 ## Edit
 
@@ -376,6 +377,7 @@ On macOS the system adds a search field at the top of the Help menu (S-MENU-005)
 | | — | | | | |
 | M-HELP-003 | Load Demo Set | | | | Beatlayer: its own demo song, opened as an untitled copy ([Help menu](../specs/help-menu.md) R15); built in WP-10.24 |
 | M-HELP-004 | Read the Live Manual... | | | | Beatlayer: Read the Beatlayer Manual... (D21); its own manual, bundled and opened in the browser ([Help menu](../specs/help-menu.md) R2); built in WP-10.19 |
+| LIBRARY-credits | Library Credits... | | | | Beatlayer addition, after Read the Beatlayer Manual...: opens the window that lists every installed library item's credit, with Export Credits... ([core library](../specs/core-library.md) R12); built in WP-9.46 |
 | M-HELP-005 | Learn Live at ableton.com... | | | | Ableton website; Beatlayer links its own site. Left out of Beatlayer's menu (D21) |
 | | — | | | | |
 | M-HELP-006 | Join the User Forum... | | | | Beatlayer: its own community link: the project's forum page, a pinned address ([Help menu](../specs/help-menu.md) R3); built in WP-10.19 |

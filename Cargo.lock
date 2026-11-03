@@ -1208,6 +1208,7 @@ dependencies = [
  "bl-core",
  "bl-devices",
  "bl-engine",
+ "bl-library",
  "bl-link",
  "bl-media",
  "bl-midi-io",

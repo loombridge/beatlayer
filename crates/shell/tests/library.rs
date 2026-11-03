@@ -248,3 +248,74 @@ fn removing_the_package_takes_its_items_away() {
         json!([])
     );
 }
+
+/// The path of `tone-a3` once the test package is installed.
+fn tone(shell: &Shell) -> PathBuf {
+    shell
+        .library_folder()
+        .join("library-core-1/tone-a3/tone-a3.wav")
+}
+
+// Spec: core-library R12, R14. A set that plays a library item credits it
+// and refers to it by its package, version and ID; opened where the library
+// isn't installed it lists the missing item and offers the download.
+#[test]
+fn a_set_refers_to_its_library_items_and_offers_the_download_when_they_are_missing() {
+    let scratch = Scratch::new("set");
+    let mut shell = shell(&scratch);
+    install(&mut shell);
+    let file = tone(&shell);
+    run(
+        &mut shell,
+        browser::ADD_TO_ARRANGEMENT,
+        json!({ "paths": [file.to_string_lossy()] }),
+    );
+
+    // Only the item the set plays is credited.
+    let credits = run(&mut shell, "library.credits", json!({ "set": true }));
+    let items = credits["packages"][0]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], "tone-a3");
+    assert_eq!(
+        run(&mut shell, "library.state", Value::Null)["missing"],
+        Value::Null
+    );
+
+    let asked = scratch.0.join("Song.blset");
+    let saved = run(
+        &mut shell,
+        "set.save_as",
+        json!({ "path": asked.to_string_lossy() }),
+    );
+    // The set goes into a project folder of its own.
+    let set = saved["path"].as_str().unwrap().to_owned();
+    run(
+        &mut shell,
+        "packages.remove",
+        json!({ "ids": ["library-core"] }),
+    );
+    shell.wait_packages();
+    run(&mut shell, "set.open", json!({ "path": set }));
+
+    let missing = run(&mut shell, "library.state", Value::Null)["missing"].clone();
+    assert_eq!(
+        missing,
+        json!([{ "item": "tone-a3", "package": "library-core", "version": "1" }])
+    );
+    let message = shell.message().cloned().expect("the Status Bar says so");
+    assert!(
+        message.text.contains("1 library item that isn't installed"),
+        "{}",
+        message.text
+    );
+
+    // Clicking the message opens the library's page, whose Download installs.
+    let action = message.action.expect("the message offers the download");
+    shell.invoke(&action.id, action.args).unwrap();
+    assert_eq!(browser_state(&mut shell).label, Label::CoreLibrary);
+    install(&mut shell);
+    assert_eq!(
+        run(&mut shell, "library.state", Value::Null)["missing"],
+        Value::Null
+    );
+}

@@ -11,4 +11,6 @@ pub use build::{Built, build};
 pub use manifest::{
     ALLOWED_LICENCES, Attribution, ItemDef, Kind, LABELS, Manifest, PackageDef, Source, sha256_hex,
 };
-pub use package::{Item, PACKAGE_FILE, Package, credits_text, licence_link};
+pub use package::{
+    Item, PACKAGE_FILE, Package, Reference, credits_text, licence_link, reference_of,
+};

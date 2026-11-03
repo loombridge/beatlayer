@@ -44,6 +44,17 @@ pub fn handles(id: &str) -> bool {
     IDS.contains(&id)
 }
 
+/// A library item the open set uses that isn't installed.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MissingItem {
+    /// The item's ID in the library.
+    pub item: String,
+    /// The package it's in, as `packages.list` names it.
+    pub package: String,
+    /// The package's version the set used.
+    pub version: String,
+}
+
 /// What `library.state` and the commands that change it return.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct LibraryState {
@@ -59,6 +70,11 @@ pub struct LibraryState {
     pub install: JobStatus,
     /// Whether the Library Credits window is open.
     pub credits_open: bool,
+    /// The library items the open set uses whose files aren't there: the
+    /// set refers to each by the package, version and ID its file's place
+    /// names, and by its content hash.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub missing: Vec<MissingItem>,
 }
 
 /// Arguments of `library.credits`.
@@ -135,7 +151,8 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                 "Reads Beatlayer's own sound library: its packages for this platform (Core, \
                  Instruments, Drums, Loops), each installed or not with its size, its item \
                  count and the share downloaded, the folder they install in, how the download \
-                 is going, and whether the Library Credits window is open.",
+                 is going, whether the Library Credits window is open, and the library items the \
+                 open set uses whose files are missing.",
             )
             .permission(Permission::Read)
             .context(Global)

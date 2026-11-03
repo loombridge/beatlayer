@@ -9,6 +9,11 @@
       "id": "audio-to-midi",
       "name": "Audio to MIDI",
       "roles": ["onnx-runtime", "pitch-model"]
+    },
+    {
+      "id": "library",
+      "name": "Beatlayer's library",
+      "roles": ["library-core", "library-instruments", "library-drums", "library-loops"]
     }
   ],
   "packages": [

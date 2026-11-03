@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use bl_shell_spec::browser::{self as browser_ids, Label, OpenPlaceArgs};
 use bl_shell_spec::library::{
     self as ids, Credit, Credits, CreditsArgs, ExportCreditsArgs, ExportedCredits, LibraryState,
-    PackageCredits,
+    MissingItem, PackageCredits,
 };
 use bl_shell_spec::stems::JobStatus;
 
@@ -111,7 +111,64 @@ impl Shell {
                 self.packages_job(&wanted)
             },
             credits_open: self.library.credits_open,
+            missing: self.library_missing(),
         }
+    }
+
+    /// The library items the open set uses whose files aren't there (R14).
+    #[must_use]
+    pub fn library_missing(&self) -> Vec<MissingItem> {
+        let mut missing: Vec<MissingItem> = Vec::new();
+        for hash in crate::dawproject::media_used(self.editor.document()) {
+            let hash = bl_media::ContentHash::from_bytes(hash.0);
+            let Some(entry) = self.media.entry(hash) else {
+                continue;
+            };
+            if matches!(self.media.check(hash), Ok(bl_media::MediaStatus::Available)) {
+                continue;
+            }
+            if let Some(found) = bl_library::reference_of(&entry.path) {
+                let item = MissingItem {
+                    item: found.item,
+                    package: found.package,
+                    version: found.version,
+                };
+                if !missing.contains(&item) {
+                    missing.push(item);
+                }
+            }
+        }
+        missing.sort_by(|a, b| (&a.package, &a.item).cmp(&(&b.package, &b.item)));
+        missing
+    }
+
+    /// The Status Bar's line for the library items an opened set uses that
+    /// aren't installed, offering the download (R14).
+    pub(super) fn library_missing_message(&self) -> Option<Message> {
+        let missing = self.library_missing().len();
+        if missing == 0 {
+            return None;
+        }
+        let action = if self.library.installed.is_empty() {
+            Invocation::new(
+                browser_ids::OPEN_PLACE,
+                to_value(&OpenPlaceArgs {
+                    label: Label::CoreLibrary,
+                }),
+            )
+        } else {
+            Invocation::new(ids::INSTALL, json!({}))
+        };
+        Some(Message {
+            text: format!(
+                "This set uses {missing} library item{} that {} installed: click to download \
+                 the library",
+                if missing == 1 { "" } else { "s" },
+                if missing == 1 { "isn't" } else { "aren't" },
+            ),
+            error: false,
+            action: Some(action),
+        })
     }
 
     /// Whether the Library Credits window is open (R12).
@@ -170,17 +227,36 @@ impl Shell {
         Credits { packages, text }
     }
 
-    /// The credit of the library item whose file is `path`, for the Info
-    /// View and the info of what's loaded from it (R11).
-    #[must_use]
-    pub fn library_credit_of(&self, path: &std::path::Path) -> Option<String> {
+    /// The name and credit of the library item whose file is `path` (R11).
+    fn library_credit_at(&self, path: &std::path::Path) -> Option<(String, String)> {
         self.library.installed.iter().find_map(|(dir, package)| {
             let item = package
                 .items
                 .iter()
                 .find(|item| dir.join(&item.file) == path)?;
-            Some(item.credit())
+            Some((item.name.clone(), item.credit()))
         })
+    }
+
+    /// What the Info View shows for the library item selected in the
+    /// browser: its name and credit (info view R13).
+    #[must_use]
+    pub fn library_info_of_selection(&self) -> Option<(String, String)> {
+        self.library_credit_at(self.browser_view.selected().last()?)
+    }
+
+    /// The credit of a clip that plays a library item's file, under the
+    /// clip's name (info view R13).
+    pub(super) fn library_info_of_clip(&self, id: bl_model::ClipId) -> Option<(String, String)> {
+        let clip = self.editor.document().clip(id)?;
+        let bl_model::ClipData::Audio(audio) = &clip.data else {
+            return None;
+        };
+        let entry = self
+            .media
+            .entry(bl_media::ContentHash::from_bytes(audio.media.0))?;
+        let (_, credit) = self.library_credit_at(&entry.path)?;
+        Some((clip.name.clone(), credit))
     }
 
     /// Reads the installed packages again if one changed.

@@ -141,3 +141,20 @@ fn credits_name_the_creator_the_licence_and_the_changes() {
         serde_json::from_str(&serde_json::to_string(&built.package).unwrap()).unwrap();
     assert_eq!(package, built.package);
 }
+
+// R14: a path names the package, its version and the item.
+#[test]
+fn an_installed_files_path_names_its_item() {
+    let path = Path::new("/x/Library/library-core-2/tone-a3/tone-a3.wav");
+    let found = bl_library::reference_of(path).unwrap();
+    assert_eq!(
+        (
+            found.package.as_str(),
+            found.version.as_str(),
+            found.item.as_str()
+        ),
+        ("library-core", "2", "tone-a3")
+    );
+    assert!(bl_library::reference_of(Path::new("/x/Samples/kick/kick.wav")).is_none());
+    assert!(bl_library::reference_of(Path::new("kick.wav")).is_none());
+}

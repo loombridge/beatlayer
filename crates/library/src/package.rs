@@ -111,3 +111,34 @@ pub fn credits_text<'a>(packages: impl IntoIterator<Item = (&'a str, &'a [Item])
     }
     text
 }
+
+/// Which library item a file in the library's folder is (R14): a set refers
+/// to the items it uses by the place their package installs them, which
+/// names the package, its version and the item, beside the file's content
+/// hash its media table holds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Reference {
+    /// The package's ID in the Packages manager, such as `library-core`.
+    pub package: String,
+    /// Its version.
+    pub version: String,
+    /// The item's ID.
+    pub item: String,
+}
+
+/// The item a path names, if it's laid out as an installed item is:
+/// `library-<part>-<version>/<item>/<file>` at its end.
+#[must_use]
+pub fn reference_of(path: &Path) -> Option<Reference> {
+    let mut parts = path
+        .components()
+        .rev()
+        .filter_map(|c| c.as_os_str().to_str());
+    let (_file, item, folder) = (parts.next()?, parts.next()?, parts.next()?);
+    let (package, version) = folder.rsplit_once('-')?;
+    package.starts_with("library-").then(|| Reference {
+        package: package.to_owned(),
+        version: version.to_owned(),
+        item: item.to_owned(),
+    })
+}

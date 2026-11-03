@@ -20,8 +20,8 @@ use bl_devices::testing::{
     INSTRUMENT_FREE_AMOUNTS, INSTRUMENT_HI_QUALITY, INSTRUMENT_MATRIX_AMOUNT,
 };
 use bl_devices::wavetable::{
-    self, LFO_RETRIGGER, LFO_SYNC, MATRIX_AMOUNT, MATRIX_TIME, UNISON_MODE, WAVETABLE,
-    envelope, lfo, slot_amount,
+    self, LFO_RETRIGGER, LFO_SYNC, MATRIX_AMOUNT, MATRIX_TIME, UNISON_MODE, WAVETABLE, envelope,
+    lfo, slot_amount,
 };
 use bl_engine::{Collector, Compiler, EngineConfig, TransportCommand, channel};
 use bl_model::{

@@ -167,6 +167,24 @@ pub fn native(name: &str, device_type: &str, role: &str) -> Value {
             "role": role, "kind": { "native": { "device_type": device_type } } })
 }
 
+/// A Modular Effect whose patch has a Filter as block 1 between Audio In and
+/// Audio Out.
+fn modular() -> Value {
+    let mut device = native("modular", bl_model::modular::EFFECT, "audio_effect");
+    device["patch"] = json!({
+        "blocks": [
+            { "id": 1, "type": "filter", "x": 150.0, "y": 0.0 },
+            { "id": 2, "type": "audio_in", "x": 0.0, "y": 0.0 },
+            { "id": 3, "type": "audio_out", "x": 300.0, "y": 0.0 },
+        ],
+        "cables": [
+            { "from": 2, "from_port": "left", "to": 1, "to_port": "in" },
+            { "from": 1, "from_port": "out", "to": 3, "to_port": "left" },
+        ],
+    });
+    device
+}
+
 /// A MIDI clip's data, as `clip.create` takes it, of `notes` (key, start,
 /// length, velocity) and unlooped.
 #[must_use]
@@ -339,6 +357,7 @@ pub fn build(driver: &mut impl Driver) -> Ids {
                 native("reverb", REVERB, "audio_effect"),
             ),
             insert(ids.track("Echo"), 0, native("delay", DELAY, "audio_effect")),
+            insert(ids.track("Echo"), 1, modular()),
             insert(ids.main, 0, native("limiter", LIMITER, "audio_effect")),
         ],
     );
@@ -354,6 +373,7 @@ pub fn build(driver: &mut impl Driver) -> Ids {
         ("utility", UTILITY),
         ("reverb", REVERB),
         ("delay", DELAY),
+        ("modular", bl_model::modular::EFFECT),
         ("limiter", LIMITER),
     ] {
         ids.devices

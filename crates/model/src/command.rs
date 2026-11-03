@@ -5195,7 +5195,7 @@ impl Document {
                 patch,
             } => {
                 let mut loaded = self.device_ref(*device)?.clone();
-                if patch.is_some() && loaded.patch.is_some() {
+                if patch.is_some() && loaded.effective_patch().is_some() {
                     loaded.patch.clone_from(patch);
                 }
                 if similarity_reference.is_some() {

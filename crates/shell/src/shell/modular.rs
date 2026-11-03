@@ -36,7 +36,7 @@ impl Shell {
 /// `device`'s patch as `modular.patch` reports it, or `None` for a device
 /// that isn't a Modular.
 pub(super) fn patch_state(device: &Device) -> Option<PatchState> {
-    let patch = device.patch.as_ref()?;
+    let patch = &device.effective_patch()?;
     let ports = |ports: &[modular::PortSpec]| {
         ports
             .iter()

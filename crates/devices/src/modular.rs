@@ -70,8 +70,19 @@ fn device_type(id: &str, name: &str, role: DeviceRole) -> DeviceType {
             ),
         );
     }
-    let device_type =
-        DeviceType::native(id, name, role).with_description(DeviceDescription::new(params));
+    // Control surfaces take the patch parameters eight at a time (R16).
+    let slots: Vec<_> = (1..=MAX_PARAMS as u8).map(slot_param).collect();
+    let mut banks = Vec::new();
+    if role == DeviceRole::Instrument {
+        banks.push(bl_model::Bank {
+            name: "Voices".to_owned(),
+            params: vec![VOICES],
+        });
+    }
+    banks.extend(bl_model::numbered(&slots));
+    let mut description = DeviceDescription::new(params);
+    description.banks = banks;
+    let device_type = DeviceType::native(id, name, role).with_description(description);
     if role == DeviceRole::AudioEffect {
         device_type.with_sidechain()
     } else {
@@ -117,7 +128,7 @@ fn compile(device: &Device, config: &NodeConfig) -> Schedule {
         .map_or(f64::from(DEFAULT_VOICES), |v| *v)
         .round() as usize;
     Schedule::build(
-        device.patch.as_ref().unwrap_or(&modular::Patch::default()),
+        &device.effective_patch().unwrap_or_default(),
         config.sample_rate.as_f64(),
         voices,
         instrument,

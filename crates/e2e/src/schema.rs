@@ -770,6 +770,12 @@ impl Walk<'_> {
             "command" => return "edit.undo".to_owned(),
             "tool" => return "arpeggiate".to_owned(),
             "signature" => return "4/4".to_owned(),
+            // Modular's blocks (modular-device R9): the fixture's patch
+            // holds a Filter as block 1.
+            "block_type" => return "mixer".to_owned(),
+            "setting" => return "cutoff".to_owned(),
+            "from_port" => return "out".to_owned(),
+            "to_port" => return "in".to_owned(),
             _ => {}
         }
         format!("E2E {}", self.fresh)
@@ -1070,6 +1076,7 @@ impl Walk<'_> {
         let text = format!("{name} {hint} {}", self.about);
         let order: &[(&[&str], &str)] = &[
             (&["operator"], bl_devices::operator::OPERATOR),
+            (&["modular"], bl_model::modular::EFFECT),
             (
                 &["multisampler", "layer", "zone", "sfz"],
                 bl_devices::multisampler::MULTISAMPLER,

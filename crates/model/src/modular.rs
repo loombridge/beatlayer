@@ -675,8 +675,7 @@ impl crate::Document {
     ) -> Result<(), ModelError> {
         let mut patch = self
             .device_ref(device)?
-            .patch
-            .clone()
+            .effective_patch()
             .ok_or(ModelError::InvalidInput("the device isn't a Modular"))?;
         let mut moves = Vec::new();
         edit(&mut patch, &mut moves)?;

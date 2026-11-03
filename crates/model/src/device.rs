@@ -556,6 +556,17 @@ impl Device {
         }
     }
 
+    /// A Modular's patch: the one it holds, else the one its type starts
+    /// with, for a device inserted without one (the modular device spec,
+    /// R1). `None` for a device that isn't a Modular.
+    #[must_use]
+    pub fn effective_patch(&self) -> Option<crate::modular::Patch> {
+        self.patch.clone().or_else(|| match &self.kind {
+            DeviceKind::Native { device_type } => crate::modular::Patch::new_for(device_type),
+            _ => None,
+        })
+    }
+
     /// The media in sample slot `slot`, if it holds any.
     #[must_use]
     pub fn media_at(&self, slot: usize) -> Option<ContentHash> {

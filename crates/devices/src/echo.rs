@@ -1459,6 +1459,7 @@ fn tunnel_display(
             handle: Some(DisplayHandle {
                 x: time_param(get, line),
                 y: None,
+                span: None,
             }),
         });
     }
@@ -1515,6 +1516,7 @@ fn filter_display(get: &dyn Fn(ParamId) -> f64) -> (DisplaySeries, Vec<DisplayMa
             handle: Some(DisplayHandle {
                 x: hz,
                 y: Some(res),
+                span: None,
             }),
         }
     };

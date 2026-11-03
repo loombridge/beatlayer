@@ -55,8 +55,13 @@ pub mod dice;
 pub mod drum_bus;
 pub mod drum_sampler;
 pub mod drum_synth;
+pub mod ds_clang;
 pub mod ds_clap;
+pub mod ds_cymbal;
+pub mod ds_fm;
+pub mod ds_hh;
 pub mod ds_kick;
+mod ds_metal;
 pub mod ds_snare;
 pub mod ds_tom;
 mod dynamics;
@@ -98,7 +103,9 @@ pub mod multisampler;
 mod multisampler_tabs;
 pub mod note_echo;
 pub mod operator;
+pub mod operator_display;
 pub mod operator_envelope;
+pub mod operator_lfo;
 pub mod oscilloscope;
 pub mod overdrive;
 pub mod pedal;
@@ -136,6 +143,7 @@ pub mod utility;
 pub mod vector_delay;
 pub mod vocoder;
 pub mod wavetable;
+pub mod wavetable_display;
 pub mod wavetable_mod;
 pub mod wavetables;
 pub mod wax;
@@ -285,6 +293,10 @@ pub fn display_in(
         ds_snare::DS_SNARE => Some(ds_snare::display(device, description, values)),
         ds_tom::DS_TOM => Some(ds_tom::display(device, description, values)),
         ds_clap::DS_CLAP => Some(ds_clap::display(device, description, values)),
+        ds_hh::DS_HH => Some(ds_hh::display(device, description, values)),
+        ds_cymbal::DS_CYMBAL => Some(ds_cymbal::display(device, description, values)),
+        ds_fm::DS_FM => Some(ds_fm::display(device, description, values)),
+        ds_clang::DS_CLANG => Some(ds_clang::display(device, description, values)),
         SATURATOR => Some(saturator::display(device, description, values, data)),
         OVERDRIVE => Some(overdrive::display(device, description, values, data)),
         TUBE => Some(tube::display(device, description, values, data)),
@@ -327,6 +339,13 @@ pub fn display_in(
         LOOPER => Some(looper::display(device, description, values, data)),
         VECTOR_DELAY => Some(vector_delay::display(device, description, values, data)),
         VOCODER => Some(vocoder::display(device, description, values, data)),
+        WAVETABLE => Some(wavetable_display::display(
+            device,
+            description,
+            values,
+            view,
+            [None, None],
+        )),
         granulator_iii::GRANULATOR_III => {
             Some(granulator_iii::display(device, description, values, data))
         }
@@ -386,6 +405,10 @@ pub fn register(registry: &mut Registry) {
     ds_snare::register(registry);
     ds_tom::register(registry);
     ds_clap::register(registry);
+    ds_hh::register(registry);
+    ds_cymbal::register(registry);
+    ds_fm::register(registry);
+    ds_clang::register(registry);
     kitbag::register(registry);
     modulator::register(registry);
     level_mod::register(registry);

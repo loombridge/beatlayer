@@ -118,5 +118,6 @@ mod user_keymap;
 mod vector_delay;
 mod view_options;
 mod vocoder;
+mod wavetable_panel;
 mod zone_editor;
 mod zoom;

@@ -762,7 +762,11 @@ pub fn display(
             x: hz as f32,
             y: FLOOR_DB + 14.0,
             text: format!("{name} {}", hertz(hz)),
-            handle: Some(DisplayHandle { x: id, y: None }),
+            handle: Some(DisplayHandle {
+                x: id,
+                y: None,
+                span: None,
+            }),
         });
     }
     DeviceDisplay {

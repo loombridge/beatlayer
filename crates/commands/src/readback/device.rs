@@ -110,6 +110,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("operator.set_envelope_levels", query(Device, "params")),
     ("operator.play_by_key", query(Device, "params")),
     ("device.clear_route", query(Device, "matrix")),
+    ("device.remove_destination", query(Device, "matrix")),
     ("device.write_route", query(Device, "matrix")),
     ("device.erase_route", query(Device, "matrix")),
     ("device.set_impulse_response", query(Device, "impulse_responses")),

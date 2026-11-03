@@ -16,8 +16,11 @@
 use std::f64::consts::{LN_10, PI};
 
 use bl_engine::{NodeData, NoteKind};
+use bl_model::device_layout::{
+    BODY_HEIGHT, BandLabel, Control, ControlBand, DisplayCell, FRAMED_WIDTH, LayoutNode, Widget,
+};
 use bl_model::{DeviceDescription, DeviceId, DeviceLayout, ParamDescriptor, ParamId, ParamUnit};
-use bl_model::{DeviceDisplay, DisplaySeries, OrdMap};
+use bl_model::{DeviceDisplay, DisplayReading, DisplaySeries, OrdMap};
 
 use crate::ds_clap::DS_CLAP;
 use crate::ds_kick::DS_KICK;
@@ -26,7 +29,8 @@ use crate::ds_tom::DS_TOM;
 use crate::filters::{Circuit, Coef, Stage};
 use crate::framework::{Audio, NativeDevice, ParamBank};
 
-/// The hit's time to fall 60 dB from its peak, in milliseconds.
+/// The hit's time to fall 60 dB from its peak, as a share of the travel
+/// from [`DECAY_MIN_MS`] to [`DECAY_MAX_MS`] (see [`decay_ms`]).
 pub const DECAY: ParamId = ParamId(0);
 /// The output level, up to 0 dB.
 pub const VOLUME: ParamId = ParamId(1);
@@ -61,20 +65,34 @@ pub fn is_drum_synth(kind: &bl_model::DeviceKind) -> bool {
         if [DS_KICK, DS_SNARE, DS_TOM, DS_CLAP].contains(&device_type.as_str()))
 }
 
-/// The Decay control: 10 ms to 4 s, on a logarithmic travel.
+/// What Decay's `percent` of travel is, in milliseconds: 10 ms to 4 s on a
+/// logarithmic travel, as Live shows Decay in per cent (the drum synths spec,
+/// R4).
 #[must_use]
-pub fn decay(default_ms: f64) -> ParamDescriptor {
+pub fn decay_ms(percent: f64) -> f64 {
+    DECAY_MIN_MS * (DECAY_MAX_MS / DECAY_MIN_MS).powf(percent / 100.0)
+}
+
+/// The Decay `ms` milliseconds is, in per cent: [`decay_ms`]'s inverse.
+#[must_use]
+pub fn decay_percent(ms: f64) -> f64 {
+    100.0 * (ms / DECAY_MIN_MS).ln() / (DECAY_MAX_MS / DECAY_MIN_MS).ln()
+}
+
+/// The Decay control: 0 to 100 % of a logarithmic travel from 10 ms to 4 s.
+#[must_use]
+pub fn decay(default_percent: f64) -> ParamDescriptor {
     ParamDescriptor::continuous(
         DECAY,
         "Decay",
-        (DECAY_MIN_MS, DECAY_MAX_MS),
-        default_ms,
-        ParamUnit::Milliseconds,
+        (0.0, 100.0),
+        default_percent,
+        ParamUnit::Percent,
     )
-    .logarithmic()
+    .decimals(1)
     .describe(
-        "How long the hit takes to fall 60 dB from its peak, and so how long it sounds. The \
-         note's length changes nothing.",
+        "How long the hit takes to fall 60 dB from its peak, and so how long it sounds: 0 % is \
+         10 ms and 100 % is 4 s, on a logarithmic travel. The note's length changes nothing.",
     )
 }
 
@@ -94,23 +112,84 @@ pub fn percent(id: ParamId, name: &str, default: f64, what: &str) -> ParamDescri
     ParamDescriptor::continuous(id, name, (0.0, 100.0), default, ParamUnit::Percent).describe(what)
 }
 
-/// A pitch control in semitones, -24 to +24: the key doesn't change it
-/// (spec R5).
+/// The semitones a [`tune`] control moves the pitch each way from its middle.
+pub const TUNE_SEMITONES: f64 = 24.0;
+
+/// What a pitch control's `percent` is, in semitones: -24 at 0 %, 0 at 50 %
+/// and +24 at 100 %.
 #[must_use]
-pub fn tune(id: ParamId, name: &str) -> ParamDescriptor {
-    ParamDescriptor::continuous(id, name, (-24.0, 24.0), 0.0, ParamUnit::Semitones).describe(
-        "Sets the sound's pitch in semitones, whatever key plays it: the key chooses a pad, \
-         not a pitch.",
-    )
+pub fn tune_semitones(percent: f64) -> f64 {
+    (percent - 50.0) / 50.0 * TUNE_SEMITONES
 }
 
-/// The layout every Drum Synth has: the display, then its controls.
+/// The pitch control that Live shows in per cent, 0 to 100 %: 50 % is the
+/// sound's own pitch and the ends are two octaves away (spec R5). The key
+/// doesn't change it.
 #[must_use]
-pub fn layout(controls: &[(ParamId, bl_model::device_layout::Widget)]) -> DeviceLayout {
-    use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode};
-    DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Cell(DisplayCell::new(ENVELOPE, 160.0, BODY_HEIGHT, 1.0)),
-        LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, controls)),
+pub fn tune(id: ParamId, name: &str, default_percent: f64) -> ParamDescriptor {
+    ParamDescriptor::continuous(id, name, (0.0, 100.0), default_percent, ParamUnit::Percent)
+        .decimals(1)
+        .describe(
+            "Sets the sound's pitch whatever key plays it, from two octaves down at 0 % to two \
+             octaves up at 100 %, the sound's own pitch at 50 %: the key chooses a pad, not a \
+             pitch.",
+        )
+}
+
+/// The size of a Drum Synth's display, in points, and the clear space round
+/// it (observed in Live 12.4.16, 2 November 2026; layout L-DEV-047).
+const CELL_WIDTH: f32 = 137.0;
+const CELL_HEIGHT: f32 = 101.0;
+const INSET: f32 = 4.0;
+
+/// Where the display's three columns sit, from its left: a large number's
+/// left edge and a box's, and where its labels and its rows start.
+const LARGE_X: [f32; 3] = [3.5, 48.0, 92.5];
+const FRAMED_X: [f32; 3] = [3.0, 47.5, 92.0];
+const LABEL_Y: f32 = 58.0;
+const ROW_Y: [f32; 2] = [70.0, 85.0];
+
+/// Where the three knobs under the display sit, in the body's band under it.
+const KNOB_X: [f32; 3] = [11.0, 55.5, 100.0];
+const KNOB_Y: f32 = 2.5;
+
+/// A large number in the display's column `column`.
+#[must_use]
+pub(crate) fn large(param: ParamId, column: usize) -> Control {
+    Control::new(param, Widget::Large, LARGE_X[column], LABEL_Y)
+}
+
+/// A box in the display's column `column` and row `row`.
+#[must_use]
+pub(crate) fn framed(param: ParamId, column: usize, row: usize) -> Control {
+    Control::new(param, Widget::Framed, FRAMED_X[column], ROW_Y[row])
+}
+
+/// A name over the display's column `column` of boxes.
+#[must_use]
+pub(crate) fn label(text: &str, column: usize) -> BandLabel {
+    BandLabel::new(text, FRAMED_X[column], LABEL_Y, FRAMED_WIDTH)
+}
+
+/// The panel every Drum Synth has, as Live draws it: a display with the
+/// instrument's drawing and its `cell` controls inside, then three knobs.
+#[must_use]
+pub(crate) fn panel(
+    (cell, labels): (Vec<Control>, Vec<BandLabel>),
+    knobs: [ParamId; 3],
+) -> DeviceLayout {
+    let display = DisplayCell::new(ENVELOPE, CELL_WIDTH, CELL_HEIGHT, 1.0)
+        .with_inset(INSET)
+        .with_top(ControlBand::free(CELL_WIDTH, CELL_HEIGHT, cell).with_labels(labels));
+    let under = BODY_HEIGHT - CELL_HEIGHT - 2.0 * INSET;
+    let knobs = knobs
+        .into_iter()
+        .zip(KNOB_X)
+        .map(|(param, x)| Control::new(param, Widget::SmallKnob, x, KNOB_Y))
+        .collect();
+    DeviceLayout::new(LayoutNode::Column(vec![
+        LayoutNode::Cell(display),
+        LayoutNode::Band(ControlBand::free(CELL_WIDTH + 2.0 * INSET, under, knobs)),
     ]))
 }
 
@@ -220,9 +299,9 @@ impl<V: Hit> DrumSynth<V> {
     }
 
     fn frame(&mut self, bank: &ParamBank, frame: usize) -> (f32, f32) {
-        let decay = bank.ramp(DECAY.0 as usize)[frame];
+        let decay = decay_ms(f64::from(bank.ramp(DECAY.0 as usize)[frame]));
         // The master envelope's step: -60 dB over Decay.
-        let step = (-3.0 * LN_10 / (f64::from(decay).max(DECAY_MIN_MS) / 1000.0 * self.rate)).exp();
+        let step = (-3.0 * LN_10 / (decay.max(DECAY_MIN_MS) / 1000.0 * self.rate)).exp();
         let end = 10f64.powf(END_DB / 20.0);
         let (mut left, mut right) = (0.0f32, 0.0f32);
         for slot in &mut self.slots {
@@ -340,10 +419,11 @@ pub(crate) fn display(
     device: DeviceId,
     description: &DeviceDescription,
     values: &OrdMap<ParamId, f64>,
+    readings: impl Fn(&dyn Fn(ParamId) -> f64) -> Vec<DisplayReading>,
     shape: impl Fn(&dyn Fn(ParamId) -> f64, f64) -> f64,
 ) -> DeviceDisplay {
     let value = |id: ParamId| description.value(values, id).unwrap_or(0.0);
-    let length = value(DECAY) * 1.5;
+    let length = decay_ms(value(DECAY)) * 1.5;
     let points = (0..DISPLAY_POINTS)
         .map(|n| {
             let ms = length * n as f64 / (DISPLAY_POINTS - 1) as f64;
@@ -366,6 +446,25 @@ pub(crate) fn display(
             values: points,
         }],
         markers: Vec::new(),
-        readings: Vec::new(),
+        readings: readings(&value),
     }
+}
+
+/// A reading of text: the note a pitch is nearest and, for DS Tom, its hertz,
+/// which the panel draws in the display and under a large number.
+pub(crate) fn reading(name: &str, text: String) -> DisplayReading {
+    DisplayReading {
+        name: name.to_owned(),
+        value: 0.0,
+        unit: String::new(),
+        text,
+    }
+}
+
+/// The reading of the note nearest `hz`, in Live's octave numbering.
+pub(crate) fn note_reading(hz: f64) -> DisplayReading {
+    let note = (69.0 + 12.0 * (hz / 440.0).log2())
+        .round()
+        .clamp(0.0, 127.0);
+    reading("Note", bl_model::note_name(note as u8))
 }

@@ -235,7 +235,15 @@ fn render(strikes: &[Strike], kit: &[Sound; 3]) -> Result<Vec<f32>, String> {
         apply(&mut editor, create)?;
         let id = editor.new_id();
         let mut device = strike::drum_sampler_type().device(id);
+        // The plain sample, as the training set was made: the effect and the
+        // filter off, no attack, and the level and velocity law that the
+        // device opened with before it took Live's values.
         for (param, value) in [
+            (strike::ATTACK, 0.0),
+            (strike::FX_ON, 0.0),
+            (strike::FILTER_ON, 0.0),
+            (strike::VOLUME, 1.0),
+            (strike::VELOCITY_TO_VOLUME, 100.0),
             (strike::HOLD_INF, 0.0),
             (strike::HOLD, sound.hold),
             (strike::DECAY, sound.decay),

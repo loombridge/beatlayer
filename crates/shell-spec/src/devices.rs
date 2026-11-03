@@ -512,11 +512,21 @@ pub fn body_width(frame: &DeviceFrame) -> f32 {
 /// choosers and Hardware Latency (Beatlayer's own; to observe).
 pub const EXTERNAL_SECTION_WIDTH: f32 = 92.0;
 
-/// The width at 100% of an external device's section: 0 for any other
-/// device.
+/// The width at 100%, in points, of the External Audio Effect's section, the
+/// strip of its choosers down the left of its panel (observed in Live 12.4.16,
+/// 2 November 2026; layout L-DEV-077).
+pub const EXTERNAL_EFFECT_WIDTH: f32 = 86.0;
+
+/// The width at 100% of an external device's section, which sits left of its
+/// body: 0 for any other device, and for the External Audio Effect, whose
+/// layout holds its section's room itself (its Phase switch sits in it).
 #[must_use]
 pub fn external_width(frame: &DeviceFrame) -> f32 {
-    if frame.external.is_some() {
+    if frame
+        .external
+        .as_ref()
+        .is_some_and(|section| !section.output)
+    {
         EXTERNAL_SECTION_WIDTH
     } else {
         0.0

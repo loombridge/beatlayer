@@ -839,7 +839,7 @@ fn sixteen_voices_with_eight_unison_copies_render_inside_the_device_budget() {
     let realtime = seconds as f64 / elapsed;
     println!("16 voices of 8 copies: {seconds} s in {elapsed:.3} s, {realtime:.1}x real time");
     assert!(rms(&signal[0]) > 0.01, "the chord sounds");
-    if full_depth() {
+    if full_depth() && crate::common::budget::judged() {
         // A debug build on a loaded machine, as Drift's budget is judged.
         assert!(
             realtime >= 1.0,

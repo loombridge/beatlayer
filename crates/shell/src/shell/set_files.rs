@@ -124,6 +124,7 @@ impl Shell {
         // that's gone: its clip, track or device would name something else
         // in this one.
         self.drop_separation();
+        self.drop_conversion();
         self.stop_autosample();
         self.autosample_dialog = None;
         self.autosample_result_value = None;
@@ -673,6 +674,8 @@ impl Shell {
         // that was replaced: finishing them would put them in this one.
         self.recording = None;
         self.pending_recording = None;
+        self.granulator_captures.clear();
+        self.granulator_files.clear();
         self.session_run = None;
         self.session_automation = crate::automation_record::SessionTake::default();
         self.automation_take = crate::automation_record::Take::default();
@@ -822,6 +825,9 @@ impl Shell {
             }
             ids::SET_SAVE => {
                 Self::args::<NoArgs>(id, args)?;
+                // Spec: granulator iii R21. A capture that ended while the
+                // set is saved is in the saved set, with its file.
+                self.finish_granulator_captures();
                 let path = self.set_path.clone().ok_or_else(|| {
                     unavailable("the set has never been saved; use `set.save_as` to give it a file")
                 })?;
@@ -859,6 +865,7 @@ impl Shell {
                 // Spec: app-shell R17 to R21. The store decides where in a
                 // project folder the set goes; the result says where.
                 let SaveAsArgs { path } = Self::args(id, args)?;
+                self.finish_granulator_captures();
                 crate::plugins::capture_states(
                     &self.plugins,
                     &self.au,
@@ -1118,6 +1125,15 @@ impl Shell {
                     self.assistant_open = false;
                     self.touch();
                     return Ok(Value::Null);
+                }
+                if self.focused_window == WindowKind::Video {
+                    // Spec: video R16. Close Window hides the Video Window
+                    // with it in front.
+                    self.focused_window = WindowKind::Main;
+                    return self.run_video_window(
+                        bl_shell_spec::video::SET_WINDOW,
+                        json!({ "shown": false }),
+                    );
                 }
                 if self.focused_window == WindowKind::Second {
                     // Spec: second-window R1. Close Window closes the second

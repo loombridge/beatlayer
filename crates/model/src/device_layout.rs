@@ -221,6 +221,12 @@ pub enum Widget {
     /// A text button like [`Toggle`](Self::Toggle) that holds only the first
     /// that many characters of its parameter's name (Impulse's M, S and Sat).
     Abbreviated(u8),
+    /// A small square box, filled while on, with the parameter's name beside
+    /// it (the LFO's ×10).
+    Checkbox,
+    /// The Map button of that slot of a modulator: no parameter's control,
+    /// so its [`Control::param`] is not placed or checked.
+    Map(u8),
     /// A [`Chooser`](Self::Chooser) with no name row: the device's own label
     /// is beside it, or it needs none (the Drum Sampler's effect type).
     BareChooser,
@@ -277,9 +283,10 @@ impl Widget {
             Self::Bare | Self::BareSlider | Self::Framed | Self::BareChooser => {
                 Size::new(FRAMED_WIDTH, BOX_HEIGHT)
             }
-            Self::Cycle | Self::Inline | Self::Abbreviated(_) => {
+            Self::Cycle | Self::Inline | Self::Abbreviated(_) | Self::Checkbox => {
                 Size::new(SEGMENT_WIDTH, BOX_HEIGHT)
             }
+            Self::Map(_) => Size::new(63.0, BOX_HEIGHT),
         }
     }
 
@@ -336,6 +343,14 @@ pub enum Glyph {
     /// Headphones: a device's audition button (Boom Audition, Utility's
     /// Bass Mono, EQ Eight's Audition).
     Headphones,
+    /// A plus over a minus: a modulation's polarity.
+    PlusMinus,
+    /// Three lines: Show Multimap.
+    List,
+    /// A straight rising line: a curve of two breakpoints.
+    CurveLine,
+    /// An S: a curve of three breakpoints.
+    CurveS,
 }
 
 /// A unit a knob's two parameters read in.
@@ -386,6 +401,10 @@ pub struct UnitPair {
     pub mode: ParamId,
     /// The two units, in the order of `mode`'s values.
     pub units: [Unit; 2],
+    /// Whether the buttons are right of the knob (the modulators') rather
+    /// than left of it (Arpeggiator's).
+    #[serde(default)]
+    pub right: bool,
 }
 
 /// A condition that greys a control: while parameter `param`'s value, rounded,
@@ -425,6 +444,21 @@ pub struct Control {
     /// The condition that greys the control.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grey: Option<GreyWhen>,
+    /// The condition under which the control is there at all: it is drawn
+    /// only while parameter `param`'s value, rounded, is `value` (the mapping
+    /// row's Amount, which Min and Max replace in Remote Control).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub only: Option<GreyWhen>,
+    /// Whether the control repeats one of the same parameter placed on
+    /// another page, which is the one the check counts (the device-wide Mod
+    /// switch on each of Expression Control's tabs).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub repeat: bool,
+    /// The condition under which the control is left out: it is not drawn
+    /// while parameter `param`'s value, rounded, is `value` (the Shaper's
+    /// Rate, which Manual replaces).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unless: Option<GreyWhen>,
 }
 
 impl Control {
@@ -440,6 +474,9 @@ impl Control {
             glyph: None,
             unit: None,
             grey: None,
+            only: None,
+            repeat: false,
+            unless: None,
         }
     }
 
@@ -461,7 +498,22 @@ impl Control {
     /// switch of the description's alternate for this control's parameter.
     #[must_use]
     pub const fn with_unit(mut self, mode: ParamId, units: [Unit; 2]) -> Self {
-        self.unit = Some(UnitPair { mode, units });
+        self.unit = Some(UnitPair {
+            mode,
+            units,
+            right: false,
+        });
+        self
+    }
+
+    /// The same knob with a unit pair right of it, as the modulators' are.
+    #[must_use]
+    pub const fn with_unit_right(mut self, mode: ParamId, units: [Unit; 2]) -> Self {
+        self.unit = Some(UnitPair {
+            mode,
+            units,
+            right: true,
+        });
         self
     }
 
@@ -469,6 +521,27 @@ impl Control {
     #[must_use]
     pub const fn greyed_while(mut self, param: ParamId, value: i32) -> Self {
         self.grey = Some(GreyWhen { param, value });
+        self
+    }
+
+    /// The same control, drawn only while `param`'s value rounds to `value`.
+    #[must_use]
+    pub const fn only_while(mut self, param: ParamId, value: i32) -> Self {
+        self.only = Some(GreyWhen { param, value });
+        self
+    }
+
+    /// The same control, repeating one placed on another page.
+    #[must_use]
+    pub const fn repeating(mut self) -> Self {
+        self.repeat = true;
+        self
+    }
+
+    /// The same control, left out while `param`'s value rounds to `value`.
+    #[must_use]
+    pub const fn unless_while(mut self, param: ParamId, value: i32) -> Self {
+        self.unless = Some(GreyWhen { param, value });
         self
     }
 
@@ -700,6 +773,11 @@ impl DisplayCell {
     }
 }
 
+/// Whether `b` is false, for leaving a default out of a saved layout.
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
 /// Whether `n` is 0, for leaving a default out of a saved layout.
 fn is_zero(n: &f32) -> bool {
     *n == 0.0
@@ -770,7 +848,19 @@ pub enum PageStyle {
     /// right of it holds the second page while it is shown and the first,
     /// which is empty, while it isn't ([`PagesNode::side_strip`]).
     Strip,
+    /// A column of tabs down the node's left edge ([`RAIL_WIDTH`] wide, the
+    /// node's height shared between them), one per page, beside the shown
+    /// page's area (Expression Control's five source tabs).
+    Rail,
+    /// No buttons of its own: the node's area is the shown page's alone, and
+    /// a control inside a page switches to the other with `device.set_page`
+    /// (a modulator's Show Multimap).
+    Switch,
 }
+
+/// The width of a rail's column of tabs, in points (observed in Live 12.4.16,
+/// 2 November 2026, on Expression Control).
+pub const RAIL_WIDTH: f32 = 47.0;
 
 /// The name of a side strip's page while its section is hidden.
 pub const STRIP_HIDDEN: &str = "Hidden";
@@ -919,7 +1009,8 @@ impl PagesNode {
             Size::new(s.width.max(n.width), s.height.max(n.height))
         });
         match self.style {
-            PageStyle::TitleBar => pages,
+            PageStyle::TitleBar | PageStyle::Switch => pages,
+            PageStyle::Rail => Size::new(RAIL_WIDTH + pages.width, pages.height.max(BODY_HEIGHT)),
             PageStyle::Tabs => Size::new(
                 pages.width.max(self.pages.len() as f32 * TAB_WIDTH),
                 pages.height + TAB_HEIGHT,
@@ -946,7 +1037,20 @@ impl PagesNode {
         };
         let mut buttons = Vec::new();
         let area = match self.style {
-            PageStyle::TitleBar => at,
+            PageStyle::TitleBar | PageStyle::Switch => at,
+            PageStyle::Rail => {
+                let height = at.height / self.pages.len() as f32;
+                buttons.extend(
+                    (0..self.pages.len())
+                        .map(|i| Rect::new(at.x, at.y + height * i as f32, RAIL_WIDTH, height)),
+                );
+                Rect::new(
+                    at.x + RAIL_WIDTH,
+                    at.y,
+                    (at.width - RAIL_WIDTH).max(0.0),
+                    at.height,
+                )
+            }
             PageStyle::Tabs => {
                 let width = at.width / self.pages.len() as f32;
                 buttons.extend(
@@ -1196,6 +1300,14 @@ fn place_band(band: &ControlBand, x: f32, y: f32, slot: u32, placed: &mut Placed
                 param: ParamId(grey.param.0 + offset),
                 ..grey
             }),
+            only: control.only.map(|only| GreyWhen {
+                param: ParamId(only.param.0 + offset),
+                ..only
+            }),
+            unless: control.unless.map(|unless| GreyWhen {
+                param: ParamId(unless.param.0 + offset),
+                ..unless
+            }),
         }));
     placed
         .labels
@@ -1306,6 +1418,12 @@ pub struct PlacedControl {
     /// What greys the control.
     #[serde(default)]
     pub grey: Option<GreyWhen>,
+    /// What the control is there only while.
+    #[serde(default)]
+    pub only: Option<GreyWhen>,
+    /// What leaves the control out.
+    #[serde(default)]
+    pub unless: Option<GreyWhen>,
 }
 
 /// A section heading where a layout placed it.
@@ -1569,7 +1687,7 @@ impl DeviceLayout {
         // Every control counts, in the part that is always there or in the
         // expanded one.
         let whole = self.shown(true);
-        let mut named: Vec<&str> = Vec::new();
+        let mut named: Vec<String> = Vec::new();
         for part in &self.title {
             if let Some(param) = part.param() {
                 if !params.iter().any(|p| p.id == param) {
@@ -1583,61 +1701,7 @@ impl DeviceLayout {
                 seen.push(param);
             }
         }
-        whole.root.visit(&mut |node| {
-            if problem.is_some() {
-                return;
-            }
-            match node {
-                LayoutNode::Band(band) => check_band(band, params, &mut seen, &mut problem),
-                LayoutNode::Cell(cell) => {
-                    let fine = |n: f32| n.is_finite() && n > 0.0;
-                    if !(fine(cell.width) && fine(cell.height) && fine(cell.weight)) {
-                        problem = Some(format!(
-                            "display cell {} needs a size and weight above 0",
-                            cell.name
-                        ));
-                    }
-                    let inside: f32 = [&cell.top, &cell.bottom]
-                        .into_iter()
-                        .flatten()
-                        .map(|band| {
-                            if band.width > cell.width {
-                                problem.get_or_insert_with(|| {
-                                    format!("a band is wider than display cell {}", cell.name)
-                                });
-                            }
-                            check_band(band, params, &mut seen, &mut problem);
-                            band.height
-                        })
-                        .sum();
-                    if inside > cell.height {
-                        problem.get_or_insert_with(|| {
-                            format!("display cell {}'s bands don't fit inside it", cell.name)
-                        });
-                    }
-                }
-                LayoutNode::Pages(node) => {
-                    let mut names: Vec<&str> = node.pages.iter().map(|p| p.name.as_str()).collect();
-                    names.sort_unstable();
-                    if node.pages.is_empty()
-                        || names.contains(&"")
-                        || names.windows(2).any(|w| w[0] == w[1])
-                    {
-                        problem = Some(format!(
-                            "pages node {} needs pages with names, each its own",
-                            node.name
-                        ));
-                    } else if named.contains(&node.name.as_str()) {
-                        problem = Some(format!(
-                            "the layout has two pages nodes named {}",
-                            node.name
-                        ));
-                    }
-                    named.push(&node.name);
-                }
-                LayoutNode::Row(_) | LayoutNode::Column(_) | LayoutNode::Heading(_) => {}
-            }
-        });
+        check_node(&whole.root, params, (&mut seen, &mut problem, &mut named));
         if let Some(problem) = problem {
             return Err(problem);
         }
@@ -1648,6 +1712,77 @@ impl DeviceLayout {
             ));
         }
         Ok(())
+    }
+}
+
+/// Checks `node` and what is below it, every page of a pages node included.
+fn check_node(
+    node: &LayoutNode,
+    params: &[ParamDescriptor],
+    (seen, problem, named): (&mut Vec<ParamId>, &mut Option<String>, &mut Vec<String>),
+) {
+    if problem.is_some() {
+        return;
+    }
+    match node {
+        LayoutNode::Band(band) => check_band(band, params, seen, problem),
+        LayoutNode::Cell(cell) => {
+            let fine = |n: f32| n.is_finite() && n > 0.0;
+            if !(fine(cell.width) && fine(cell.height) && fine(cell.weight)) {
+                *problem = Some(format!(
+                    "display cell {} needs a size and weight above 0",
+                    cell.name
+                ));
+            }
+            let inside: f32 = [&cell.top, &cell.bottom]
+                .into_iter()
+                .flatten()
+                .map(|band| {
+                    if band.width > cell.width {
+                        problem.get_or_insert_with(|| {
+                            format!("a band is wider than display cell {}", cell.name)
+                        });
+                    }
+                    check_band(band, params, seen, problem);
+                    band.height
+                })
+                .sum();
+            if inside > cell.height {
+                problem.get_or_insert_with(|| {
+                    format!("display cell {}'s bands don't fit inside it", cell.name)
+                });
+            }
+        }
+        LayoutNode::Pages(node) => {
+            let mut names: Vec<&str> = node.pages.iter().map(|p| p.name.as_str()).collect();
+            names.sort_unstable();
+            if node.pages.is_empty()
+                || names.contains(&"")
+                || names.windows(2).any(|w| w[0] == w[1])
+            {
+                *problem = Some(format!(
+                    "pages node {} needs pages with names, each its own",
+                    node.name
+                ));
+            } else if named.contains(&node.name) {
+                *problem = Some(format!(
+                    "the layout has two pages nodes named {}",
+                    node.name
+                ));
+            }
+            named.push(node.name.clone());
+            for page in &node.pages {
+                for part in page.section.iter().chain([&page.node]) {
+                    check_node(part, params, (seen, problem, named));
+                }
+            }
+        }
+        LayoutNode::Row(children) | LayoutNode::Column(children) => {
+            for child in children {
+                check_node(child, params, (seen, problem, named));
+            }
+        }
+        LayoutNode::Heading(_) => {}
     }
 }
 
@@ -1671,7 +1806,11 @@ fn check_band(
     let (stride, count) = band
         .slots
         .map_or((0, 1), |group| (group.stride, group.count));
-    for control in &band.controls {
+    for control in band
+        .controls
+        .iter()
+        .filter(|c| !c.repeat && !matches!(c.widget, Widget::Map(_)))
+    {
         for slot in 0..count {
             for first in control.params() {
                 if problem.is_some() {
@@ -1712,6 +1851,16 @@ fn check_band(
             *problem = Some(format!(
                 "parameter {}'s control is greyed by parameter {}, which the device doesn't have",
                 control.param.0, grey.param.0
+            ));
+        }
+        if let Some(only) = control
+            .only
+            .or(control.unless)
+            .filter(|o| described(o.param).is_none())
+        {
+            *problem = Some(format!(
+                "parameter {}'s control is drawn only by parameter {}, which the device doesn't have",
+                control.param.0, only.param.0
             ));
         }
     }

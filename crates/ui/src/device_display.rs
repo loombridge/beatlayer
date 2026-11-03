@@ -245,11 +245,10 @@ fn modulator_readings(
     display: &DeviceDisplay,
 ) {
     let c = &theme.colors;
+    // Under the mapping row (layout L-DEV-016).
+    let top = cell.top() + 22.0;
     let strip = |at: f32, share: f32| {
-        let rect = Rect::from_min_max(
-            pos2(at, cell.top() + 4.0),
-            pos2(at + METER_WIDTH, cell.bottom() - 4.0),
-        );
+        let rect = Rect::from_min_max(pos2(at, top), pos2(at + METER_WIDTH, cell.bottom() - 4.0));
         painter.rect_filled(rect, 0.0, c.window.0);
         let fill = Rect::from_min_max(
             pos2(
@@ -267,16 +266,31 @@ fn modulator_readings(
             left += METER_WIDTH + 4.0;
         }
     }
+    // The level is a line across the display at its height.
     if let Some(level) = display.reading("Level") {
-        strip(cell.right() - METER_WIDTH - 4.0, level.value / 100.0);
+        let y = cell.bottom()
+            - 2.0
+            - (cell.bottom() - 2.0 - top) * (level.value / 100.0).clamp(0.0, 1.0);
+        painter.hline(cell.x_range(), y, Stroke::new(1.5, ink));
     }
-    if let Some(trigger) = display.reading("Trigger") {
-        let at = pos2(cell.right() - METER_WIDTH - 14.0, cell.top() + 8.0);
-        if trigger.value > 0.5 {
-            painter.circle_filled(at, 3.0, ink);
-        } else {
-            painter.circle_stroke(at, 3.0, Stroke::new(1.0, c.separator.0));
-        }
+}
+
+/// The LED that flashes on each start of a modulator driven by notes, at
+/// `at`: lit while the reading says it started, outlined otherwise.
+pub fn trigger_led(
+    painter: &Painter,
+    theme: &Theme,
+    at: Pos2,
+    ink: Color32,
+    display: &DeviceDisplay,
+) {
+    let Some(trigger) = display.reading("Trigger") else {
+        return;
+    };
+    if trigger.value > 0.5 {
+        painter.circle_filled(at, 3.0, ink);
+    } else {
+        painter.circle_stroke(at, 3.0, Stroke::new(1.0, theme.colors.separator.0));
     }
 }
 

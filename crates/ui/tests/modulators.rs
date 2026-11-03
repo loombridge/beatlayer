@@ -243,6 +243,67 @@ fn unmap_removes_the_mapping() {
     );
 }
 
+/// Whether a node labelled `label` is on screen.
+fn has_node(h: &mut Harness, label: &str) -> bool {
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    nodes.iter().any(|n| n.label == label)
+}
+
+// Spec: modulation R17. Layout L-DEV-016.
+#[test]
+fn show_multimap_replaces_the_panel_with_the_eight_slots_and_hides_again() {
+    let mut rig = rig();
+    assert!(has_node(&mut rig.h, "Map 1"));
+    assert!(
+        !has_node(&mut rig.h, "Map 8"),
+        "one slot shows in a new device"
+    );
+    let button = node_rect(&mut rig.h, "Show/Hide Multimap");
+    rig.h.click(button.center());
+    rig.h.settle();
+    for n in 1..=8 {
+        assert!(
+            has_node(&mut rig.h, &format!("Map {n}")),
+            "slot {n} is listed"
+        );
+    }
+    assert!(
+        !has_node(&mut rig.h, "Waveform"),
+        "the list replaces the panel"
+    );
+    // Each row's Map button maps its own slot.
+    let eighth = node_rect(&mut rig.h, "Map 8");
+    rig.h.click(eighth.center());
+    assert_eq!(
+        rig.h.shell.armed_map().map(|a| (a.device, a.slot)),
+        Some((rig.wave, 7))
+    );
+    rig.h.key(Key::Escape, Modifiers::NONE);
+    let button = node_rect(&mut rig.h, "Show/Hide Multimap");
+    rig.h.click(button.center());
+    rig.h.settle();
+    assert!(!has_node(&mut rig.h, "Map 8"));
+    assert!(has_node(&mut rig.h, "Waveform"), "the panel is back");
+}
+
+// Spec: modulation R16. Layout L-DEV-016.
+#[test]
+fn remote_control_gives_the_amount_over_to_min_and_max() {
+    let mut rig = rig();
+    assert!(has_node(&mut rig.h, "Amount 1"));
+    assert!(!has_node(&mut rig.h, "Min 1"));
+    rig.h
+        .shell
+        .run(
+            "device.set_param",
+            json!({ "device": rig.wave, "param": bl_model::modulator::MODE.0, "value": 1.0 }),
+        )
+        .unwrap();
+    rig.h.settle();
+    assert!(!has_node(&mut rig.h, "Amount 1"));
+    assert!(has_node(&mut rig.h, "Min 1") && has_node(&mut rig.h, "Max 1"));
+}
+
 /// The shape display of a Shaper (or a CV Shaper) and its device.
 fn curve_rig(kind: &bl_model::DeviceKind, name: &str) -> (Rig, DeviceId, Rect) {
     let mut rig = rig();
@@ -314,6 +375,15 @@ fn shaper_gestures(kind: &bl_model::DeviceKind, name: &str) {
         3,
         "a new Shaper plays the triangle"
     );
+    // Snap is lit in a new Shaper, as Live's is: these move breakpoints freely.
+    rig.h
+        .shell
+        .run(
+            "device.set_param",
+            json!({ "device": curve, "param": bl_model::modulator::SNAP.0, "value": 0.0 }),
+        )
+        .unwrap();
+    rig.h.settle();
     // The plot area sits above the cell's bottom controls.
     let plot = Rect::from_min_max(area.min, pos2(area.max.x, area.max.y));
     let at = |x: f32, y: f32| {

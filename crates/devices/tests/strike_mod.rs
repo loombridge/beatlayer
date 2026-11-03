@@ -7,7 +7,7 @@
 
 use crate::common;
 use bl_core::time::{Frames, TempoMap};
-use bl_devices::modulator::RATE_HZ;
+use bl_devices::strike_mod::RATE_MS;
 use bl_devices::strike_mod::{ECHO, ECHO_TIME, LOOP, VELOCITY, strike_mod_type};
 use bl_engine::modbus::Shape;
 use bl_engine::{Collector, Node, NoteEvent, Registry, TransportInfo};
@@ -37,7 +37,9 @@ fn strike(params: &[(ParamId, f64)]) -> Box<dyn Node> {
     let mut all = vec![
         (modulator::amount(0), 100.0),
         (POLARITY, 1.0),
-        (RATE_HZ, 10.0),
+        (RATE_MS, 100.0),
+        // A new one has its rate in sync and Snap lit: these play it in ms.
+        (bl_devices::modulator::TIME_MODE, 0.0),
     ];
     all.extend_from_slice(params);
     node(&registry(), &device(&strike_mod_type(), &all), 512)

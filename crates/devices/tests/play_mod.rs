@@ -305,15 +305,22 @@ fn the_curve_and_smoothing_shape_the_output() {
     let s = |velocity, more: &[(ParamId, f64)]| {
         let mut params = vec![
             (param(0, Field::Curve), 1.0),
-            (param(0, Field::CurveX), 50.0),
-            (param(0, Field::CurveY), 80.0),
+            (param(0, Field::CurveX), 64.0),
+            (param(0, Field::CurveY), 102.0),
         ];
         params.extend_from_slice(more);
         at(VELOCITY, velocity, &params)
     };
-    close(s(0.25, &[]), 0.4, "S, lower");
-    close(s(0.5, &[]), 0.8, "S, middle");
-    close(s(0.75, &[]), 0.9, "S, upper");
+    // The middle breakpoint is at 64 and 102 of 127.
+    let (mx, my) = (64.0f32 / 127.0, 102.0f32 / 127.0);
+    let lower = |x: f32| my * x / mx;
+    close(s(0.25, &[]), lower(0.25), "S, lower");
+    close(s(0.5, &[]), lower(0.5), "S, middle");
+    close(
+        s(0.75, &[]),
+        my + (1.0 - my) * (0.75 - mx) / (1.0 - mx),
+        "S, upper",
+    );
     // Link bends the lower segment the other way from the upper.
     let bent = s(
         0.25,
@@ -323,8 +330,11 @@ fn the_curve_and_smoothing_shape_the_output() {
         ],
     );
     let unlinked = s(0.25, &[(param(0, Field::CurveA), 50.0)]);
-    close(unlinked, 0.4, "A bends only the upper segment");
-    assert!(bent > 0.4, "Link bends the lower the other way: {bent}");
+    close(unlinked, lower(0.25), "A bends only the upper segment");
+    assert!(
+        bent > lower(0.25),
+        "Link bends the lower the other way: {bent}"
+    );
     // Min and Max put the output between two others, and Min above Max
     // flips it.
     let range = |min, max| {
@@ -334,8 +344,12 @@ fn the_curve_and_smoothing_shape_the_output() {
             &[(param(0, Field::Min), min), (param(0, Field::Max), max)],
         )
     };
-    close(range(20.0, 60.0), 0.3, "Min and Max");
-    close(range(100.0, 0.0), 0.75, "flipped");
+    close(
+        range(25.0, 76.0),
+        25.0 / 127.0 + 0.25 * 51.0 / 127.0,
+        "Min and Max",
+    );
+    close(range(127.0, 0.0), 0.75, "flipped");
 
     // Smoothing: Rise 100 ms is 4,800 frames. Linear takes that for the whole
     // range, Logarithmic is a time constant.

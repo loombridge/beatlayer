@@ -17,10 +17,12 @@ use bl_dsp::Random;
 use bl_engine::modbus::{NOT_HELD, Shape};
 use bl_engine::{DeviceType, NodeData, Registry};
 use bl_model::device_layout::{
-    BODY_HEIGHT, ControlBand, DeviceLayout, DisplayCell, LayoutNode, Widget,
+    BODY_HEIGHT, BandLabel, Control, ControlBand, DeviceLayout, DisplayCell, Glyph, LayoutNode,
+    Page, PageStyle, PagesNode, Unit, Widget,
 };
 use bl_model::modulator::{
-    self, CURVE_MOD, DEPTH, MODE, POLARITY, SLOTS, ShapePoint, WAVE_MOD, default_shape, shape_value,
+    self, CURVE_MOD, DEPTH, MODE, MULTIMAP_HIDDEN, MULTIMAP_NODE, MULTIMAP_SHOWN, POLARITY, SLOTS,
+    ShapePoint, WAVE_MOD, default_shape, shape_value,
 };
 use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 
@@ -95,7 +97,7 @@ pub const TRIGGER_MODES: [&str; 3] = ["Loop", "1-Shot", "Manual"];
 /// The LFO's own parameters, which CV LFO shares, and the shared ones.
 pub(crate) fn wave_params() -> Vec<ParamDescriptor> {
     let mut params = vec![
-        ParamDescriptor::choice(WAVE, "Wave", &WAVES, 0)
+        ParamDescriptor::choice(WAVE, "Waveform", &WAVES, 0)
             .describe("The waveform: sine, rising or falling ramps, triangle, square, or one of the random waves."),
         ParamDescriptor::continuous(SHAPE, "Shape", (-100.0, 100.0), 0.0, ParamUnit::Percent)
             .decimals(0)
@@ -113,7 +115,7 @@ pub(crate) fn wave_params() -> Vec<ParamDescriptor> {
 pub(crate) const WAVE_BANKS: [(&str, &[&str]); 2] = [
     (
         "Wave",
-        &["Wave", "Shape", "Steps", "Hold", "Jitter", "Smooth"],
+        &["Waveform", "Shape", "Steps", "Hold", "Jitter", "Smooth"],
     ),
     (
         "Timing",
@@ -142,6 +144,8 @@ pub fn wave_mod_type() -> DeviceType {
     ));
     DeviceType::native(WAVE_MOD, "LFO", DeviceRole::AudioEffect).with_description(
         DeviceDescription::new(params)
+            .with_alternate_at((TIME_MODE, 1), RATE_HZ, RATE_BEATS)
+            .with_relabels(vec![rate_label(RATE_BEATS, TIME_MODE)])
             .with_layout(wave_layout())
             .with_banks(&[
                 WAVE_BANKS[0],
@@ -165,6 +169,16 @@ pub fn wave_mod_type() -> DeviceType {
                 ),
             ]),
     )
+}
+
+/// The label a synced rate or delay reads under, Live's: the knob is one
+/// control whichever unit is lit.
+pub(crate) fn rate_label(synced: ParamId, mode: ParamId) -> bl_model::param::Relabel {
+    bl_model::param::Relabel {
+        param: synced,
+        by: mode,
+        labels: vec![bl_model::param::ParamLabel::named("Rate")],
+    }
 }
 
 /// The Shaper's own parameters, which CV Shaper shares, and the shared ones.
@@ -223,7 +237,21 @@ pub(crate) const CURVE_BANKS: [(&str, &[&str]); 2] = [
 /// The Shaper's type.
 #[must_use]
 pub fn curve_mod_type() -> DeviceType {
-    let mut params = curve_params();
+    // Live's Shaper reads its Phase to two decimals and has no ×10: its Rate
+    // is in sync or in Hz.
+    let mut params: Vec<_> = curve_params()
+        .into_iter()
+        .filter(|p| p.id != TIMES_TEN)
+        .map(|p| match p.id {
+            PHASE => p.decimals(2),
+            // Live's Shaper starts with its Rate in sync, and Snap lit.
+            TIME_MODE => ParamDescriptor::choice(TIME_MODE, "Time Mode", &["Hz", "Beats"], 1)
+                .describe("Sets the rate in Hz, running freely, or in beat divisions, locked to the song position."),
+            SNAP => ParamDescriptor::toggle(SNAP, "Snap", true)
+                .describe("Snaps breakpoints to the grid as they are placed and dragged."),
+            _ => p,
+        })
+        .collect();
     params.extend(mapping_params(
         SLOTS,
         (
@@ -233,10 +261,15 @@ pub fn curve_mod_type() -> DeviceType {
     ));
     DeviceType::native(CURVE_MOD, "Shaper", DeviceRole::AudioEffect).with_description(
         DeviceDescription::new(params)
+            .with_alternate_at((TIME_MODE, 1), RATE_HZ, RATE_BEATS)
+            .with_relabels(vec![rate_label(RATE_BEATS, TIME_MODE)])
             .with_layout(curve_layout())
             .with_banks(&[
                 CURVE_BANKS[0],
-                CURVE_BANKS[1],
+                (
+                    "Timing",
+                    &["Time Mode", "Rate", "Beat Rate", "Offset", "Phase", "R"],
+                ),
                 ("Mapping", &["Mod", "Polarity", "Depth"]),
                 (
                     "Targets 1-2",
@@ -294,17 +327,31 @@ pub(crate) fn shared_params() -> Vec<ParamDescriptor> {
 /// Mod, Polarity, Depth (named `depth.0`, described by `depth.1`) and each
 /// of `slots` slots' Amount, Min and Max (R13, R14, R16).
 pub(crate) fn mapping_params(slots: u8, depth: (&str, &str)) -> Vec<ParamDescriptor> {
+    mapping_params_with(slots, Some(depth), (["Mod", "Remote"], 0))
+}
+
+/// The same, with the Mod switch's two names and Polarity's default
+/// (`0` Bipolar, `1` Unipolar), and no Depth where `depth` is `None`.
+pub(crate) fn mapping_params_with(
+    slots: u8,
+    depth: Option<(&str, &str)>,
+    (mode_names, polarity): ([&str; 2], usize),
+) -> Vec<ParamDescriptor> {
     let mut params = vec![
-        ParamDescriptor::choice(MODE, "Mod", &["Modulation", "Remote Control"], 0).describe(
+        ParamDescriptor::choice(MODE, "Mod", &mode_names, 0).describe(
             "Modulation moves each target round its own value. Remote Control sets each target between its Min and Max.",
         ),
-        ParamDescriptor::choice(POLARITY, "Polarity", &["Bipolar", "Unipolar"], 0).describe(
+        ParamDescriptor::choice(POLARITY, "Polarity", &["Bipolar", "Unipolar"], polarity).describe(
             "Bipolar swings both ways round the target's value, Unipolar one way from it.",
         ),
-        ParamDescriptor::continuous(DEPTH, depth.0, (0.0, 100.0), 100.0, ParamUnit::Percent)
-            .decimals(0)
-            .describe(depth.1),
     ];
+    if let Some(depth) = depth {
+        params.push(
+            ParamDescriptor::continuous(DEPTH, depth.0, (0.0, 100.0), 100.0, ParamUnit::Percent)
+                .decimals(0)
+                .describe(depth.1),
+        );
+    }
     for slot in 0..slots {
         let n = slot + 1;
         params.push(
@@ -312,7 +359,7 @@ pub(crate) fn mapping_params(slots: u8, depth: (&str, &str)) -> Vec<ParamDescrip
                 modulator::amount(slot),
                 &format!("Amount {n}"),
                 (-100.0, 100.0),
-                0.0,
+                50.0,
                 ParamUnit::Percent,
             )
             .decimals(0)
@@ -396,28 +443,141 @@ pub(crate) fn wave_parts() -> [LayoutNode; 3] {
     ]
 }
 
-/// The mapping's output band, which CV devices replace with their own.
-fn mapping_output() -> LayoutNode {
-    LayoutNode::Band(ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (MODE, Widget::Chooser),
-            (POLARITY, Widget::Chooser),
-            (DEPTH, Widget::Knob),
-        ],
-    ))
+/// The width of a modulator's display cell, in points (layout L-DEV-044:
+/// Envelope Follower's is 234 by 97).
+pub(crate) const CELL_WIDTH: f32 = 234.0;
+
+/// The height of the mapping row along the top of a display cell: a 12-point
+/// button 3 points from the edge.
+pub(crate) const MAPPING_ROW: f32 = 18.0;
+
+/// Where the mapping row's parts sit along the cell, in points. The Map
+/// button, at the cell's left, and the Show Multimap button, at its right,
+/// are the panel's own; the rest are controls (layout L-DEV-016).
+const MOD_X: f32 = 85.0;
+const POLARITY_X: f32 = 129.0;
+const AMOUNT_X: f32 = 147.0;
+const MAX_X: f32 = 168.0;
+
+/// The mapping row of slot `slot`'s controls at height `y` in a band: Mod, and
+/// beside it Polarity and Amount, or while the Mod switch reads Remote the
+/// Min and Max that replace them.
+fn mapping_controls(slot: u8, y: f32, with_mode: bool) -> Vec<Control> {
+    let at = Control::new;
+    let mut controls = Vec::new();
+    if with_mode {
+        controls.push(at(MODE, Widget::Cycle, MOD_X, y).sized(39.0, 12.0));
+        controls.push(
+            at(POLARITY, Widget::IconToggle, POLARITY_X, y)
+                .sized(12.0, 12.0)
+                .with_glyph(Glyph::PlusMinus)
+                .only_while(MODE, 0),
+        );
+    }
+    controls.push(
+        at(modulator::amount(slot), Widget::Bare, AMOUNT_X, y)
+            .sized(30.0, 12.0)
+            .only_while(MODE, 0),
+    );
+    controls.push(
+        at(modulator::min(slot), Widget::Bare, POLARITY_X, y)
+            .sized(36.0, 12.0)
+            .only_while(MODE, 1),
+    );
+    controls.push(
+        at(modulator::max(slot), Widget::Bare, MAX_X, y)
+            .sized(36.0, 12.0)
+            .only_while(MODE, 1),
+    );
+    controls
 }
 
-/// A modulator's layout: its `parts`, slot 1's mapping cell and the output
-/// band, with the other slots' cells in the part Show Multimap adds.
-fn mapped_layout(parts: [LayoutNode; 3]) -> DeviceLayout {
-    let (first, rest) = mapping_cells(SLOTS);
-    let [a, b, c] = parts;
-    DeviceLayout::new(LayoutNode::Row(vec![a, b, c, first, mapping_output()])).with_expanded(rest)
+/// The row along the top of a modulator's display cell for its first slot:
+/// Map, Mod, Polarity, Amount and Show Multimap (layout L-DEV-016).
+pub(crate) fn mapping_row() -> ControlBand {
+    ControlBand::free(CELL_WIDTH, MAPPING_ROW, mapping_controls(0, 3.0, true))
+}
+
+/// The same row in a band `height` tall that also holds the device's own
+/// `extra` controls and `labels`, down the cell's right-hand side.
+pub(crate) fn mapping_row_with(
+    height: f32,
+    extra: Vec<Control>,
+    labels: Vec<bl_model::device_layout::BandLabel>,
+) -> ControlBand {
+    let mut controls = mapping_controls(0, 3.0, true);
+    controls.extend(extra);
+    ControlBand::free(CELL_WIDTH, height, controls).with_labels(labels)
+}
+
+/// The list Show Multimap shows in place of the whole panel: a row of Map,
+/// Mod, Polarity and Amount for each of the eight slots, 15 points apart. The
+/// first slot's controls are the panel's own, and every row's Mod and Polarity
+/// are the device's one pair, so the other seven slots' controls are all
+/// this cell places.
+fn multimap_page() -> LayoutNode {
+    let controls = (1..SLOTS)
+        .flat_map(|slot| mapping_controls(slot, 3.0 + 15.0 * f32::from(slot), false))
+        .collect();
+    LayoutNode::Cell(
+        DisplayCell::new("Multimap", CELL_WIDTH, BODY_HEIGHT - 8.0, 1.0)
+            .with_inset(4.0)
+            .with_top(ControlBand::free(CELL_WIDTH, 126.0, controls)),
+    )
+}
+
+/// A modulator's layout: its own `panel`, which Show Multimap replaces with
+/// the list of its eight mappings.
+pub(crate) fn mapped_layout(panel: LayoutNode) -> DeviceLayout {
+    DeviceLayout::new(LayoutNode::Pages(PagesNode::new(
+        MULTIMAP_NODE,
+        PageStyle::Switch,
+        vec![
+            Page::new(MULTIMAP_HIDDEN, panel),
+            Page::new(MULTIMAP_SHOWN, multimap_page()),
+        ],
+    )))
+}
+
+/// The Live LFO's panel (layout L-DEV-016): the waveform display with its
+/// mapping row along the top and Waveform, Shape, Steps, Jitter and Smooth
+/// along the foot; under it Rate with its Hz and sync buttons and ×10, Depth,
+/// Offset, and Phase over Hold and R.
+fn wave_panel() -> LayoutNode {
+    let at = Control::new;
+    let cell = DisplayCell::new("Wave", CELL_WIDTH, 96.0, 1.0)
+        .with_inset(4.0)
+        .with_top(mapping_row())
+        .with_bottom(ControlBand::free(
+            CELL_WIDTH,
+            30.0,
+            vec![
+                at(WAVE, Widget::Chooser, 4.0, 5.0),
+                at(SHAPE, Widget::Number, 62.0, 5.0).sized(40.0, 21.0),
+                at(STEPS, Widget::Number, 105.0, 5.0).sized(40.0, 21.0),
+                at(JITTER, Widget::Number, 152.0, 5.0).sized(40.0, 21.0),
+                at(SMOOTH, Widget::Number, 194.0, 5.0).sized(40.0, 21.0),
+            ],
+        ));
+    let controls = ControlBand::free(
+        CELL_WIDTH + 8.0,
+        54.0,
+        vec![
+            at(RATE_HZ, Widget::SmallKnob, 15.0, 4.0)
+                .with_unit_right(TIME_MODE, [Unit::Hz, Unit::Sync]),
+            at(TIMES_TEN, Widget::Checkbox, 57.0, 36.0).sized(40.0, 12.0),
+            at(DEPTH, Widget::SmallKnob, 98.0, 4.0),
+            at(OFFSET, Widget::SmallKnob, 141.0, 4.0),
+            at(PHASE, Widget::Number, 189.0, 6.0).sized(40.0, 21.0),
+            at(HOLD, Widget::Toggle, 189.0, 29.0).sized(25.0, 12.0),
+            at(RESTART, Widget::Round, 216.0, 29.0),
+        ],
+    );
+    LayoutNode::Column(vec![LayoutNode::Cell(cell), LayoutNode::Band(controls)])
 }
 
 fn wave_layout() -> DeviceLayout {
-    mapped_layout(wave_parts())
+    mapped_layout(wave_panel())
 }
 
 /// The Shaper's controls and display, which CV Shaper shares (cv-tools
@@ -457,8 +617,63 @@ pub(crate) fn curve_parts() -> [LayoutNode; 3] {
     ]
 }
 
+/// The Live Shaper's panel (layout L-DEV-016): the shape display with its
+/// mapping row along the top and the presets, Grid and Snap along the foot; at
+/// the right the output display with Jitter, Smooth, R, Phase and Offset
+/// inside, the Loop, 1-Shot and Manual row, and Rate with its Hz and sync
+/// buttons beside Depth.
+fn curve_panel() -> LayoutNode {
+    let at = Control::new;
+    let curve = DisplayCell::new("Curve", 265.0, 150.0, 3.0)
+        .with_inset(4.0)
+        .with_top(mapping_row())
+        .with_bottom(ControlBand::free(
+            265.0,
+            20.0,
+            vec![
+                at(GRID_DIVISIONS, Widget::Inline, 182.0, 4.0).sized(46.0, 12.0),
+                at(SNAP, Widget::Toggle, 234.0, 4.0).sized(28.0, 12.0),
+            ],
+        ));
+    let output = DisplayCell::new("Output", 137.0, 74.0, 1.0)
+        .with_inset(4.0)
+        .with_bottom(
+            ControlBand::free(
+                137.0,
+                38.0,
+                vec![
+                    at(JITTER, Widget::Inline, 9.0, 5.0).sized(60.0, 12.0),
+                    at(SMOOTH, Widget::Inline, 72.0, 5.0).sized(60.0, 12.0),
+                    at(RESTART, Widget::Round, 4.0, 22.0)
+                        .greyed_while(TIME_MODE, 1)
+                        .unless_while(TRIGGER_MODE, 2),
+                    at(PHASE, Widget::Bare, 31.0, 22.0).sized(38.0, 12.0),
+                    at(OFFSET, Widget::Inline, 74.0, 22.0).sized(46.0, 12.0),
+                    at(TRIGGER, Widget::Round, 122.0, 22.0).only_while(TRIGGER_MODE, 1),
+                ],
+            )
+            .with_labels(vec![BandLabel::new("Ø", 19.0, 23.5, 11.0)]),
+        );
+    let controls = ControlBand::free(
+        145.0,
+        76.0,
+        vec![
+            at(TRIGGER_MODE, Widget::Segments(3), 6.0, 4.0).sized(129.0, 12.0),
+            at(RATE_HZ, Widget::SmallKnob, 8.0, 20.0)
+                .with_unit_right(TIME_MODE, [Unit::Hz, Unit::Sync])
+                .unless_while(TRIGGER_MODE, 2),
+            at(MANUAL, Widget::SmallKnob, 8.0, 20.0).only_while(TRIGGER_MODE, 2),
+            at(DEPTH, Widget::SmallKnob, 98.0, 20.0),
+        ],
+    );
+    LayoutNode::Row(vec![
+        LayoutNode::Cell(curve),
+        LayoutNode::Column(vec![LayoutNode::Cell(output), LayoutNode::Band(controls)]),
+    ])
+}
+
 fn curve_layout() -> DeviceLayout {
-    mapped_layout(curve_parts())
+    mapped_layout(curve_panel())
 }
 
 /// Adds the two modulators to `registry`.

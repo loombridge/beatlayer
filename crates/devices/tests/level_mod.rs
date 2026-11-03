@@ -125,7 +125,8 @@ fn the_output_follows_the_input_level() {
 #[test]
 fn rise_and_fall_smooth_the_output_and_the_rows_are_the_same_at_any_block_size() {
     let input = steps(&[(0.0, 2_048), (1.0, 8_192), (0.0, 12_288)]);
-    let params = [(RISE, 50.0), (FALL, 200.0)];
+    // Per cent: 10 ms to the per cent, so 50 ms and 200 ms.
+    let params = [(RISE, 5.0), (FALL, 20.0)];
     let mut node = follower(&params);
     let out = run(node.as_mut(), 22_528, 512, &input, None);
     let level = out.rows.contribution(0);

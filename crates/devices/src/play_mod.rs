@@ -22,9 +22,11 @@ use bl_dsp::Random;
 use bl_engine::{DeviceType, NoteEvent, NoteExpression, NoteKind, Registry};
 use bl_model::automation::curve_value;
 use bl_model::device_layout::{
-    BODY_HEIGHT, ControlBand, DeviceLayout, DisplayCell, LayoutNode, Widget,
+    BODY_HEIGHT, BandLabel, Control, ControlBand, DeviceLayout, DisplayCell, LayoutNode, Page,
+    PageStyle, PagesNode, TitlePart, Widget,
 };
-use bl_model::modulator::{self, PLAY_MOD, PLAY_SLOTS};
+use bl_model::modulator::{self, MODE, PLAY_MOD, PLAY_SLOTS, POLARITY};
+use bl_model::param::{ParamLabel, Relabel};
 use bl_model::{
     DeviceDescription, DeviceDisplay, DeviceId, DeviceRole, DisplayReading, DisplaySeries, OrdMap,
     ParamDescriptor, ParamId, ParamUnit,
@@ -32,7 +34,7 @@ use bl_model::{
 
 use crate::framework::{Audio, Modulation, NativeDevice, ParamBank, add};
 use crate::midi_fx::seed;
-use crate::modulator::mapping_params;
+use crate::modulator::mapping_params_with;
 use crate::signal_mod::{Held, Indices, SignalOut};
 
 /// The tabs.
@@ -50,12 +52,17 @@ pub const SOURCES: [&str; 10] = [
     "Slide",
     "Sustain",
 ];
-/// What each tab starts on.
-const DEFAULT_SOURCES: [f64; TABS] = [0.0, 1.0, 2.0, 3.0, 4.0];
+/// What each tab starts on: Velocity, Pressure, Slide, Random and Increment,
+/// as the tabs' names say (layout L-DEV-021).
+const DEFAULT_SOURCES: [f64; TABS] = [0.0, 3.0, 8.0, 6.0, 7.0];
+/// The tabs' names, and each one's page of the panel.
+const TAB_NAMES: [&str; TABS] = ["Vel", "Press", "Slide", "Rand", "Incr"];
+/// The units of the curve's Min, Max, X and Y: the range of a controller.
+const RANGE: f64 = 127.0;
 /// The curve choices.
 pub const CURVES: [&str; 2] = ["Linear", "S"];
 /// The smoothing choices.
-pub const SMOOTHINGS: [&str; 2] = ["Linear", "Logarithmic"];
+pub const SMOOTHINGS: [&str; 2] = ["Lin", "Log"];
 
 /// The first parameter id of tab `tab`; each tab has [`FIELDS`] ids.
 const TAB_BASE: u32 = 100;
@@ -119,6 +126,16 @@ pub fn play_mod_type() -> DeviceType {
             .decimals(0)
             .describe(text)
         };
+        let range = |field, what: &str, range: (f64, f64), default, text: &str| {
+            ParamDescriptor::integer(
+                param(tab, field),
+                &name(what),
+                (range.0 as i64, range.1 as i64),
+                default as i64,
+                ParamUnit::None,
+            )
+            .describe(text)
+        };
         let time = |field, what: &str, text: &str| {
             ParamDescriptor::continuous(
                 param(tab, field),
@@ -138,12 +155,12 @@ pub fn play_mod_type() -> DeviceType {
                 default_source as usize,
             )
             .describe("What the tab follows: Velocity, Modwheel, Pitchbend, Pressure, Keytrack, Expression, Random, Increment, Slide or Sustain."),
-            percent(Field::RandomAmount, "Random Amount", (0.0, 100.0), 100.0, "How far each note's random value strays from the middle."),
+            percent(Field::RandomAmount, "Random Amount", (0.0, 100.0), 50.0, "How far each note's random value strays from the middle."),
             ParamDescriptor::integer(
                 param(tab, Field::IncrementSteps),
                 &name("Increment Steps"),
                 (1, 32),
-                4,
+                8,
                 ParamUnit::None,
             )
             .describe("How many steps Increment goes through before it starts again."),
@@ -153,28 +170,30 @@ pub fn play_mod_type() -> DeviceType {
             percent(Field::CurveB, "Curve B", (-100.0, 100.0), 0.0, "Bends the S curve's lower segment."),
             ParamDescriptor::toggle(param(tab, Field::CurveLink), &name("Curve Link"), false)
                 .describe("Bends both segments of the S curve in opposite directions, by Curve A."),
-            percent(Field::CurveX, "Curve X", (1.0, 99.0), 50.0, "Where the S curve's middle breakpoint sits across."),
-            percent(Field::CurveY, "Curve Y", (0.0, 100.0), 50.0, "Where the S curve's middle breakpoint sits up."),
-            percent(Field::Min, "Min", (0.0, 100.0), 0.0, "The curve's output where its input is at the bottom."),
-            percent(Field::Max, "Max", (0.0, 100.0), 100.0, "The curve's output where its input is at the top."),
-            ParamDescriptor::choice(param(tab, Field::Smoothing), &name("Smoothing"), &SMOOTHINGS, 0)
+            range(Field::CurveX, "Curve X", (1.0, 126.0), 64.0, "Where the S curve's middle breakpoint sits across, from 0 to 127."),
+            range(Field::CurveY, "Curve Y", (0.0, 127.0), 64.0, "Where the S curve's middle breakpoint sits up, from 0 to 127."),
+            range(Field::Min, "Min", (0.0, 127.0), 0.0, "The curve's output where its input is at the bottom, from 0 to 127."),
+            range(Field::Max, "Max", (0.0, 127.0), 127.0, "The curve's output where its input is at the top, from 0 to 127."),
+            ParamDescriptor::choice(param(tab, Field::Smoothing), &name("Smoothing"), &SMOOTHINGS, 1)
                 .describe("Linear takes the Rise or Fall time for the whole range; Logarithmic follows with that time constant."),
             time(Field::Rise, "Rise", "How slowly the output follows a rising value."),
             time(Field::Fall, "Fall", "How slowly the output follows a falling value."),
         ]);
     }
-    params.extend(mapping_params(
+    // Live's Output Range is each tab's own Amount (or Min and Max) and the
+    // Polarity: there is no Depth, and the Mod switch reads Modulate or Remote,
+    // Unipolar to begin with (layout L-DEV-021).
+    params.extend(mapping_params_with(
         PLAY_SLOTS,
-        (
-            "Output Range Max",
-            "In Modulation mode, how far the modulator reaches: 0 % none, 100 % full.",
-        ),
+        None,
+        (["Modulate", "Remote"], 1),
     ));
     DeviceType::native(PLAY_MOD, "Expression Control", DeviceRole::MidiEffect).with_description(
         DeviceDescription::new(params)
+            .with_relabels(relabels())
             .with_layout(layout())
             .with_banks(&[
-                ("Mapping", &["Mod", "Polarity", "Output Range Max"]),
+                ("Mapping", &["Mod", "Polarity"]),
                 // Each tab's curve and each slot's mapping have a Min
                 // and a Max of the same name: they are given by number.
                 (
@@ -310,69 +329,134 @@ pub fn play_mod_type() -> DeviceType {
     )
 }
 
-/// One tab: its controls, its curve's display and its slot's mapping.
-fn tab_layout(tab: usize) -> LayoutNode {
-    let controls = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (param(tab, Field::Source), Widget::Chooser),
-            (param(tab, Field::RandomAmount), Widget::Knob),
-            (param(tab, Field::IncrementSteps), Widget::Number),
-            (param(tab, Field::Smoothing), Widget::Chooser),
-            (param(tab, Field::Rise), Widget::Knob),
-            (param(tab, Field::Fall), Widget::Knob),
-        ],
-    );
-    let curve = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (param(tab, Field::Curve), Widget::Chooser),
-            (param(tab, Field::CurveA), Widget::Knob),
-            (param(tab, Field::CurveB), Widget::Knob),
-            (param(tab, Field::CurveLink), Widget::Toggle),
-            (param(tab, Field::CurveX), Widget::Knob),
-            (param(tab, Field::CurveY), Widget::Knob),
-            (param(tab, Field::Min), Widget::Knob),
-            (param(tab, Field::Max), Widget::Knob),
-        ],
-    );
+/// The names Live's panel gives each tab's controls, which the tab's number
+/// makes unique for agents: each reads under Live's name (layout L-DEV-021).
+fn relabels() -> Vec<Relabel> {
+    let names = [
+        (Field::Source, "Source"),
+        (Field::RandomAmount, "Random"),
+        (Field::IncrementSteps, "Steps"),
+        (Field::Curve, "Curve Type"),
+        (Field::CurveA, "Curve"),
+        (Field::CurveB, "Curve"),
+        (Field::CurveLink, "Link"),
+        (Field::CurveX, "X"),
+        (Field::CurveY, "Y"),
+        (Field::Min, "Min"),
+        (Field::Max, "Max"),
+        (Field::Smoothing, "Smooth"),
+        (Field::Rise, "Rise"),
+        (Field::Fall, "Fall"),
+    ];
+    (0..TABS)
+        .flat_map(|tab| {
+            names.iter().map(move |&(field, name)| Relabel {
+                param: param(tab, field),
+                by: MODE,
+                labels: vec![ParamLabel::named(name)],
+            })
+        })
+        .collect()
+}
+
+/// One tab's page (layout L-DEV-021): Source, Target, Output Range and Curve
+/// down the left; the curve's display with Min, Max, the curve's type, X and Y
+/// along its foot; Modulate, Steps, Random, Smooth and Rise | Fall down the
+/// right.
+fn tab_page(tab: usize) -> LayoutNode {
+    let at = Control::new;
+    let p = |field| param(tab, field);
     let slot = tab as u8;
-    let mapping = DisplayCell::new(&format!("Mapping {}", tab + 1), 180.0, BODY_HEIGHT, 1.0)
-        .with_bottom(ControlBand::stacked(
-            62.0,
-            &[
-                (modulator::amount(slot), Widget::Knob),
-                (modulator::min(slot), Widget::Knob),
-                (modulator::max(slot), Widget::Knob),
+    // The device-wide Mod and Polarity are the first tab's controls, which
+    // the others' repeat.
+    let again = |control: Control| {
+        if tab == 0 {
+            control
+        } else {
+            control.repeating()
+        }
+    };
+    let left = ControlBand::free(
+        88.0,
+        BODY_HEIGHT,
+        vec![
+            at(p(Field::Source), Widget::Chooser, 4.0, 4.0).sized(80.0, 21.0),
+            at(modulator::amount(slot), Widget::Map(slot), 4.0, 42.0).sized(80.0, 12.0),
+            again(
+                at(POLARITY, Widget::Cycle, 4.0, 71.0)
+                    .sized(44.0, 12.0)
+                    .only_while(MODE, 0),
+            ),
+            at(modulator::amount(slot), Widget::Bare, 52.0, 71.0)
+                .sized(30.0, 12.0)
+                .only_while(MODE, 0),
+            at(modulator::min(slot), Widget::Bare, 4.0, 71.0)
+                .sized(38.0, 12.0)
+                .only_while(MODE, 1),
+            at(modulator::max(slot), Widget::Bare, 44.0, 71.0)
+                .sized(38.0, 12.0)
+                .only_while(MODE, 1),
+            at(p(Field::CurveA), Widget::SmallKnob, 0.0, 92.0),
+            at(p(Field::CurveLink), Widget::Round, 35.0, 112.0).only_while(p(Field::Curve), 1),
+            at(p(Field::CurveB), Widget::SmallKnob, 48.0, 92.0).only_while(p(Field::Curve), 1),
+        ],
+    )
+    .with_labels(vec![
+        BandLabel::new("Target", 4.0, 31.0, 80.0),
+        BandLabel::new("Output Range", 4.0, 60.0, 80.0),
+    ]);
+    let curve = DisplayCell::new(&format!("Curve {}", tab + 1), 134.0, 150.0, 1.0)
+        .with_inset(4.0)
+        .with_bottom(ControlBand::free(
+            134.0,
+            35.0,
+            vec![
+                at(p(Field::Min), Widget::Inline, 4.0, 4.0).sized(50.0, 12.0),
+                at(p(Field::Max), Widget::Inline, 4.0, 19.0).sized(50.0, 12.0),
+                at(p(Field::Curve), Widget::IconSegments(2), 58.0, 4.0).sized(27.0, 12.0),
+                at(p(Field::CurveX), Widget::Inline, 88.0, 4.0)
+                    .sized(44.0, 12.0)
+                    .greyed_while(p(Field::Curve), 0),
+                at(p(Field::CurveY), Widget::Inline, 88.0, 19.0)
+                    .sized(44.0, 12.0)
+                    .greyed_while(p(Field::Curve), 0),
             ],
         ));
+    let right = ControlBand::free(
+        60.0,
+        BODY_HEIGHT,
+        vec![
+            again(at(MODE, Widget::Cycle, 4.0, 4.0).sized(52.0, 12.0)),
+            at(p(Field::IncrementSteps), Widget::Bare, 4.0, 31.0).sized(52.0, 12.0),
+            at(p(Field::RandomAmount), Widget::Bare, 4.0, 57.0).sized(52.0, 12.0),
+            at(p(Field::Smoothing), Widget::Cycle, 4.0, 83.0).sized(52.0, 12.0),
+            at(p(Field::Rise), Widget::Bare, 4.0, 109.0).sized(52.0, 12.0),
+            at(p(Field::Fall), Widget::Bare, 4.0, 123.0).sized(52.0, 12.0),
+        ],
+    )
+    .with_labels(vec![
+        BandLabel::new("Steps", 4.0, 22.0, 52.0),
+        BandLabel::new("Random", 4.0, 48.0, 52.0),
+        BandLabel::new("Smooth", 4.0, 74.0, 52.0),
+        BandLabel::new("Rise | Fall", 4.0, 100.0, 52.0),
+    ]);
     LayoutNode::Row(vec![
-        LayoutNode::Band(controls),
-        LayoutNode::Cell(DisplayCell::new(
-            &format!("Curve {}", tab + 1),
-            120.0,
-            BODY_HEIGHT,
-            1.0,
-        )),
-        LayoutNode::Band(curve),
-        LayoutNode::Cell(mapping),
+        LayoutNode::Band(left),
+        LayoutNode::Cell(curve),
+        LayoutNode::Band(right),
     ])
 }
 
+/// The panel: the five source tabs down its left edge, each its own page.
 fn layout() -> DeviceLayout {
-    let output = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (modulator::MODE, Widget::Chooser),
-            (modulator::POLARITY, Widget::Chooser),
-            (modulator::DEPTH, Widget::Knob),
-        ],
-    );
-    DeviceLayout::new(LayoutNode::Row(vec![
-        tab_layout(0),
-        LayoutNode::Band(output),
-    ]))
-    .with_expanded(LayoutNode::Row((1..TABS).map(tab_layout).collect()))
+    DeviceLayout::new(LayoutNode::Pages(PagesNode::new(
+        "Tabs",
+        PageStyle::Rail,
+        (0..TABS)
+            .map(|tab| Page::new(TAB_NAMES[tab], tab_page(tab)))
+            .collect(),
+    )))
+    .with_title(vec![TitlePart::Mpe])
 }
 
 /// Adds the Expression Control to `registry`.
@@ -626,7 +710,7 @@ impl NativeDevice for PlayMod {
                 let share = self.source(tab, at(Field::Source) as usize, params, f);
                 let s = at(Field::Curve) >= 0.5;
                 let (a, b) = (at(Field::CurveA) / 100.0, at(Field::CurveB) / 100.0);
-                let middle = (at(Field::CurveX) / 100.0, at(Field::CurveY) / 100.0);
+                let middle = (at(Field::CurveX) / RANGE, at(Field::CurveY) / RANGE);
                 let y = curve(
                     s,
                     a,
@@ -635,7 +719,7 @@ impl NativeDevice for PlayMod {
                     middle,
                     share.clamp(0.0, 1.0),
                 );
-                let (low, high) = (at(Field::Min) / 100.0, at(Field::Max) / 100.0);
+                let (low, high) = (at(Field::Min) / RANGE, at(Field::Max) / RANGE);
                 let target = low + y * (high - low);
                 // Spec: modulation R27. Smoothing, Rise going up, Fall down.
                 let rising = target > self.smoothed[tab];
@@ -711,7 +795,7 @@ pub fn display(
     };
     for tab in 0..TABS {
         let at = |field: Field| value(param(tab, field));
-        let (low, high) = (at(Field::Min) / 100.0, at(Field::Max) / 100.0);
+        let (low, high) = (at(Field::Min) / RANGE, at(Field::Max) / RANGE);
         let samples = (0..=POINTS)
             .map(|i| {
                 let x = i as f64 / POINTS as f64;
@@ -720,7 +804,7 @@ pub fn display(
                     at(Field::CurveA) / 100.0,
                     at(Field::CurveB) / 100.0,
                     at(Field::CurveLink) >= 0.5,
-                    (at(Field::CurveX) / 100.0, at(Field::CurveY) / 100.0),
+                    (at(Field::CurveX) / RANGE, at(Field::CurveY) / RANGE),
                     x,
                 );
                 (low + y * (high - low)).clamp(0.0, 1.0) as f32

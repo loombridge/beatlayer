@@ -67,6 +67,13 @@ pub const GRIDS: [(&str, u32); 5] = [
     ("1/16", 16),
     ("1/32", 32),
 ];
+/// The name of the pages node whose second page is a modulator's Show
+/// Multimap list (layout L-DEV-016).
+pub const MULTIMAP_NODE: &str = "Multimap";
+/// The page of that node that lists the eight mappings.
+pub const MULTIMAP_SHOWN: &str = "Multimap";
+/// The page of that node that shows the device's own panel.
+pub const MULTIMAP_HIDDEN: &str = "Device";
 /// The first parameter id a slot owns; each slot has three.
 const SLOT_BASE: u32 = 67;
 

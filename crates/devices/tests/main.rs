@@ -73,6 +73,7 @@ mod midi_cc;
 mod midi_monitor;
 mod midi_mpe;
 mod modulation;
+mod modulator_panels;
 mod modulators;
 mod multiband_dynamics;
 mod multisampler;

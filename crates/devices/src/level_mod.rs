@@ -17,7 +17,7 @@
 
 use bl_engine::{DeviceType, Registry};
 use bl_model::device_layout::{
-    BODY_HEIGHT, ControlBand, DeviceLayout, DisplayCell, LayoutNode, Widget,
+    BODY_HEIGHT, Control, ControlBand, DeviceLayout, DisplayCell, LayoutNode, Unit, Widget,
 };
 use bl_model::modulator::{LEVEL_MOD, SLOTS};
 use bl_model::param::gain_to_db;
@@ -27,7 +27,7 @@ use bl_model::{
 };
 
 use crate::framework::{Audio, DelayLine, Modulation, NativeDevice, ParamBank, add};
-use crate::modulator::{DIVISIONS, mapping_cells, mapping_params};
+use crate::modulator::{CELL_WIDTH, DIVISIONS, mapped_layout, mapping_params_with, mapping_row};
 use crate::signal_mod::{Indices, SignalOut};
 
 /// Gain: the input's gain before the detector.
@@ -78,6 +78,54 @@ pub(crate) fn level_params() -> Vec<ParamDescriptor> {
     ]
 }
 
+/// How many milliseconds 100 % of Rise or Fall is: Beatlayer's own law, as
+/// Live shows only the percentage.
+const PERCENT_MS: f64 = 10.0;
+
+/// The detector's parameters as Live's panel reads them (layout L-DEV-016):
+/// Gain from silence to +30 dB, Rise and Fall in per cent, Delay to 500 ms.
+fn live_params() -> Vec<ParamDescriptor> {
+    level_params()
+        .into_iter()
+        .map(|p| match p.id {
+            GAIN => ParamDescriptor::gain(GAIN, "Gain", 30.0, 0.0)
+                .describe("The gain of the signal the detector hears, down to silence."),
+            RISE => ParamDescriptor::continuous(
+                RISE,
+                "Rise",
+                (0.0, 100.0),
+                0.0,
+                ParamUnit::Percent,
+            )
+            .decimals(2)
+            .describe(
+                "How much the output's attack is smoothed; 0 follows a rising level at once.",
+            ),
+            FALL => ParamDescriptor::continuous(
+                FALL,
+                "Fall",
+                (0.0, 100.0),
+                0.0,
+                ParamUnit::Percent,
+            )
+            .decimals(2)
+            .describe(
+                "How much the output's release is smoothed; 0 follows a falling level at once.",
+            ),
+            DELAY_TIME => ParamDescriptor::continuous(
+                DELAY_TIME,
+                "Delay",
+                (0.0, 500.0),
+                0.0,
+                ParamUnit::Milliseconds,
+            )
+            .decimals(2)
+            .describe("Delays the output by this time."),
+            _ => p,
+        })
+        .collect()
+}
+
 /// The bank of the detector's controls, which CV Envelope Follower shares.
 pub(crate) const LEVEL_BANK: (&str, &[&str]) = (
     "Level",
@@ -94,22 +142,23 @@ pub(crate) const LEVEL_BANK: (&str, &[&str]) = (
 /// The Envelope Follower's type.
 #[must_use]
 pub fn level_mod_type() -> DeviceType {
-    let mut params = level_params();
-    params.extend(mapping_params(
-        SLOTS,
-        (
-            "Depth",
-            "How far the modulator reaches: 0 % none, 100 % full.",
-        ),
-    ));
+    let mut params = live_params();
+    // Live's Envelope Follower has no Depth: each mapping's Amount is its reach.
+    params.extend(mapping_params_with(SLOTS, None, (["Mod", "Remote"], 0)));
     DeviceType::native(LEVEL_MOD, "Envelope Follower", DeviceRole::AudioEffect)
         .with_sidechain()
         .with_description(
             DeviceDescription::new(params)
+                .with_alternate_at((DELAY_MODE, 1), DELAY_TIME, DELAY_BEATS)
+                .with_relabels(vec![bl_model::param::Relabel {
+                    param: DELAY_BEATS,
+                    by: DELAY_MODE,
+                    labels: vec![bl_model::param::ParamLabel::named("Delay")],
+                }])
                 .with_layout(layout())
                 .with_banks(&[
                     LEVEL_BANK,
-                    ("Mapping", &["Mod", "Polarity", "Depth"]),
+                    ("Mapping", &["Mod", "Polarity"]),
                     (
                         "Targets 1-2",
                         &["Amount 1", "Min 1", "Max 1", "Amount 2", "Min 2", "Max 2"],
@@ -150,24 +199,29 @@ pub(crate) fn level_parts() -> [LayoutNode; 2] {
     ]
 }
 
+/// The Live panel (layout L-DEV-016): the level display, 234 by 96 points,
+/// with the mapping row along its top; under it Gain, Rise, Fall and Delay,
+/// which has the ms and sync buttons beside it.
 fn layout() -> DeviceLayout {
-    let output = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (bl_model::modulator::MODE, Widget::Chooser),
-            (bl_model::modulator::POLARITY, Widget::Chooser),
-            (bl_model::modulator::DEPTH, Widget::Knob),
+    let at = Control::new;
+    let cell = DisplayCell::new("Level", CELL_WIDTH, 96.0, 1.0)
+        .with_inset(4.0)
+        .with_top(mapping_row());
+    let controls = ControlBand::free(
+        CELL_WIDTH + 8.0,
+        54.0,
+        vec![
+            at(GAIN, Widget::SmallKnob, 23.0, 4.0),
+            at(RISE, Widget::SmallKnob, 68.0, 4.0),
+            at(FALL, Widget::SmallKnob, 114.0, 4.0),
+            at(DELAY_TIME, Widget::SmallKnob, 160.0, 4.0)
+                .with_unit_right(DELAY_MODE, [Unit::Ms, Unit::Sync]),
         ],
     );
-    let (first, rest) = mapping_cells(SLOTS);
-    let [input, level] = level_parts();
-    DeviceLayout::new(LayoutNode::Row(vec![
-        input,
-        level,
-        first,
-        LayoutNode::Band(output),
+    mapped_layout(LayoutNode::Column(vec![
+        LayoutNode::Cell(cell),
+        LayoutNode::Band(controls),
     ]))
-    .with_expanded(rest)
 }
 
 /// Adds the Envelope Follower to `registry`.
@@ -204,6 +258,9 @@ pub(crate) struct Controls<'a> {
     time: &'a [f32],
     beats: &'a [f32],
     bpm: f64,
+    /// Whether Rise and Fall are per cent ([`PERCENT_MS`]) rather than
+    /// milliseconds.
+    percent: bool,
 }
 
 impl<'a> Controls<'a> {
@@ -217,7 +274,14 @@ impl<'a> Controls<'a> {
             time: ramp(DELAY_TIME),
             beats: ramp(DELAY_BEATS),
             bpm,
+            percent: false,
         }
+    }
+
+    /// The same, reading Rise and Fall in per cent.
+    pub(crate) fn percent(mut self) -> Self {
+        self.percent = true;
+        self
     }
 }
 
@@ -287,11 +351,8 @@ impl Follower {
     /// Rise or Fall, held at 1 and delayed by Delay (modulation R24).
     pub(crate) fn frame(&mut self, c: &Controls<'_>, f: usize) -> f64 {
         let x = f64::from(self.heard[f]) * f64::from(c.gain[f]);
-        let coefficient = self.coefficient(f64::from(if x > self.level {
-            c.rise[f]
-        } else {
-            c.fall[f]
-        }));
+        let time = f64::from(if x > self.level { c.rise[f] } else { c.fall[f] });
+        let coefficient = self.coefficient(if c.percent { time * PERCENT_MS } else { time });
         self.level += (x - self.level) * coefficient;
         let level = self.level.min(1.0);
         self.delay.write(level as f32);
@@ -357,7 +418,7 @@ impl NativeDevice for LevelMod {
             audio.send(note);
         }
         self.follower.hear(audio);
-        let controls = Controls::new(params, audio.bpm());
+        let controls = Controls::new(params, audio.bpm()).percent();
         let ix = Indices::new(params, SLOTS);
         for f in 0..audio.frames() {
             let level = self.follower.frame(&controls, f);

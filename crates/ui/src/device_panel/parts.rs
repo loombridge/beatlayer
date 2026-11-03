@@ -316,6 +316,10 @@ impl Control<'_> {
                     paint_glyph(painter, rect.shrink(3.0), glyph, ink);
                 }
             }
+            Face::Letter(letter) => {
+                painter.circle_filled(rect.center(), rect.height() / 2.0, fill);
+                painter.text(rect.center(), Align2::CENTER_CENTER, letter, font(), ink);
+            }
             face => {
                 painter.rect_filled(rect, BOX_CORNER, fill);
                 if look == Look::Outlined && !lit {
@@ -331,7 +335,7 @@ impl Control<'_> {
                         painter.text(rect.center(), Align2::CENTER_CENTER, text, font(), ink);
                     }
                     Face::Glyph(glyph) => paint_glyph(painter, rect.shrink(2.0), glyph, ink),
-                    Face::Circle(_) => {}
+                    Face::Circle(_) | Face::Letter(_) => {}
                 }
             }
         }
@@ -377,7 +381,13 @@ impl Control<'_> {
         (glyph, round): (Option<Glyph>, bool),
     ) {
         let on = self.on();
-        let face = if round {
+        let name = short_name(&self.descriptor.name);
+        let face = if round && glyph.is_none() {
+            Face::Letter(
+                name.get(..name.chars().next().map_or(0, char::len_utf8))
+                    .unwrap_or(""),
+            )
+        } else if round {
             Face::Circle(glyph)
         } else if let Some(glyph) = glyph {
             Face::Glyph(glyph)
@@ -385,6 +395,44 @@ impl Control<'_> {
             Face::Text(short_name(&self.descriptor.name))
         };
         let response = self.button(ui, theme, (self.rect, self.id()), (Look::Dark, on), face);
+        if Self::chosen(ui, &response) {
+            self.change(if on { 0.0 } else { 1.0 }, events);
+        }
+        self.describe_switch(ui, &response);
+    }
+
+    /// A small box, filled in the accent while on, with the parameter's name
+    /// beside it.
+    pub(super) fn checkbox(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
+        let on = self.on();
+        let response = ui.interact(self.rect, self.id(), Sense::click());
+        crate::focus::register(ui.ctx(), self.id(), bl_shell::Area::Detail, None);
+        let c = &theme.colors;
+        let side = BOX_HEIGHT - 3.0;
+        let square = Rect::from_min_size(
+            pos2(self.rect.left(), self.rect.center().y - side / 2.0),
+            vec2(side, side),
+        );
+        let painter = ui.painter();
+        painter.rect_filled(
+            square,
+            BOX_CORNER,
+            if on { self.lit(theme) } else { c.window.0 },
+        );
+        painter.rect_stroke(
+            square,
+            BOX_CORNER,
+            Stroke::new(1.0, c.separator.0),
+            StrokeKind::Inside,
+        );
+        painter.text(
+            pos2(square.right() + 3.0, self.rect.center().y),
+            Align2::LEFT_CENTER,
+            short_name(&self.descriptor.name),
+            font(),
+            c.text.0,
+        );
+        focus_ring(ui, theme, self.rect, &response);
         if Self::chosen(ui, &response) {
             self.change(if on { 0.0 } else { 1.0 }, events);
         }
@@ -634,6 +682,8 @@ enum Face<'a> {
     Glyph(Glyph),
     /// A round button, with an icon if it has one.
     Circle(Option<Glyph>),
+    /// A round button holding a letter (R, T).
+    Letter(&'a str),
 }
 
 /// How a unit reads to a screen reader.
@@ -671,6 +721,8 @@ pub fn glyph_for(choice: &str) -> Option<Glyph> {
 pub fn filter_glyph(choice: &str) -> Option<Glyph> {
     let name = choice.to_ascii_lowercase();
     match glyph_for(choice) {
+        None if name == "linear" => Some(Glyph::CurveLine),
+        None if name == "s" => Some(Glyph::CurveS),
         Some(Glyph::LowPass) if name.contains("24") => Some(Glyph::LowPass24),
         Some(Glyph::HighPass) if name.contains("24") => Some(Glyph::HighPass24),
         None if name.contains("peak") => Some(Glyph::Peak),
@@ -748,6 +800,25 @@ pub fn paint_glyph(painter: &Painter, rect: Rect, glyph: Glyph, ink: Color32) {
             line(&[(0.0, -0.6), (0.0, 0.6)]);
         }
         Glyph::Minus => line(&[(-0.6, 0.0), (0.6, 0.0)]),
+        Glyph::PlusMinus => {
+            line(&[(-0.5, -0.5), (0.5, -0.5)]);
+            line(&[(0.0, -0.95), (0.0, -0.05)]);
+            line(&[(-0.5, 0.6), (0.5, 0.6)]);
+        }
+        Glyph::CurveLine => line(&[(-0.7, 0.7), (0.7, -0.7)]),
+        Glyph::CurveS => line(&[
+            (-0.8, 0.6),
+            (-0.2, 0.6),
+            (-0.05, 0.1),
+            (0.05, -0.1),
+            (0.2, -0.6),
+            (0.8, -0.6),
+        ]),
+        Glyph::List => {
+            for y in [-0.6, 0.0, 0.6] {
+                line(&[(-0.6, y), (0.6, y)]);
+            }
+        }
         Glyph::FlatSharp => {
             // A flat, then a sharp.
             line(&[(-0.8, -0.8), (-0.8, 0.6)]);
@@ -1040,5 +1111,76 @@ pub(super) fn plain_control<'a>(
         under: None,
         automation: None,
         coarse: 1,
+    }
+}
+
+/// A modulator's Show Multimap list (layout L-DEV-016): a row for each of
+/// its eight slots, 15 points apart, of its Map button, the device's Mod and
+/// Polarity (one pair for every row) and, for the first slot, its Amount or its
+/// Min and Max; the other slots' amounts are the layout's own controls.
+pub(super) fn multimap_rows(
+    ui: &mut Ui,
+    theme: &Theme,
+    (frame, panel): (&DeviceFrame, &DevicePanel),
+    cell: Rect,
+    events: &mut Vec<UiEvent>,
+) {
+    use bl_model::modulator::{self, MODE, POLARITY};
+    let Some(modulator) = &frame.modulator else {
+        return;
+    };
+    let index = |id: ParamId| panel.description.params.iter().position(|p| p.id == id);
+    let remote = panel.read(MODE).round() as i32 == 1;
+    for slot in 0..modulator::SLOTS {
+        let y = cell.top() + 3.0 + 15.0 * f32::from(slot);
+        crate::mapping::map_button(
+            ui,
+            theme,
+            frame,
+            modulator,
+            slot,
+            (pos2(cell.left() + 4.0, y), crate::mapping::MAP_WIDTH),
+            events,
+        );
+        if let Some(at) = index(MODE) {
+            let rect = Rect::from_min_size(pos2(cell.left() + 85.0, y), vec2(39.0, BOX_HEIGHT));
+            let control = plain_control(frame, panel, at, rect);
+            let id = Id::new(("multimap-mod", frame.id, slot));
+            let text = control.descriptor.format(control.value);
+            let response =
+                control.button(ui, theme, (rect, id), (Look::Dark, true), Face::Text(&text));
+            if Control::chosen(ui, &response) {
+                control.change(if control.on() { 0.0 } else { 1.0 }, events);
+            }
+        }
+        if !remote && let Some(at) = index(POLARITY) {
+            let rect = Rect::from_min_size(pos2(cell.left() + 129.0, y), vec2(12.0, BOX_HEIGHT));
+            let control = plain_control(frame, panel, at, rect);
+            let id = Id::new(("multimap-polarity", frame.id, slot));
+            let face = Face::Glyph(Glyph::PlusMinus);
+            let response = control.button(ui, theme, (rect, id), (Look::Dark, control.on()), face);
+            if Control::chosen(ui, &response) {
+                control.change(if control.on() { 0.0 } else { 1.0 }, events);
+            }
+        }
+    }
+    // The first slot's own controls are the panel's, which this list
+    // replaces: its Amount, or its Min and Max.
+    let boxes: &[(ParamId, f32, f32)] = if remote {
+        &[
+            (modulator::min(0), 129.0, 36.0),
+            (modulator::max(0), 168.0, 36.0),
+        ]
+    } else {
+        &[(modulator::amount(0), 147.0, 30.0)]
+    };
+    for &(param, x, width) in boxes {
+        if let Some(at) = index(param) {
+            let rect = Rect::from_min_size(
+                pos2(cell.left() + x, cell.top() + 3.0),
+                vec2(width, BOX_HEIGHT),
+            );
+            plain_control(frame, panel, at, rect).boxed(ui, theme, events, (false, false));
+        }
     }
 }

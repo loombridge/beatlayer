@@ -358,6 +358,9 @@ pub enum Glyph {
     HighPass24,
     /// A peak filter's response.
     Peak,
+    /// Headphones: a device's audition button (Boom Audition, Utility's
+    /// Bass Mono, EQ Eight's Audition).
+    Headphones,
 }
 
 /// A unit a knob's two parameters read in.

@@ -22,10 +22,14 @@ fn registry() -> Registry {
     registry
 }
 
-/// A Compressor of `params`, up to `max_frames` at a time.
+/// A Compressor of `params`, up to `max_frames` at a time, over the settings
+/// these tests were written against (Peak, Lin, no SC Filter), not the ones a
+/// new Compressor has (Live's, tested on their own): `params` override them.
 fn squeeze(params: &[(ParamId, f64)], max_frames: usize) -> Box<dyn Node> {
     let device_type: DeviceType = compressor_type();
-    node(&registry(), &device(&device_type, params), max_frames)
+    let mut all = vec![(MODE, 0.0), (ENVELOPE, 0.0), (SC_FILTER, 0.0)];
+    all.extend_from_slice(params);
+    node(&registry(), &device(&device_type, &all), max_frames)
 }
 
 /// Runs one block: `input` on both channels, with `key` (also on both) as

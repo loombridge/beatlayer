@@ -671,6 +671,7 @@ fn every_icon_draws_something_inside_its_button() {
         Glyph::PhaseInvert,
         Glyph::Record,
         Glyph::Stop,
+        Glyph::Headphones,
     ];
     let ctx = egui::Context::default();
     let area = Rect::from_min_size(pos2(10.0, 10.0), egui::vec2(8.0, 8.0));

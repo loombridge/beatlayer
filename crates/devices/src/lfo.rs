@@ -275,6 +275,10 @@ pub struct Lfo {
     hz: f64,
     /// Triangle Analog's filter coefficient.
     analog: f64,
+    /// Where the phases were at the last [`restart`](Self::restart), taken
+    /// off them, and whether the next step is that moment.
+    anchor: [f64; 2],
+    restarting: bool,
 }
 
 impl Lfo {
@@ -298,7 +302,17 @@ impl Lfo {
             step: 1.0 / rate,
             hz: 1.0,
             analog: 1.0 - (-1.0 / (ANALOG_SECONDS * rate)).exp(),
+            anchor: [0.0; 2],
+            restarting: false,
         }
+    }
+
+    /// Starts the waves over, at the beginning of their cycle, on the next
+    /// [`step`](Self::step): for an LFO that restarts at a note or an onset.
+    /// A rate synced to the song restarts from the grid's phase, and goes on
+    /// at the grid's pace.
+    pub fn restart(&mut self) {
+        self.restarting = true;
     }
 
     /// Sets the LFO for the stretch of audio in `audio`: its rate, how the
@@ -409,6 +423,12 @@ impl Lfo {
             ];
             [now[0], now[1]]
         };
+        if self.restarting {
+            self.restarting = false;
+            self.anchor = phases;
+        }
+        phases[0] -= self.anchor[0];
+        phases[1] -= self.anchor[1];
         if let Stereo::Phase(degrees) = self.stereo {
             phases[1] = phases[0] + degrees / 360.0;
         }

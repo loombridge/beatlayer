@@ -19,9 +19,14 @@ use common::{
 
 const SIZES: [usize; 4] = [1, 100, 512, 4096];
 
+/// The shifts of a major triad, which a new Chord had before Live's default
+/// of none.
+const TRIAD: [(bl_model::ParamId, f64); 2] = [(shift(0), 4.0), (shift(1), 7.0)];
+
 fn play(params: &[(bl_model::ParamId, f64)], size: usize) -> Vec<(i64, NoteKind, u8, f32)> {
     let mut chain = Chain::new(4096);
-    chain.effect(STACK, params);
+    let params: Vec<_> = TRIAD.into_iter().chain(params.iter().copied()).collect();
+    chain.effect(STACK, &params);
     chain.clip(4, [note(60, 0, 1)]);
     chain.sync();
     chain.play();
@@ -192,7 +197,7 @@ fn notes_that_have_not_sounded_when_the_key_comes_up_never_do() {
 #[test]
 fn a_strum_skips_a_key_already_sounding() {
     let mut chain = Chain::new(4096);
-    chain.effect(STACK, &[(STRUM, 100.0)]);
+    chain.effect(STACK, &[TRIAD[0], TRIAD[1], (STRUM, 100.0)]);
     // E is played, and the chord on C would add another E.
     chain.clip(4, [note(64, 0, 2), note(60, 0, 2)]);
     chain.sync();
@@ -205,7 +210,10 @@ fn a_strum_skips_a_key_already_sounding() {
         .count();
     assert_eq!(e, 1);
     let mut chain = Chain::new(4096);
-    chain.effect(STACK, &[(STRUM, 100.0), (DUPLICATES, 1.0)]);
+    chain.effect(
+        STACK,
+        &[TRIAD[0], TRIAD[1], (STRUM, 100.0), (DUPLICATES, 1.0)],
+    );
     chain.clip(4, [note(64, 0, 2), note(60, 0, 2)]);
     chain.sync();
     chain.play();
@@ -227,7 +235,11 @@ fn per_note_events_give_each_added_note_its_own_id_and_expressions() {
     for per_note in [true, false] {
         let device = common::device(
             &bl_devices::stack_type(),
-            &[(PER_NOTE, if per_note { 1.0 } else { 0.0 })],
+            &[
+                TRIAD[0],
+                TRIAD[1],
+                (PER_NOTE, if per_note { 1.0 } else { 0.0 }),
+            ],
         );
         let mut stack = node(&registry, &device, 256);
         let on = note_on(0, 60, 0.8, Some(7));
@@ -351,7 +363,7 @@ fn a_strummed_note_due_before_the_key_comes_up_sounds_at_every_block_size() {
     for size in SIZES {
         let mut chain = Chain::new(4096);
         // Shifts +4 and +7, strummed over 10 ms: 0, 240 and 480 frames.
-        chain.effect(STACK, &[(STRUM, 10.0), (TENSION, 0.0)]);
+        chain.effect(STACK, &[TRIAD[0], TRIAD[1], (STRUM, 10.0), (TENSION, 0.0)]);
         // A key held for 375 frames.
         let short = bl_model::Note::new(60, Ticks::ZERO, Ticks(TICKS_PER_QUARTER / 64), 100);
         chain.clip(4, [short]);

@@ -21,7 +21,8 @@
 //! Every change runs `device.set_param`, which an agent runs too.
 
 use bl_model::device_layout::{
-    BUTTON_GAP, PADDING, PageStyle, PlacedPages, Size, UNIT_PAIR_WIDTH, Widget,
+    BOX_HEIGHT, BUTTON_GAP, PADDING, PageStyle, PlacedPages, Size, UNIT_PAIR_WIDTH, UNIT_ROW_GAP,
+    Widget,
 };
 use bl_model::modulator::ModTarget;
 use bl_model::{DeviceDisplay, DeviceId, ParamDescriptor, ParamId};
@@ -43,6 +44,7 @@ use crate::widgets::modulated_text;
 
 mod drum_drawings;
 mod parts;
+mod scale_grid;
 
 /// Where a Drum Synth's drawing is centred in its display, and its note's
 /// text, from the display's top-left corner, in points (observed in Live
@@ -298,6 +300,10 @@ fn page_row(
 
 /// The width of a title-bar tab reading `name`.
 fn tab_width(name: &str) -> f32 {
+    // CC Control's 1-8 and 9-16 are 25 points each (L-DEV-045, observed).
+    if name.chars().all(|c| c.is_ascii_digit() || c == '-') {
+        return 25.0;
+    }
     name.chars().count() as f32 * 6.0 + 16.0
 }
 
@@ -519,6 +525,14 @@ pub fn show(
             && name == bl_devices::corpus::XY_CELL
         {
             corpus_xy(ui, theme, frame, (panel, display), (id, rect), events);
+            continue;
+        }
+        // Spec: midi-scale-map R13. Scale's grid is the twelve notes' targets.
+        if matches!(&frame.kind, bl_model::DeviceKind::Native { device_type }
+            if device_type == bl_devices::remap::REMAP)
+            && name == bl_devices::remap::GRID_CELL
+        {
+            scale_grid::show(ui, theme, frame, panel, (id, rect), events);
             continue;
         }
         let _ = ui.interact(rect, id, Sense::hover());
@@ -777,6 +791,10 @@ pub fn show(
                 whole.min,
                 pos2(whole.right() - UNIT_PAIR_WIDTH - PADDING, whole.bottom()),
             ),
+            Some(pair) if pair.below => Rect::from_min_max(
+                whole.min,
+                pos2(whole.right(), whole.bottom() - UNIT_ROW_GAP - BOX_HEIGHT),
+            ),
             Some(_) => Rect::from_min_max(
                 pos2(whole.left() + UNIT_PAIR_WIDTH + PADDING, whole.top()),
                 whole.max,
@@ -943,13 +961,25 @@ pub fn show(
                 let cells = button_cells(buttons, usize::from(columns), usize::from(rows));
                 control.choice_buttons(ui, theme, events, (&cells, true, false));
             }
+            Widget::Square => control.square(ui, theme, events),
+            Widget::Switch => control.switch(ui, theme, events),
+            Widget::Stepper => {
+                let target = extra
+                    .and_then(|e| e.target)
+                    .and_then(|id| panel.description.params.iter().position(|p| p.id == id))
+                    .map(|at| (&panel.description.params[at], panel.value(at)));
+                if let Some(target) = target {
+                    control.stepper(ui, theme, events, target);
+                }
+            }
             Widget::Large => control.large(ui, theme, events),
             Widget::Bare => control.boxed(ui, theme, events, (false, false)),
             Widget::BareSlider => control.boxed(ui, theme, events, (false, true)),
             Widget::Framed => control.boxed(ui, theme, events, (true, false)),
             Widget::Checkbox => control.checkbox(ui, theme, events),
             Widget::Map(_) => {}
-            Widget::Cycle => control.cycle(ui, theme, events),
+            Widget::Cycle => control.cycle(ui, theme, events, false),
+            Widget::Mode => control.cycle(ui, theme, events, true),
         };
         if locked {
             ui.add_enabled_ui(false, draw);
@@ -975,6 +1005,8 @@ pub fn show(
                     pos2(whole.right() - UNIT_PAIR_WIDTH, whole.top()),
                     whole.max,
                 )
+            } else if pair.below {
+                Rect::from_min_max(pos2(whole.left(), whole.bottom() - BOX_HEIGHT), whole.max)
             } else {
                 Rect::from_min_max(
                     whole.min,
@@ -1142,10 +1174,25 @@ fn pan_reading(kind: &bl_model::DeviceKind, param: &ParamDescriptor, value: f64)
 
 /// What a control's name above it reads: a sample slot's parameter drops the
 /// slot's number (`Slot 3 Start` reads `Start`), since the panel shows one
-/// slot's at a time, and one of Meld's drops its engine's letter.
+/// slot's at a time, one of Meld's drops its engine's letter, and MPE
+/// Control's Min, Max, X, Y, Smooth, Rise, Fall, Default and Centered drop
+/// their source's name (`Press Min` reads `Min`), which the tab beside them
+/// says.
 fn short_name(name: &str) -> std::borrow::Cow<'_, str> {
     if let Some(short) = bl_devices::meld::panel_name(name) {
         return short.into();
+    }
+    if let Some(rest) = ["Press ", "Slide ", "NotePB "]
+        .iter()
+        .find_map(|source| name.strip_prefix(source))
+        .filter(|rest| {
+            [
+                "Min", "Max", "X", "Y", "Smooth", "Rise", "Fall", "Default", "Centered",
+            ]
+            .contains(rest)
+        })
+    {
+        return rest.into();
     }
     name.strip_prefix("Slot ")
         .and_then(|rest| rest.split_once(' '))

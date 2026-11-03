@@ -84,20 +84,28 @@ impl Plan {
         self.offset(self.audio.in_file_seconds(value))
     }
 
-    /// The notes the transcription found, placed in the new clip (R7, R15,
-    /// R22): notes before the Start marker are dropped.
+    /// Where the region (R4) starts, in ticks from the Start marker: before
+    /// it when the loop brace starts earlier. The new clip's contents start
+    /// here, so its Start marker sits this far into them.
+    fn origin(&self) -> Ticks {
+        self.offset(self.region.0).min(Ticks::ZERO)
+    }
+
+    /// The notes the transcription found, placed in the new clip's contents
+    /// from [`Plan::origin`] (R7, R15, R22).
     fn place(&self, found: &[Found]) -> Vec<Note> {
+        let origin = self.origin();
         let mut placed: Vec<(Note, f32)> = found
             .iter()
             .filter_map(|note| {
                 let start = self.offset(self.region.0 + note.start);
                 let end = self.offset(self.region.0 + note.end);
-                (start >= Ticks::ZERO).then(|| {
-                    let start = self.snapped(start, note.confidence);
+                (start >= origin).then(|| {
+                    let start = self.snapped(start, note.confidence, origin);
                     (
                         Note::new(
                             note.pitch,
-                            start,
+                            start - origin,
                             (end - start).max(Ticks(1)),
                             note.velocity,
                         ),
@@ -132,7 +140,7 @@ impl Plan {
 
     /// `start` moved onto the clip's sixteenth-note grid when the onset is
     /// confident and within 20 ms of a line (R15). The grid is the set's.
-    fn snapped(&self, start: Ticks, confidence: f32) -> Ticks {
+    fn snapped(&self, start: Ticks, confidence: f32, origin: Ticks) -> Ticks {
         if confidence < SNAP_CONFIDENCE {
             return start;
         }
@@ -140,7 +148,7 @@ impl Plan {
         let line = Ticks((at.get() as f64 / SIXTEENTH as f64).round() as i64 * SIXTEENTH);
         let seconds = self.tempo.ticks_to_seconds(at);
         let within = self.tempo.seconds_to_ticks(seconds + SNAP_WITHIN) - at;
-        if (line - at).get().abs() <= within.get() && line >= self.clip.start {
+        if (line - at).get().abs() <= within.get() && line >= self.clip.start + origin {
             line - self.clip.start
         } else {
             start
@@ -539,7 +547,9 @@ impl Shell {
         // Spec: audio-to-midi R6. The source's loop, brace and markers, at
         // the same song positions.
         midi.looping = audio.looping;
-        let after_start = |ticks: Ticks| (ticks > Ticks::ZERO).then_some(ticks);
+        let origin = plan.origin();
+        midi.start = Ticks::ZERO - origin;
+        let after_start = |ticks: Ticks| (ticks > Ticks::ZERO).then_some(ticks - origin);
         midi.end = if audio.looping {
             None
         } else {
@@ -548,10 +558,10 @@ impl Shell {
                 .and_then(|end| after_start(plan.offset_of_form(end)))
         };
         if audio.looping {
-            midi.loop_start = plan.offset_of_form(audio.loop_start).max(Ticks::ZERO);
+            midi.loop_start = (plan.offset_of_form(audio.loop_start) - origin).max(Ticks::ZERO);
             midi.loop_end = audio
                 .loop_end
-                .map(|end| plan.offset_of_form(end))
+                .map(|end| plan.offset_of_form(end) - origin)
                 .filter(|end| *end > midi.loop_start);
         }
         let track: TrackId = self.editor.new_id();

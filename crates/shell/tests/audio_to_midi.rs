@@ -591,18 +591,25 @@ fn a_looped_warped_clip_converts_its_loop_and_the_new_clip_loops_with_it() {
     ]);
     let status = convert(&mut shell, clip, "melody");
     let new_clip: ClipId = id(&status, "created_clip");
-    let made = notes(&shell, new_clip);
-    assert_eq!(made.len(), 1, "the note before the Start marker is dropped");
+    // The contents start at the brace, a beat before the Start marker, so
+    // the note inside the brace before the marker is kept (R4, R7).
+    let mut made = notes(&shell, new_clip);
+    made.sort_by_key(|n| n.start);
     assert_eq!(
-        (made[0].key, made[0].start.get()),
-        (62, Ticks::QUARTER.get())
+        made.iter()
+            .map(|n| (n.key, n.start.get()))
+            .collect::<Vec<_>>(),
+        [
+            (60, Ticks::QUARTER.get() * 2 / 5),
+            (62, 2 * Ticks::QUARTER.get())
+        ]
     );
+    // The brace and the Start marker keep their song positions (R6).
     let data = midi(&shell, new_clip);
     assert!(data.looping);
-    assert_eq!(data.start, Ticks::ZERO);
-    // The brace begins before the Start marker, so it begins at the marker.
+    assert_eq!(data.start, Ticks::QUARTER);
     assert_eq!(data.loop_start, Ticks::ZERO);
-    assert_eq!(data.loop_end, Some(Ticks(2 * Ticks::QUARTER.get())));
+    assert_eq!(data.loop_end, Some(Ticks(3 * Ticks::QUARTER.get())));
 }
 
 // Spec: audio-to-midi R7. A warped clip's notes are timed through its warp

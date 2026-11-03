@@ -19,7 +19,7 @@
 
 use bl_engine::{DeviceType, NodeConfig, Registry};
 use bl_model::Device;
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{BODY_HEIGHT, Control, ControlBand, DisplayCell, LayoutNode, Widget};
 use bl_model::param::db_to_gain;
 use bl_model::{
     DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayReading, OrdMap,
@@ -70,35 +70,35 @@ pub fn gate_type() -> DeviceType {
             THRESHOLD,
             "Threshold",
             (-80.0, 0.0),
-            -30.0,
+            -12.0,
             ParamUnit::Decibels,
         )
         .describe("The level that opens the gate."),
-        ParamDescriptor::continuous(RETURN, "Return", (0.0, 24.0), 6.0, ParamUnit::Decibels)
+        ParamDescriptor::continuous(RETURN, "Return", (0.0, 24.0), 3.0, ParamUnit::Decibels)
             .describe(
                 "How far below the threshold the level must fall before the gate starts to \
                  close; a larger gap stops it chattering.",
             ),
-        ParamDescriptor::continuous(ATTACK, "Attack", (0.01, 50.0), 1.0, ParamUnit::Milliseconds)
+        ParamDescriptor::continuous(ATTACK, "Attack", (0.01, 50.0), 3.5, ParamUnit::Milliseconds)
             .logarithmic()
             .describe("How long the gate takes to open fully."),
-        ParamDescriptor::continuous(HOLD, "Hold", (1.0, 2000.0), 20.0, ParamUnit::Milliseconds)
+        ParamDescriptor::continuous(HOLD, "Hold", (1.0, 2000.0), 10.0, ParamUnit::Milliseconds)
             .logarithmic()
             .describe("How long the gate stays open once the level has fallen."),
         ParamDescriptor::continuous(
             RELEASE,
             "Release",
             (1.0, 5000.0),
-            100.0,
+            15.0,
             ParamUnit::Milliseconds,
         )
         .logarithmic()
         .describe("How long the gate takes to close fully."),
-        ParamDescriptor::gain(FLOOR, "Floor", 0.0, f64::NEG_INFINITY)
+        ParamDescriptor::gain(FLOOR, "Floor", 0.0, -40.0)
             .describe("The level of a closed gate: silence, or any level up to no change."),
         ParamDescriptor::toggle(FLIP, "Flip", false)
             .describe("Passes the signal only while it is below the threshold."),
-        ParamDescriptor::choice(LOOKAHEAD, "Look", &["0 ms", "1 ms", "10 ms"], 0)
+        ParamDescriptor::choice(LOOKAHEAD, "Lookahead", &["0 ms", "1 ms", "10 ms"], 0)
             .describe("How far ahead the detector sees a peak; it delays the output as long."),
         ParamDescriptor::toggle(SC_EQ, "SC EQ", false).describe(
             "Listens through a filter, so only a band of the detector's signal opens the gate.",
@@ -128,7 +128,7 @@ pub fn gate_type() -> DeviceType {
                             "Release",
                             "Floor",
                             "Flip",
-                            "Look",
+                            "Lookahead",
                         ],
                     ),
                     ("Sidechain", &["SC EQ", "Type", "Freq", "Res"]),
@@ -136,39 +136,44 @@ pub fn gate_type() -> DeviceType {
         )
 }
 
-/// The detector's controls on the left, the display with the envelope's
-/// controls along its bottom edge, and the SC EQ's on the right.
+/// The device's layout as Live draws it (L-DEV-053): the SC EQ's column,
+/// Threshold and Return over Flip and Lookahead, the level display with the
+/// envelope's small knobs along its foot.
 fn layout() -> DeviceLayout {
+    let at = Control::new;
     DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Band(ControlBand::stacked(
+        LayoutNode::Band(ControlBand::free(
+            62.0,
             BODY_HEIGHT,
-            &[
-                (THRESHOLD, Widget::Knob),
-                (RETURN, Widget::Knob),
-                (FLIP, Widget::Toggle),
-                (LOOKAHEAD, Widget::Chooser),
+            vec![
+                at(SC_EQ, Widget::Toggle, 4.0, 4.0).sized(54.0, 12.0),
+                at(SC_TYPE, Widget::Chooser, 4.0, 27.0),
+                at(SC_FREQ, Widget::Knob, 11.0, 56.0),
+                at(SC_RES, Widget::Slider, 4.0, 134.0),
+            ],
+        )),
+        LayoutNode::Band(ControlBand::free(
+            61.0,
+            BODY_HEIGHT,
+            vec![
+                at(THRESHOLD, Widget::Knob, 8.0, 4.0),
+                at(RETURN, Widget::Knob, 8.0, 58.0),
+                at(FLIP, Widget::Toggle, 4.0, 117.0).sized(44.0, 12.0),
+                at(LOOKAHEAD, Widget::Chooser, 4.0, 132.0),
             ],
         )),
         LayoutNode::Cell(
-            DisplayCell::new("Gate", 220.0, BODY_HEIGHT, 1.0).with_bottom(ControlBand::stacked(
-                96.0,
-                &[
-                    (ATTACK, Widget::Knob),
-                    (HOLD, Widget::Knob),
-                    (RELEASE, Widget::Knob),
-                    (FLOOR, Widget::Knob),
+            DisplayCell::new("Gate", 187.0, BODY_HEIGHT, 1.0).with_bottom(ControlBand::free(
+                187.0,
+                45.0,
+                vec![
+                    at(ATTACK, Widget::SmallKnob, 6.0, 2.0),
+                    at(HOLD, Widget::SmallKnob, 52.0, 2.0),
+                    at(RELEASE, Widget::SmallKnob, 96.0, 2.0),
+                    at(FLOOR, Widget::SmallKnob, 146.0, 2.0),
                 ],
             )),
         ),
-        LayoutNode::Band(ControlBand::stacked(
-            BODY_HEIGHT,
-            &[
-                (SC_EQ, Widget::Toggle),
-                (SC_TYPE, Widget::Chooser),
-                (SC_FREQ, Widget::Knob),
-                (SC_RES, Widget::Knob),
-            ],
-        )),
     ]))
 }
 

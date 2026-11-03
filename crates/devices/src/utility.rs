@@ -2,13 +2,16 @@
 //! mono, phase invert per side, balance, the DC filter and mute, matching
 //! Live 12's Utility (the utility spec).
 //!
-//! Its look is the framework's generic layout: Beatlayer's own.
+//! Its panel is Live's (layout row L-DEV-058): Input and Output sections.
 
 use core::f32::consts::TAU;
 use core::mem;
 
 use bl_engine::{DeviceType, Registry};
-use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
+use bl_model::device_layout::{
+    BODY_HEIGHT, Control, ControlBand, HEADING_HEIGHT, Heading, LayoutNode, Widget,
+};
+use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 
@@ -43,6 +46,48 @@ pub const CHANNEL_MODES: [&str; 4] = ["Stereo", "Left", "Right", "Swap"];
 
 /// The DC filter's cutoff, in Hz: far below the audible range.
 const DC_CUTOFF_HZ: f32 = 5.0;
+
+/// The panel as Live draws it: the input section (the phase buttons, the
+/// channel mode, Width, Mono, and Bass Mono with its frequency) beside the
+/// output section (Gain, Balance, Mute and DC).
+fn layout() -> DeviceLayout {
+    let at = Control::new;
+    let section = |name: &str, width: f32, controls: Vec<Control>| {
+        LayoutNode::Column(vec![
+            LayoutNode::Heading(Heading::new(name, width)),
+            LayoutNode::Band(ControlBand::free(
+                width,
+                BODY_HEIGHT - HEADING_HEIGHT,
+                controls,
+            )),
+        ])
+    };
+    DeviceLayout::new(LayoutNode::Row(vec![
+        section(
+            "Input",
+            90.0,
+            vec![
+                at(PHASE_LEFT, Widget::Toggle, 4.0, 2.0).sized(38.0, 12.0),
+                at(PHASE_RIGHT, Widget::Toggle, 46.0, 2.0).sized(38.0, 12.0),
+                at(CHANNEL_MODE, Widget::Chooser, 4.0, 16.0).sized(82.0, 21.0),
+                at(WIDTH, Widget::Knob, 25.0, 38.0),
+                at(MONO, Widget::Toggle, 4.0, 94.0).sized(82.0, 12.0),
+                at(BASS_MONO, Widget::Toggle, 4.0, 108.0).sized(82.0, 12.0),
+                at(BASS_MONO_FREQUENCY, Widget::Slider, 4.0, 122.0).sized(82.0, 21.0),
+            ],
+        ),
+        section(
+            "Output",
+            56.0,
+            vec![
+                at(GAIN, Widget::Knob, 8.0, 4.0),
+                at(BALANCE, Widget::Knob, 8.0, 58.0),
+                at(MUTE, Widget::Toggle, 4.0, 130.0).sized(24.0, 12.0),
+                at(DC, Widget::Toggle, 30.0, 130.0).sized(22.0, 12.0),
+            ],
+        ),
+    ]))
+}
 
 /// The Utility device's type.
 #[must_use]
@@ -79,6 +124,7 @@ pub fn utility_type() -> DeviceType {
                 .describe("Scales the signal, down to silence."),
             ParamDescriptor::toggle(MUTE, "Mute", false).describe("Silences the input."),
         ])
+        .with_layout(layout())
         .with_banks(&[
             (
                 "Utility",

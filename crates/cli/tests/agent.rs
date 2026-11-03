@@ -996,6 +996,16 @@ fn an_agent_adds_the_eqs_and_dynamics_sets_them_by_id_and_keys_them_from_another
         );
     };
     set(&mut host, shutter, gate::THRESHOLD, -30.0);
+    // The settings this test was written against, not a new Gate's.
+    for (param, value) in [
+        (gate::RETURN, 6.0),
+        (gate::ATTACK, 1.0),
+        (gate::HOLD, 20.0),
+        (gate::RELEASE, 100.0),
+        (gate::FLOOR, 0.0),
+    ] {
+        set(&mut host, shutter, param, value);
+    }
     set(&mut host, bond, bus_compressor::THRESHOLD, -30.0);
     set(&mut host, bond, bus_compressor::RATIO, 20.0);
     let mute = |host: &mut EngineHost, track, mute: bool| {

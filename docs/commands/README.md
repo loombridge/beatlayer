@@ -15002,6 +15002,7 @@ One of:
 - `"low_pass24"`: A low-pass filter's response at 24 dB per octave.
 - `"high_pass24"`: A high-pass filter's response at 24 dB per octave.
 - `"peak"`: A peak filter's response.
+- `"headphones"`: Headphones: a device's audition button (Boom Audition, Utility's Bass Mono, EQ Eight's Audition).
 
 <details><summary>JSON Schema</summary>
 
@@ -15087,6 +15088,11 @@ One of:
     {
       "const": "peak",
       "description": "A peak filter's response.",
+      "type": "string"
+    },
+    {
+      "const": "headphones",
+      "description": "Headphones: a device's audition button (Boom Audition, Utility's Bass Mono, EQ Eight's Audition).",
       "type": "string"
     }
   ]

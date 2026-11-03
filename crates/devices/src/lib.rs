@@ -90,8 +90,11 @@ pub mod lift;
 pub mod limiter;
 pub mod looper;
 pub mod meld;
+pub mod meld_display;
 pub mod meld_filter;
 mod meld_gen;
+mod meld_matrix;
+mod meld_mod;
 mod meld_osc;
 pub mod midi_cc;
 mod midi_fx;
@@ -278,6 +281,7 @@ pub fn display_in(
         ECHO => Some(echo::display(device, description, values, data, view)),
         COMPRESSOR => Some(compressor::display(device, description, values, data)),
         corpus::CORPUS => Some(corpus::display(device, data)),
+        meld::MELD => Some(meld_display::display(device, description, values)),
         CHANNEL_EQ => Some(channel_eq::display(device, description, values, data)),
         BUS_COMPRESSOR => Some(bus_compressor::display(device, description, values, data)),
         GATE => Some(gate::display(device, description, values, data)),

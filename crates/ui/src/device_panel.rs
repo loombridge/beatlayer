@@ -441,6 +441,13 @@ pub fn show(
             slot_cell(ui, theme, frame, panel, (id, &name, slot, rect), events);
             continue;
         }
+        // Spec: meld R63 to R66. Meld's grids and the buttons of its Matrix
+        // tab are drawn by its own panel.
+        if crate::meld_panel::is_meld(frame)
+            && crate::meld_panel::cell(ui, theme, frame, panel, (id, &name, rect), events)
+        {
+            continue;
+        }
         // Spec: wavetable R35 to R39. Wavetable's displays and its grid are
         // drawn by its own panel.
         if crate::wavetable_panel::is_wavetable(frame)
@@ -548,7 +555,14 @@ pub fn show(
                         .cloned()
                         .collect(),
                     markers: Vec::new(),
-                    readings: Vec::new(),
+                    // A cell's reading, if it has one, is what a screen
+                    // reader says of it.
+                    readings: d
+                        .readings
+                        .iter()
+                        .filter(|r| r.name == name)
+                        .cloned()
+                        .collect(),
                     ..d.clone()
                 };
                 Some(&own)
@@ -637,6 +651,9 @@ pub fn show(
             .label(&read, param)
             .is_some_and(|label| label.unit.is_some() || label.law.is_some())
             .then(|| panel.description.text(&read, &descriptor, value));
+        // Spec: meld R63. A touch on a control adds its parameter as a row
+        // of the grid the tab shows.
+        crate::meld_panel::touched(ui, frame, panel, (&descriptor.name, rect), events);
         let control = Control {
             device: frame.id,
             enabled: frame.enabled,
@@ -911,8 +928,11 @@ fn pan_reading(kind: &bl_model::DeviceKind, param: &ParamDescriptor, value: f64)
 
 /// What a control's name above it reads: a sample slot's parameter drops the
 /// slot's number (`Slot 3 Start` reads `Start`), since the panel shows one
-/// slot's at a time.
-fn short_name(name: &str) -> &str {
+/// slot's at a time, and one of Meld's drops its engine's letter.
+fn short_name(name: &str) -> std::borrow::Cow<'_, str> {
+    if let Some(short) = bl_devices::meld::panel_name(name) {
+        return short.into();
+    }
     name.strip_prefix("Slot ")
         .and_then(|rest| rest.split_once(' '))
         .filter(|(number, _)| number.chars().all(|c| c.is_ascii_digit()))
@@ -925,6 +945,7 @@ fn short_name(name: &str) -> &str {
                 other => other,
             }
         })
+        .into()
 }
 
 /// A display cell standing for a sample slot (WP-5.17): its number and key,

@@ -4315,6 +4315,15 @@ fn new_device(id: DeviceId, args: &AddDeviceArgs, types: &[DeviceType]) -> Devic
         .with_role(args.device.role);
     if args.device.sidechain || known.is_some_and(|t| t.sidechain) {
         device = device.with_sidechain();
+        // Spec: granulator iii R18. A device whose node always hears its
+        // source starts with External on.
+        if let Some(sidechain) = device
+            .sidechain
+            .as_mut()
+            .filter(|_| known.is_some_and(|t| t.sidechain_on))
+        {
+            sidechain.enabled = true;
+        }
     }
     // Spec: external-devices R9. A device whose type works with hardware
     // starts with its routing, which `device.set_external` sets.

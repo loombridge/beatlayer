@@ -501,6 +501,11 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                 Key::ArrowDown,
             ),
         ),
+        // Granulator III's Capture button (WP-8.27): Enter on it.
+        (
+            "granulator.capture",
+            main(a_granulator, device_view, "Capture", Key::Enter),
+        ),
         // The CV Instrument's section (WP-7.17): Enter on its buttons.
         (
             "cv.calibrate",

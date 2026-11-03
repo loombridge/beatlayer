@@ -12,7 +12,9 @@ use bl_core::time::{SampleRate, TICKS_PER_QUARTER};
 use bl_dsp::Random;
 use bl_dsp::stft::{self, Complex32, Stft, Window, wrap_phase};
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{
+    BODY_HEIGHT, BOX_HEIGHT, Control, ControlBand, DisplayCell, LayoutNode, Widget,
+};
 use bl_model::{
     Device, DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole,
     DisplaySpectrogram, ParamDescriptor, ParamId, ParamUnit, SpectrogramGrid,
@@ -186,7 +188,7 @@ pub fn spectral_time_type() -> DeviceType {
             FADE_IN,
             "Fade In",
             (0.0, 5_000.0),
-            50.0,
+            2.0,
             ParamUnit::Milliseconds,
         )
         .describe("How long a freeze takes to fade in."),
@@ -194,7 +196,7 @@ pub fn spectral_time_type() -> DeviceType {
             FADE_OUT,
             "Fade Out",
             (0.0, 5_000.0),
-            500.0,
+            40.0,
             ParamUnit::Milliseconds,
         )
         .describe("How long a freeze takes to fade out."),
@@ -215,9 +217,9 @@ pub fn spectral_time_type() -> DeviceType {
             .describe("Positive delays the highs more than the lows, negative the reverse."),
         ParamDescriptor::continuous(SPRAY, "Spray", (0.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("Scatters each frequency band's delay time at random."),
-        ParamDescriptor::continuous(MASK, "Mask", (-100.0, 100.0), 0.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(MASK, "Mask", (-1.0, 1.0), 0.0, ParamUnit::None)
             .describe("Delays only the highs (positive) or the lows (negative)."),
-        ParamDescriptor::continuous(FEEDBACK, "Feedback", (0.0, 100.0), 50.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(FEEDBACK, "Feedback", (0.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("How much of each repeat returns to the delay's input."),
         ParamDescriptor::continuous(SHIFT, "Shift", (-24.0, 24.0), 0.0, ParamUnit::Semitones)
             .describe("Moves each repeat's pitch by this interval."),
@@ -227,7 +229,7 @@ pub fn spectral_time_type() -> DeviceType {
             DELAY_DRY_WET,
             "Delay Dry/Wet",
             (0.0, 100.0),
-            100.0,
+            50.0,
             ParamUnit::Percent,
         )
         .describe("Balances the delay's input against its echoes."),
@@ -242,7 +244,7 @@ pub fn spectral_time_type() -> DeviceType {
         .describe("The analysis' frame size at 48 kHz: lower is less latency, less accuracy."),
         ParamDescriptor::gain(INPUT_SEND, "Input Send", 12.0, 0.0)
             .describe("The gain of what goes into the spectral processing, down to silence."),
-        ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 100.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 50.0, ParamUnit::Percent)
             .describe("Balances the dry signal against the processed one."),
         ParamDescriptor::toggle(ZERO_DRY_LATENCY, "Zero Dry Signal Latency", false).describe(
             "Passes the dry signal undelayed and reports no latency; the wet signal arrives late.",
@@ -300,49 +302,85 @@ pub fn spectral_time_type() -> DeviceType {
     )
 }
 
+/// The panel as Live lays it out (observed in Live 12.4.16, 2 November 2026;
+/// layout L-DEV-082): the freezer, the delay, the display with Resolution
+/// along its top, and the output. What Live shows for the freezer's
+/// Retrigger interval and the delay's other modes isn't recorded: those
+/// controls sit in the expanded part.
 fn layout() -> DeviceLayout {
-    use Widget::{Chooser, Knob, Number, Toggle};
+    use Widget::{Chooser, Number, SmallKnob};
     let band = |controls: &[(ParamId, Widget)]| {
         LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, controls))
     };
     DeviceLayout::new(LayoutNode::Row(vec![
-        band(&[
-            (FREEZER_ON, Toggle),
-            (FREEZE, Toggle),
-            (FREEZER_MODE, Chooser),
-            (TRIGGER, Chooser),
-            (SENSITIVITY, Knob),
-            (INTERVAL_MODE, Chooser),
-            (INTERVAL_TIME, Knob),
-            (INTERVAL_DIVISION, Chooser),
-            (FADE_SHAPE, Chooser),
-            (X_FADE, Knob),
-            (FADE_IN, Knob),
-            (FADE_OUT, Knob),
-        ]),
-        LayoutNode::Cell(DisplayCell::new("Spectrogram", 240.0, BODY_HEIGHT, 1.0)),
-        band(&[
-            (DELAY_ON, Toggle),
-            (DELAY_MODE, Chooser),
-            (TIME, Knob),
-            (NOTES, Chooser),
-            (SIXTEENTHS, Number),
-            (TRIPLETS, Number),
-            (DOTTED, Number),
-            (TILT, Knob),
-            (SPRAY, Knob),
-            (MASK, Knob),
-            (FEEDBACK, Knob),
-            (SHIFT, Knob),
-            (STEREO, Knob),
-            (DELAY_DRY_WET, Knob),
-        ]),
-        band(&[
-            (ORDER, Chooser),
-            (RESOLUTION, Chooser),
-            (INPUT_SEND, Knob),
-            (DRY_WET, Knob),
-        ]),
+        LayoutNode::Band(ControlBand::free(
+            134.6,
+            BODY_HEIGHT,
+            vec![
+                Control::new(FREEZER_ON, Widget::Check, 4.6, 4.6)
+                    .captioned("1 Freezer")
+                    .sized(70.0, BOX_HEIGHT),
+                Control::new(FREEZER_MODE, Widget::Stack(2), 4.8, 19.4).sized(70.0, 27.0),
+                Control::new(TRIGGER, Widget::Segments(2), 4.8, 48.0)
+                    .greyed_while(FREEZER_MODE, 0)
+                    .sized(70.0, 11.0),
+                Control::new(FADE_SHAPE, Widget::IconSegments(2), 83.5, 18.8).sized(45.0, 12.0),
+                Control::new(FADE_IN, SmallKnob, 89.8, 41.8),
+                Control::new(FADE_OUT, SmallKnob, 89.8, 97.0),
+                Control::new(FREEZE, Widget::Toggle, 4.8, 128.0)
+                    .captioned("*")
+                    .sized(70.0, 24.6),
+            ],
+        )),
+        LayoutNode::Band(ControlBand::free(
+            148.6,
+            BODY_HEIGHT,
+            vec![
+                Control::new(DELAY_ON, Widget::Check, 4.6, 4.6)
+                    .captioned("2 Delay")
+                    .sized(70.0, BOX_HEIGHT),
+                Control::new(TIME, SmallKnob, 10.1, 20.3),
+                Control::new(FEEDBACK, SmallKnob, 58.0, 20.3),
+                Control::new(SHIFT, SmallKnob, 105.9, 20.3),
+                Control::new(DELAY_MODE, Chooser, 3.2, 73.5)
+                    .captioned("Mode")
+                    .sized(45.2, 21.0),
+                Control::new(STEREO, Number, 51.2, 73.5).sized(45.2, 21.0),
+                Control::new(DELAY_DRY_WET, Widget::Slider, 99.6, 73.5)
+                    .captioned("Mix")
+                    .sized(45.2, 21.0),
+                Control::new(TILT, SmallKnob, 10.1, 110.0),
+                Control::new(SPRAY, SmallKnob, 58.0, 110.0),
+                Control::new(MASK, SmallKnob, 105.9, 110.0),
+            ],
+        )),
+        LayoutNode::Cell(
+            DisplayCell::new("Spectrogram", 181.0, BODY_HEIGHT, 1.0).with_top(ControlBand::free(
+                181.0,
+                17.0,
+                vec![Control::new(RESOLUTION, Widget::Readout, 91.5, 3.0).sized(85.0, BOX_HEIGHT)],
+            )),
+        ),
+        LayoutNode::Band(ControlBand::free(
+            61.0,
+            BODY_HEIGHT,
+            vec![
+                Control::new(INPUT_SEND, SmallKnob, 15.0, 3.6).captioned("Send"),
+                Control::new(ORDER, Widget::Stack(2), 5.7, 66.0).sized(44.2, 27.0),
+                Control::new(DRY_WET, SmallKnob, 15.0, 110.0),
+            ],
+        )),
+    ]))
+    .with_expanded(band(&[
+        (SENSITIVITY, Widget::Knob),
+        (INTERVAL_MODE, Chooser),
+        (INTERVAL_TIME, Widget::Knob),
+        (INTERVAL_DIVISION, Chooser),
+        (X_FADE, Widget::Knob),
+        (NOTES, Chooser),
+        (SIXTEENTHS, Number),
+        (TRIPLETS, Number),
+        (DOTTED, Number),
     ]))
 }
 
@@ -1278,7 +1316,7 @@ impl SpectralTime {
                 samples: delay_frames(&v, bpm, rate),
                 tilt: v(TILT) / 100.0,
                 spray: v(SPRAY) / 100.0,
-                mask: v(MASK) / 100.0,
+                mask: v(MASK),
                 feedback: ((v(FEEDBACK) / 100.0) as f32).min(MAX_FEEDBACK),
                 ratio: (v(SHIFT) / 12.0).exp2(),
                 stereo: v(STEREO) / 100.0,

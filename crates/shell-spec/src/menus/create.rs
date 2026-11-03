@@ -1,6 +1,6 @@
 //! The Create menu.
 
-use super::Action::{Command as Cmd, Pending, Shortcut as Key};
+use super::Action::{Choice, Command as Cmd, Pending, Shortcut as Key};
 use super::{Row, SAMPLE_DELETE, SAMPLE_INSERT, SAMPLE_WARP, SEPARATOR};
 use crate::audio_editing::CONSOLIDATE_TO_SCENE;
 use crate::capture_midi::CAPTURE as CAPTURE_MIDI;
@@ -50,17 +50,17 @@ pub(super) const CREATE: &[Row] = &[
     (
         "M-CREATE-012",
         "Convert Harmony to New MIDI Track",
-        Pending(None),
+        Choice(crate::audio_to_midi::CONVERT, r#"{"kind":"harmony"}"#),
     ),
     (
         "M-CREATE-013",
         "Convert Melody to New MIDI Track",
-        Pending(None),
+        Choice(crate::audio_to_midi::CONVERT, r#"{"kind":"melody"}"#),
     ),
     (
         "M-CREATE-014",
         "Convert Drums to New MIDI Track",
-        Pending(None),
+        Choice(crate::audio_to_midi::CONVERT, r#"{"kind":"drums"}"#),
     ),
     (
         "M-CREATE-015",

@@ -5,7 +5,7 @@
 
 use crate::common;
 use bl_devices::overdrive::{
-    DRIVE, DRY_WET, DYNAMICS, FREQUENCY, OVERDRIVE, TONE, WIDTH, overdrive_type,
+    DRIVE, DRY_WET, DYNAMICS, FREQUENCY, OVERDRIVE, TONE, WIDTH, WIDTH_OCTAVES, overdrive_type,
 };
 use bl_engine::{DeviceType, Node, Registry};
 use bl_model::ParamId;
@@ -105,7 +105,11 @@ fn the_overdrive_is_described_and_laid_out() {
 #[test]
 fn the_band_pass_has_its_centre_and_width_within_two_per_cent() {
     for (centre, octaves) in [(1_200.0, 1.5), (3_000.0, 0.5)] {
-        let params = [(FREQUENCY, centre), (WIDTH, octaves), (DRY_WET, 100.0)];
+        let params = [
+            (FREQUENCY, centre),
+            (WIDTH, octaves / WIDTH_OCTAVES),
+            (DRY_WET, 100.0),
+        ];
         let (low, high) = edges(&params, centre / 8.0, centre * 8.0);
         let found_centre = (low * high).sqrt();
         let found_width = (high / low).log2();
@@ -126,7 +130,15 @@ fn harmonics_are_present_at_drive_zero() {
     let frames = 24_000;
     let input = sine(1_000.0, 0.3, frames);
     let out = run(
-        grit(&[(DRIVE, 0.0), (FREQUENCY, 1_000.0), (WIDTH, 2.0)], frames).as_mut(),
+        grit(
+            &[
+                (DRIVE, 0.0),
+                (FREQUENCY, 1_000.0),
+                (WIDTH, 2.0 / WIDTH_OCTAVES),
+            ],
+            frames,
+        )
+        .as_mut(),
         &input,
         &[],
     );
@@ -140,7 +152,11 @@ fn harmonics_are_present_at_drive_zero() {
     // And a hard drive distorts more.
     let hard = run(
         grit(
-            &[(DRIVE, 100.0), (FREQUENCY, 1_000.0), (WIDTH, 2.0)],
+            &[
+                (DRIVE, 100.0),
+                (FREQUENCY, 1_000.0),
+                (WIDTH, 2.0 / WIDTH_OCTAVES),
+            ],
             frames,
         )
         .as_mut(),
@@ -155,8 +171,16 @@ fn harmonics_are_present_at_drive_zero() {
 // Spec: overdrive R4
 #[test]
 fn tone_raises_the_highs() {
-    let at =
-        |tone: f64| small_signal_gain(&[(TONE, tone), (FREQUENCY, 6_000.0), (WIDTH, 4.0)], 6_000.0);
+    let at = |tone: f64| {
+        small_signal_gain(
+            &[
+                (TONE, tone),
+                (FREQUENCY, 6_000.0),
+                (WIDTH, 4.0 / WIDTH_OCTAVES),
+            ],
+            6_000.0,
+        )
+    };
     let (dark, flat, bright) = (at(0.0), at(50.0), at(100.0));
     assert!(dark < flat && flat < bright, "{dark} {flat} {bright}");
     assert!(20.0 * (bright / dark).log10() > 18.0, "a wide range");
@@ -177,7 +201,7 @@ fn dynamics_levels_the_output_across_a_drive_sweep() {
                             (DRIVE, *drive),
                             (DYNAMICS, dynamics),
                             (FREQUENCY, 1_000.0),
-                            (WIDTH, 2.0),
+                            (WIDTH, 2.0 / WIDTH_OCTAVES),
                         ],
                         frames,
                     )
@@ -247,7 +271,7 @@ fn renders_are_bit_identical_at_any_block_size() {
         (DRIVE, 70.0),
         (TONE, 80.0),
         (FREQUENCY, 900.0),
-        (WIDTH, 1.0),
+        (WIDTH, 1.0 / WIDTH_OCTAVES),
         (DYNAMICS, 20.0),
         (DRY_WET, 85.0),
     ];

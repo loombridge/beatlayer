@@ -12,7 +12,10 @@
 //! up, and mixes the two.
 
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::{Device, DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
+use bl_model::device_layout::{BODY_HEIGHT, BOX_HEIGHT, Control, ControlBand, LayoutNode, Widget};
+use bl_model::{
+    Device, DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit,
+};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 
@@ -57,8 +60,32 @@ pub fn hardware_effect_type() -> DeviceType {
             ParamDescriptor::toggle(INVERT, "Invert", false)
                 .describe("Flips the phase of the signal coming back."),
         ])
+        .with_layout(layout())
         .with_banks(&[("Gain", &["Out Gain", "In Gain", "Dry/Wet", "Invert"])]),
     )
+}
+
+/// The panel's layout, as Live draws it (observed in Live 12.4.16, 2 November
+/// 2026; layout L-DEV-077): the section of choosers down the left (the host's
+/// own, [`bl_model::External`]) with Invert in it, and the three knobs to its
+/// right.
+fn layout() -> DeviceLayout {
+    DeviceLayout::new(LayoutNode::Row(vec![
+        LayoutNode::Band(ControlBand::free(
+            86.0,
+            BODY_HEIGHT,
+            vec![Control::new(INVERT, Widget::Toggle, 4.0, 113.0).sized(32.5, BOX_HEIGHT)],
+        )),
+        LayoutNode::Band(ControlBand::free(
+            42.0,
+            BODY_HEIGHT,
+            vec![
+                Control::new(GAIN_OUT, Widget::SmallKnob, 4.0, 5.5).captioned("Gain"),
+                Control::new(GAIN_IN, Widget::SmallKnob, 4.0, 59.5).captioned("Gain"),
+                Control::new(DRY_WET, Widget::SmallKnob, 4.0, 110.0),
+            ],
+        )),
+    ]))
 }
 
 /// Adds the External Audio Effect to `registry`.

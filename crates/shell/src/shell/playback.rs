@@ -43,8 +43,11 @@ impl Shell {
         if let Some(message) = self.browser_view.take_message() {
             self.set_message(message, true);
         }
-        let mut changed =
-            polled.changed | self.poll_processed() | self.poll_packages() | self.poll_stems();
+        let mut changed = polled.changed
+            | self.poll_processed()
+            | self.poll_packages()
+            | self.poll_stems()
+            | self.poll_audio_to_midi();
         // Spec: device-changes R1 to R5. A device that went away, changed
         // rate or stalled shows in the Status Bar, and the stream reopens.
         if let Some((message, error)) = self.audio.poll_device() {
@@ -169,6 +172,7 @@ impl Shell {
     pub fn poll_engine(&mut self) -> EngineTransport {
         let engine = self.audio.transport_state();
         self.poll_capture();
+        self.poll_granulator_captures();
         // Spec: automation-editing R23. A recording edits the set as it
         // runs, so it ends the edit a selected breakpoint opened.
         if self.recording.is_some() || self.session_run.is_some() {

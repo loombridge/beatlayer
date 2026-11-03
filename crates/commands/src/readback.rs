@@ -70,6 +70,7 @@ impl Object {
                 "tracks",
             ],
             Self::Device => &[
+                "capture",
                 "compare",
                 "cv",
                 "impulse_responses",

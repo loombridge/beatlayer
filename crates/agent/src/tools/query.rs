@@ -543,6 +543,12 @@ impl View<'_> {
                 };
             }
         }
+        // Spec: granulator iii R23. A Granulator III's capture: its source,
+        // Length, whether it is capturing, the frames captured and the file
+        // of the last capture, which `granulator.capture` changes.
+        if let Some(capture) = self.shell.capture_of(device) {
+            value["capture"] = capture;
+        }
         // A multisampler's layers and the options of its layer list
         // (WP-5.13, R30).
         if !device.layers.is_default() {

@@ -134,6 +134,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("device.unwrap_rack", query(Track, "devices")),
     ("device.update_layers", query(Device, "layers")),
     ("device.wrap_in_rack", query(Track, "devices")),
+    ("granulator.capture", query(Device, "capture")),
     ("modulator.map", query(Device, "mappings")),
     ("modulator.set_shape", query(Device, "shape")),
     ("modulator.unmap", query(Device, "mappings")),

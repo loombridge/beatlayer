@@ -165,6 +165,11 @@ fn playing_in(doc: &Document, track: TrackId, start: Ticks, end: Ticks) -> Vec<C
 }
 
 impl Shell {
+    /// Whether a separation is under way, which a conversion waits for.
+    pub(super) fn separating(&self) -> bool {
+        self.stems.separation.is_some() || self.stems.writing
+    }
+
     /// Separate Stems' dialog, if it's open.
     #[must_use]
     pub fn stems_dialog(&self) -> Option<DialogStatus> {

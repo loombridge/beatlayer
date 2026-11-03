@@ -116,6 +116,7 @@ mod tuning_section;
 mod undo_history;
 mod user_keymap;
 mod vector_delay;
+mod video_window;
 mod view_options;
 mod vocoder;
 mod zone_editor;

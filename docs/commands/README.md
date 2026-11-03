@@ -43330,6 +43330,65 @@ One of:
 
 </details>
 
+### `WindowState`
+
+What `video.window_state` and `video.set_window` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `shown` | boolean | yes | Whether the window shows. |
+| `enabled` | boolean | yes | Whether the set has a video clip in the Arrangement, which the window needs to show. |
+| `frame` | [`WindowFrame`](#windowframe) or null | yes | Where the window is and how big, once it has been placed; the same in every set. |
+| `full_screen` | boolean | yes | Whether the window is in full screen. |
+| `showing` | [`FrameAt`](#frameat) | yes | The frame the window shows now: `clip` is `null` where it is black for want of a video clip at the playhead. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `video.window_state` and `video.set_window` return.",
+  "properties": {
+    "enabled": {
+      "description": "Whether the set has a video clip in the Arrangement, which the window needs to show.",
+      "type": "boolean"
+    },
+    "frame": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WindowFrame"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Where the window is and how big, once it has been placed; the same in every set."
+    },
+    "full_screen": {
+      "description": "Whether the window is in full screen.",
+      "type": "boolean"
+    },
+    "showing": {
+      "$ref": "#/$defs/FrameAt",
+      "description": "The frame the window shows now: `clip` is `null` where it is black for want of a video clip at the playhead."
+    },
+    "shown": {
+      "description": "Whether the window shows.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "shown",
+    "enabled",
+    "frame",
+    "full_screen",
+    "showing"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Zone`
 
 A range of values with a fade at each end (R5): the layer is silent at the lowest and highest value when it has a fade there, and reaches full level `fade_low` values above the lowest and `fade_high` below the highest.

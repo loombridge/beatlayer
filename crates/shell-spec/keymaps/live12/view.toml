@@ -121,7 +121,10 @@ trigger = "press"
 milestone = "M9"
 mac = ["Cmd+Option+Shift+V"]
 win = ["Ctrl+Alt+Shift+V"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.toggle_video_window", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-VIEW-010"

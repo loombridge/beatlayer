@@ -132,7 +132,7 @@ The test of R8 walks the whole registry. A command is reached by a key, a menu i
 | R10 | `crates/ui/tests/accessibility/screen_reader.rs`, `the_screen_reader_follows_the_keyboard_focus`; `crates/ui/tests/accessibility/tab_order.rs`, `tab_runs_through_the_arrangement_and_the_neighbour_keys_to_the_next_track`; `crates/ui/tests/accessibility/outline_view.rs`, `outline_view_in_focus_outlines_the_focused_area_and_control_until_switched_off`; `crates/ui/tests/automation.rs`, `the_lock_envelopes_switch_is_in_the_tab_order` (Lock Envelopes, WP-6.25's); the Set Locator, Previous Locator, Next Locator and Automation Mode controls | headless UI |
 | R11 | to be written in WP-9.38 | UI script |
 | R12 | to be written in WP-9.33 | UI script |
-| R13 | to be written in WP-9.26 | UI script |
+| R13 | `crates/ui/tests/video_window.rs`, `the_window_is_named_video_and_its_picture_is_an_image_of_the_clip_and_the_frames_time`, `the_view_menu_item_and_its_key_show_and_hide_the_window` and the Esc check in `a_double_click_goes_full_screen_and_back_and_option_double_click_sets_the_movies_size` | UI script |
 | R14 | to be written in WP-9.51 | UI script |
 | R15 to R18 | to be written in WP-10.25 | audit in CI; a seeded unnamed button |
 | R19 to R21 | to be written in WP-10.26 | UI script, tree test |

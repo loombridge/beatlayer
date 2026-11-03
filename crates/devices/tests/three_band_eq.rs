@@ -25,9 +25,13 @@ fn registry() -> Registry {
     registry
 }
 
+/// An EQ Three of `params`, over the 24 dB slope these tests were written
+/// against, not the 48 dB a new one has (Live's, tested on its own).
 fn triad(params: &[(ParamId, f64)], max_frames: usize) -> Box<dyn Node> {
     let device_type: DeviceType = three_band_eq_type();
-    node(&registry(), &device(&device_type, params), max_frames)
+    let mut all = vec![(SLOPE, 0.0)];
+    all.extend_from_slice(params);
+    node(&registry(), &device(&device_type, &all), max_frames)
 }
 
 fn impulse(params: &[(ParamId, f64)]) -> Vec<f32> {
@@ -77,8 +81,8 @@ fn the_three_band_eq_is_described_with_its_ranges_and_defaults() {
     }
     assert_eq!(
         description.param(SLOPE).unwrap().default,
-        0.0,
-        "24 dB first"
+        1.0,
+        "48 dB first"
     );
 }
 

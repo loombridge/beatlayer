@@ -8,6 +8,7 @@
 bl_rt::install_trap!();
 
 mod alignment_delay;
+mod amp;
 mod analog;
 mod arpeggiator;
 mod articulation_map;
@@ -41,6 +42,7 @@ mod drum_bus;
 mod drum_panels;
 mod drum_sampler;
 mod drum_synths;
+mod dynamics_panels;
 mod echo;
 mod effect_parts;
 mod electric;

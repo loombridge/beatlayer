@@ -60,6 +60,7 @@ mod drum;
 pub use drum::PadSample;
 
 mod macros;
+mod operator;
 
 /// An Articulation Map's row that is learning its trigger (the articulation
 /// map spec, R15): the row, and how many events its node had heard when the
@@ -125,6 +126,9 @@ pub struct DeviceView {
     /// The view each device's display shows, where it has chosen one
     /// (WP-5.43).
     display_views: std::collections::BTreeMap<DeviceId, String>,
+    /// The harmonics editor's options each Operator has set (operator R27):
+    /// view state.
+    harmonics: BTreeMap<DeviceId, ids::HarmonicsView>,
     /// The page each device's pages nodes show, where it has chosen one
     /// (WP-8.1): saved with the set but not part of the document, so
     /// switching pages is no undo step. A multisampler's `Tabs` node is not
@@ -484,6 +488,16 @@ impl DeviceView {
             articulations: device.articulations.clone(),
             learning: self.learning.get(&device.id).map(|learn| learn.row),
             matrix_routes: self.matrix_routes(device),
+            harmonics: matches!(&device.kind, DeviceKind::Native { device_type }
+                if device_type == bl_devices::operator::OPERATOR)
+            .then(|| {
+                let view = self.harmonics(device.id);
+                bl_shell_spec::devices::HarmonicsOptions {
+                    even_only: view.even_only,
+                    odd_only: view.odd_only,
+                    normalize: view.normalize,
+                }
+            }),
             locked: Vec::new(),
         })
     }
@@ -601,6 +615,7 @@ impl DeviceView {
             articulations: Vec::new(),
             learning: None,
             matrix_routes: Vec::new(),
+            harmonics: None,
             locked: Vec::new(),
         }
     }
@@ -826,6 +841,7 @@ impl DeviceView {
         self.layer_hot_swap = self.layer_hot_swap.filter(|(device, _)| exists(device));
         self.armed = self.armed.filter(|(d, _)| exists(d));
         self.display_views.retain(|d, _| exists(d));
+        self.harmonics.retain(|d, _| exists(d));
         self.pages.retain(|d, _| exists(d));
         self.displays.retain(|d, _| exists(d));
         self.pads_selected.retain(|d, _| exists(d));
@@ -1757,7 +1773,10 @@ impl DeviceView {
         };
         let view = self.display_view(device);
         let data = self.displays.get(&device.id).map(|d| d.values.as_slice());
-        let mut display = if device.is_articulation_map() {
+        let mut display = if device_type == bl_devices::operator::OPERATOR {
+            // Spec: operator R29.
+            Self::operator_display(device, view.as_deref())
+        } else if device.is_articulation_map() {
             // Spec: articulation-map R17. The current articulation's number
             // and name.
             bl_devices::articulation_map::display(
@@ -1957,7 +1976,14 @@ impl DeviceView {
                     })
             }
             ids::LOAD_PRESET => has_target() && args.get("path").is_some(),
-            ids::SET_ROUTE | ids::CLEAR_ROUTE | ids::COPY_RESONATOR => has_target(),
+            ids::SET_ROUTE
+            | ids::CLEAR_ROUTE
+            | ids::COPY_RESONATOR
+            | ids::SET_PARTIALS
+            | ids::COPY_OSCILLATOR
+            | ids::SET_ENVELOPE_LEVELS
+            | ids::PLAY_BY_KEY
+            | ids::SET_HARMONICS => has_target(),
             ids::PARAMETERS
             | ids::DISPLAY
             | ids::PREVIEW_HIT
@@ -2756,6 +2782,16 @@ impl DeviceView {
                         self.set_multisampler_view(device, view);
                     }
                     None => {
+                        // Spec: operator R29. A section's page starts its
+                        // display on that section's view.
+                        if let Some(view) = bl_devices::operator_display::view_of_page(&name)
+                            .filter(|_| {
+                                matches!(&current.kind, DeviceKind::Native { device_type }
+                                    if device_type == bl_devices::operator::OPERATOR)
+                            })
+                        {
+                            self.display_views.insert(device, view.to_owned());
+                        }
                         self.pages.entry(device).or_default().insert(node, name);
                     }
                 }
@@ -2777,6 +2813,35 @@ impl DeviceView {
                 let copied = self.copy_resonator(args, editor)?;
                 outcome.document_changed = true;
                 outcome.value = to_value(&copied);
+                return Ok(outcome);
+            }
+            ids::SET_PARTIALS => {
+                let changed = self.set_partials(args, editor)?;
+                outcome.document_changed = true;
+                outcome.value = to_value(&changed);
+                return Ok(outcome);
+            }
+            ids::COPY_OSCILLATOR => {
+                let copied = self.copy_oscillator(args, editor)?;
+                outcome.document_changed = true;
+                outcome.value = to_value(&copied);
+                return Ok(outcome);
+            }
+            ids::SET_ENVELOPE_LEVELS => {
+                let changed = self.set_envelope_levels(args, editor)?;
+                outcome.document_changed = true;
+                outcome.value = to_value(&changed);
+                return Ok(outcome);
+            }
+            ids::PLAY_BY_KEY => {
+                let changed = self.play_by_key(args, editor)?;
+                outcome.document_changed = true;
+                outcome.value = to_value(&changed);
+                return Ok(outcome);
+            }
+            ids::SET_HARMONICS => {
+                let view = self.set_harmonics(args, editor.document())?;
+                outcome.value = to_value(&view);
                 return Ok(outcome);
             }
             ids::ARTICULATION_LIST => {

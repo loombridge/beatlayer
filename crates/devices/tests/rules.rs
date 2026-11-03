@@ -90,8 +90,14 @@ fn every_gain_parameter_reaches_minus_infinity() {
             } else {
                 vec![param.id]
             };
-            let silenced: Vec<_> = group.iter().map(|id| (*id, 0.0)).collect();
-            let mut at_default = node(&registry, &device(&device_type, &[]), 256);
+            let mut silenced: Vec<_> = group.iter().map(|id| (*id, 0.0)).collect();
+            // Gate's Floor is the gain of a shut gate: keep it shut.
+            let mut shut_gate = vec![];
+            if device_type.name == "Gate" {
+                shut_gate.push((bl_devices::gate::THRESHOLD, 0.0));
+                silenced.extend(shut_gate.iter().copied());
+            }
+            let mut at_default = node(&registry, &device(&device_type, &shut_gate), 256);
             let mut at_silence = node(&registry, &device(&device_type, &silenced), 256);
             let open = run(at_default.as_mut(), &input, &[]);
             let shut = run(at_silence.as_mut(), &input, &[]);

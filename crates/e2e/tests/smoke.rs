@@ -156,7 +156,7 @@ fn the_rich_set_builds_through_the_agent_api_and_keeps_its_invariants() {
     let mut host = Host::new();
     let ids = fixture::build(&mut host);
     host.check();
-    assert_eq!(ids.tracks.len(), 8);
+    assert_eq!(ids.tracks.len(), 9);
     assert_eq!(ids.midi_tracks.len(), 2);
     assert_eq!(ids.audio_tracks.len(), 2);
     assert_eq!((ids.groups.len(), ids.returns.len()), (1, 2));
@@ -164,7 +164,7 @@ fn the_rich_set_builds_through_the_agent_api_and_keeps_its_invariants() {
     assert_eq!(ids.arrangement.audio.len(), 2);
     assert_eq!(ids.session.midi.len(), 2);
     assert_eq!(ids.session.audio.len(), 1);
-    assert_eq!(ids.devices.values().map(Vec::len).sum::<usize>(), 12);
+    assert_eq!(ids.devices.values().map(Vec::len).sum::<usize>(), 13);
     assert_eq!(ids.locators.len(), 2);
     assert_eq!(ids.scenes.len(), 9, "the default eight and Drop");
     // Every ID it gives reads back.

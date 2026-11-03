@@ -22,7 +22,7 @@
 
 use bl_engine::{DeviceType, NodeConfig, Registry};
 use bl_model::Device;
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{BODY_HEIGHT, Control, ControlBand, DisplayCell, LayoutNode, Widget};
 use bl_model::param::db_to_gain;
 use bl_model::{
     DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayMarker,
@@ -83,6 +83,10 @@ const DEFAULT_LOOKAHEAD: usize = 0;
 const MODE_RMS: usize = 1;
 const MODE_EXPAND: usize = 2;
 
+/// The SC Filter's Type choice a new Compressor starts at: High Pass, the
+/// shape an 80 Hz frequency means.
+const SC_HIGH_PASS: usize = 2;
+
 /// The Env choices: Lin, then Log.
 const ENV_LOG: usize = 1;
 
@@ -137,15 +141,15 @@ pub fn compressor_type() -> DeviceType {
         )
         .logarithmic()
         .describe("How long the gain takes to recover once the input falls below the threshold."),
-        ParamDescriptor::toggle(AUTO_RELEASE, "Auto Release", false)
+        ParamDescriptor::toggle(AUTO_RELEASE, "Auto", false)
             .describe("Lets the compressor pick the release time from the signal."),
         ParamDescriptor::continuous(KNEE, "Knee", (0.0, 24.0), 6.0, ParamUnit::Decibels)
             .describe("The width of the gradual turn around the threshold."),
-        ParamDescriptor::choice(MODE, "Mode", &["Peak", "RMS", "Expand"], 0).describe(
+        ParamDescriptor::choice(MODE, "Mode", &["Peak", "RMS", "Expand"], MODE_RMS).describe(
             "Whether the detector follows short peaks, an RMS level, or expands above \
                  the threshold.",
         ),
-        ParamDescriptor::choice(ENVELOPE, "Env", &["Lin", "Log"], 0)
+        ParamDescriptor::choice(ENVELOPE, "Env", &["Lin", "Log"], ENV_LOG)
             .describe("The envelope's shape: linear, or releasing faster from deeper reductions."),
         ParamDescriptor::choice(
             LOOKAHEAD,
@@ -161,12 +165,12 @@ pub fn compressor_type() -> DeviceType {
         ),
         ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 100.0, ParamUnit::Percent)
             .describe("The balance between the compressed and the dry signal."),
-        ParamDescriptor::toggle(SC_FILTER, "SC Filter", false).describe(
+        ParamDescriptor::toggle(SC_FILTER, "SC Filter", true).describe(
             "Listens through a filter, so only a band of the detector's signal triggers it.",
         ),
-        ParamDescriptor::choice(SC_TYPE, "Type", &SC_TYPES, 0)
+        ParamDescriptor::choice(SC_TYPE, "Type", &SC_TYPES, SC_HIGH_PASS)
             .describe("The sidechain filter's shape."),
-        ParamDescriptor::continuous(SC_FREQ, "Freq", (20.0, 20_000.0), 500.0, ParamUnit::Hertz)
+        ParamDescriptor::continuous(SC_FREQ, "Freq", (20.0, 20_000.0), 80.0, ParamUnit::Hertz)
             .logarithmic()
             .describe("The sidechain filter's cutoff or center frequency."),
         ParamDescriptor::continuous(SC_RES, "Res", (0.1, 10.0), 0.71, ParamUnit::None)
@@ -187,7 +191,7 @@ pub fn compressor_type() -> DeviceType {
                             "Ratio",
                             "Attack",
                             "Release",
-                            "Auto Release",
+                            "Auto",
                             "Knee",
                             "Out",
                             "Dry/Wet",
@@ -199,46 +203,61 @@ pub fn compressor_type() -> DeviceType {
         )
 }
 
-/// The device's layout: the ratio, attack's and release's controls on the
-/// left, the gain reduction's display between them with the threshold and
-/// Out on its top edge and the knee, Makeup, Look, Dry/Wet and Mode on its
-/// bottom one, and the SC Filter's controls on the right.
+/// The device's layout as Live draws it (L-DEV-050): the SC Filter's column,
+/// Ratio, Attack, Release and Auto in a column of small knobs, the gain
+/// reduction's display with the threshold and Out on its top edge and the
+/// knee, look-ahead and envelope on its bottom one, and Makeup, the mode
+/// and Dry/Wet on the right.
 fn layout() -> DeviceLayout {
+    let at = Control::new;
     DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Band(ControlBand::stacked(
+        LayoutNode::Band(ControlBand::free(
+            62.0,
             BODY_HEIGHT,
-            &[
-                (RATIO, Widget::Knob),
-                (ATTACK, Widget::Knob),
-                (RELEASE, Widget::Knob),
-                (AUTO_RELEASE, Widget::Toggle),
-                (ENVELOPE, Widget::Chooser),
+            vec![
+                at(SC_FILTER, Widget::Toggle, 4.0, 4.0).sized(54.0, 12.0),
+                at(SC_TYPE, Widget::Chooser, 4.0, 27.0),
+                at(SC_FREQ, Widget::Knob, 11.0, 56.0),
+                at(SC_RES, Widget::Slider, 4.0, 134.0),
+            ],
+        )),
+        LayoutNode::Band(ControlBand::free(
+            48.0,
+            BODY_HEIGHT,
+            vec![
+                at(RATIO, Widget::SmallKnob, 8.0, 4.0),
+                at(ATTACK, Widget::SmallKnob, 8.0, 45.0),
+                at(RELEASE, Widget::SmallKnob, 8.0, 86.0),
+                at(AUTO_RELEASE, Widget::Toggle, 4.0, 140.0).sized(40.0, 12.0),
             ],
         )),
         LayoutNode::Cell(
-            DisplayCell::new("Gain Reduction", 180.0, BODY_HEIGHT, 1.0)
-                .with_top(ControlBand::stacked(
-                    60.0,
-                    &[(THRESHOLD, Widget::Knob), (OUT, Widget::Knob)],
+            DisplayCell::new("Gain Reduction", 234.0, BODY_HEIGHT, 1.0)
+                .with_top(ControlBand::free(
+                    234.0,
+                    29.0,
+                    vec![
+                        at(THRESHOLD, Widget::Number, 4.0, 4.0).sized(60.0, 21.0),
+                        at(OUT, Widget::Number, 70.0, 4.0).sized(60.0, 21.0),
+                    ],
                 ))
-                .with_bottom(ControlBand::stacked(
-                    96.0,
-                    &[
-                        (KNEE, Widget::Knob),
-                        (MAKEUP, Widget::Toggle),
-                        (LOOKAHEAD, Widget::Chooser),
-                        (DRY_WET, Widget::Knob),
-                        (MODE, Widget::Chooser),
+                .with_bottom(ControlBand::free(
+                    234.0,
+                    29.0,
+                    vec![
+                        at(KNEE, Widget::Number, 4.0, 4.0),
+                        at(LOOKAHEAD, Widget::Chooser, 70.0, 4.0),
+                        at(ENVELOPE, Widget::Chooser, 136.0, 4.0),
                     ],
                 )),
         ),
-        LayoutNode::Band(ControlBand::stacked(
+        LayoutNode::Band(ControlBand::free(
+            60.0,
             BODY_HEIGHT,
-            &[
-                (SC_FILTER, Widget::Toggle),
-                (SC_TYPE, Widget::Chooser),
-                (SC_FREQ, Widget::Knob),
-                (SC_RES, Widget::Knob),
+            vec![
+                at(MAKEUP, Widget::Toggle, 4.0, 4.0).sized(52.0, 12.0),
+                at(MODE, Widget::Stack(3), 4.0, 44.0).sized(52.0, 42.0),
+                at(DRY_WET, Widget::Knob, 10.0, 103.0),
             ],
         )),
     ]))

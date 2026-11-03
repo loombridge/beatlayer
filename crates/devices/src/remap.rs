@@ -3,13 +3,21 @@
 //! notes that come in to the notes that go out, then transposes the result.
 //! Notes mapped to nothing play nothing.
 //!
-//! Its look is the framework's generic layout: Beatlayer's own.
+//! Its panel is laid out as Live draws it (layout L-DEV-066): the 13 by 13
+//! grid, which the Map parameters are the columns of, beside the choosers,
+//! Transpose, Fold, Lowest and Range.
 
 use bl_engine::{DeviceType, NoteBuffer, NoteEvent, NoteKind, Registry};
-use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
+use bl_model::device_layout::{
+    BODY_HEIGHT, Control, ControlBand, DisplayCell, Heading, LayoutNode, Widget,
+};
+use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
-use crate::midi_fx::{Key, Router, scale_choices, scale_named, use_current_scale, value};
+use crate::midi_fx::{
+    Key, Router, key_choice, scale_choices, scale_named, use_current_scale, value,
+};
+use crate::panel::{inset, spacer};
 
 /// The Scale device type's id.
 pub const REMAP: &str = "beatlayer.remap";
@@ -33,7 +41,11 @@ pub const USE_SCALE: ParamId = ParamId(5);
 pub const MAP: ParamId = ParamId(6);
 
 /// The twelve columns.
-const COLUMNS: u32 = 12;
+/// How many notes of an octave the grid has columns for.
+pub const COLUMNS: u32 = 12;
+
+/// The name of the grid's display cell.
+pub const GRID_CELL: &str = "Scale Map";
 
 /// The chooser of the grid: User, the grid a person edits, then a scale from
 /// the list (the scale-map spec, R10). A parameter after the columns, so a
@@ -51,6 +63,52 @@ pub const fn map(column: u32) -> ParamId {
     ParamId(MAP.0 + column)
 }
 
+/// Scale's panel as Live draws it: the grid, whose columns the Map
+/// parameters are, and the choosers, Transpose, Fold, Lowest and Range at its
+/// right.
+fn layout() -> DeviceLayout {
+    let at = |param, widget, x, y| Control::new(param, widget, x, y);
+    let map: Vec<ParamId> = (0..COLUMNS).map(map).collect();
+    let right = ControlBand::free(
+        86.0,
+        BODY_HEIGHT - 15.0,
+        vec![
+            at(BASE, Widget::Chooser, 6.0, 7.0)
+                .sized(76.0, 12.0)
+                .unnamed(),
+            at(SCALE_NAME, Widget::Chooser, 6.0, 22.0)
+                .sized(76.0, 12.0)
+                .unnamed(),
+            at(TRANSPOSE, Widget::SmallKnob, 26.0, 41.0),
+            at(FOLD, Widget::Toggle, 26.0, 95.0),
+            at(LOWEST, Widget::Number, 5.0, 117.0).sized(36.0, 21.0),
+            at(RANGE, Widget::Slider, 45.0, 117.0).sized(35.0, 21.0),
+        ],
+    );
+    DeviceLayout::new(LayoutNode::Row(vec![
+        LayoutNode::Column(vec![
+            spacer(0.0, 4.0),
+            inset(DisplayCell::new(GRID_CELL, 135.0, 146.0, 1.0).driving(&map)),
+        ]),
+        LayoutNode::Column(vec![
+            spacer(0.0, 3.0),
+            LayoutNode::Heading(Heading::new("In   Out", 86.0)),
+            LayoutNode::Band(right),
+        ]),
+    ]))
+}
+
+/// The row each of the twelve columns sends its note to, as the grid shows
+/// it: the nearest note of the scale `scale_name` chooses (an entry of the
+/// Scale Name chooser), or, for User, what `user` gives for the column.
+#[must_use]
+pub fn rows(scale_name: usize, user: impl Fn(u32) -> i32) -> [i32; COLUMNS as usize] {
+    match scale_named(scale_name) {
+        Some(name) => nearest_rows(name.steps()),
+        None => core::array::from_fn(|c| user(c as u32)),
+    }
+}
+
 /// Scale's device type.
 #[must_use]
 pub fn remap_type() -> DeviceType {
@@ -62,9 +120,9 @@ pub fn remap_type() -> DeviceType {
         ParamDescriptor::toggle(FOLD, "Fold", false).describe(
             "Moves a mapped note by an octave when that brings it nearer the note that came in.",
         ),
-        ParamDescriptor::integer(LOWEST, "Lowest", (0, 127), 0, ParamUnit::None)
+        key_choice(LOWEST, "Lowest", 0)
             .describe("The lowest key that is remapped; lower keys pass through."),
-        ParamDescriptor::integer(RANGE, "Range", (0, 127), 127, ParamUnit::None)
+        ParamDescriptor::integer(RANGE, "Range", (0, 128), 128, ParamUnit::Semitones)
             .describe("How many keys above Lowest are remapped; higher keys pass through."),
         ParamDescriptor::toggle(USE_SCALE, "Use Current Scale", false).describe(
             "Takes Base and Scale Name from the current scale, and shows them. Every note stays \
@@ -90,6 +148,7 @@ pub fn remap_type() -> DeviceType {
     DeviceType::native(REMAP, "Scale", DeviceRole::MidiEffect).with_description(
         DeviceDescription::new(params)
             .with_title_switch(USE_SCALE)
+            .with_layout(layout())
             .with_banks(&[
                 (
                     "Scale",

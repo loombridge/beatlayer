@@ -3,10 +3,14 @@
 //! divisions with swing or in free milliseconds, with per-repeat transposition,
 //! velocity decay, feedback, Thru/Mute input modes, and MPE expression feedback.
 //!
-//! Its look is the framework's generic layout: Beatlayer's own.
+//! Its panel is laid out as Live draws it (layout L-DEV-099): the delay time
+//! as a grid of eight buttons with Sync, Swing, Input and Pitch, the Delay and
+//! Fback knobs, and the MPE button with its three amounts in a column at the
+//! right.
 
 use bl_engine::{DeviceType, NoteBuffer, NoteEvent, NoteExpression, NoteKind, Registry};
-use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
+use bl_model::device_layout::{BODY_HEIGHT, Control, ControlBand, LayoutNode, Widget};
+use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::midi_fx::{Key, Router, value};
@@ -14,13 +18,15 @@ use crate::midi_fx::{Key, Router, value};
 /// The Note Echo device type's ID.
 pub const NOTE_ECHO: &str = "beatlayer.note_echo";
 
-/// Sync delay time to beat divisions (true) vs free milliseconds (false).
+/// Sync delay time to beat divisions (1, Sync) vs free milliseconds (0,
+/// Time).
 pub const SYNC: ParamId = ParamId(0);
-/// Delay time in sixteenth notes (1 to 16).
+/// Delay time in sixteenth notes: one of [`TIMES`], the button of the grid.
 pub const TIME_SYNC: ParamId = ParamId(1);
 /// Swing percentage altering delay timing.
 pub const SWING: ParamId = ParamId(2);
-/// Free delay time in milliseconds.
+/// Free delay time in milliseconds: the box beside the Sync button while it
+/// reads Time.
 pub const TIME_MS: ParamId = ParamId(3);
 /// Input playback mode: Thru (0) or Mute (1).
 pub const INPUT: ParamId = ParamId(4);
@@ -39,29 +45,77 @@ pub const SLIDE_FEEDBACK: ParamId = ParamId(10);
 /// Feedback percentage for per-note pitch bend expression data.
 pub const PITCH_BEND_FEEDBACK: ParamId = ParamId(11);
 
+/// The delay times the grid's buttons set, in sixteenth notes, in order.
+pub const TIMES: [u8; 8] = [1, 2, 3, 4, 5, 6, 8, 16];
+
+/// The names of Sync's two states: the button reads Time while it is off.
+pub const SYNC_MODES: [&str; 2] = ["Time", "Sync"];
+
 /// The Input mode choices.
 pub const INPUT_MODES: [&str; 2] = ["Thru", "Mute"];
 
 const MAX_ACTIVE: usize = 64;
 const MAX_REPEATS: usize = 16;
 
+/// Note Echo's panel as Live draws it.
+fn layout() -> DeviceLayout {
+    let at = |param, widget, x, y| Control::new(param, widget, x, y);
+    DeviceLayout::new(LayoutNode::Band(ControlBand::free(
+        151.0,
+        BODY_HEIGHT,
+        vec![
+            at(
+                TIME_SYNC,
+                Widget::Grid {
+                    columns: 4,
+                    rows: 2,
+                },
+                6.0,
+                5.5,
+            )
+            .titled()
+            .greyed_while(SYNC, 0),
+            at(SYNC, Widget::Mode, 5.0, 45.0),
+            // Swing's box is the delay time while Sync is off.
+            at(TIME_MS, Widget::Number, 52.0, 45.0)
+                .sized(45.0, 12.0)
+                .unnamed(),
+            at(INPUT, Widget::Stack(2), 5.0, 63.0)
+                .sized(36.0, 36.0)
+                .titled(),
+            at(PITCH, Widget::Number, 52.0, 65.0).sized(45.0, 21.0),
+            at(VELOCITY_DECAY, Widget::SmallKnob, 11.0, 107.0),
+            at(FEEDBACK, Widget::SmallKnob, 58.0, 107.0),
+            at(MPE, Widget::Toggle, 110.0, 14.5),
+            at(PRESS_FEEDBACK, Widget::Number, 110.0, 34.0).sized(35.0, 21.0),
+            at(SLIDE_FEEDBACK, Widget::Number, 110.0, 63.0).sized(35.0, 21.0),
+            at(PITCH_BEND_FEEDBACK, Widget::Number, 110.0, 92.0).sized(35.0, 21.0),
+        ],
+    )))
+}
+
 /// Note Echo's device type.
 #[must_use]
 pub fn note_echo_type() -> DeviceType {
     DeviceType::native(NOTE_ECHO, "Note Echo", DeviceRole::MidiEffect).with_description(
         DeviceDescription::new(vec![
-            ParamDescriptor::toggle(SYNC, "Sync", true)
+            ParamDescriptor::choice(SYNC, "Sync", &SYNC_MODES, 1)
                 .describe("Syncs delay time to beat divisions rather than milliseconds."),
-            ParamDescriptor::integer(TIME_SYNC, "Time", (1, 16), 4, ParamUnit::None)
-                .describe("Delay time in sixteenth notes."),
+            ParamDescriptor::choice(
+                TIME_SYNC,
+                "Delay Time",
+                &["1", "2", "3", "4", "5", "6", "8", "16"],
+                1,
+            )
+            .describe("Delay time in sixteenth notes."),
             ParamDescriptor::continuous(SWING, "Swing", (-50.0, 50.0), 0.0, ParamUnit::Percent)
-                .decimals(0)
+                .decimals(2)
                 .describe("Swing offset adjusting delay timing."),
             ParamDescriptor::continuous(
                 TIME_MS,
                 "Time Free",
-                (1.0, 5_000.0),
-                250.0,
+                (1.0, 2_000.0),
+                500.0,
                 ParamUnit::Milliseconds,
             )
             .logarithmic()
@@ -75,27 +129,21 @@ pub fn note_echo_type() -> DeviceType {
                 .describe("Transposition in semitones applied to each successive echo repeat."),
             ParamDescriptor::continuous(
                 VELOCITY_DECAY,
-                "Decay",
+                "Delay",
                 (0.0, 100.0),
-                80.0,
+                100.0,
                 ParamUnit::Percent,
             )
             .decimals(0)
             .describe("Velocity scaling applied to each echo repetition."),
-            ParamDescriptor::continuous(
-                FEEDBACK,
-                "Feedback",
-                (0.0, 100.0),
-                60.0,
-                ParamUnit::Percent,
-            )
-            .decimals(0)
-            .describe("Amount of output signal fed back into the delay line."),
+            ParamDescriptor::continuous(FEEDBACK, "Fback", (0.0, 100.0), 50.0, ParamUnit::Percent)
+                .decimals(1)
+                .describe("Amount of output signal fed back into the delay line."),
             ParamDescriptor::toggle(MPE, "MPE", false)
                 .describe("Echoes incoming MPE expression data alongside notes."),
             ParamDescriptor::continuous(
                 PRESS_FEEDBACK,
-                "Press Fback",
+                "Press",
                 (0.0, 100.0),
                 100.0,
                 ParamUnit::Percent,
@@ -104,7 +152,7 @@ pub fn note_echo_type() -> DeviceType {
             .describe("Feedback decay for per-note pressure expressions."),
             ParamDescriptor::continuous(
                 SLIDE_FEEDBACK,
-                "Slide Fback",
+                "Slide",
                 (0.0, 100.0),
                 100.0,
                 ParamUnit::Percent,
@@ -113,7 +161,7 @@ pub fn note_echo_type() -> DeviceType {
             .describe("Feedback decay for per-note slide expressions."),
             ParamDescriptor::continuous(
                 PITCH_BEND_FEEDBACK,
-                "PB Fback",
+                "Note PB",
                 (0.0, 100.0),
                 100.0,
                 ParamUnit::Percent,
@@ -121,21 +169,23 @@ pub fn note_echo_type() -> DeviceType {
             .decimals(0)
             .describe("Feedback decay for per-note pitch bend expressions."),
         ])
+        .with_alternate_at((SYNC, 1), TIME_MS, SWING)
+        .with_layout(layout())
         .with_banks(&[
             (
                 "Echo",
                 &[
                     "Sync",
-                    "Time",
+                    "Delay Time",
                     "Time Free",
                     "Swing",
-                    "Feedback",
-                    "Decay",
+                    "Fback",
+                    "Delay",
                     "Pitch",
                     "Input",
                 ],
             ),
-            ("MPE", &["MPE", "Press Fback", "Slide Fback", "PB Fback"]),
+            ("MPE", &["MPE", "Press", "Slide", "Note PB"]),
         ]),
     )
 }
@@ -210,7 +260,8 @@ impl NativeDevice for NoteEcho {
 
         let is_sync = value(params, SYNC) >= 0.5;
         let delay_frames = if is_sync {
-            let sixteenths = value(params, TIME_SYNC).clamp(1.0, 16.0);
+            let sixteenths =
+                f64::from(TIMES[(value(params, TIME_SYNC) as usize).min(TIMES.len() - 1)]);
             let swing = value(params, SWING) / 100.0;
             let beats = sixteenths * 0.25 * (1.0 + swing);
             (beats * 60.0 / bpm * sample_rate).round().max(1.0) as i64

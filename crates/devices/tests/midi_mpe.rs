@@ -60,13 +60,13 @@ fn pressure_passes_the_identity_curve_unchanged() {
 #[test]
 fn min_and_max_place_the_output_range() {
     let params = &[
-        (source_min(PRESS as u32), 0.2),
-        (source_max(PRESS as u32), 0.8),
+        (source_min(PRESS as u32), 25.0),
+        (source_max(PRESS as u32), 102.0),
     ];
     let low = shape_run(params, &[expression(4, NoteExpression::Pressure, 0.0)]);
     let high = shape_run(params, &[expression(4, NoteExpression::Pressure, 1.0)]);
-    assert!((pressure_value(&low).unwrap() - 0.2).abs() < 1e-6);
-    assert!((pressure_value(&high).unwrap() - 0.8).abs() < 1e-6);
+    assert!((pressure_value(&low).unwrap() - 25.0 / 127.0).abs() < 1e-6);
+    assert!((pressure_value(&high).unwrap() - 102.0 / 127.0).abs() < 1e-6);
 }
 
 // Spec: mpe-shaper R3. Curve A bends the linear curve.
@@ -87,8 +87,8 @@ fn curve_a_bends_the_linear_curve() {
 fn the_s_curve_joins_two_segments() {
     let params = &[
         (source_curve(PRESS as u32), 1.0),
-        (source_x(PRESS as u32), 0.5),
-        (source_y(PRESS as u32), 0.25),
+        (source_x(PRESS as u32), 64.0),
+        (source_y(PRESS as u32), 32.0),
     ];
     let out = shape_run(params, &[expression(4, NoteExpression::Pressure, 0.25)]);
     // The first segment runs from 0 to (X, Y): 0.25 of the way is half of Y.
@@ -169,7 +169,7 @@ fn centered_slide_reads_distance_from_the_middle() {
 #[test]
 fn notepb_scales_the_bend_and_converts_to_pitch_bend() {
     let out = shape_run(
-        &[(PITCH_RANGE, 2.0), (NOTEPB_TO_PB, 1.0)],
+        &[(PITCH_RANGE, 1.0), (NOTEPB_TO_PB, 1.0)],
         &[expression(4, NoteExpression::Bend, 0.5)],
     );
     let value = out.iter().find_map(|event| match event.kind {
@@ -231,9 +231,9 @@ fn smoothing_moves_over_the_rise_time() {
 // its frame.
 #[test]
 fn press_default_gives_a_note_pressure() {
-    let out = shape_run(&[(PRESS_DEFAULT, 1.0), (PRESS_DEFAULT_VALUE, 0.5)], &[]);
+    let out = shape_run(&[(PRESS_DEFAULT, 1.0), (PRESS_DEFAULT_VALUE, 64.0)], &[]);
     assert!(
-        (pressure_value(&out).unwrap() - 0.5).abs() < 1e-6,
+        (pressure_value(&out).unwrap() - 64.0 / 127.0).abs() < 1e-6,
         "{out:?}"
     );
 }
@@ -246,7 +246,7 @@ fn slide_defaults_on_note_on() {
         &[
             (SLIDE_MODE, 2.0),
             (SLIDE_DEFAULT, 1.0),
-            (SLIDE_DEFAULT_VALUE, 0.75),
+            (SLIDE_DEFAULT_VALUE, 95.0),
         ],
         &[],
     );
@@ -257,7 +257,7 @@ fn slide_defaults_on_note_on() {
         } => Some(value),
         _ => None,
     });
-    assert!((value.unwrap() - 0.75).abs() < 1e-6, "{out:?}");
+    assert!((value.unwrap() - 95.0 / 127.0).abs() < 1e-6, "{out:?}");
 }
 
 // Spec: mpe-shaper R13. Slide's Ons mode sends the first slide a note
@@ -354,16 +354,11 @@ fn the_zero_to_one_parameters_read_and_parse_as_unitless_fractions() {
             .find(|d| d.name == name)
             .unwrap_or_else(|| panic!("{name} is described"))
     };
-    for name in [
-        "Press Default Value",
-        "Slide Default Value",
-        "Press Max",
-        "Press Curve A",
-    ] {
+    for name in ["Press Curve A", "Press Curve B"] {
         let d = param(name);
         assert!(!d.format(d.default).ends_with('%'), "{name} has no unit");
         assert_eq!(d.parse("0.5"), Some(0.5), "{name} parses 0.5 as half");
     }
-    let d = param("Press Default Value");
-    assert_eq!(d.format(d.default), "0.50");
+    let d = param("Press Curve B");
+    assert_eq!(d.format(d.default), "0.00");
 }

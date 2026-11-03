@@ -9,7 +9,7 @@
 
 Random moves some of the notes that reach it by a random number of steps. Chance says how often a note moves, as a dry/wet balance for the randomness. Choices is how many different distances a note may move by and Interval is the step between them, so together they set how far a note can go. Mode Random picks a distance with no fixed order; Mode Alt goes through the distances in turn. Sign says whether notes move up (Add), down (Sub), or either way (Bi). Each note ends on the key it was started on, and its expressions follow it.
 
-The device takes Live's name, Random; its look is the device framework's generic controls. Random choices come from a generator seeded from the device, so an offline render repeats. The Use Current Scale switch in its title bar makes the distances count degrees of the device's current scale ([scales.md](scales.md)), so the notes Random moves land in the scale. This spec covers the device only.
+The device takes Live's name, Random; its panel is laid out as Live draws it (layout L-DEV-065). Random choices come from a generator seeded from the device, so an offline render repeats. The Use Current Scale switch in its title bar makes the distances count degrees of the device's current scale ([scales.md](scales.md)), so the notes Random moves land in the scale. This spec covers the device only.
 
 ## Sources
 
@@ -55,7 +55,7 @@ The device takes Live's name, Random; its look is the device framework's generic
 
 ## Defaults, ranges and details
 
-- A new Random starts at Chance 100 %, Choices 24, Interval 1 semitone, Mode Random, Sign Add and Use Current Scale off. The manual states only the Mode and Sign defaults; the rest are Beatlayer's.
-- Interval runs from 1 to 24 semitones. The manual doesn't give its range.
+- A new Random starts at Chance 0 %, Choices 12, Interval 1, Mode Random, Sign Add and Use Current Scale off, as Live's panel reads in a new set (observed in Live 12.4.16, 2 November 2026).
+- Interval runs from 1 to 24 and reads without a unit, as Live's does; it counts semitones, or degrees with Use Current Scale. The manual doesn't give its range. The lights for the sign of the last move (+, 0, −) are not drawn: they need the engine to publish a device's display state.
 - Whether a distance of 0 is among the choices is not stated; here the distances are 1 to Choices times Interval, and "0" is a note Chance left alone.
 - The three direction lights are not drawn: they need the engine to publish a device's display state.

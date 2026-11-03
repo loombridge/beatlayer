@@ -12,11 +12,18 @@
 //!
 //! What the manual leaves open — the exact curve laws, the smoothing's time
 //! constants, and what Default does to a note that carries no expression — is
-//! Beatlayer's own, written into the spec. Its look is the framework's
-//! generic layout.
+//! Beatlayer's own, written into the spec. Its panel is laid out as Live
+//! draws it (layout L-DEV-100): a column of tabs for the three sources with
+//! the shown source's curve knobs under them, a transfer curve whose foot
+//! holds the curve type, Min, Max, X and Y, and, in the expanded part, the
+//! shown source's settings.
 
 use bl_engine::{DeviceType, NoteEvent, NoteExpression, NoteKind, Registry};
-use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
+use bl_model::device_layout::{
+    BODY_HEIGHT, Control, ControlBand, DisplayCell, Glyph, LayoutNode, Page, PageStyle, PagesNode,
+    TitlePart, Widget,
+};
+use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::midi_fx::value;
@@ -122,6 +129,8 @@ pub const NOTEPB_TO_PB: ParamId = ParamId(46);
 
 /// The curve type choices.
 pub const CURVES: [&str; 2] = ["Linear", "S-shaped"];
+/// The Pitch Range choices: the factors the bend is scaled by.
+pub const PITCH_RANGES: [&str; 4] = ["1x", "2x", "4x", "8x"];
 /// The slide mode choices.
 pub const SLIDE_MODES: [&str; 3] = ["Abs", "Rel", "Ons"];
 
@@ -130,87 +139,199 @@ fn source_params(s: u32, label: &str) -> Vec<ParamDescriptor> {
         ParamDescriptor::toggle(source_on(s), label, true).describe(&format!(
             "Whether {label} is shaped. Off, its data passes through."
         )),
-        ParamDescriptor::choice(source_curve(s), &format!("{label} Curve"), &CURVES, 0).describe(
-            &format!("{label}'s curve: a linear ramp or an S-shaped one."),
-        ),
+        ParamDescriptor::choice(
+            source_curve(s),
+            &format!("{label} Curve"),
+            &CURVES,
+            // NotePB starts with the S-shaped curve, whose breakpoint is
+            // its centre.
+            usize::from(s == NOTE_PB as u32),
+        )
+        .describe(&format!(
+            "{label}'s curve: a linear ramp or an S-shaped one."
+        )),
         ParamDescriptor::continuous(
             source_curve_a(s),
             &format!("{label} Curve A"),
-            (0.0, 1.0),
-            0.5,
-            ParamUnit::None,
-        )
-        .decimals(2)
-        .describe(&format!("{label}'s curve bend, 0.5 leaving it straight.")),
-        ParamDescriptor::continuous(
-            source_curve_b(s),
-            &format!("{label} Curve B"),
-            (0.0, 1.0),
-            0.5,
-            ParamUnit::None,
-        )
-        .decimals(2)
-        .describe(&format!(
-            "{label}'s second S-shaped segment's bend, when the segments aren't linked."
-        )),
-        ParamDescriptor::toggle(source_link(s), &format!("{label} Curve Link"), true).describe(
-            &format!("Whether {label}'s two S-shaped segments move together."),
-        ),
-        ParamDescriptor::continuous(
-            source_min(s),
-            &format!("{label} Min"),
-            (0.0, 1.0),
+            (-1.0, 1.0),
             0.0,
             ParamUnit::None,
         )
         .decimals(2)
-        .describe(&format!("The lowest value {label} comes out as.")),
+        .describe(&format!("{label}'s curve bend, 0 leaving it straight.")),
         ParamDescriptor::continuous(
+            source_curve_b(s),
+            &format!("{label} Curve B"),
+            (-1.0, 1.0),
+            0.0,
+            ParamUnit::None,
+        )
+        .decimals(2)
+        .describe(&format!(
+            "{label}'s second S-shaped segment's bend, 0 leaving it straight, when the \
+             segments aren't linked."
+        )),
+        ParamDescriptor::toggle(source_link(s), &format!("{label} Curve Link"), true).describe(
+            &format!("Whether {label}'s two S-shaped segments move together."),
+        ),
+        ParamDescriptor::integer(
+            source_min(s),
+            &format!("{label} Min"),
+            (0, 127),
+            0,
+            ParamUnit::None,
+        )
+        .describe(&format!("The lowest value {label} comes out as, of 127.")),
+        ParamDescriptor::integer(
             source_max(s),
             &format!("{label} Max"),
-            (0.0, 1.0),
-            1.0,
+            (0, 127),
+            127,
             ParamUnit::None,
         )
-        .decimals(2)
-        .describe(&format!("The highest value {label} comes out as.")),
-        ParamDescriptor::continuous(
+        .describe(&format!("The highest value {label} comes out as, of 127.")),
+        ParamDescriptor::integer(
             source_x(s),
             &format!("{label} X"),
-            (0.0, 1.0),
-            0.5,
+            (0, 127),
+            64,
             ParamUnit::None,
         )
-        .decimals(2)
-        .describe(&format!("{label}'s S-shaped breakpoint along the input.")),
-        ParamDescriptor::continuous(
+        .describe(&format!(
+            "{label}'s S-shaped breakpoint along the input, of 127."
+        )),
+        ParamDescriptor::integer(
             source_y(s),
             &format!("{label} Y"),
-            (0.0, 1.0),
-            0.5,
+            (0, 127),
+            64,
             ParamUnit::None,
         )
-        .decimals(2)
-        .describe(&format!("{label}'s S-shaped breakpoint's output.")),
+        .describe(&format!("{label}'s S-shaped breakpoint's output, of 127.")),
         ParamDescriptor::toggle(source_smooth(s), &format!("{label} Smooth"), false)
             .describe(&format!("Whether {label}'s output is smoothed.")),
         ParamDescriptor::continuous(
             source_rise(s),
             &format!("{label} Rise"),
             (0.0, 1000.0),
-            50.0,
+            15.0,
             ParamUnit::Milliseconds,
         )
+        .decimals(1)
         .describe(&format!("How long {label} takes to rise to a new value.")),
         ParamDescriptor::continuous(
             source_fall(s),
             &format!("{label} Fall"),
             (0.0, 1000.0),
-            50.0,
+            15.0,
             ParamUnit::Milliseconds,
         )
+        .decimals(1)
         .describe(&format!("How long {label} takes to fall to a new value.")),
     ]
+}
+
+/// The name of the pages node whose tabs choose the source.
+pub const SOURCE_PAGES: &str = "Source";
+
+/// The source tabs' names, in order.
+pub const SOURCE_NAMES: [&str; 3] = ["Press", "Slide", "NotePB"];
+
+/// The name of the pages node of the settings, which follows the source tabs.
+pub const SETTINGS_PAGES: &str = "Source Settings";
+
+/// The width of the settings part, in points.
+const SETTINGS_WIDTH: f32 = 88.0;
+
+/// MPE Control's panel as Live draws it: the source tabs with the shown
+/// source's curve knobs under them, the transfer curve with its curve type,
+/// Min, Max, X and Y at its foot, and, in the expanded part, the settings of
+/// the shown source.
+fn layout() -> DeviceLayout {
+    let at = |param, widget, x, y| Control::new(param, widget, x, y);
+    let pages = (0..SOURCES)
+        .map(|s| {
+            let foot = ControlBand::free(
+                160.0,
+                25.0,
+                vec![
+                    at(source_curve(s), Widget::IconSegments(2), 2.0, 11.0),
+                    at(source_min(s), Widget::Number, 52.0, 2.0).sized(24.0, 21.0),
+                    at(source_max(s), Widget::Number, 78.0, 2.0).sized(26.0, 21.0),
+                    at(source_x(s), Widget::Number, 106.0, 2.0).sized(24.0, 21.0),
+                    at(source_y(s), Widget::Number, 132.0, 2.0).sized(24.0, 21.0),
+                ],
+            );
+            // The second knob and the link between the two show with the
+            // S-shaped curve, whose two segments they bend.
+            let s_only = |control: Control| control.hidden_while(source_curve(s), 0);
+            let knobs = ControlBand::free(
+                52.0,
+                BODY_HEIGHT - 48.0,
+                vec![
+                    at(source_curve_a(s), Widget::SmallKnob, 10.0, 8.0).unnamed(),
+                    s_only(at(source_link(s), Widget::IconToggle, 17.0, 52.0))
+                        .with_glyph(Glyph::Link)
+                        .sized(18.0, 12.0),
+                    s_only(at(source_curve_b(s), Widget::SmallKnob, 10.0, 70.0).unnamed()),
+                ],
+            );
+            Page::new(
+                SOURCE_NAMES[s as usize],
+                LayoutNode::Cell(
+                    DisplayCell::new("Transfer Curve", 160.0, BODY_HEIGHT, 1.0).with_bottom(foot),
+                ),
+            )
+            .with_section(LayoutNode::Band(knobs))
+        })
+        .collect();
+    DeviceLayout::new(LayoutNode::Pages(PagesNode::new(
+        SOURCE_PAGES,
+        PageStyle::Column,
+        pages,
+    )))
+    .with_expanded(LayoutNode::Pages(PagesNode::following(
+        SETTINGS_PAGES,
+        SOURCE_PAGES,
+        (0..SOURCES)
+            .map(|s| Page::new(SOURCE_NAMES[s as usize], LayoutNode::Band(settings(s))))
+            .collect(),
+    )))
+    .with_triangle_right_when_shown()
+    .with_title(vec![TitlePart::Mpe])
+}
+
+/// What the settings show for source `s`: Smooth, Rise and Fall, then what
+/// the source has of its own, then its conversion.
+fn settings(s: u32) -> ControlBand {
+    let at = |param, widget, y| Control::new(param, widget, 6.0, y).sized(76.0, 12.0);
+    let tick = |param, y| at(param, Widget::Check, y);
+    let mut controls = vec![
+        tick(source_smooth(s), 3.0),
+        at(source_rise(s), Widget::Inline, 18.0),
+        at(source_fall(s), Widget::Inline, 33.0),
+    ];
+    let own = |param, widget, y, height| Control::new(param, widget, 6.0, y).sized(76.0, height);
+    match s as usize {
+        PRESS => controls.extend([
+            tick(PRESS_DEFAULT, 62.0).sized(50.0, 12.0),
+            Control::new(PRESS_DEFAULT_VALUE, Widget::Bare, 58.0, 62.0).sized(26.0, 12.0),
+            tick(SWAP_TO_SLIDE, 79.0),
+            tick(PRESS_TO_AT, 130.0),
+        ]),
+        SLIDE => controls.extend([
+            tick(SLIDE_DEFAULT, 62.0).sized(50.0, 12.0),
+            Control::new(SLIDE_DEFAULT_VALUE, Widget::Bare, 58.0, 62.0).sized(26.0, 12.0),
+            tick(SLIDE_CENTERED, 79.0),
+            own(SLIDE_MODE, Widget::Segments(3), 98.0, 21.0).titled(),
+            tick(SLIDE_TO_MOD, 130.0),
+        ]),
+        _ => controls.extend([
+            own(PITCH_RANGE, Widget::Segments(4), 65.0, 21.0).titled(),
+            tick(NOTEPB_TO_PB, 130.0),
+        ]),
+    }
+    ControlBand::free(SETTINGS_WIDTH, BODY_HEIGHT, controls)
 }
 
 /// MPE Control's device type.
@@ -222,14 +343,13 @@ pub fn mpe_control_type() -> DeviceType {
     params.extend([
         ParamDescriptor::toggle(PRESS_DEFAULT, "Press Default", false)
             .describe("Gives a note that carries no pressure the Press default value."),
-        ParamDescriptor::continuous(
+        ParamDescriptor::integer(
             PRESS_DEFAULT_VALUE,
             "Press Default Value",
-            (0.0, 1.0),
-            0.5,
+            (0, 127),
+            0,
             ParamUnit::None,
         )
-        .decimals(2)
         .describe("The pressure a note without one gets, while Press Default is on."),
         ParamDescriptor::toggle(SWAP_TO_SLIDE, "Swap to Slide", false)
             .describe("Sends what pressure carried as slide instead."),
@@ -237,14 +357,13 @@ pub fn mpe_control_type() -> DeviceType {
             .describe("Converts per-note pressure to channel pressure."),
         ParamDescriptor::toggle(SLIDE_DEFAULT, "Slide Default", false)
             .describe("Gives a note that carries no slide the Slide default value."),
-        ParamDescriptor::continuous(
+        ParamDescriptor::integer(
             SLIDE_DEFAULT_VALUE,
             "Slide Default Value",
-            (0.0, 1.0),
-            0.5,
+            (0, 127),
+            0,
             ParamUnit::None,
         )
-        .decimals(2)
         .describe("The slide a note without one gets, while Slide Default is on."),
         ParamDescriptor::toggle(SLIDE_CENTERED, "Slide Centered", false).describe(
             "Reads slide as distance from the middle: the centre is zero and the ends are one.",
@@ -255,91 +374,91 @@ pub fn mpe_control_type() -> DeviceType {
         ),
         ParamDescriptor::toggle(SLIDE_TO_MOD, "Slide to Mod", false)
             .describe("Converts slide to the mod wheel, CC 1."),
-        ParamDescriptor::continuous(PITCH_RANGE, "Pitch Range", (0.1, 4.0), 1.0, ParamUnit::None)
-            .describe(
-                "Scales per-note pitch bend, for a controller and instrument whose ranges differ.",
-            ),
+        ParamDescriptor::choice(PITCH_RANGE, "Pitch Range", &PITCH_RANGES, 0).describe(
+            "Scales per-note pitch bend by 1, 2, 4 or 8, for a controller and instrument whose \
+             ranges differ.",
+        ),
         ParamDescriptor::toggle(NOTEPB_TO_PB, "NotePB to PB", false)
             .describe("Converts per-note pitch bend to a channel pitch bend."),
     ]);
     DeviceType::native(MPE_CONTROL, "MPE Control", DeviceRole::MidiEffect).with_description(
-        DeviceDescription::new(params).with_banks(&[
-            (
-                "Pressure",
-                &[
-                    "Press",
-                    "Press Min",
-                    "Press Max",
-                    "Press Smooth",
-                    "Press Rise",
-                    "Press Fall",
-                    "Press Default",
-                    "Press Default Value",
-                ],
-            ),
-            (
-                "Pressure Curve",
-                &[
-                    "Press Curve",
-                    "Press Curve A",
-                    "Press Curve B",
-                    "Press Curve Link",
-                    "Press X",
-                    "Press Y",
-                ],
-            ),
-            (
-                "Slide",
-                &[
+        DeviceDescription::new(params)
+            .with_menu_options(&[source_on(0), source_on(1), source_on(2)])
+            .with_layout(layout())
+            .with_banks(&[
+                (
+                    "Pressure",
+                    &[
+                        "Press Min",
+                        "Press Max",
+                        "Press Smooth",
+                        "Press Rise",
+                        "Press Fall",
+                        "Press Default",
+                        "Press Default Value",
+                    ],
+                ),
+                (
+                    "Pressure Curve",
+                    &[
+                        "Press Curve",
+                        "Press Curve A",
+                        "Press Curve B",
+                        "Press Curve Link",
+                        "Press X",
+                        "Press Y",
+                    ],
+                ),
+                (
                     "Slide",
-                    "Slide Min",
-                    "Slide Max",
-                    "Slide Smooth",
-                    "Slide Rise",
-                    "Slide Fall",
-                    "Slide Default",
-                    "Slide Default Value",
-                ],
-            ),
-            (
-                "Slide Curve",
-                &[
+                    &[
+                        "Slide Min",
+                        "Slide Max",
+                        "Slide Smooth",
+                        "Slide Rise",
+                        "Slide Fall",
+                        "Slide Default",
+                        "Slide Default Value",
+                    ],
+                ),
+                (
                     "Slide Curve",
-                    "Slide Curve A",
-                    "Slide Curve B",
-                    "Slide Curve Link",
-                    "Slide X",
-                    "Slide Y",
-                    "Slide Centered",
-                    "Slide Mode",
-                ],
-            ),
-            (
-                "Note Pitch Bend",
-                &[
-                    "NotePB",
-                    "NotePB Min",
-                    "NotePB Max",
-                    "NotePB Smooth",
-                    "NotePB Rise",
-                    "NotePB Fall",
-                    "Pitch Range",
-                    "NotePB to PB",
-                ],
-            ),
-            (
-                "Note PB Curve",
-                &[
-                    "NotePB Curve",
-                    "NotePB Curve A",
-                    "NotePB Curve B",
-                    "NotePB Curve Link",
-                    "NotePB X",
-                    "NotePB Y",
-                ],
-            ),
-            ("Routing", &["Swap to Slide", "Press to AT", "Slide to Mod"]),
-        ]),
+                    &[
+                        "Slide Curve",
+                        "Slide Curve A",
+                        "Slide Curve B",
+                        "Slide Curve Link",
+                        "Slide X",
+                        "Slide Y",
+                        "Slide Centered",
+                        "Slide Mode",
+                    ],
+                ),
+                (
+                    "Note Pitch Bend",
+                    &[
+                        "NotePB Min",
+                        "NotePB Max",
+                        "NotePB Smooth",
+                        "NotePB Rise",
+                        "NotePB Fall",
+                        "Pitch Range",
+                        "NotePB to PB",
+                    ],
+                ),
+                (
+                    "Note PB Curve",
+                    &[
+                        "NotePB Curve",
+                        "NotePB Curve A",
+                        "NotePB Curve B",
+                        "NotePB Curve Link",
+                        "NotePB X",
+                        "NotePB Y",
+                    ],
+                ),
+                ("Routing", &["Swap to Slide", "Press to AT", "Slide to Mod"]),
+            ]),
     )
 }
 
@@ -424,13 +543,14 @@ impl Source {
         Self {
             on: value(params, source_on(s)) >= 0.5,
             curved: value(params, source_curve(s)) >= 0.5,
-            a: value(params, source_curve_a(s)),
-            b: value(params, source_curve_b(s)),
+            // The curve laws take a bend from 0 to 1, 0.5 straight.
+            a: (value(params, source_curve_a(s)) + 1.0) / 2.0,
+            b: (value(params, source_curve_b(s)) + 1.0) / 2.0,
             link: value(params, source_link(s)) >= 0.5,
-            min: value(params, source_min(s)),
-            max: value(params, source_max(s)),
-            x: value(params, source_x(s)),
-            y: value(params, source_y(s)),
+            min: value(params, source_min(s)) / 127.0,
+            max: value(params, source_max(s)) / 127.0,
+            x: value(params, source_x(s)) / 127.0,
+            y: value(params, source_y(s)) / 127.0,
             smooth: value(params, source_smooth(s)) >= 0.5,
             rise: value(params, source_rise(s)),
             fall: value(params, source_fall(s)),
@@ -499,12 +619,12 @@ impl NativeDevice for MpeControl {
         let press_to_at = value(params, PRESS_TO_AT) >= 0.5;
         let slide_to_mod = value(params, SLIDE_TO_MOD) >= 0.5;
         let notepb_to_pb = value(params, NOTEPB_TO_PB) >= 0.5;
-        let range = value(params, PITCH_RANGE);
+        let range = 2f64.powf(value(params, PITCH_RANGE).round());
         let press_default = value(params, PRESS_DEFAULT) >= 0.5;
         let slide_default_on = value(params, SLIDE_DEFAULT) >= 0.5;
         let default_value = [
-            value(params, PRESS_DEFAULT_VALUE),
-            value(params, SLIDE_DEFAULT_VALUE),
+            value(params, PRESS_DEFAULT_VALUE) / 127.0,
+            value(params, SLIDE_DEFAULT_VALUE) / 127.0,
         ];
         for note in audio.notes() {
             let (channel, key) = (note.channel, note.key);

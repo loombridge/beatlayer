@@ -2,14 +2,17 @@
 //! the velocity of each note, or its release velocity, along a curve from an
 //! input window to an output range.
 //!
-//! Its look is the framework's generic layout: Beatlayer's own.
+//! Its panel is laid out as Live draws it (layout L-DEV-063): the curve's
+//! display cell over Operation and Mode, with the knobs and boxes beside it.
 
 use bl_engine::midi_clips::Rng;
 use bl_engine::{DeviceType, NoteBuffer, NoteEvent, NoteKind, Registry};
-use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
+use bl_model::device_layout::{BODY_HEIGHT, Control, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::midi_fx::{Key, Router, seed, value};
+use crate::panel::{inset, spacer};
 
 /// The Velocity device type's id.
 pub const TOUCH: &str = "beatlayer.touch";
@@ -39,57 +42,82 @@ pub const OPERATIONS: [&str; 3] = ["Note On", "Release", "Both"];
 /// The Mode choices.
 pub const MODES: [&str; 3] = ["Clip", "Gate", "Fixed"];
 
+/// The name of the curve's display cell.
+pub const CURVE_CELL: &str = "Velocity Curve";
+
+/// Velocity's panel as Live draws it: the curve over Operation and Mode, then
+/// Drive, Comp. and Random in a column of small knobs, and Out Hi, Out Low,
+/// Range and Lowest in the next.
+fn layout() -> DeviceLayout {
+    let at = |param, widget, x, y| Control::new(param, widget, x, y);
+    let under = ControlBand::free(
+        66.0,
+        BODY_HEIGHT - 58.0,
+        vec![
+            at(OPERATION, Widget::Chooser, 9.0, 19.0).sized(45.0, 21.0),
+            at(MODE, Widget::Stack(3), 9.0, 41.0).titled(),
+        ],
+    );
+    let knobs = ControlBand::free(
+        85.0,
+        BODY_HEIGHT,
+        vec![
+            at(DRIVE, Widget::SmallKnob, 3.0, 7.0),
+            at(COMPAND, Widget::SmallKnob, 3.0, 59.0),
+            at(RANDOM, Widget::SmallKnob, 3.0, 111.0),
+            at(OUT_HIGH, Widget::SmallKnob, 46.0, 7.0),
+            at(OUT_LOW, Widget::SmallKnob, 46.0, 59.0),
+            at(RANGE, Widget::Slider, 47.0, 111.0).sized(31.0, 21.0),
+            at(LOWEST, Widget::Number, 47.0, 135.0).sized(31.0, 21.0),
+        ],
+    );
+    DeviceLayout::new(LayoutNode::Row(vec![
+        LayoutNode::Column(vec![
+            spacer(0.0, 4.0),
+            inset(DisplayCell::new(CURVE_CELL, 58.0, 54.0, 1.0)),
+            LayoutNode::Band(under),
+        ]),
+        LayoutNode::Band(knobs),
+    ]))
+}
+
 /// Velocity's device type.
 #[must_use]
 pub fn touch_type() -> DeviceType {
     DeviceType::native(TOUCH, "Velocity", DeviceRole::MidiEffect).with_description(
         DeviceDescription::new(vec![
-            ParamDescriptor::integer(LOWEST, "Lowest", (0, 127), 0, ParamUnit::None)
+            ParamDescriptor::integer(LOWEST, "Lowest", (1, 127), 1, ParamUnit::None)
                 .describe("The softest input velocity the curve starts from."),
             ParamDescriptor::integer(RANGE, "Range", (0, 127), 127, ParamUnit::None)
                 .describe("How many velocity steps above Lowest the curve covers."),
-            ParamDescriptor::integer(OUT_LOW, "Out Low", (0, 127), 0, ParamUnit::None)
+            ParamDescriptor::integer(OUT_LOW, "Out Low", (1, 127), 1, ParamUnit::None)
                 .describe("The output velocity at the bottom of the curve."),
-            ParamDescriptor::integer(OUT_HIGH, "Out High", (0, 127), 127, ParamUnit::None)
+            ParamDescriptor::integer(OUT_HIGH, "Out Hi", (1, 127), 127, ParamUnit::None)
                 .describe("The output velocity at the top of the curve."),
-            ParamDescriptor::choice(OPERATION, "Operation", &OPERATIONS, 0).describe(
+            ParamDescriptor::choice(OPERATION, "Operation", &OPERATIONS, 2).describe(
                 "Applies the curve to note-on velocity, to release velocity, or to both.",
             ),
             ParamDescriptor::choice(MODE, "Mode", &MODES, 0).describe(
                 "Clip holds velocities outside the input window at its edges, Gate drops \
-                 the notes outside it, and Fixed gives every note the Out High velocity.",
+                 the notes outside it, and Fixed gives every note the Out Hi velocity.",
             ),
             ParamDescriptor::integer(RANDOM, "Random", (0, 127), 0, ParamUnit::None)
                 .describe("How far each velocity may move at random, inside the output range."),
-            ParamDescriptor::continuous(DRIVE, "Drive", (-100.0, 100.0), 0.0, ParamUnit::Percent)
-                .decimals(0)
+            ParamDescriptor::continuous(DRIVE, "Drive", (-1.0, 1.0), 0.0, ParamUnit::None)
                 .describe("Bends the curve so more notes come out loud (positive) or soft."),
-            ParamDescriptor::continuous(
-                COMPAND,
-                "Compand",
-                (-100.0, 100.0),
-                0.0,
-                ParamUnit::Percent,
-            )
-            .decimals(0)
-            .describe(
-                "Pushes outputs toward the top and bottom of the output range (positive) or \
+            ParamDescriptor::continuous(COMPAND, "Comp.", (-1.0, 1.0), 0.0, ParamUnit::None)
+                .describe(
+                    "Pushes outputs toward the top and bottom of the output range (positive) or \
                  toward its middle (negative).",
-            ),
+                ),
         ])
+        .with_layout(layout())
         .with_banks(&[
             (
                 "Range",
-                &[
-                    "Lowest",
-                    "Range",
-                    "Out Low",
-                    "Out High",
-                    "Operation",
-                    "Mode",
-                ],
+                &["Lowest", "Range", "Out Low", "Out Hi", "Operation", "Mode"],
             ),
-            ("Shaping", &["Drive", "Compand", "Random"]),
+            ("Shaping", &["Drive", "Comp.", "Random"]),
         ]),
     )
 }
@@ -177,8 +205,8 @@ impl NativeDevice for Touch {
             out_high: value(params, OUT_HIGH),
             mode: value(params, MODE) as usize,
             random: value(params, RANDOM),
-            drive: value(params, DRIVE) / 100.0,
-            compand: value(params, COMPAND) / 100.0,
+            drive: value(params, DRIVE),
+            compand: value(params, COMPAND),
         };
         let operation = value(params, OPERATION) as usize;
         for note in audio.notes() {

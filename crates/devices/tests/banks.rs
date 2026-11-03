@@ -3,9 +3,14 @@
 
 use bl_model::{BANK_SIZE, DeviceKind, ParamId};
 
-/// The types whose parameters run to the hundreds: they leave their banks to
-/// the generic ones, eight parameters at a time in descriptor order.
-const GENERIC: &[&str] = &["beatlayer.mosaic", "beatlayer.kitbag"];
+/// The types whose parameters run to the hundreds, or are all menu options
+/// (MIDI Monitor's): they leave their banks to the generic ones, eight
+/// parameters at a time in descriptor order.
+const GENERIC: &[&str] = &[
+    "beatlayer.mosaic",
+    "beatlayer.kitbag",
+    "beatlayer.midi_monitor",
+];
 
 // Spec: control-surfaces R19
 #[test]

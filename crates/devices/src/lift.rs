@@ -2,13 +2,15 @@
 //! every note by a number of semitones, and keeps the result inside a window
 //! of keys by blocking, folding or limiting what falls outside it.
 //!
-//! Its look is the framework's generic layout: Beatlayer's own.
+//! Its panel is laid out as Live draws it (layout L-DEV-064): the Pitch knob
+//! over its stepper, then the window's Lowest and Range, and Mode.
 
 use bl_engine::{DeviceType, NoteBuffer, NoteEvent, NoteKind, Registry};
-use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
+use bl_model::device_layout::{BODY_HEIGHT, Control, ControlBand, LayoutNode, Widget};
+use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
-use crate::midi_fx::{Key, Router, scale_in_use, use_current_scale, value};
+use crate::midi_fx::{Key, Router, key_choice, scale_in_use, use_current_scale, value};
 
 /// The Pitch device type's id.
 pub const LIFT: &str = "beatlayer.lift";
@@ -33,6 +35,23 @@ const MOST_DEGREES: i32 = 30;
 /// The Mode choices.
 pub const MODES: [&str; 3] = ["Block", "Fold", "Limit"];
 
+/// Pitch's panel as Live draws it: the knob, the stepper under it that moves
+/// Pitch by Step Width, the window's two boxes and Mode.
+fn layout() -> DeviceLayout {
+    let at = |param, widget, x, y| Control::new(param, widget, x, y);
+    DeviceLayout::new(LayoutNode::Band(ControlBand::free(
+        111.0,
+        BODY_HEIGHT,
+        vec![
+            at(PITCH, Widget::Knob, 35.0, 10.0),
+            at(STEP_WIDTH, Widget::Stepper, 22.0, 81.0).stepping(PITCH),
+            at(LOWEST, Widget::Number, 5.0, 103.0).sized(32.0, 21.0),
+            at(RANGE, Widget::Slider, 58.0, 103.0).sized(48.0, 21.0),
+            at(MODE, Widget::Chooser, 5.0, 131.0).sized(101.0, 21.0),
+        ],
+    )))
+}
+
 /// Pitch's device type.
 #[must_use]
 pub fn lift_type() -> DeviceType {
@@ -40,11 +59,11 @@ pub fn lift_type() -> DeviceType {
         DeviceDescription::new(vec![
             ParamDescriptor::integer(PITCH, "Pitch", (-128, 128), 0, ParamUnit::Semitones)
                 .describe("Moves every note by this many semitones."),
-            ParamDescriptor::integer(STEP_WIDTH, "Step Width", (1, 48), 1, ParamUnit::Semitones)
-                .describe("How far the Step Up and Step Down buttons move Pitch."),
-            ParamDescriptor::integer(LOWEST, "Lowest", (0, 127), 0, ParamUnit::None)
+            ParamDescriptor::integer(STEP_WIDTH, "Step Width", (1, 48), 12, ParamUnit::Semitones)
+                .describe("How far the buttons beside it, − and +, move Pitch."),
+            key_choice(LOWEST, "Lowest", 0)
                 .describe("The lowest key a note may sound on after it is moved."),
-            ParamDescriptor::integer(RANGE, "Range", (0, 127), 127, ParamUnit::None)
+            ParamDescriptor::integer(RANGE, "Range", (0, 127), 127, ParamUnit::Semitones)
                 .describe("How many keys above Lowest a note may sound on."),
             ParamDescriptor::choice(MODE, "Mode", &MODES, 0).describe(
                 "What happens to a note outside the window: Block drops it, Fold moves it by \
@@ -56,6 +75,7 @@ pub fn lift_type() -> DeviceType {
             ),
         ])
         .with_title_switch(USE_SCALE)
+        .with_layout(layout())
         .with_banks(&[("Pitch", &["Pitch", "Step Width", "Lowest", "Range", "Mode"])]),
     )
 }

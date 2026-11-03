@@ -101,7 +101,24 @@ fn set(h: &mut Harness, patch: Value) {
 
 fn labelled<'a>(nodes: &'a [Node], label: &str) -> &'a Node {
     // The dialog sits under the Control Bar, which has controls of its own
-    // with some of the same names, such as Sample Rate.
+    // with some of the same names, such as Sample Rate; and other panels
+    // have an Edit of theirs, so the dialog's is the one on the Encoder
+    // Settings row.
+    if label == "Edit" {
+        let row = nodes
+            .iter()
+            .find(|n| n.value == "Encoder Settings" && n.bounds.is_some_and(|b| b.y0 >= 61.0))
+            .and_then(|n| n.bounds)
+            .expect("the Encoder Settings label");
+        return nodes
+            .iter()
+            .find(|n| {
+                n.label == "Edit"
+                    && n.bounds
+                        .is_some_and(|b| (b.y0 - row.y0).abs() < 12.0 && b.x0 > row.x0)
+            })
+            .expect("the Encoder Settings row's Edit");
+    }
     nodes
         .iter()
         .find(|n| n.label == label && n.bounds.is_some_and(|b| b.y0 >= 61.0))
@@ -490,4 +507,61 @@ fn the_progress_windows_bar_moves_and_cancel_leaves_nothing_behind() {
     );
     let nodes = Harness::nodes(&h.settle());
     assert!(!nodes.iter().any(|n| n.label == "Export progress"));
+}
+
+/// Spec: export R29, R38, R47, R48. With a video clip in the range the Video
+/// section is live: Create Video switches, the Video Encoder chooser lists
+/// the encoders the computer has, and Edit opens the settings dialog, which
+/// OK applies and Esc leaves, the export dialog behind it staying open.
+#[test]
+fn the_video_section_is_live_with_a_video_clip_and_edit_opens_the_settings() {
+    let scratch = Scratch::new("video");
+    let mut h = harness(&scratch);
+    let movie = scratch.path("Movie.mov");
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/video/mjpeg-24f.mov"),
+        &movie,
+    )
+    .unwrap();
+    h.shell
+        .run(
+            browser_commands::ADD_TO_ARRANGEMENT,
+            json!({ "paths": [movie.to_string_lossy()], "at": 0 }),
+        )
+        .unwrap();
+    h.settle();
+    h.shell.run(ids::OPEN_DIALOG, json!({})).unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    for label in ["Create Video", "Video Encoder", "Edit"] {
+        assert!(!labelled(&nodes, label).disabled, "{label}");
+    }
+    assert_eq!(labelled(&nodes, "Create Video").toggled, Some(false));
+
+    click_node(&mut h, "Create Video");
+    assert!(dialog(&mut h).choices.create_video);
+    set(&mut h, json!({ "video_encoder": "motion_jpeg" }));
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(labelled(&nodes, "Video Encoder").value, "Motion JPEG");
+
+    // Edit opens the settings; the frame rate set and OK pressed, the
+    // settings are the dialog's.
+    click_node(&mut h, "Edit");
+    let nodes = Harness::nodes(&h.settle());
+    assert!(nodes.iter().any(|n| n.value == "Motion JPEG Settings"));
+    click_node(&mut h, "Frame Rate: same as the movie");
+    click_node(&mut h, "OK");
+    let nodes = Harness::nodes(&h.settle());
+    assert!(!nodes.iter().any(|n| n.value == "Motion JPEG Settings"));
+    assert_eq!(dialog(&mut h).choices.video_settings.frame_rate, Some(30.0));
+    assert_eq!(dialog(&mut h).choices.video_settings.size, None);
+
+    // Esc closes the settings and nothing more.
+    click_node(&mut h, "Edit");
+    click_node(&mut h, "Size: same as the movie");
+    h.key(Key::Escape, Modifiers::NONE);
+    h.settle();
+    assert!(h.shell.export_dialog().is_some());
+    assert_eq!(dialog(&mut h).choices.video_settings.size, None);
+    let nodes = Harness::nodes(&h.settle());
+    assert!(!nodes.iter().any(|n| n.value == "Motion JPEG Settings"));
 }

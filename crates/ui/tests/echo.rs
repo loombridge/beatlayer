@@ -36,6 +36,11 @@ fn harness() -> (Harness, DeviceId) {
     )
     .unwrap();
     h.settle();
+    // Both lines count in notes, as these tests were written (Live's panel
+    // starts them in Dotted).
+    for line in 0..2 {
+        set(&mut h, added.device, line_param(line, echo::SYNC_MODE), 0.0);
+    }
     (h, added.device)
 }
 
@@ -184,11 +189,11 @@ fn the_tabs_switch_the_controls_shown_and_are_no_undo_step() {
         ("Modulation", ["Waveform", "HP Freq"]),
         ("Character", ["Gate", "Waveform"]),
     ] {
-        let (_, _, pages) = placed(&mut h, device);
-        let node = pages.iter().find(|p| p.name == TABS).unwrap();
-        let index = node.names.iter().position(|n| n == tab).unwrap();
-        let r = node.buttons[index];
-        h.click(pos2(r.x + r.width / 2.0, r.y + r.height / 2.0));
+        // The tabs are in the title bar.
+        h.accesskit(
+            bl_ui::device_panel::page_button_id(device, TABS, tab),
+            egui::accesskit::Action::Click,
+        );
         h.settle();
         assert_eq!(shown(&h, device), tab);
         assert_eq!(drawn(&mut h, &controls), [true, false], "{tab}");

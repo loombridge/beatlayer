@@ -36,7 +36,7 @@ The device takes Live's name with Beatlayer's own type ID, `beatlayer.echo`, its
 
 ### The Echo tab
 
-- **R7.** With Filter on, each loop has a 12 dB per octave high-pass (HP, 20 Hz to 20 kHz, 20 Hz by default) and low-pass (LP, 20 Hz to 20 kHz, 20 kHz by default) in series, each with its resonance (HP Res and LP Res, 0 to 100 %, a Q from 0.5 at 0 % to 10 at 100 %, evenly on a log scale). Each filter's response, measured on the first echo of an impulse, is within 0.5 dB of its design from 20 Hz to 20 kHz. With Filter off they pass everything. (S2; the slopes, ranges and Q law are Beatlayer's own)
+- **R7.** With Filter on, each loop has a 12 dB per octave high-pass (HP, 20 Hz to 20 kHz, 50 Hz by default) and low-pass (LP, 20 Hz to 20 kHz, 5 kHz by default) in series, each with its resonance (HP Res and LP Res, 0 to 100 %, a Q from 0.5 at 0 % to 10 at 100 %, evenly on a log scale). Each filter's response, measured on the first echo of an impulse, is within 0.5 dB of its design from 20 Hz to 20 kHz. With Filter off they pass everything. (S2; the slopes, ranges and Q law are Beatlayer's own)
 - **R8.** The display draws the tunnel: one ring per echo, its size falling with the echo's level and its place across the cell by its channel, for the first 16 echoes of each line as the times and Feedback give them, with a handle for each line's time, low in the cell, the right line's a little above the left's, whose place across it is the travel of the parameter that sets the time (the division of the line's Sync Mode, or the free time); dragging a handle sideways sets that line's time as one undo step, and with Stereo Link the right line's handle sets the left line's time too. The tunnel draws an echo only while its level is above −60 dB. The filter-display button draws the two filters' response instead, with a handle on each cutoff, dragging which sets the cutoff and, vertically, the resonance, in one undo step; the arrow keys and a screen reader's steps move a handle by a step of its parameter. The display data (each line's echo times and levels, the filter curve) is published as device framework R35 says and read by `device.display`, whose two views are `tunnel` and `filter`. (S2, S6; the look is Beatlayer's own)
 
 ### The Modulation tab
@@ -53,7 +53,7 @@ The device takes Live's name with Beatlayer's own type ID, `beatlayer.echo`, its
 
 ### The global controls
 
-- **R15.** Reverb, 0 to 100 %, mixes a small reverb into the wet signal, crossfading from the signal to the reverb, whose output has the energy of its input; Decay, 0.2 to 10 s, is its reverberation time, within 10 % measured as RT30 on its own output. The reverb is Beatlayer's own, built from the parts of [the reverb](reverb.md). (S5; the design and ranges are Beatlayer's own)
+- **R15.** Reverb, 0 to 100 %, mixes a small reverb into the wet signal, crossfading from the signal to the reverb, whose output has the energy of its input; Decay, 0 to 100 %, is its reverberation time, 0.2 s to 10 s along a logarithmic travel (R25), within 10 % measured as RT30 on its own output. The reverb is Beatlayer's own, built from the parts of [the reverb](reverb.md). (S5; the design and ranges are Beatlayer's own)
 - **R16.** The reverb's location is Pre (before the delay lines, so the echoes repeat a reverberated signal), Post (after them, on their output) or Feedback (inside the loop, so each echo is more diffuse than the last); in Feedback the loop's gain stays below 1 as R6 says. (S5)
 - **R17.** Stereo, 0 to 200 %, sets the wet signal's width by its mid and side: mono at 0 %, unchanged at 100 %, the side doubled at 200 %. Output is a gain from −∞ to +12 dB on the wet signal (rule G1). Dry/Wet, 0 to 100 %, balances the dry signal against the wet; with Equal-Loudness on (Dry/Wet's context menu, a switch saved with the device) the two follow sine and cosine laws, so the sum of a steady noise stays within 0.5 dB at every setting. (S5, S6; the laws are Beatlayer's own)
 
@@ -66,6 +66,7 @@ The device takes Live's name with Beatlayer's own type ID, `beatlayer.echo`, its
 - **R22.** Echo reports no latency. (Beatlayer's own)
 - **R23.** A set with Echo saves and reopens with every parameter, its tab and Equal-Loudness. (S6)
 - **R24.** Every control takes the keyboard focus in the Device View, the tabs among them, and assistive technology reads each with its name and value. (S6)
+- **R25.** The panel is Live's (observed in Live 12.4.16, 2 November 2026): the tabs Echo, Modulation and Character in the title bar; at the left each line's time knob (Left, Right: the time in milliseconds while Sync is off, and while it is on the division of the line's Sync Mode) with the link button between them and Sync, Sync Mode and Offset under each, then Input with the D and Ø buttons and Feedback; on the Echo tab the tunnel display with Filter, HP, Res, LP and Res along its foot; at the right Reverb, Stereo, the reverb's location, Decay, Output, the channel mode as three buttons and Dry/Wet. A new Echo has Sync on and Dotted at 1/8 each side, 50 % Feedback, the filter on from 50 Hz to 5 kHz, a Decay of 50 % and 70 % Dry/Wet. Decay reads in per cent and sets 0.2 s at 0 % to 10 s at 100 %, evenly in its logarithm. The Modulation and Character tabs hold Beatlayer's own arrangement; their pages are not observed. (Layout L-DEV-088)
 
 ## Tests
 
@@ -94,3 +95,4 @@ Unless it names another file, a test is in `crates/devices/tests/echo.rs`.
 | R22 | `echo_reports_no_latency` | unit |
 | R23 | `crates/shell/tests/echo.rs`, `a_set_with_echo_saves_and_reopens_with_every_parameter_and_its_tab`; the agent test above | save and reopen |
 | R24 | `crates/ui/tests/echo.rs`, `a_handle_takes_the_keyboard_and_steps_with_the_arrows`; `crates/ui/tests/device_pages.rs` (the tabs' tab list and arrow keys) | UI script with the accessibility tree |
+| R25 | `crates/devices/tests/live_panels.rs`, `echo_holds_lives_controls_in_lives_order` | unit |

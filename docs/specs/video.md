@@ -96,4 +96,4 @@ Decoding runs in a crate of its own, `bl-video`, on a video thread that decodes 
 | R20 | `crates/ui/tests/video_window.rs` (`a_double_click_goes_full_screen_and_back_and_option_double_click_sets_the_movies_size`) | UI script |
 | R21 | `crates/shell/tests/video_window.rs` (`video.window_state` after each `video.set_window`) | shell test |
 | R22 | `crates/ui/tests/video_window.rs` (`the_window_is_named_video_and_its_picture_is_an_image_of_the_clip_and_the_frames_time`, and Esc in `a_double_click_goes_full_screen_and_back_and_option_double_click_sets_the_movies_size`) | UI script |
-| R24, R25 | to be written in WP-9.27: a Motion JPEG export checked frame by frame | shell test |
+| R24, R25 | `crates/shell/tests/export_video.rs`: a Motion JPEG export checked frame by frame, its sound against the audio export's, and the selected clip's whole-movie span | shell test |

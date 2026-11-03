@@ -17,7 +17,7 @@
 use bl_commands::Context::Global;
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
-use bl_model::TrackId;
+use bl_model::{ClipId, TrackId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -137,6 +137,99 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
+/// The encoders the Video Encoder chooser lists (the export spec, R47). A
+/// computer lists the ones it has: Motion JPEG is on every one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum VideoEncoder {
+    /// H.264.
+    #[serde(rename = "h264")]
+    H264,
+    /// HEVC.
+    Hevc,
+    /// Apple ProRes 422.
+    #[serde(rename = "prores_422")]
+    ProRes422,
+    /// Motion JPEG, Beatlayer's own.
+    MotionJpeg,
+}
+
+impl VideoEncoder {
+    /// Every encoder, in the chooser's order.
+    pub const ALL: [Self; 4] = [Self::H264, Self::Hevc, Self::ProRes422, Self::MotionJpeg];
+
+    /// The name the chooser shows.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::H264 => "H.264",
+            Self::Hevc => "HEVC",
+            Self::ProRes422 => "ProRes 422",
+            Self::MotionJpeg => "Motion JPEG",
+        }
+    }
+}
+
+/// A picture size in pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct VideoSize {
+    /// Width.
+    pub width: u32,
+    /// Height.
+    pub height: u32,
+}
+
+/// The settings Encoder Settings' Edit opens (the export spec, R48). A
+/// setting left out is the source movie's own, or for the quality 85.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct VideoSettings {
+    /// From 1 to 100: how much of the picture the encoder keeps. 85 unless
+    /// given. ProRes 422 has no quality and ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1, max = 100))]
+    pub quality: Option<u8>,
+    /// Frames a second, such as 24, 25 or 29.97. The source movie's rate
+    /// when left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame_rate: Option<f64>,
+    /// The picture's size. The source movie's when left out; an odd width
+    /// or height is rounded down to even.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<VideoSize>,
+}
+
+impl VideoSettings {
+    /// The quality a left-out one means.
+    pub const DEFAULT_QUALITY: u8 = 85;
+
+    /// The quality, from 1 to 100.
+    #[must_use]
+    pub fn quality(&self) -> u8 {
+        self.quality.unwrap_or(Self::DEFAULT_QUALITY)
+    }
+}
+
+/// The `video` argument of `export.audio` (the export spec, R52): write a
+/// QuickTime movie beside each audio file, named as it is with `.mov`, of
+/// the Arrangement's picture over the range with the rendered audio as its
+/// sound. It needs a PCM file type and a video clip in the range.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VideoOptions {
+    /// The encoder. Left out, H.264 where this computer has it, else
+    /// Motion JPEG.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encoder: Option<VideoEncoder>,
+    /// The encoder's settings.
+    #[serde(default)]
+    pub settings: VideoSettings,
+    /// A video clip: with it, and `start` and `length` left out, the range
+    /// is the whole of the clip's movie, the part of it before the clip's
+    /// start as pre-roll (R50).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+}
+
 /// Arguments of `export.audio`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -214,6 +307,10 @@ pub struct ExportArgs {
     /// MP3 is the only file.
     #[serde(default, skip_serializing_if = "is_false")]
     pub encode_mp3: bool,
+    /// Create Video: a QuickTime movie beside each audio file (R52). Needs a
+    /// PCM file type and a video clip in the range.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub video: Option<VideoOptions>,
     /// How long the render waits before it starts, in seconds, so the
     /// hardware's last sound dies away: 10 unless given, and longer if the
     /// seconds are given.
@@ -247,6 +344,10 @@ pub enum RangeSource {
 pub struct ExportResult {
     /// The file written (or the base path if multiple files were written).
     pub path: String,
+    /// The movie written beside the first file, if `video` was given (the
+    /// movies of a multi-file export are in `files`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub movie: Option<String>,
     /// Every file written by the export: one for Main or a single track,
     /// or one per track for all-tracks or selected-tracks exports.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -370,7 +471,6 @@ pub const MP3_SAMPLE_RATES: [u32; 9] = [
 /// The Export Audio/Video dialog's controls, as the export spec's R29 to
 /// R37 list them, with a new install's values as their defaults. Render
 /// Start and Render Length aren't here: they're the dialog's alone (R39).
-/// The Video section has no choices, since it is drawn disabled (R38).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct ExportChoices {
@@ -399,6 +499,13 @@ pub struct ExportChoices {
     pub dither: Dither,
     /// Encode MP3.
     pub encode_mp3: bool,
+    /// Create Video (R46).
+    pub create_video: bool,
+    /// Video Encoder; none in a new install, when it shows H.264 where the
+    /// computer has it and Motion JPEG otherwise (R47).
+    pub video_encoder: Option<VideoEncoder>,
+    /// Encoder Settings (R48).
+    pub video_settings: VideoSettings,
 }
 
 impl Default for ExportChoices {
@@ -416,6 +523,9 @@ impl Default for ExportChoices {
             bit_depth: 24,
             dither: Dither::Triangular,
             encode_mp3: false,
+            create_video: false,
+            video_encoder: None,
+            video_settings: VideoSettings::default(),
         }
     }
 }
@@ -461,9 +571,16 @@ impl ExportChoices {
 
     /// The controls that are disabled and why, and the reason Export is
     /// disabled if it is. `selected` is how many tracks are selected, and
-    /// `length` the Render Length in ticks (R30 to R32, R36, R37, R38).
+    /// `length` the Render Length in ticks, and `video_in_range` whether the
+    /// set has a video clip inside the range (R30 to R32, R36, R37, R38).
     #[must_use]
-    pub fn problems(&self, engine_rate: u32, selected: usize, length: Ticks) -> Problems {
+    pub fn problems(
+        &self,
+        engine_rate: u32,
+        selected: usize,
+        length: Ticks,
+        video_in_range: bool,
+    ) -> Problems {
         let mut disabled = Vec::new();
         if self.rendered_track == RenderedTrack::Main {
             disabled.push(Disabled::new(
@@ -487,8 +604,19 @@ impl ExportChoices {
                 ));
             }
         }
-        for control in ["Create Video", "Video Encoder", "Encoder Settings"] {
-            disabled.push(Disabled::new(control, "The set has no video clips."));
+        // R38: the Video section is for a set with a video clip in the range
+        // and a PCM file to put the movie's sound from.
+        let why_no_video = if !video_in_range {
+            Some("The set has no video clips in the range.")
+        } else if !self.encode_pcm {
+            Some("Encode PCM is off: the movie's sound is the PCM file.")
+        } else {
+            None
+        };
+        if let Some(why) = why_no_video {
+            for control in ["Create Video", "Video Encoder", "Encoder Settings"] {
+                disabled.push(Disabled::new(control, why));
+            }
         }
         let blocked = if self.rendered_track == RenderedTrack::SelectedTracks && selected == 0 {
             Some(
@@ -544,6 +672,11 @@ impl ExportChoices {
             convert_to_mono: self.convert_to_mono,
             create_analysis_file: self.create_analysis_file,
             encode_mp3: self.encode_pcm && self.encode_mp3,
+            video: (self.create_video && self.encode_pcm).then_some(VideoOptions {
+                encoder: self.video_encoder,
+                settings: self.video_settings,
+                clip: None,
+            }),
             wait_seconds: None,
             auto_restart: None,
             max_attempts: None,
@@ -591,6 +724,10 @@ pub struct ExportDialogStatus {
     pub reason: Option<String>,
     /// The controls drawn disabled, with their reasons.
     pub disabled: Vec<Disabled>,
+    /// The encoders the Video Encoder chooser lists on this computer, in
+    /// its order (R47).
+    #[serde(default)]
+    pub video_encoders: Vec<VideoEncoder>,
 }
 
 /// The export under way (R41, R44).
@@ -654,6 +791,16 @@ pub struct ChoicesPatch {
     /// Encode MP3.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub encode_mp3: Option<bool>,
+    /// Create Video.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub create_video: Option<bool>,
+    /// Video Encoder: `h264`, `hevc`, `prores_422` or `motion_jpeg`, one the
+    /// computer lists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub video_encoder: Option<VideoEncoder>,
+    /// Encoder Settings: the whole of them, as Edit sets them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub video_settings: Option<VideoSettings>,
     /// Render Start.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start: Option<Position>,
@@ -714,7 +861,15 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  `wait_seconds` seconds (10 unless given) so the hardware's sound dies away; \
                  `auto_restart` (on unless told otherwise) starts it again when a dropout spoils \
                  it, up to `max_attempts` times, and with it off the dropouts are listed. \
-                 Changes nothing in the set.",
+                 `video` also writes a QuickTime movie beside each audio file, named as it is \
+                 with `.mov`: the Arrangement's picture at each frame time of the range (black \
+                 where no video clip plays, the bottom-most track's where several do) with the \
+                 rendered audio as 24-bit PCM. It takes `encoder` (`h264`, `hevc`, `prores_422` \
+                 or `motion_jpeg`, the ones `export.status` lists; H.264 where there is one, else \
+                 Motion JPEG), `settings` (`quality` from 1 to 100, `frame_rate` and `size`, the \
+                 source movie's unless given) and `clip`, a video clip whose whole movie is the \
+                 range, with its pre-roll, when `start` and `length` are left out. It needs a \
+                 PCM file type and a video clip in the range. Changes nothing in the set.",
             )
             .permission(Permission::External)
             .context(Global)
@@ -727,8 +882,8 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .description(
                 "Opens the Export Audio/Video dialog, a modal window over the main window, with \
                  the choices it kept from the last export (a new install's defaults the first \
-                 time), and Render Start and Render Length set to the Arrangement's time \
-                 selection or else the whole set. Call it again with the dialog open after a \
+                 time), and Render Start and Render Length set to a selected video clip's whole \
+                 movie, else the Arrangement's time selection, else the whole set. Call it again with the dialog open after a \
                  cancelled save dialog to go on. Returns what `export.status` does. Changes \
                  nothing in the set.",
             )
@@ -755,8 +910,8 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                 "Changes the Export Audio/Video dialog's controls, the ones given and no \
                  others, with the dialog open: Rendered Track, Include Return and Main Effects, \
                  Render as Loop, Convert to Mono, Normalize, Create Analysis File, Sample Rate, \
-                 Encode PCM, File Type, Bit Depth, Dither Options, Encode MP3, and Render Start \
-                 and Render Length. Choosing FLAC with 32 bits chosen sets 24. The choices are \
+                 Encode PCM, File Type, Bit Depth, Dither Options, Encode MP3, Create Video, \
+                 Video Encoder, Encoder Settings, and Render Start and Render Length. Choosing FLAC with 32 bits chosen sets 24. The choices are \
                  the dialog's own until Export sends them: nothing in the set changes and there \
                  is no undo step. Returns what `export.status` does.",
             )

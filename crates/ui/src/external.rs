@@ -4,7 +4,7 @@
 //! command (`device.set_external`), and a drag on Hardware Latency is one
 //! undo step however far it goes.
 //!
-//! The External Instrument's rows are Live's (layout L-DEV-064); the External
+//! The External Instrument's rows are Live's (layout L-DEV-103); the External
 //! Audio Effect's and the CV devices' are Beatlayer's own, as Live's are to
 //! observe.
 
@@ -67,7 +67,7 @@ pub fn section_rect(frame: Rect) -> Rect {
     )
 }
 
-/// Layout L-DEV-064: where each control of the External Instrument sits, as
+/// Layout L-DEV-103: where each control of the External Instrument sits, as
 /// Live puts them: the MIDI To chooser and its channel across the top, the
 /// Audio From chooser under a rule and left of the Gain knob, and Hardware
 /// Latency's box and its unit switch at the foot. Each name is above its box.

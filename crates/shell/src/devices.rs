@@ -85,8 +85,9 @@ pub struct DeviceView {
     /// in order, holding `selected` (device chains R47).
     selection: Vec<DeviceId>,
     folded: BTreeSet<DeviceId>,
-    /// Devices whose expanded part is shown (WP-5.42).
-    expanded: BTreeSet<DeviceId>,
+    /// Devices whose expanded part is shown the other way from how a new
+    /// one of its type is (WP-5.42).
+    flipped: BTreeSet<DeviceId>,
     clipboard: Vec<Device>,
     /// The chains cut or copied from a rack (WP-5.1).
     chain_clipboard: Vec<Chain>,
@@ -459,7 +460,7 @@ impl DeviceView {
                 .filter(|node| !node.pages.is_empty())
                 .map(|node| {
                     let page = choice
-                        .get(&node.name)
+                        .get(node.follows.as_ref().unwrap_or(&node.name))
                         .and_then(|name| node.pages.iter().find(|p| &p.name == name))
                         .unwrap_or(&node.pages[0]);
                     PagesFrame {
@@ -611,6 +612,7 @@ impl DeviceView {
                 grid_params: Vec::new(),
                 alternates: Vec::new(),
                 relabels: Vec::new(),
+                impulse_responses: Vec::new(),
             },
             plugin: true,
             configured: knob_params,
@@ -883,7 +885,7 @@ impl DeviceView {
         self.hot_swap = self.hot_swap.filter(exists);
         self.slots.retain(|device, _| exists(device));
         self.folded.retain(exists);
-        self.expanded.retain(exists);
+        self.flipped.retain(exists);
         self.configuring.retain(exists);
         self.pending_params.retain(|device, _| exists(device));
         let chain_exists = |c: &ChainId| doc.chain(*c).is_some();
@@ -973,6 +975,17 @@ impl DeviceView {
     fn expandable(&self, device: &Device) -> bool {
         self.description(&device.kind)
             .is_some_and(|d| d.layout.has_expanded())
+    }
+
+    /// Whether a new `device` shows its expanded part.
+    fn opens_expanded(&self, device: &Device) -> bool {
+        self.description(&device.kind)
+            .is_some_and(|d| d.layout.opens_expanded)
+    }
+
+    /// Whether `device` shows its expanded part now.
+    fn is_expanded(&self, device: &Device) -> bool {
+        self.expandable(device) && self.opens_expanded(device) != self.flipped.contains(&device.id)
     }
 
     /// Whether a device's sidechain section is shown.
@@ -1709,10 +1722,14 @@ impl DeviceView {
             kind: d.kind.clone(),
             role: d.role,
             enabled: d.enabled,
+            // Spec: device-framework R47. A device with an impulse-response
+            // slot takes a dropped file too.
             takes_sample: matches!(
                 &d.kind,
                 DeviceKind::Native { device_type } if bl_devices::plays_samples(device_type)
-            ),
+            ) || self
+                .description(&d.kind)
+                .is_some_and(|d| !d.impulse_responses.is_empty()),
             swaps_to_snapshot: matches!(
                 &d.kind,
                 DeviceKind::Native { device_type } if device_type == bl_devices::DRUM_SAMPLER
@@ -1720,7 +1737,10 @@ impl DeviceView {
             show_preset_name: d.show_preset_name,
             folded: self.folded.contains(&d.id),
             expandable: self.expandable(d),
-            expanded: self.expandable(d) && self.expanded.contains(&d.id),
+            expanded: self.is_expanded(d),
+            points_right_when_shown: self
+                .description(&d.kind)
+                .is_some_and(|l| l.layout.points_right_when_shown),
             floating: d.floating,
             b_active: d.b_active,
             configure: self.configuring.contains(&d.id),
@@ -2227,20 +2247,20 @@ impl DeviceView {
             ids::EXPAND => {
                 let ExpandDeviceArgs { device, expanded } = parse(args)?;
                 let device = self.target(editor.document(), device)?;
-                if editor
+                let Some((shown, opens)) = editor
                     .document()
                     .device(device)
-                    .is_none_or(|d| !self.expandable(d))
-                {
+                    .filter(|d| self.expandable(d))
+                    .map(|d| (self.is_expanded(d), self.opens_expanded(d)))
+                else {
                     return Err(DeviceError::Unavailable(format!(
                         "{device} has no expanded part"
                     )));
-                }
-                let expanded = expanded.unwrap_or(!self.expanded.contains(&device));
-                if expanded {
-                    self.expanded.insert(device);
+                };
+                if expanded.unwrap_or(!shown) == opens {
+                    self.flipped.remove(&device);
                 } else {
-                    self.expanded.remove(&device);
+                    self.flipped.insert(device);
                 }
             }
             ids::ADD => {
@@ -3772,8 +3792,16 @@ impl DeviceView {
                 index,
                 device,
             })?;
-            if let Some((params, name, shape, articulations, routes, mpe, similarity_reference)) =
-                state
+            if let Some((
+                params,
+                name,
+                shape,
+                articulations,
+                routes,
+                mpe,
+                similarity_reference,
+                patch,
+            )) = state
             {
                 editor.apply(Command::SetDeviceState {
                     device: id,
@@ -3784,6 +3812,7 @@ impl DeviceView {
                     routes,
                     mpe,
                     similarity_reference,
+                    patch,
                 })?;
             }
             map_inner_copies(editor, &pairs)
@@ -3834,6 +3863,7 @@ impl DeviceView {
                 preset.routes,
                 preset.mpe,
                 preset.similarity_reference,
+                preset.patch,
             )
         });
         Ready {
@@ -3895,6 +3925,7 @@ impl DeviceView {
                     routes,
                     mpe,
                     similarity_reference,
+                    patch,
                 )) = state
                 {
                     editor.apply(Command::SetDeviceState {
@@ -3906,6 +3937,7 @@ impl DeviceView {
                         routes,
                         mpe,
                         similarity_reference,
+                        patch,
                     })?;
                 }
                 map_inner_copies(editor, &pairs)
@@ -4416,7 +4448,16 @@ impl DeviceView {
                 editor.apply(Command::AddChain { rack, index, chain })?;
                 if let (
                     Some(device),
-                    Some((params, name, shape, articulations, routes, mpe, similarity_reference)),
+                    Some((
+                        params,
+                        name,
+                        shape,
+                        articulations,
+                        routes,
+                        mpe,
+                        similarity_reference,
+                        patch,
+                    )),
                 ) = (device_id, state)
                 {
                     editor.apply(Command::SetDeviceState {
@@ -4428,6 +4469,7 @@ impl DeviceView {
                         routes,
                         mpe,
                         similarity_reference,
+                        patch,
                     })?;
                 }
                 if let Some(device) = move_device {
@@ -4712,6 +4754,7 @@ pub(crate) fn load_preset(
             routes: Some(loaded.routes.unwrap_or_default()),
             mpe: loaded.mpe,
             similarity_reference: loaded.similarity_reference,
+            patch: loaded.patch,
         })
         .map(|_| ())
         .map_err(|e| DeviceError::Failed(e.to_string()))

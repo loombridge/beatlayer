@@ -567,10 +567,21 @@ impl View<'_> {
         if !wavetables.is_empty() {
             value["wavetables"] = json!(wavetables);
         }
+        // Spec: impulse-responses R12. What each impulse-response slot holds,
+        // which `device.load_sample` and `device.set_sample` change.
+        let impulse_responses = self.shell.impulse_slots(device.id);
+        if !impulse_responses.is_empty() {
+            value["impulse_responses"] = json!(impulse_responses);
+        }
         // Spec: operator R27. The partials of the user waves an Operator's
         // oscillators play, which `device.set_partials` changes.
         if !device.partials.is_empty() {
             value["partials"] = json!(device.partials);
+        }
+        // Spec: modular-device R9. A Modular's patch, which the `modular.`
+        // commands change.
+        if let Some(patch) = &device.patch {
+            value["patch"] = json!(patch);
         }
         // Spec: modulation R18. A modulator's mappings, which
         // `modulator.map` and `modulator.unmap` change.

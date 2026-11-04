@@ -8,11 +8,12 @@
 
 use std::f32::consts::{FRAC_PI_2, PI};
 
-use bl_model::ParamId;
 use bl_model::device_layout::{
-    BOX_HEIGHT, Glyph, KNOB_DIAMETER, LABEL_HEIGHT, PlacedHeading, PlacedLabel, PlacedPages,
-    SMALL_KNOB_DIAMETER, STRIP_HIDDEN, STRIP_SHOWN, STRIP_WIDTH, TitlePart, Unit, UnitPair,
+    BOX_HEIGHT, BUTTON_GAP, CHECK_SIZE, Glyph, KNOB_DIAMETER, LABEL_HEIGHT, PlacedHeading,
+    PlacedLabel, PlacedPages, SMALL_KNOB_DIAMETER, STRIP_HIDDEN, STRIP_SHOWN, STRIP_WIDTH,
+    TitlePart, UNIT_ROW_BUTTON, Unit, UnitPair,
 };
+use bl_model::{ParamDescriptor, ParamId};
 use bl_shell::Invocation;
 use bl_shell::device_commands::{DeviceFrame, DevicePanel};
 use egui::accesskit::Role;
@@ -30,6 +31,10 @@ use crate::widgets::{paint_ring_segment, ring_segment};
 /// The size of the text on a device's controls, in points: Live's cap height
 /// of 6.3 points (observed).
 pub const DEVICE_TEXT: f32 = 9.0;
+
+/// The width of a text button in the title bar, in points (observed: Learn and
+/// Send, L-DEV-045).
+const TITLE_BUTTON_WIDTH: f32 = 30.0;
 
 /// The corner of a box or a button, in points (observed: nearly square).
 pub const BOX_CORNER: f32 = 1.0;
@@ -164,7 +169,7 @@ impl Control<'_> {
 
     /// Operator's knob: its name over its left edge, a ring 19 points across
     /// and its value at the ring's lower right (observed in Live 12.4.16, 2
-    /// November 2026; layout L-DEV-066).
+    /// November 2026; layout L-DEV-105).
     pub(super) fn mini_knob(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
         let c = &theme.colors;
         let response = ui.interact(self.rect, self.id(), Sense::click_and_drag());
@@ -596,7 +601,10 @@ impl Control<'_> {
                     ink,
                 ),
                 None => {
-                    painter.text(
+                    // A name too long for the box is cut short before the arrow.
+                    let clip =
+                        Rect::from_min_max(field.min, pos2(field.right() - 11.0, field.bottom()));
+                    painter.with_clip_rect(clip).text(
                         pos2(field.left() + 3.0, field.center().y),
                         Align2::LEFT_CENTER,
                         text,
@@ -992,8 +1000,100 @@ impl Control<'_> {
         self.describe(ui, &response, Role::SpinButton);
     }
 
-    /// A single button showing the chosen choice, lit: a click takes the next.
-    pub(super) fn cycle(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
+    /// A box under the name reading On or Off, lit while on: a press turns
+    /// it.
+    pub(super) fn switch(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
+        let below = self.label(ui, theme);
+        let field = Rect::from_min_size(below.min, vec2(below.width(), BOX_HEIGHT));
+        let on = self.on();
+        let face = Face::Text(if on { "On" } else { "Off" });
+        let response = self.button(ui, theme, (field, self.id()), (Look::Dark, on), face);
+        if Self::chosen(ui, &response) {
+            self.change(if on { 0.0 } else { 1.0 }, events);
+        }
+        self.describe_switch(ui, &response);
+    }
+
+    /// A small square button under the name, lit while on.
+    pub(super) fn square(&self, ui: &mut Ui, theme: &Theme, events: &mut Vec<UiEvent>) {
+        let below = self.label(ui, theme);
+        let side = vec2(CHECK_SIZE, CHECK_SIZE);
+        let square = Rect::from_min_size(
+            pos2(below.center().x - side.x / 2.0, below.top() + 2.0),
+            side,
+        );
+        let on = self.on();
+        let response = self.button(
+            ui,
+            theme,
+            (square, self.id()),
+            (Look::Dark, on),
+            Face::Text(""),
+        );
+        if Self::chosen(ui, &response) {
+            let d = self.descriptor;
+            self.change(if on { d.min() } else { d.max() }, events);
+        }
+        self.describe_switch(ui, &response);
+    }
+
+    /// A stepper: a number box for the amount, with a round − and a round +
+    /// that move `target` (its descriptor and its value) down and up by it.
+    pub(super) fn stepper(
+        &self,
+        ui: &mut Ui,
+        theme: &Theme,
+        events: &mut Vec<UiEvent>,
+        (target, current): (&ParamDescriptor, f64),
+    ) {
+        let side = vec2(BOX_HEIGHT, BOX_HEIGHT);
+        let down = Rect::from_min_size(self.rect.min, side);
+        let up = Rect::from_min_size(pos2(self.rect.right() - BOX_HEIGHT, self.rect.top()), side);
+        let middle = Rect::from_min_max(
+            pos2(down.right() + BUTTON_GAP, self.rect.top()),
+            pos2(up.left() - BUTTON_GAP, self.rect.bottom()),
+        );
+        self.number_field(ui, theme, events, middle, (false, false));
+        for (rect, sign, glyph, name) in [
+            (down, -1.0, Glyph::Minus, "Step Down"),
+            (up, 1.0, Glyph::Plus, "Step Up"),
+        ] {
+            let id = self.id().with(name);
+            let response = self.button(
+                ui,
+                theme,
+                (rect, id),
+                (Look::Dark, false),
+                Face::Circle(Some(glyph)),
+            );
+            let moved = target.clamp(current + sign * self.value);
+            if Self::chosen(ui, &response) && moved != current {
+                events.push(UiEvent::BeginNamedGesture(super::gesture_name(target)));
+                events.push(UiEvent::Invoke(Invocation::new(
+                    "device.set_param",
+                    json!({ "device": self.device, "param": target.id, "value": moved }),
+                )));
+                events.push(UiEvent::EndGesture);
+            }
+            let label = format!("{name} {}", target.name);
+            response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &label));
+            ui.ctx().accesskit_node_builder(id, |node| {
+                node.set_role(Role::Button);
+                node.set_label(label.clone());
+            });
+        }
+    }
+
+    /// A single button showing the chosen choice, lit: a click takes the
+    /// next. With `by_choice` it is lit only while a choice other than the
+    /// first is chosen (Note Echo's Sync, which reads Time while off).
+    pub(super) fn cycle(
+        &self,
+        ui: &mut Ui,
+        theme: &Theme,
+        events: &mut Vec<UiEvent>,
+        by_choice: bool,
+    ) {
         let text = self.descriptor.format(self.value);
         let response = self.button(
             ui,
@@ -1001,7 +1101,11 @@ impl Control<'_> {
             (self.rect, self.id()),
             (
                 Look::Dark,
-                !matches!(self.descriptor.kind, bl_model::ParamKind::Toggle) || self.on(),
+                if by_choice {
+                    self.value >= 0.5
+                } else {
+                    !matches!(self.descriptor.kind, bl_model::ParamKind::Toggle) || self.on()
+                },
             ),
             Face::Text(&text),
         );
@@ -1093,12 +1197,23 @@ impl Control<'_> {
         mode: &Control<'_>,
     ) {
         let top = mode.rect.center().y - BOX_HEIGHT - 1.5;
+        let left = mode.rect.center().x - UNIT_ROW_BUTTON - 2.0;
         let on_second = mode.on();
         for (index, unit) in pair.units.iter().enumerate() {
-            let rect = Rect::from_min_size(
-                pos2(mode.rect.left(), top + index as f32 * (BOX_HEIGHT + 3.0)),
-                vec2(bl_model::device_layout::UNIT_PAIR_WIDTH, BOX_HEIGHT),
-            );
+            let rect = if pair.below {
+                Rect::from_min_size(
+                    pos2(
+                        left + index as f32 * (UNIT_ROW_BUTTON + 4.0),
+                        mode.rect.top(),
+                    ),
+                    vec2(UNIT_ROW_BUTTON, BOX_HEIGHT),
+                )
+            } else {
+                Rect::from_min_size(
+                    pos2(mode.rect.left(), top + index as f32 * (BOX_HEIGHT + 3.0)),
+                    vec2(bl_model::device_layout::UNIT_PAIR_WIDTH, BOX_HEIGHT),
+                )
+            };
             let chosen = on_second == (index == 1);
             let face = match (unit.glyph(), unit.text()) {
                 (Some(glyph), _) => Face::Glyph(glyph),
@@ -1161,6 +1276,10 @@ pub fn glyph_for(choice: &str) -> Option<Glyph> {
         Some(Glyph::BandPass)
     } else if name.contains("notch") || name == "n" {
         Some(Glyph::Notch)
+    } else if name == "linear" {
+        Some(Glyph::Line)
+    } else if name.starts_with("s-shaped") {
+        Some(Glyph::SCurve)
     } else if name == "record" {
         Some(Glyph::Record)
     } else if name == "overdub" {
@@ -1286,6 +1405,15 @@ pub fn paint_glyph(painter: &Painter, rect: Rect, glyph: Glyph, ink: Color32) {
             line(&[(0.0, -0.6), (0.0, 0.6)]);
         }
         Glyph::Minus => line(&[(-0.6, 0.0), (0.6, 0.0)]),
+        Glyph::Line => line(&[(-0.8, 0.8), (0.8, -0.8)]),
+        Glyph::SCurve => line(&[
+            (-0.8, 0.8),
+            (-0.2, 0.7),
+            (-0.1, 0.3),
+            (0.1, -0.3),
+            (0.2, -0.7),
+            (0.8, -0.8),
+        ]),
         Glyph::Link => {
             // Two rings that overlap.
             for x in [-0.35, 0.35] {
@@ -1545,8 +1673,14 @@ pub fn title_parts(
             );
         }
     }
+    // The label's ink reads on the bar: dark on the light bar of a selected
+    // device (observed).
+    let (bar_text, ink) = if frame.selected {
+        (c.window.0, c.window.0)
+    } else {
+        (c.text.0, c.text_dim.0)
+    };
     for (index, part) in panel.description.layout.title.iter().enumerate().rev() {
-        let ink = c.text_dim.0;
         match part {
             TitlePart::Round(..) => {}
             TitlePart::Heading(text) => {
@@ -1558,7 +1692,7 @@ pub fn title_parts(
                     Align2::LEFT_CENTER,
                     text,
                     font(),
-                    c.text.0,
+                    bar_text,
                 );
             }
             TitlePart::Section(text, centre) => {
@@ -1610,7 +1744,7 @@ pub fn title_parts(
                     .iter()
                     .find(|p| p.id == *param)
                     .map_or("", |p| p.name.as_str());
-                let width = text_width(&painter, name, ink) + 10.0;
+                let width = TITLE_BUTTON_WIDTH;
                 let rect = row(room.right() - width, width);
                 room.max.x = rect.left() - 3.0;
                 title_button(

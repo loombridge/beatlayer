@@ -96,6 +96,7 @@
 //!   (`clip_view.show_properties`, `clip_view.show_marker`,
 //!   `clip.set_marker_at_playhead`, WP-6.55).
 //! - [`video`]: video clips for agents (`video.frame_at`, WP-9.25).
+//! - [`modular`]: the Modular device's patch (`modular.patch`, WP-9.36).
 //! - [`tunings`]: tuning systems (`tuning.load`, `tuning.state`, WP-6.9).
 //! - [`search`]: the search field's commands (`search.*`, WP-6.42): command
 //!   search and track search.
@@ -137,6 +138,7 @@ pub mod freeze;
 pub mod granulator;
 pub mod groove;
 pub mod keymap;
+pub mod library;
 pub mod link;
 pub mod linked_clips;
 pub mod locator;
@@ -145,6 +147,7 @@ pub mod midi_files;
 pub mod midi_io;
 pub mod midi_tools;
 pub mod mixer_view;
+pub mod modular;
 pub mod modulation;
 pub mod multisampler;
 pub mod note_filters;
@@ -228,6 +231,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     stems::register(registry)?;
     audio_to_midi::register(registry)?;
     packages::register(registry)?;
+    library::register(registry)?;
     extensions::register(registry)?;
     sample_editor::register(registry)?;
     audio_editing::register(registry)?;
@@ -241,6 +245,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     warping::register(registry)?;
     scales::register(registry)?;
     tunings::register(registry)?;
+    modular::register(registry)?;
     link::register(registry)?;
     sync::register(registry)?;
     tempo_follower::register(registry)?;

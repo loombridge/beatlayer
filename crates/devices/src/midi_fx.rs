@@ -7,7 +7,7 @@
 
 use bl_engine::scales::OFF;
 use bl_engine::{NoteBuffer, NoteEvent, NoteExpression, NoteKind};
-use bl_model::{Device, ParamId, Scale, ScaleName};
+use bl_model::{Device, ParamDescriptor, ParamId, Scale, ScaleName};
 
 use crate::framework::{Audio, ParamBank};
 
@@ -69,6 +69,25 @@ pub(crate) fn scale_named(entry: usize) -> Option<ScaleName> {
         .copied()
 }
 
+/// The names of the 128 keys as Live's boxes read them: `C-2` for key 0, with
+/// middle C, key 60, `C3` (observed in Live 12.4.16 on Pitch's Lowest).
+pub(crate) fn key_names() -> Vec<String> {
+    const NAMES: [&str; 12] = [
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+    ];
+    (0..128)
+        .map(|key: i32| format!("{}{}", NAMES[(key % 12) as usize], key / 12 - 2))
+        .collect()
+}
+
+/// A chooser of the 128 keys, named `name`, starting on `default`, which a
+/// box draws as a note (Lowest of Pitch and Scale).
+pub(crate) fn key_choice(id: ParamId, name: &str, default: usize) -> ParamDescriptor {
+    let names = key_names();
+    let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    ParamDescriptor::choice(id, name, &refs, default)
+}
+
 /// A seed for the random choices of `device`: its ID, so a render repeats
 /// and two devices differ.
 pub(crate) fn seed(device: &Device) -> u64 {
@@ -76,7 +95,7 @@ pub(crate) fn seed(device: &Device) -> u64 {
 }
 
 /// A note's identity: its channel, key and ID.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Key {
     pub(crate) channel: u8,
     pub(crate) key: u8,

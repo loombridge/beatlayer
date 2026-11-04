@@ -1,4 +1,4 @@
-//! The mechanism drawn at the left of Electric's display (layout L-DEV-063):
+//! The mechanism drawn at the left of Electric's display (layout L-DEV-102):
 //! the damper, the tine with its tone bar, the pickup under it and the hammer
 //! arm, in Beatlayer's own line style. The parts the shown section's controls
 //! act on are in the accent, the others in the display's grey.

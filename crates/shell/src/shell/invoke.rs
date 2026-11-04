@@ -289,6 +289,34 @@ impl Shell {
                 });
                 Ok(Value::Null)
             }
+            // Spec: core-library R12. Export Credits asks where first, when
+            // there is something to credit.
+            bl_shell_spec::library::EXPORT_CREDITS if !has("path") => {
+                let set = args.get("set").and_then(Value::as_bool).unwrap_or(false);
+                self.refresh_stale_library();
+                if self.library_credits(set).packages.is_empty() {
+                    return Err(ShellError::Failed {
+                        command: id.to_owned(),
+                        message: if set {
+                            "the set uses no library items"
+                        } else {
+                            "no library items are installed"
+                        }
+                        .to_owned(),
+                    });
+                }
+                let name = if set {
+                    self.set_name()
+                } else {
+                    "Library".to_owned()
+                };
+                self.effects.push(Effect::PickCreditsPath {
+                    file_name: format!("{} Credits.txt", bl_project::preset::file_safe(&name)),
+                    set,
+                    folder: self.save_dialog_folder(),
+                });
+                Ok(Value::Null)
+            }
             dawproject_ids::IMPORT_DAWPROJECT | dawproject_ids::EXPORT_DAWPROJECT => {
                 self.run_dawproject_for_person(id, args)
             }

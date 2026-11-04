@@ -37,6 +37,7 @@ bl-ext = { path = "crates/ext" }
 bl-push = { path = "crates/push" }
 bl-link = { path = "crates/link" }
 bl-interop = { path = "crates/interop" }
+bl-library = { path = "crates/library" }
 bl-ui = { path = "crates/ui" }
 bl-shell = { path = "crates/shell" }
 bl-shell-spec = { path = "crates/shell-spec" }

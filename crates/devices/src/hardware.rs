@@ -43,10 +43,10 @@ pub fn hardware_instrument_type() -> DeviceType {
 }
 
 /// The width of the body at the right of the section, in points: the frame is
-/// Live's 129 points wide with the section's 88 (layout L-DEV-064).
+/// Live's 129 points wide with the section's 88 (layout L-DEV-103).
 const BODY_WIDTH: f32 = 41.0;
 
-/// Layout L-DEV-064: Gain is a small knob at the right of the Audio From box,
+/// Layout L-DEV-103: Gain is a small knob at the right of the Audio From box,
 /// on the row of its name; the choosers, Peak and Hardware Latency are the
 /// section's, down the left.
 fn layout() -> DeviceLayout {

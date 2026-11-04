@@ -1,7 +1,8 @@
 //! The Help menu.
 
-use super::Action::{Omitted, Pending, Shortcut as Key};
-use super::{Action, IMP_16, IMP_16_SEPARATOR, Row, SEPARATOR};
+use super::Action::{Command as Cmd, Omitted, Pending, Shortcut as Key};
+use super::{Action, IMP_16, IMP_16_SEPARATOR, LIBRARY_CREDITS, Row, SEPARATOR};
+use crate::library::SHOW_CREDITS;
 
 pub(super) const HELP: &[Row] = &[
     (IMP_16, "Search Commands…", Key(&["S-MENU-007"])),
@@ -15,6 +16,7 @@ pub(super) const HELP: &[Row] = &[
     SEPARATOR,
     ("M-HELP-003", "Load Demo Set", Pending(None)),
     ("M-HELP-004", "Read the Beatlayer Manual...", Pending(None)),
+    (LIBRARY_CREDITS, "Library Credits...", Cmd(SHOW_CREDITS)),
     (
         "M-HELP-005",
         "Learn Live at ableton.com...",

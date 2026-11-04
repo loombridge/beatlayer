@@ -1,4 +1,4 @@
-//! What Drift's displays draw (layout L-DEV-065): an envelope's curve, the
+//! What Drift's displays draw (layout L-DEV-104): an envelope's curve, the
 //! LFO's wave, the pitch modulation under the oscillators, and the little
 //! waveforms that stand for a waveform chooser's choices.
 

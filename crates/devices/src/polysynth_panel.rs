@@ -1,4 +1,4 @@
-//! Drift's panel as Live lays it out (layout L-DEV-065): the oscillators and
+//! Drift's panel as Live lays it out (layout L-DEV-104): the oscillators and
 //! the mix on a black ground, the filter, the two envelopes over their
 //! display, the LFO and Mod tabs, and the global controls at the right,
 //! each at the place measured on Live 12.4.16 on 2 November 2026.

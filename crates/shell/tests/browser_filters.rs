@@ -622,14 +622,19 @@ fn library_labels_are_hidden_moved_and_reset() {
     };
     let first = state(&mut shell);
     assert_eq!(library_names(&first)[0], "All");
-    assert_eq!(library_names(&first)[1], "Sounds");
+    // Spec: browser R31. Beatlayer's library comes first after All.
+    assert_eq!(library_names(&first)[1], "Core Library");
+    assert_eq!(library_names(&first)[2], "Sounds");
     // Dragging Samples up puts it second; All stays first.
     let moved: BrowserState = run(
         &mut shell,
         ids::MOVE_LABEL,
         json!({ "label": "samples", "position": 0 }),
     );
-    assert_eq!(&library_names(&moved)[..3], ["All", "Samples", "Sounds"]);
+    assert_eq!(
+        &library_names(&moved)[..3],
+        ["All", "Samples", "Core Library"]
+    );
     assert!(
         shell
             .run(ids::MOVE_LABEL, json!({ "label": "all", "position": 4 }))
@@ -667,7 +672,10 @@ fn library_labels_are_hidden_moved_and_reset() {
     // Kept between launches.
     let mut relaunched = shell_on(&config);
     let back = state(&mut relaunched);
-    assert_eq!(&library_names(&back)[..3], ["All", "Samples", "Sounds"]);
+    assert_eq!(
+        &library_names(&back)[..3],
+        ["All", "Samples", "Core Library"]
+    );
     assert!(
         !back
             .labels
@@ -678,7 +686,10 @@ fn library_labels_are_hidden_moved_and_reset() {
     );
     // Reset Label Order puts the order back; hidden labels stay hidden.
     let reset: BrowserState = run(&mut relaunched, ids::RESET_LABEL_ORDER, json!({}));
-    assert_eq!(&library_names(&reset)[..3], ["All", "Sounds", "Drums"]);
+    assert_eq!(
+        &library_names(&reset)[..4],
+        ["All", "Core Library", "Sounds", "Drums"]
+    );
     assert!(
         !reset
             .labels

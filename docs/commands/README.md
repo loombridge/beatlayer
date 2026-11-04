@@ -58,6 +58,7 @@ The commands, by the part of their ID before its first dot:
 - [`granulator`](granulator.md)
 - [`groove`](groove.md)
 - [`keymap`](keymap.md)
+- [`library`](library.md)
 - [`link`](link.md)
 - [`locator`](locator.md)
 - [`meld`](meld.md)
@@ -65,6 +66,7 @@ The commands, by the part of their ID before its first dot:
 - [`midi_tool`](midi_tool.md)
 - [`mixer`](mixer.md)
 - [`mixer_view`](mixer_view.md)
+- [`modular`](modular.md)
 - [`modulation`](modulation.md)
 - [`modulator`](modulator.md)
 - [`note`](note.md)
@@ -3951,6 +3953,169 @@ Changes to Beats' controls: only the ones given change.
 
 </details>
 
+### `Block`
+
+One block of a patch (R2).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | [`BlockId`](#blockid) | yes | The block's ID in the patch. |
+| `type` | string | yes | Its type's ID (R19). |
+| `x` | number | yes | Where it sits in the editor. |
+| `y` | number | yes | Where it sits in the editor. |
+| `settings` | object | no | The settings that aren't the type's defaults, by setting ID. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One block of a patch (R2).",
+  "properties": {
+    "id": {
+      "$ref": "#/$defs/BlockId",
+      "description": "The block's ID in the patch."
+    },
+    "settings": {
+      "additionalProperties": {
+        "format": "double",
+        "type": "number"
+      },
+      "description": "The settings that aren't the type's defaults, by setting ID.",
+      "type": "object"
+    },
+    "type": {
+      "description": "Its type's ID (R19).",
+      "type": "string"
+    },
+    "x": {
+      "description": "Where it sits in the editor.",
+      "format": "float",
+      "type": "number"
+    },
+    "y": {
+      "description": "Where it sits in the editor.",
+      "format": "float",
+      "type": "number"
+    }
+  },
+  "required": [
+    "id",
+    "type",
+    "x",
+    "y"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `BlockId`
+
+A block's ID within its patch.
+
+Type: integer, at least 0.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A block's ID within its patch.",
+  "format": "uint32",
+  "minimum": 0,
+  "type": "integer"
+}
+```
+
+</details>
+
+### `BlockView`
+
+One block of the patch.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | [`BlockId`](#blockid) | yes | The block's ID in the patch. |
+| `type` | string | yes | Its type's ID. |
+| `name` | string | yes | Its type's name, or the type's ID where Beatlayer doesn't know it. |
+| `known` | boolean | yes | Whether Beatlayer knows the type; a block it doesn't know is silent. |
+| `x` | number | yes | Where it sits in the editor. |
+| `y` | number | yes | Where it sits in the editor. |
+| `inputs` | array of [`PortView`](#portview) | yes | Its input ports. |
+| `outputs` | array of [`PortView`](#portview) | yes | Its output ports. |
+| `settings` | array of [`SettingView`](#settingview) | yes | Its settings. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One block of the patch.",
+  "properties": {
+    "id": {
+      "$ref": "#/$defs/BlockId",
+      "description": "The block's ID in the patch."
+    },
+    "inputs": {
+      "description": "Its input ports.",
+      "items": {
+        "$ref": "#/$defs/PortView"
+      },
+      "type": "array"
+    },
+    "known": {
+      "description": "Whether Beatlayer knows the type; a block it doesn't know is silent.",
+      "type": "boolean"
+    },
+    "name": {
+      "description": "Its type's name, or the type's ID where Beatlayer doesn't know it.",
+      "type": "string"
+    },
+    "outputs": {
+      "description": "Its output ports.",
+      "items": {
+        "$ref": "#/$defs/PortView"
+      },
+      "type": "array"
+    },
+    "settings": {
+      "description": "Its settings.",
+      "items": {
+        "$ref": "#/$defs/SettingView"
+      },
+      "type": "array"
+    },
+    "type": {
+      "description": "Its type's ID.",
+      "type": "string"
+    },
+    "x": {
+      "description": "Where it sits in the editor.",
+      "format": "float",
+      "type": "number"
+    },
+    "y": {
+      "description": "Where it sits in the editor.",
+      "format": "float",
+      "type": "number"
+    }
+  },
+  "required": [
+    "id",
+    "type",
+    "name",
+    "known",
+    "x",
+    "y",
+    "inputs",
+    "outputs",
+    "settings"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `BlockedItem`
 
 A plug-in that failed a scan, and why.
@@ -4440,6 +4605,52 @@ What the browser shows: most browser commands return it.
     "columns",
     "can_back",
     "can_forward"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Cable`
+
+A cable from one block's output port to another's input port (R2).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `from` | [`BlockId`](#blockid) | yes | The block it leaves. |
+| `from_port` | string | yes | The output port it leaves, by ID. |
+| `to` | [`BlockId`](#blockid) | yes | The block it enters. |
+| `to_port` | string | yes | The input port it enters, by ID. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A cable from one block's output port to another's input port (R2).",
+  "properties": {
+    "from": {
+      "$ref": "#/$defs/BlockId",
+      "description": "The block it leaves."
+    },
+    "from_port": {
+      "description": "The output port it leaves, by ID.",
+      "type": "string"
+    },
+    "to": {
+      "$ref": "#/$defs/BlockId",
+      "description": "The block it enters."
+    },
+    "to_port": {
+      "description": "The input port it enters, by ID.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "from",
+    "from_port",
+    "to",
+    "to_port"
   ],
   "type": "object"
 }
@@ -8304,6 +8515,7 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
 | `shown` | [`ShownWhen`](#shownwhen) or null | no | The condition under which the control shows: only while parameter `param`'s value, rounded, is `value`. A control that is not shown takes no place and draws nothing, so another can be drawn where it would be (Drift's Envelope 2 shows its Rate, Tilt and Hold in the places of its Attack, Decay and Sustain while it cycles). |
 | `size` | [`Size`](#size) or null | no | Its size where the device sets it, in place of the widget's: the width of a box, a row of buttons or a unit pair's control. |
 | `steps` | array or null | no | For a grid, row or stack of buttons over a whole-number parameter, the values its buttons set, in order (Delay's 1 2 3 4 5 6 8 16 of the sixteen steps its time takes): the button for the value the parameter has is lit, and none is while it has another. Over a choice parameter, the indexes of the choices that have a button, in order. |
+| `target` | [`ParamId`](#paramid) or null | no | The parameter a [`Widget::Stepper`]'s buttons move. |
 | `titled` | boolean | no | Set for a row, stack or grid of buttons with its parameter's name above it, left-aligned (Chorus-Ensemble's Taps). |
 | `trim` | integer from 0 to 255 | no | How many words of the parameter's name the control leaves out of the name it shows: a table's `Stiffness Vel` shows `Vel` under its row's name. |
 | `unit` | [`UnitPair`](#unitpair) or null | no | The unit pair beside a knob, which makes the knob show one of two parameters. |
@@ -8403,6 +8615,17 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
         "array",
         "null"
       ]
+    },
+    "target": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ParamId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The parameter a [`Widget::Stepper`]'s buttons move."
     },
     "titled": {
       "description": "Set for a row, stack or grid of buttons with its parameter's name above it, left-aligned (Chorus-Ensemble's Taps).",
@@ -9155,6 +9378,83 @@ What `set.create_pack` returns.
 
 </details>
 
+### `Credit`
+
+One item's credit.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | The item's ID in the library. |
+| `name` | string | yes | Its name. |
+| `credit` | string | yes | Its credit: title, creator, licence and its link, source and changes. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One item's credit.",
+  "properties": {
+    "credit": {
+      "description": "Its credit: title, creator, licence and its link, source and changes.",
+      "type": "string"
+    },
+    "id": {
+      "description": "The item's ID in the library.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "credit"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Credits`
+
+What `library.credits` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `packages` | array of [`PackageCredits`](#packagecredits) | yes | The credits by package. |
+| `text` | string | yes | The same, as the text Export Credits writes. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `library.credits` returns.",
+  "properties": {
+    "packages": {
+      "description": "The credits by package.",
+      "items": {
+        "$ref": "#/$defs/PackageCredits"
+      },
+      "type": "array"
+    },
+    "text": {
+      "description": "The same, as the text Export Credits writes.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "packages",
+    "text"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `CropResult`
 
 What `clip.crop` did.
@@ -9836,6 +10136,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `other_params` | array or null | no | The values of the state that isn't active, in the same form as [`params`](Self::params) (device compare R1, R10). `None` while the two states are equal, as a new device's are, and left out of the saved set then. Use [`other_params`](Self::other_params) to read it. |
 | `own_name` | string | no | The device's own name, such as `Auto Filter`, which the title bar shows while Show Preset Name is off. Empty while it's the same as [`name`](Self::name), and left out of the saved set then. |
 | `partials` | array of [`Partials`](#partials) | no | The partials of the user waves an Operator's oscillators play (the Operator spec, R27), by oscillator; one that isn't listed has the first partial alone. Empty for a device without drawn waves, and left out of the saved set then. |
+| `patch` | [`Patch`](#patch) or null | no | A Modular device's patch (the modular device spec, R2, R8): its blocks, cables and patch parameters. `None` for every device that isn't Modular, and left out of the saved set then. |
 | `plugin` | [`PluginState`](#pluginstate) or null | no | A plug-in's own state and where it was loaded from (WP-2.6), as last saved with the set. Left out of the saved set for a native device, and for a plug-in until the set is first saved with it. |
 | `preset_name` | string or null | no | The name of the preset the device holds (the plug-in list spec, R5): the Beatlayer device preset last loaded into it or saved from it, or else the program name the plug-in's format reported. Left out of the saved set while there is none, so a device saved before this package loads with none. |
 | `region` | [`SampleRegion`](#sampleregion) or null | no | The part of slot 0's sample a Simpler plays, between its Start and End flags (the sampler spec, R22): `None` for the whole sample. Loading another sample clears it; an edit that changes the sample's length moves it. Left out of the saved set while it is the whole sample. |
@@ -10012,6 +10313,17 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
         "$ref": "#/$defs/Partials"
       },
       "type": "array"
+    },
+    "patch": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Patch"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A Modular device's patch (the modular device spec, R2, R8): its blocks, cables and patch parameters. `None` for every device that isn't Modular, and left out of the saved set then."
     },
     "plugin": {
       "anyOf": [
@@ -10198,6 +10510,7 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
 | `banks` | array of [`Bank`](#bank) | no | The banks the type declares for control surfaces, its main controls first; empty for a type that leaves them to [`DeviceDescription::banks`]' generic ones. They hold neither the menu options nor the title switch. |
 | `display_drag` | array of [`ParamId`](#paramid) | no | The parameter a vertical drag on the display changes, one for each of `views`, in their order (Roar's shaper display drags the shown stage's Shaper Amount); empty for a display that isn't dragged. |
 | `grid_params` | array of [`ParamId`](#paramid) | no | The parameters a display cell sets by its own gestures, which the layout places no control for: a matrix grid's route amounts. |
+| `impulse_responses` | array of string | no | The names of the impulse-response slots every device of the type has, in their order (the impulse responses spec, R1). A slot is media, not a parameter: slot `k` is the device's media slot `k`. |
 | `menu_options` | array of [`ParamId`](#paramid) | no | The switches the device lists as its own items in its Show Options menu, after Save as Default Preset (C-DEVICE-015), in this order. They are parameters like any other, but the layout places no control for them. |
 | `relabels` | array of [`Relabel`](#relabel) | no | The parameters whose names follow another parameter's value. |
 | `spectrogram` | [`SpectrogramGrid`](#spectrogramgrid) or null | no | The grid of the spectrogram its display holds, if it holds one (the device framework spec, R46). |
@@ -10235,6 +10548,13 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
       "description": "The parameters a display cell sets by its own gestures, which the layout places no control for: a matrix grid's route amounts.",
       "items": {
         "$ref": "#/$defs/ParamId"
+      },
+      "type": "array"
+    },
+    "impulse_responses": {
+      "description": "The names of the impulse-response slots every device of the type has, in their order (the impulse responses spec, R1). A slot is media, not a parameter: slot `k` is the device's media slot `k`.",
+      "items": {
+        "type": "string"
       },
       "type": "array"
     },
@@ -10461,6 +10781,7 @@ One device as the Device View shows it.
 | `folded` | boolean | yes | Whether it's folded to its title bar. |
 | `expandable` | boolean | yes | Whether it has an expanded part, which its title bar's expand toggle shows and hides (L-DEV-004; WP-5.42). |
 | `expanded` | boolean | yes | Whether its expanded part is shown. Never while it has none. |
+| `points_right_when_shown` | boolean | yes | Whether its expand toggle's triangle points right while the expanded part shows (it points down while it is hidden), instead of the other way round. |
 | `floating` | boolean | yes | Whether it floats in a window of its own, its place in the chain a strip (WP-2.5b). |
 | `b_active` | boolean | yes | Whether its B state is the active one, which the title bar marks "(B)" (device compare R5). |
 | `configure` | boolean | yes | Whether the device is in Plug-In Configure Mode (clap-hosting R5, WP-5.40): its title bar's Configure switch is lit. View state, never saved with the set. False for a device that isn't a plug-in. |
@@ -10613,6 +10934,11 @@ One device as the Device View shows it.
       ],
       "description": "Its parameters and layout, for the generic UI; left out for a device whose type doesn't describe them."
     },
+    "points_right_when_shown": {
+      "default": false,
+      "description": "Whether its expand toggle's triangle points right while the expanded part shows (it points down while it is hidden), instead of the other way round.",
+      "type": "boolean"
+    },
     "rack": {
       "anyOf": [
         {
@@ -10680,6 +11006,7 @@ One device as the Device View shows it.
     "folded",
     "expandable",
     "expanded",
+    "points_right_when_shown",
     "floating",
     "b_active",
     "configure",
@@ -10814,6 +11141,8 @@ A device's layout (IMP-14): bands of controls and display cells in rows and colu
 |---|---|---|---|
 | `root` | [`LayoutNode`](#layoutnode) | yes | The whole body. |
 | `expanded` | [`LayoutNode`](#layoutnode) or null | no | The part the device adds to its body while it is expanded (L-DEV-004, L-DEV-007), if it has one: placed to the right of [`root`](Self::root). It places its parameters' controls like the rest of the layout. |
+| `opens_expanded` | boolean | no | Whether a new device shows its expanded part, as Arpeggiator does (L-DEV-101). |
+| `points_right_when_shown` | boolean | no | Whether the expand toggle's triangle points right while the expanded part shows and down while it is hidden, as Arpeggiator's and MPE Control's do (L-DEV-100, L-DEV-101); otherwise it points right while the part is hidden. |
 | `title` | array of [`TitlePart`](#titlepart) | no | What the device adds to its title bar. |
 
 <details><summary>JSON Schema</summary>
@@ -10832,6 +11161,14 @@ A device's layout (IMP-14): bands of controls and display cells in rows and colu
         }
       ],
       "description": "The part the device adds to its body while it is expanded (L-DEV-004, L-DEV-007), if it has one: placed to the right of [`root`](Self::root). It places its parameters' controls like the rest of the layout."
+    },
+    "opens_expanded": {
+      "description": "Whether a new device shows its expanded part, as Arpeggiator does (L-DEV-101).",
+      "type": "boolean"
+    },
+    "points_right_when_shown": {
+      "description": "Whether the expand toggle's triangle points right while the expanded part shows and down while it is hidden, as Arpeggiator's and MPE Control's do (L-DEV-100, L-DEV-101); otherwise it points right while the part is hidden.",
+      "type": "boolean"
     },
     "root": {
       "$ref": "#/$defs/LayoutNode",
@@ -11809,6 +12146,7 @@ A display cell: a graph, a spectrum, a waveform, or an envelope editor, which gr
 | `weight` | number | yes | Its share of extra room, against the other cells it shares with. |
 | `bottom` | [`ControlBand`](#controlband) or null | no | Controls inside its bottom edge, from its left. |
 | `inset` | number | no | The space left clear around the cell inside the room it is given, as Live leaves round a Drum Synth's display (L-DEV-047): the cell's size and growth are inside it. |
+| `params` | array of [`ParamId`](#paramid) | no | The parameters the cell's own drawing sets, which need no control of their own (Scale's grid sets its twelve notes' targets). |
 | `slot` | integer or null | no | The sample slot the cell stands for, if it does: it shows the slot and takes a click that selects it, and a sample dropped on it (WP-5.17). |
 | `top` | [`ControlBand`](#controlband) or null | no | Controls inside its top edge, from its left. |
 
@@ -11842,6 +12180,13 @@ A display cell: a graph, a spectrum, a waveform, or an envelope editor, which gr
     "name": {
       "description": "What it shows, for the device that draws it and for screen readers.",
       "type": "string"
+    },
+    "params": {
+      "description": "The parameters the cell's own drawing sets, which need no control of their own (Scale's grid sets its twelve notes' targets).",
+      "items": {
+        "$ref": "#/$defs/ParamId"
+      },
+      "type": "array"
     },
     "slot": {
       "description": "The sample slot the cell stands for, if it does: it shows the slot and takes a click that selects it, and a sample dropped on it (WP-5.17).",
@@ -13701,6 +14046,42 @@ What `export.status` returns (R44).
   "required": [
     "dialog",
     "export"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ExportedCredits`
+
+What `library.export_credits` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The file written. |
+| `items` | integer, at least 0 | yes | How many items it credits. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `library.export_credits` returns.",
+  "properties": {
+    "items": {
+      "description": "How many items it credits.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "path": {
+      "description": "The file written.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path",
+    "items"
   ],
   "type": "object"
 }
@@ -15859,7 +16240,9 @@ One of:
 - `"plus"`: A plus sign.
 - `"minus"`: A minus sign.
 - `"flat_sharp"`: A flat and a sharp: Use Current Scale.
-- `"link"`: Two linked rings: the link between a device's two channels.
+- `"line"`: A straight line rising to the right: a linear curve.
+- `"s_curve"`: A line rising in an S: an S-shaped curve.
+- `"link"`: Two linked rings: the link between a device's two channels, or a curve's two knobs moving together (MPE Control's Curve Link).
 - `"freeze"`: An asterisk: Freeze.
 - `"phase_invert"`: A circle struck through: invert the phase.
 - `"record"`: A filled circle: record.
@@ -15946,8 +16329,18 @@ One of:
       "type": "string"
     },
     {
+      "const": "line",
+      "description": "A straight line rising to the right: a linear curve.",
+      "type": "string"
+    },
+    {
+      "const": "s_curve",
+      "description": "A line rising in an S: an S-shaped curve.",
+      "type": "string"
+    },
+    {
       "const": "link",
-      "description": "Two linked rings: the link between a device's two channels.",
+      "description": "Two linked rings: the link between a device's two channels, or a curve's two knobs moving together (MPE Control's Curve Link).",
       "type": "string"
     },
     {
@@ -17568,6 +17961,290 @@ A clip `midi.import_file` placed.
 
 </details>
 
+### `ImpulseCategory`
+
+One category of a device's chooser.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The category's name. |
+| `responses` | array of [`ImpulseChoice`](#impulsechoice) | yes | Its responses, in order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One category of a device's chooser.",
+  "properties": {
+    "name": {
+      "description": "The category's name.",
+      "type": "string"
+    },
+    "responses": {
+      "description": "Its responses, in order.",
+      "items": {
+        "$ref": "#/$defs/ImpulseChoice"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "responses"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ImpulseChoice`
+
+One response in a chooser's category.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Its name: its file's name without the extension. |
+| `file` | string | yes | Its file's path. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One response in a chooser's category.",
+  "properties": {
+    "file": {
+      "description": "Its file's path.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Its name: its file's name without the extension.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "file"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ImpulseResponses`
+
+What `device.impulse_responses` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `slots` | array of [`ImpulseSlot`](#impulseslot) | yes | What each slot holds. |
+| `categories` | array of [`ImpulseCategory`](#impulsecategory) | yes | The chooser's categories in order, the bundled ones then `User`. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.impulse_responses` returns.",
+  "properties": {
+    "categories": {
+      "description": "The chooser's categories in order, the bundled ones then `User`.",
+      "items": {
+        "$ref": "#/$defs/ImpulseCategory"
+      },
+      "type": "array"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "slots": {
+      "description": "What each slot holds.",
+      "items": {
+        "$ref": "#/$defs/ImpulseSlot"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "device",
+    "slots",
+    "categories"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ImpulseSlot`
+
+What an impulse-response slot holds (the impulse responses spec, R12).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The slot's name. |
+| `slot` | integer from 0 to 255 | yes | The slot's number, counted from 0. |
+| `state` | [`ImpulseState`](#impulsestate) | yes | Where the response is. |
+| `category` | string or null | no | The chooser's category for it: `User` for a file from elsewhere. |
+| `file` | string or null | no | The response's file name; left out for an empty slot. |
+| `file_frames` | integer or null | no | The file's length in frames at its own rate, once prepared. |
+| `frames` | integer or null | no | The length in frames at the engine's rate after trimming, once prepared. |
+| `gain_db` | number or null | no | The gain normalising applied, in dB, once prepared. |
+| `layout` | string or null | no | `mono`, `stereo` or `true_stereo`, once it is prepared. |
+| `media` | [`ContentHash`](#contenthash) or null | no | The file's content hash. |
+| `path` | string or null | no | The file's path, if the set knows it. |
+| `response` | string or null | no | Its name in that category. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What an impulse-response slot holds (the impulse responses spec, R12).",
+  "properties": {
+    "category": {
+      "description": "The chooser's category for it: `User` for a file from elsewhere.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "file": {
+      "description": "The response's file name; left out for an empty slot.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "file_frames": {
+      "description": "The file's length in frames at its own rate, once prepared.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "frames": {
+      "description": "The length in frames at the engine's rate after trimming, once prepared.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "gain_db": {
+      "description": "The gain normalising applied, in dB, once prepared.",
+      "format": "float",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "layout": {
+      "description": "`mono`, `stereo` or `true_stereo`, once it is prepared.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "media": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ContentHash"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The file's content hash."
+    },
+    "name": {
+      "description": "The slot's name.",
+      "type": "string"
+    },
+    "path": {
+      "description": "The file's path, if the set knows it.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "response": {
+      "description": "Its name in that category.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "slot": {
+      "description": "The slot's number, counted from 0.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "state": {
+      "$ref": "#/$defs/ImpulseState",
+      "description": "Where the response is."
+    }
+  },
+  "required": [
+    "name",
+    "slot",
+    "state"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ImpulseState`
+
+Where a response is in being made ready to play (the impulse responses spec, R12).
+
+One of:
+
+- `"empty"`: The slot holds no response.
+- `"preparing"`: The response is named and is being decoded and prepared.
+- `"ready"`: The response is prepared and plays.
+- `"missing"`: The response's file can't be found; the slot plays silence.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Where a response is in being made ready to play (the impulse responses spec, R12).",
+  "oneOf": [
+    {
+      "const": "empty",
+      "description": "The slot holds no response.",
+      "type": "string"
+    },
+    {
+      "const": "preparing",
+      "description": "The response is named and is being decoded and prepared.",
+      "type": "string"
+    },
+    {
+      "const": "ready",
+      "description": "The response is prepared and plays.",
+      "type": "string"
+    },
+    {
+      "const": "missing",
+      "description": "The response's file can't be found; the slot plays silence.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `IndexState`
 
 The index of the places' files, built in the background.
@@ -18670,6 +19347,7 @@ A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, 
 One of:
 
 - `"all"`: Everything: the places as folders, searched together.
+- `"core_library"`: Beatlayer's own sound library (core library R8): its items once it's installed, its download page before.
 - `"sounds"`: Instrument presets.
 - `"drums"`: Drum kits.
 - `"instruments"`: Instruments.
@@ -18697,6 +19375,11 @@ One of:
     {
       "const": "all",
       "description": "Everything: the places as folders, searched together.",
+      "type": "string"
+    },
+    {
+      "const": "core_library",
+      "description": "Beatlayer's own sound library (core library R8): its items once it's installed, its download page before.",
       "type": "string"
     },
     {
@@ -20479,6 +21162,69 @@ The Library page's settings (L-SET-016).
 
 </details>
 
+### `LibraryState`
+
+What `library.state` and the commands that change it return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `folder` | string | yes | The folder the installed packages' items are in, read-only. |
+| `installed` | boolean | yes | Whether any package is installed: the browser's Core Library label lists items once it is, and shows the download page before. |
+| `packages` | array of [`PackageStatus`](#packagestatus) | yes | The library's packages for this platform, installed or not, each with its item count (`items`). |
+| `install` | [`JobStatus`](#jobstatus) | yes | How the download is going. |
+| `credits_open` | boolean | yes | Whether the Library Credits window is open. |
+| `missing` | array of [`MissingItem`](#missingitem) | no | The library items the open set uses whose files aren't there: the set refers to each by the package, version and ID its file's place names, and by its content hash. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `library.state` and the commands that change it return.",
+  "properties": {
+    "credits_open": {
+      "description": "Whether the Library Credits window is open.",
+      "type": "boolean"
+    },
+    "folder": {
+      "description": "The folder the installed packages' items are in, read-only.",
+      "type": "string"
+    },
+    "install": {
+      "$ref": "#/$defs/JobStatus",
+      "description": "How the download is going."
+    },
+    "installed": {
+      "description": "Whether any package is installed: the browser's Core Library label lists items once it is, and shows the download page before.",
+      "type": "boolean"
+    },
+    "missing": {
+      "description": "The library items the open set uses whose files aren't there: the set refers to each by the package, version and ID its file's place names, and by its content hash.",
+      "items": {
+        "$ref": "#/$defs/MissingItem"
+      },
+      "type": "array"
+    },
+    "packages": {
+      "description": "The library's packages for this platform, installed or not, each with its item count (`items`).",
+      "items": {
+        "$ref": "#/$defs/PackageStatus"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "folder",
+    "installed",
+    "packages",
+    "install",
+    "credits_open"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `LinkAudioPeer`
 
 A peer in the session that has Link Audio on (`link.state`).
@@ -20767,6 +21513,7 @@ What `device.load_sample` returns.
 | `media` | [`ContentHash`](#contenthash) | yes | The sample's media, by content hash: what the device and the set name it by. |
 | `slot` | integer from 0 to 255 | yes | The slot that took it, counted from 0. |
 | `name` | string | yes | The file's name, for messages. |
+| `impulse_response` | [`ImpulseSlot`](#impulseslot) or null | no | For an impulse-response slot, what it now holds (the impulse responses spec, R4). |
 
 <details><summary>JSON Schema</summary>
 
@@ -20777,6 +21524,17 @@ What `device.load_sample` returns.
     "device": {
       "$ref": "#/$defs/DeviceId",
       "description": "The device that took the sample."
+    },
+    "impulse_response": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ImpulseSlot"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "For an impulse-response slot, what it now holds (the impulse responses spec, R4)."
     },
     "media": {
       "$ref": "#/$defs/ContentHash",
@@ -22925,6 +23683,46 @@ What `midi_tool.state` returns, and what the commands that change a tool's choic
     "stacks",
     "target",
     "application"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `MissingItem`
+
+A library item the open set uses that isn't installed.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `item` | string | yes | The item's ID in the library. |
+| `package` | string | yes | The package it's in, as `packages.list` names it. |
+| `version` | string | yes | The package's version the set used. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A library item the open set uses that isn't installed.",
+  "properties": {
+    "item": {
+      "description": "The item's ID in the library.",
+      "type": "string"
+    },
+    "package": {
+      "description": "The package it's in, as `packages.list` names it.",
+      "type": "string"
+    },
+    "version": {
+      "description": "The package's version the set used.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "item",
+    "package",
+    "version"
   ],
   "type": "object"
 }
@@ -25497,6 +26295,49 @@ What `set.pack_status` returns.
 
 </details>
 
+### `PackageCredits`
+
+The credits of one installed package's items.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `package` | string | yes | The package's ID in the library. |
+| `name` | string | yes | Its name. |
+| `items` | array of [`Credit`](#credit) | yes | Its items' credits, in ID order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The credits of one installed package's items.",
+  "properties": {
+    "items": {
+      "description": "Its items' credits, in ID order.",
+      "items": {
+        "$ref": "#/$defs/Credit"
+      },
+      "type": "array"
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "package": {
+      "description": "The package's ID in the library.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "package",
+    "name",
+    "items"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `PackageState`
 
 Where a package is.
@@ -25563,6 +26404,7 @@ A package of the manifest, as `packages.list` and `stems.status` give it.
 | `state` | [`PackageState`](#packagestate) | yes | Where it is. |
 | `features` | array of string | yes | The features that need it, by ID. |
 | `at_next_launch` | boolean | no | Installed, but a library in its role is already loaded, so it takes effect the next time Beatlayer starts. |
+| `items` | integer, at least 0 | no | For a library package, how many items it holds: counted once it's installed, as its manifest entry says before (core library R13). |
 | `progress` | number | no | While it downloads, how far it is, from 0 to 1. |
 
 <details><summary>JSON Schema</summary>
@@ -25589,6 +26431,12 @@ A package of the manifest, as `packages.list` and `stems.status` give it.
     "installed": {
       "description": "Whether it's installed.",
       "type": "boolean"
+    },
+    "items": {
+      "description": "For a library package, how many items it holds: counted once it's installed, as its manifest entry says before (core library R13).",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
     },
     "name": {
       "description": "Its name.",
@@ -26156,6 +27004,8 @@ One of:
 - `"strip"`: A strip down the node's left edge ([`STRIP_WIDTH`] wide) with a ▼ toggle at its top and the node's name written up it; the node's area right of it holds the second page while it is shown and the first, which is empty, while it isn't ([`PagesNode::side_strip`]).
 - `"regions"`: No buttons: each page shows when its region of the body is clicked, the region being the controls its [`Page::select`] names with the heading over them (Electric's sections, Analog's, Operator's). The node's area is the shown page's alone.
 - `"placed"`: A button for each page at a place of its own ([`Page::button`]) in the node's area, as the 1 and 2 over Drift's envelope display are; the node's area is the shown page's.
+- `"column"`: A column of tabs down the node's left edge ([`COLUMN_TAB_WIDTH`] wide), with the shown page's section under them, beside the area the shown page fills (MPE Control's Press, Slide and NotePB).
+- `"follower"`: No tabs of its own: the node shows the page its [`PagesNode::follows`] node shows, by name (MPE Control's settings, which change with its source).
 
 <details><summary>JSON Schema</summary>
 
@@ -26191,6 +27041,16 @@ One of:
     {
       "const": "placed",
       "description": "A button for each page at a place of its own ([`Page::button`]) in the node's area, as the 1 and 2 over Drift's envelope display are; the node's area is the shown page's.",
+      "type": "string"
+    },
+    {
+      "const": "column",
+      "description": "A column of tabs down the node's left edge ([`COLUMN_TAB_WIDTH`] wide), with the shown page's section under them, beside the area the shown page fills (MPE Control's Press, Slide and NotePB).",
+      "type": "string"
+    },
+    {
+      "const": "follower",
+      "description": "No tabs of its own: the node shows the page its [`PagesNode::follows`] node shows, by name (MPE Control's settings, which change with its source).",
       "type": "string"
     }
   ]
@@ -26257,6 +27117,7 @@ Pages of a device's body, one shown at a time (device framework R41).
 | `name` | string | yes | The node's name, which `device.set_page` and the page choice use; it is unique in the layout. |
 | `style` | [`PageStyle`](#pagestyle) | yes | How the pages show. |
 | `pages` | array of [`Page`](#page) | yes | The pages, in order; the first shows in a new device. |
+| `follows` | string or null | no | For a [`PageStyle::Follower`], the node whose page it shows. |
 | `shown` | integer, at least 0 | no | The page shown, as an index; [`DeviceLayout::with_pages`] sets it. |
 | `title_at` | number or null | no | In the title-bar style, where the run of tabs starts, in points from the frame's left edge: at the title's right end where left out. |
 
@@ -26266,6 +27127,13 @@ Pages of a device's body, one shown at a time (device framework R41).
 {
   "description": "Pages of a device's body, one shown at a time (device framework R41).",
   "properties": {
+    "follows": {
+      "description": "For a [`PageStyle::Follower`], the node whose page it shows.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "name": {
       "description": "The node's name, which `device.set_page` and the page choice use; it is unique in the layout.",
       "type": "string"
@@ -26889,6 +27757,61 @@ One of:
 
 </details>
 
+### `ParamView`
+
+One patch parameter.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `slot` | integer from 0 to 255 | yes | Its slot, from 1. |
+| `param` | [`ParamId`](#paramid) | yes | The device parameter number `device.set_param` and automation take. |
+| `name` | string | yes | Its name: the block's, then the setting's. |
+| `block` | [`BlockId`](#blockid) | yes | The block. |
+| `setting` | string | yes | The setting's ID. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One patch parameter.",
+  "properties": {
+    "block": {
+      "$ref": "#/$defs/BlockId",
+      "description": "The block."
+    },
+    "name": {
+      "description": "Its name: the block's, then the setting's.",
+      "type": "string"
+    },
+    "param": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The device parameter number `device.set_param` and automation take."
+    },
+    "setting": {
+      "description": "The setting's ID.",
+      "type": "string"
+    },
+    "slot": {
+      "description": "Its slot, from 1.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "slot",
+    "param",
+    "name",
+    "block",
+    "setting"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ParameterState`
 
 One of a device's parameters as `device.parameters` reports it.
@@ -27119,6 +28042,168 @@ What `device.set_partials` returns.
     "device",
     "osc",
     "count"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Patch`
+
+A Modular device's patch (R2).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `blocks` | array of [`Block`](#block) | yes | The blocks, in the order they were added. |
+| `cables` | array of [`Cable`](#cable) | yes | The cables. |
+| `params` | array of [`PatchParam`](#patchparam) | no | The patch parameters, by slot. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A Modular device's patch (R2).",
+  "properties": {
+    "blocks": {
+      "description": "The blocks, in the order they were added.",
+      "items": {
+        "$ref": "#/$defs/Block"
+      },
+      "type": "array"
+    },
+    "cables": {
+      "description": "The cables.",
+      "items": {
+        "$ref": "#/$defs/Cable"
+      },
+      "type": "array"
+    },
+    "params": {
+      "description": "The patch parameters, by slot.",
+      "items": {
+        "$ref": "#/$defs/PatchParam"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "blocks",
+    "cables"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PatchParam`
+
+A setting made a patch parameter (R6).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `slot` | integer from 0 to 255 | yes | Which of the device's 64 patch parameters it is, from 1: its parameter number is the same. |
+| `block` | [`BlockId`](#blockid) | yes | The block. |
+| `setting` | string | yes | The setting's ID. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A setting made a patch parameter (R6).",
+  "properties": {
+    "block": {
+      "$ref": "#/$defs/BlockId",
+      "description": "The block."
+    },
+    "setting": {
+      "description": "The setting's ID.",
+      "type": "string"
+    },
+    "slot": {
+      "description": "Which of the device's 64 patch parameters it is, from 1: its parameter number is the same.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "slot",
+    "block",
+    "setting"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PatchState`
+
+What `modular.patch` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `voices` | integer, at least 0 | yes | How many voices play, 1 to 32; 1 for an effect. |
+| `blocks` | array of [`BlockView`](#blockview) | yes | The blocks, in the order they were added. |
+| `cables` | array of [`Cable`](#cable) | yes | The cables. |
+| `params` | array of [`ParamView`](#paramview) | yes | The patch parameters, by slot. A value runs from 0 to 1 across its setting's range. |
+| `unknown_blocks` | integer, at least 0 | yes | How many blocks Beatlayer doesn't know, which play silence. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `modular.patch` returns.",
+  "properties": {
+    "blocks": {
+      "description": "The blocks, in the order they were added.",
+      "items": {
+        "$ref": "#/$defs/BlockView"
+      },
+      "type": "array"
+    },
+    "cables": {
+      "description": "The cables.",
+      "items": {
+        "$ref": "#/$defs/Cable"
+      },
+      "type": "array"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "params": {
+      "description": "The patch parameters, by slot. A value runs from 0 to 1 across its setting's range.",
+      "items": {
+        "$ref": "#/$defs/ParamView"
+      },
+      "type": "array"
+    },
+    "unknown_blocks": {
+      "description": "How many blocks Beatlayer doesn't know, which play silence.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "voices": {
+      "description": "How many voices play, 1 to 32; 1 for an effect.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "voices",
+    "blocks",
+    "cables",
+    "params",
+    "unknown_blocks"
   ],
   "type": "object"
 }
@@ -28088,6 +29173,83 @@ A port a row names, and whether the MIDI system offers it now.
   "required": [
     "name",
     "present"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PortType`
+
+What a port carries (R2).
+
+One of:
+
+- `"audio"`: A sample per frame.
+- `"control"`: A value per frame, from −1 to 1 unless the block says otherwise.
+- `"gate"`: On above 0.5.
+- `"notes"`: Note and expression events.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a port carries (R2).",
+  "oneOf": [
+    {
+      "const": "audio",
+      "description": "A sample per frame.",
+      "type": "string"
+    },
+    {
+      "const": "control",
+      "description": "A value per frame, from −1 to 1 unless the block says otherwise.",
+      "type": "string"
+    },
+    {
+      "const": "gate",
+      "description": "On above 0.5.",
+      "type": "string"
+    },
+    {
+      "const": "notes",
+      "description": "Note and expression events.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PortView`
+
+One port of a block.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | The port's ID, which cables name. |
+| `type` | [`PortType`](#porttype) | yes | What it carries. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One port of a block.",
+  "properties": {
+    "id": {
+      "description": "The port's ID, which cables name.",
+      "type": "string"
+    },
+    "type": {
+      "$ref": "#/$defs/PortType",
+      "description": "What it carries."
+    }
+  },
+  "required": [
+    "id",
+    "type"
   ],
   "type": "object"
 }
@@ -36678,6 +37840,94 @@ What `midi.set_show_resync_button` returns.
 
 </details>
 
+### `SettingView`
+
+One setting of a block.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | The setting's ID, which `modular.set` names. |
+| `name` | string | yes | Its name. |
+| `value` | number | yes | Its value now. |
+| `default` | number | yes | Its value in a new block. |
+| `min` | number | yes | Its lowest value. |
+| `max` | number | yes | Its highest value. |
+| `unit` | string | yes | The text after its number, with its space, or none. |
+| `choices` | array of string | yes | The names of a choice's values, in order; empty for a number. |
+| `slot` | integer or null | no | The patch parameter it is, if it is one. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One setting of a block.",
+  "properties": {
+    "choices": {
+      "description": "The names of a choice's values, in order; empty for a number.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "default": {
+      "description": "Its value in a new block.",
+      "format": "double",
+      "type": "number"
+    },
+    "id": {
+      "description": "The setting's ID, which `modular.set` names.",
+      "type": "string"
+    },
+    "max": {
+      "description": "Its highest value.",
+      "format": "double",
+      "type": "number"
+    },
+    "min": {
+      "description": "Its lowest value.",
+      "format": "double",
+      "type": "number"
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "slot": {
+      "description": "The patch parameter it is, if it is one.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "unit": {
+      "description": "The text after its number, with its space, or none.",
+      "type": "string"
+    },
+    "value": {
+      "description": "Its value now.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "value",
+    "default",
+    "min",
+    "max",
+    "unit",
+    "choices"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `SettingsPage`
 
 A page of the Settings window, in Live's order (L-SET-002).
@@ -43476,6 +44726,7 @@ A pair of unit buttons beside a knob that switch which of two parameters the kno
 |---|---|---|---|
 | `mode` | [`ParamId`](#paramid) | yes | The switch that picks the unit: off, the first unit's parameter (the control's own) shows and the first button is lit. |
 | `units` | array of [`Unit`](#unit), at least 2 | yes | The two units, in the order of `mode`'s values. |
+| `below` | boolean | no | Set for a pair drawn side by side in a row under the knob rather than stacked at its left (Note Length's). |
 
 <details><summary>JSON Schema</summary>
 
@@ -43483,6 +44734,10 @@ A pair of unit buttons beside a knob that switch which of two parameters the kno
 {
   "description": "A pair of unit buttons beside a knob that switch which of two parameters the knob shows: Arpeggiator's Rate (ms or sync), Envelope Follower's Delay, LFO's Rate. The knob shows one parameter, never both: the device's description says which two, as an [`Alternate`](crate::param::Alternate) whose switch is `mode`.",
   "properties": {
+    "below": {
+      "description": "Set for a pair drawn side by side in a row under the knob rather than stacked at its left (Note Length's).",
+      "type": "boolean"
+    },
     "mode": {
       "$ref": "#/$defs/ParamId",
       "description": "The switch that picks the unit: off, the first unit's parameter (the control's own) shows and the first button is lit."
@@ -44905,6 +46160,9 @@ One of:
 - an object with `stack` (integer from 0 to 255): The same as a column of that many buttons.
 - an object with `grid` (object with `columns` (integer from 0 to 255), `rows` (integer from 0 to 255)): The choices of a choice parameter as a grid of small buttons, filled by rows (Note Echo's 1 2 3 4 over 5 6 8 16).
 - an object with `icon_segments` (integer from 0 to 255): A row of that many icon buttons, one for each choice of a choice parameter (the filter types), the chosen one lit.
+- `"switch"`: A box under the parameter's name that reads On or Off and turns the switch when pressed (Arpeggiator's Velocity).
+- `"square"`: A small square button under the parameter's name, lit while on (CC Control's Custom A).
+- `"stepper"`: A number box with a round − at its left and a round + at its right: the box is the control's parameter, the amount the buttons step, and the buttons move the parameter its [`Control::target`] names by it (Pitch's Step Width).
 - `"inline"`: A name and the value after it on one line, the value in blue, dragged or typed (Freq and Width along the foot of Delay's display).
 - `"tick"`: A small box that is filled while the switch is on, with the name after it (the Filter switch along the foot of a display).
 - `"stacked"`: The name over the value, both centred, the value in blue and dragged or typed, with no box (Reverb's Amount and Rate).
@@ -44928,6 +46186,7 @@ One of:
 - `"bare_chooser"`: A [`Chooser`](Self::Chooser) with no name row: the device's own label is beside it, or it needs none (the Drum Sampler's effect type).
 - `"cycle"`: A lit text button holding the chosen choice's name, a press taking the next choice and the last going round to the first (the Drum Sampler's modulation source, Resonators' Mode).
 - `"mini_knob"`: Operator's knob: the name over its left edge, a ring 19 points across and the value at its lower right.
+- `"mode"`: A text button holding the chosen name of a two-choice parameter, lit while its second choice is chosen; a press switches to the other (Note Echo's Sync, which reads Time while it is off).
 
 <details><summary>JSON Schema</summary>
 
@@ -45065,6 +46324,21 @@ One of:
         "icon_segments"
       ],
       "type": "object"
+    },
+    {
+      "const": "switch",
+      "description": "A box under the parameter's name that reads On or Off and turns the switch when pressed (Arpeggiator's Velocity).",
+      "type": "string"
+    },
+    {
+      "const": "square",
+      "description": "A small square button under the parameter's name, lit while on (CC Control's Custom A).",
+      "type": "string"
+    },
+    {
+      "const": "stepper",
+      "description": "A number box with a round − at its left and a round + at its right: the box is the control's parameter, the amount the buttons step, and the buttons move the parameter its [`Control::target`] names by it (Pitch's Step Width).",
+      "type": "string"
     },
     {
       "const": "inline",
@@ -45245,6 +46519,11 @@ One of:
     {
       "const": "mini_knob",
       "description": "Operator's knob: the name over its left edge, a ring 19 points across and the value at its lower right.",
+      "type": "string"
+    },
+    {
+      "const": "mode",
+      "description": "A text button holding the chosen name of a two-choice parameter, lit while its second choice is chosen; a press switches to the other (Note Echo's Sync, which reads Time while it is off).",
       "type": "string"
     }
   ]

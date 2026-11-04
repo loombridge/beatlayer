@@ -172,6 +172,13 @@ pub const IMP_05: &str = "IMP-05";
 /// menus.md's Live rows.
 pub const DAWPROJECT_EXPORT: &str = "DAWPROJECT-export";
 
+/// The rows of Beatlayer's own Library Credits... in Help and Export Library
+/// Credits... in File (core library R12): additions, so not rows of
+/// menus.md's Live rows.
+pub const LIBRARY_CREDITS: &str = "LIBRARY-credits";
+/// See [`LIBRARY_CREDITS`].
+pub const LIBRARY_EXPORT: &str = "LIBRARY-export";
+
 /// The rows of Beatlayer's own Search Commands… (IMP-16) at the top of Help,
 /// with the separator after it, and Find Track (IMP-18) after Next Neighbor:
 /// improvements, so not rows of menus.md, which records Live's menus.

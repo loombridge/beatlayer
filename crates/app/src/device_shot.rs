@@ -1,5 +1,6 @@
-//! `--device-shot DEVICE [--page PAGE]` with `--screenshot FILE`: adds a new
-//! device to a track of a new set, shows the page asked for, draws the
+//! `--device-shot DEVICE [--page PAGE] [--expanded]` with `--screenshot FILE`:
+//! adds a new device to a track of a new set, shows the page asked for (and
+//! the device's expanded part, if asked), draws the
 //! window offscreen as `--screenshot` does, and saves only the device's
 //! panel, at 100% zoom, so a pull request can put Beatlayer's panel beside
 //! Live's picture of the same device (`cargo xtask device-shot`).
@@ -18,6 +19,8 @@ pub struct Request {
     pub device: String,
     /// A page to show, by name, on every pages node that has one.
     pub page: Option<String>,
+    /// Whether to show the device's expanded part.
+    pub expanded: bool,
 }
 
 /// The name as compared: lower case, with spaces and hyphens as one.
@@ -105,6 +108,11 @@ pub fn prepare(shell: &mut Shell, request: &Request) -> Result<DeviceId, String>
         "role": device_type.role,
     });
     let id = add(shell, kind, device)?;
+    if request.expanded {
+        shell
+            .invoke("device.expand", json!({ "device": id, "expanded": true }))
+            .map_err(|e| e.to_string())?;
+    }
     if let Some(page) = &request.page {
         let wanted = plain(page);
         let mut shown = false;
@@ -170,19 +178,22 @@ mod tests {
             let found = find(&Request {
                 device: name.to_owned(),
                 page: None,
+                expanded: false,
             });
             assert_eq!(found.unwrap().name, "Arpeggiator");
         }
         assert!(
             find(&Request {
                 device: "auto filter".to_owned(),
-                page: None
+                page: None,
+                expanded: false
             })
             .is_ok()
         );
         let missing = find(&Request {
             device: "nothing".to_owned(),
             page: None,
+            expanded: false,
         })
         .unwrap_err();
         assert!(missing.contains("Arpeggiator"), "{missing}");

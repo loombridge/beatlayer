@@ -1,5 +1,5 @@
-//! The synthesisers' panels in the Device View, headless (layout L-DEV-063
-//! to L-DEV-068): what each draws of Live's panel, and that the sections
+//! The synthesisers' panels in the Device View, headless (layout L-DEV-102
+//! to L-DEV-105): what each draws of Live's panel, and that the sections
 //! show their pages when clicked, as one undo step each.
 //!
 //! Spec: electric R16; external-devices R9.

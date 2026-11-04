@@ -154,7 +154,14 @@ impl Shell {
     /// the item has any (R11).
     #[must_use]
     pub fn info_text_shown(&self, target: InfoTarget) -> Option<(String, String)> {
-        self.info_item(target).filter(|(_, text)| !text.is_empty())
+        // Spec: info-view R13. A clip that plays a library item's file
+        // shows its credit while it has no text of the person's own.
+        self.info_item(target)
+            .filter(|(_, text)| !text.is_empty())
+            .or_else(|| match target {
+                InfoTarget::Clip(id) => self.library_info_of_clip(id),
+                _ => None,
+            })
     }
 
     /// An item's name and its info text (empty for none), or `None` once

@@ -1,5 +1,5 @@
-//! The synthesisers' panels as Live lays them out, part 1 (layout L-DEV-063
-//! to L-DEV-068): each holds the controls Live's panel shows, in its order
+//! The synthesisers' panels as Live lays them out, part 1 (layout L-DEV-102
+//! to L-DEV-105): each holds the controls Live's panel shows, in its order
 //! and kinds, and none else, and a new device opens at the values and in the
 //! units Live shows (observed in Live 12.4.16, 2 and 3 November 2026).
 

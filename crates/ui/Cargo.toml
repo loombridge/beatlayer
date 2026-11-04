@@ -60,6 +60,8 @@ bl-midi-io.workspace = true
 # A second Link instance plays the peer over the loopback network in the Link
 # toggle's tests (WP-7.15).
 bl-link.workspace = true
+# Builds the library's test package for its page and credits tests (WP-9.46).
+bl-library.workspace = true
 # The test tools, so the MIDI Tools panels have tools to show (WP-6.11).
 bl-midi-tools = { workspace = true, features = ["testing"] }
 # The test surface, so the Control Surfaces table has a surface to run

@@ -72,6 +72,7 @@ use bl_shell_spec::midi_files as midi_ids;
 use bl_shell_spec::midi_io as midi_io_ids;
 use bl_shell_spec::midi_tools as tool_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
+use bl_shell_spec::modular as modular_ids;
 use bl_shell_spec::multisampler as multisampler_ids;
 use bl_shell_spec::notes::{self as note_ids};
 use bl_shell_spec::packages as packages_ids;
@@ -113,6 +114,7 @@ mod file_manager;
 mod freeze;
 mod granulator;
 mod grooves;
+mod impulse;
 mod keymap;
 mod link;
 mod multisampler;
@@ -140,10 +142,12 @@ mod gestures;
 mod info_text;
 mod instant;
 mod invoke;
+mod library;
 mod map_mode;
 mod menus;
 mod midi_input;
 mod mixer;
+mod modular;
 mod packages;
 mod packs;
 mod perception_commands;
@@ -308,6 +312,17 @@ pub enum Effect {
     PickDawProjectPath {
         /// The suggested name: the set's, with `.dawproject`.
         file_name: String,
+        /// The folder the dialog opens in, if there is one.
+        folder: Option<PathBuf>,
+    },
+    /// Ask where to write the library's credits, in a save dialog that
+    /// suggests `file_name`, then run `library.export_credits` with the path
+    /// and `set` (the core library spec, R12).
+    PickCreditsPath {
+        /// The suggested name.
+        file_name: String,
+        /// Whether the file credits only the open set's library items.
+        set: bool,
         /// The folder the dialog opens in, if there is one.
         folder: Option<PathBuf>,
     },
@@ -790,6 +805,9 @@ pub struct Shell {
     /// The media the set's clips play, which the browser fills and the
     /// Arrangement's waveforms read.
     media: Arc<MediaStore>,
+    /// The bundled impulse-response folder a test chose, instead of the
+    /// app's (the impulse responses spec, R10).
+    bundled_impulses: Option<PathBuf>,
     /// The movies the set's video clips name (WP-9.25).
     movies: video::Movies,
     /// The Video Window (WP-9.26).
@@ -803,6 +821,8 @@ pub struct Shell {
     audio_to_midi: audio_to_midi::AudioToMidiState,
     /// The Packages manager: the installer thread and its queue (WP-9.1).
     packages: packages::PackagesState,
+    /// Beatlayer's library (WP-9.46).
+    library: library::LibraryShell,
     /// The extension host, once an extension command has run (WP-9.29).
     extensions: Option<extensions::ExtensionState>,
     /// The Export Audio/Video dialog and the export under way (WP-6.71).
@@ -1360,12 +1380,14 @@ impl Shell {
         let mut shell = Self {
             browser_view,
             media,
+            bundled_impulses: None,
             movies: video::Movies::default(),
             video_window: video_window::VideoWindow::default(),
             processed: Vec::new(),
             stems: stems::StemsState::default(),
             audio_to_midi: audio_to_midi::AudioToMidiState::default(),
             packages: packages::PackagesState::default(),
+            library: library::LibraryShell::default(),
             extensions: None,
             export: export_dialog::ExportState::default(),
             packs: packs::PackState::default(),
@@ -1862,6 +1884,12 @@ impl Shell {
                 ),
             });
         }
+        if id == "device.set_sample"
+            && let Some(result) = self.set_impulse_sample(id, &args)
+        {
+            // Spec: impulse-responses R2.
+            return result;
+        }
         if id == bl_shell_spec::transport::SET_RECORD_QUANTIZATION
             && let Some(reason) = self.record_quantization_locked()
         {
@@ -2343,6 +2371,9 @@ impl Shell {
         if packages_ids::handles(id) {
             return self.run_packages(id, args);
         }
+        if bl_shell_spec::library::handles(id) {
+            return self.run_library(id, args);
+        }
         if extension_ids::handles(id) {
             return self.run_extensions(id, args);
         }
@@ -2367,6 +2398,9 @@ impl Shell {
         }
         if tuning_ids::handles(id) {
             return self.run_tunings(id, args);
+        }
+        if modular_ids::handles(id) {
+            return self.run_modular(id, args);
         }
         if dawproject_ids::handles(id) {
             return self.run_dawproject(id, args);

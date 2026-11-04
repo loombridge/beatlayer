@@ -1098,7 +1098,11 @@ pub fn register(registry: &mut Registry) {
 /// from its drawn partials and Repeat, off the audio thread: a new user
 /// wave is the first partial alone.
 #[must_use]
-pub fn device_data(device: &Device, _file: bl_engine::FileOf<'_>) -> bl_engine::DeviceData {
+pub fn device_data(
+    device: &Device,
+    _config: &NodeConfig,
+    _file: bl_engine::FileOf<'_>,
+) -> bl_engine::DeviceData {
     let mut data = bl_engine::DeviceData::default();
     for op in 0..OPERATORS {
         let levels = device

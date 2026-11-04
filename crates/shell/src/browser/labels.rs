@@ -487,8 +487,8 @@ mod tests {
         let saved = [saved(1), saved(2)];
         let order = prefs.ordered(&saved);
         assert_eq!(order[0], Label::All);
-        assert_eq!(order[13], Label::Saved(1));
-        assert_eq!(order[14], Label::Saved(2));
+        assert_eq!(order[14], Label::Saved(1));
+        assert_eq!(order[15], Label::Saved(2));
         prefs.move_label(&order, &Label::Samples, 0);
         let order = prefs.ordered(&saved);
         assert_eq!(order[0], Label::All, "All stays first");
@@ -496,7 +496,9 @@ mod tests {
         prefs.move_label(&order, &Label::Saved(2), 2);
         assert_eq!(prefs.ordered(&saved)[2], Label::Saved(2));
         prefs.reset_order();
-        assert_eq!(prefs.ordered(&saved)[1], Label::Sounds);
+        // Core Library is first after All (browser R31), then Sounds.
+        assert_eq!(prefs.ordered(&saved)[1], Label::CoreLibrary);
+        assert_eq!(prefs.ordered(&saved)[2], Label::Sounds);
     }
 
     #[test]

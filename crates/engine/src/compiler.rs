@@ -639,6 +639,15 @@ impl Compiler {
             {
                 self.send_device_data(document, id, &mut update);
             }
+            // A device that reads its media as data gets them again when
+            // they change, with no new program (impulse responses, R4).
+            if let (Change::Modified, Some(before), Some(after)) =
+                (change, old.device(id), document.device(id))
+                && before.media != after.media
+                && self.registry.reads_media_as_data(&after.kind)
+            {
+                self.send_device_data(document, id, &mut update);
+            }
             // An Operator whose drawn partials changed, or a parameter its
             // user waves' tables are built from, gets the tables again, with
             // no new program (operator R7, R27).
@@ -647,6 +656,16 @@ impl Compiler {
                 && (before.partials != after.partials
                     || self.registry.data_params_changed(before, after))
                 && before.media == after.media
+            {
+                self.send_device_data(document, id, &mut update);
+            }
+            // A Modular whose patch changed gets its schedule compiled
+            // again, with no new program (modular-device R4); a change of
+            // its voice count does the same, as a parameter its data is
+            // built from.
+            if let (Change::Modified, Some(before), Some(after)) =
+                (change, old.device(id), document.device(id))
+                && before.patch != after.patch
             {
                 self.send_device_data(document, id, &mut update);
             }
@@ -938,7 +957,10 @@ impl Compiler {
         };
         let library = self.registry.media();
         let file = |media| library.and_then(|library| library.file(media));
-        let Some(data) = self.registry.data(device_ref, &file) else {
+        let Some(data) = self
+            .registry
+            .data(device_ref, &self.config.node_config(), &file)
+        else {
             return;
         };
         update.missing.extend(data.missing);
@@ -2235,7 +2257,10 @@ impl Compiler {
                 });
             // A node that swaps samples in place is the same node while it
             // holds one, whichever it is (sound similarity R29).
-            let media = if self.registry.swaps_samples_in_place(&device.kind) {
+            let media = if self.registry.reads_media_as_data(&device.kind) {
+                // Impulse responses reach the node as data (R4).
+                Vec::new()
+            } else if self.registry.swaps_samples_in_place(&device.kind) {
                 device
                     .media_at(0)
                     .map(|_| vec![Some(ContentHash([0; 32]))])
@@ -2264,7 +2289,8 @@ impl Compiler {
                         // with this compile's update (WP-2.16).
                         // A device with wavetables reads its media as tables,
                         // sent as data, not as decoded audio.
-                        let wavetables = device.wavetables.iter().any(Option::is_some);
+                        let wavetables = device.wavetables.iter().any(Option::is_some)
+                            || self.registry.reads_media_as_data(&device.kind);
                         build.dataful.push(device.id);
                         for (slot, media) in device.media.iter().enumerate() {
                             if let Some(media) = *media
@@ -3998,7 +4024,7 @@ mod tests {
         registry.add_device_with_data(
             DeviceType::native(DRAWN, "Drawn", bl_model::DeviceRole::Instrument),
             |device, config| Box::new(crate::nodes::TestTone::new(device, config)),
-            Some(std::sync::Arc::new(|_, _| DeviceData {
+            Some(std::sync::Arc::new(|_, _, _| DeviceData {
                 items: vec![Box::new(|gc| gc.data(Sent))],
                 missing: Vec::new(),
             })),
@@ -4049,6 +4075,67 @@ mod tests {
             value: 1.0,
         });
         assert!(other.data.is_empty(), "another parameter sends none");
+    }
+
+    // Spec: modular-device R4. A patch edit sends the device's node a new
+    // schedule as node data, with no new program; a move of a block does too,
+    // and an edit of another device's parameter sends nothing.
+    #[test]
+    fn a_patch_edit_sends_the_modular_its_schedule_again_with_no_new_program() {
+        use crate::registry::{DeviceData, DeviceType};
+        const MODULAR: &str = "beatlayer.modular_effect";
+        let mut registry = Registry::new();
+        registry.add_device_with_data(
+            DeviceType::native(MODULAR, "Modular", bl_model::DeviceRole::AudioEffect),
+            |device, config| Box::new(crate::nodes::TestTone::new(device, config)),
+            Some(std::sync::Arc::new(|_, _, _| DeviceData {
+                items: vec![Box::new(|gc| gc.data(Sent))],
+                missing: Vec::new(),
+            })),
+        );
+        let collector = Collector::new();
+        let config = EngineConfig::new(bl_core::time::SampleRate::HZ_48000, 64);
+        let mut compiler = Compiler::new(config, registry, collector.handle());
+        let mut editor = Editor::new();
+        let track = track(&mut editor, TrackKind::Midi, None);
+        let device = editor.new_id();
+        let kind = DeviceKind::Native {
+            device_type: MODULAR.to_owned(),
+        };
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device: Device::new(device, "", kind),
+            })
+            .unwrap();
+        assert!(compiler.sync(editor.document()).program.is_some());
+        let mut edit = |command: Command| {
+            editor.apply(command).unwrap();
+            compiler.sync(editor.document())
+        };
+        let added = edit(Command::ModularAddBlock {
+            device,
+            block_type: "mixer".to_owned(),
+            id: None,
+            x: 0.0,
+            y: 0.0,
+        });
+        assert!(added.program.is_none());
+        assert_eq!(added.data.len(), 1, "the patch compiles again");
+        let moved = edit(Command::ModularMoveBlock {
+            device,
+            block: bl_model::modular::BlockId(3),
+            x: 4.0,
+            y: 4.0,
+        });
+        assert_eq!(moved.data.len(), 1);
+        let other = edit(Command::SetDeviceParam {
+            device,
+            param: bl_model::ParamId(6),
+            value: 1.0,
+        });
+        assert!(other.data.is_empty(), "a parameter sends no schedule");
     }
 
     // Spec: themes R27. A colour is never heard: colouring a track, a clip or a

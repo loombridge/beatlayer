@@ -1,4 +1,4 @@
-//! Operator's panel as Live lays it out (layout L-DEV-066): the four
+//! Operator's panel as Live lays it out (layout L-DEV-105): the four
 //! oscillators' rows down the left, a display with the fields of the row
 //! clicked last in the middle, and the LFO, the filter, the pitch envelope
 //! and the global controls in four rows at the right, each at the place

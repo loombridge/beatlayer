@@ -21,7 +21,8 @@
 //! Every change runs `device.set_param`, which an agent runs too.
 
 use bl_model::device_layout::{
-    BUTTON_GAP, PADDING, PageStyle, PlacedPages, Size, UNIT_PAIR_WIDTH, Widget,
+    BOX_HEIGHT, BUTTON_GAP, PADDING, PageStyle, PlacedPages, Size, UNIT_PAIR_WIDTH, UNIT_ROW_GAP,
+    Widget,
 };
 use bl_model::modulator::ModTarget;
 use bl_model::{DeviceDisplay, DeviceId, ParamDescriptor, ParamId};
@@ -45,6 +46,7 @@ mod drift_drawings;
 mod drum_drawings;
 mod electric_drawing;
 mod parts;
+mod scale_grid;
 
 /// Where a Drum Synth's drawing is centred in its display, and its note's
 /// text, from the display's top-left corner, in points (observed in Live
@@ -305,6 +307,10 @@ pub const TITLE_INSET: f32 = 18.0;
 
 /// The width of a title-bar tab reading `name`.
 fn tab_width(name: &str) -> f32 {
+    // CC Control's 1-8 and 9-16 are 25 points each (L-DEV-045, observed).
+    if name.chars().all(|c| c.is_ascii_digit() || c == '-') {
+        return 25.0;
+    }
     name.chars().count() as f32 * 6.0 + 16.0
 }
 
@@ -545,8 +551,16 @@ pub fn show(
             corpus_xy(ui, theme, frame, (panel, display), (id, rect), events);
             continue;
         }
+        // Spec: midi-scale-map R13. Scale's grid is the twelve notes' targets.
+        if matches!(&frame.kind, bl_model::DeviceKind::Native { device_type }
+            if device_type == bl_devices::remap::REMAP)
+            && name == bl_devices::remap::GRID_CELL
+        {
+            scale_grid::show(ui, theme, frame, panel, (id, rect), events);
+            continue;
+        }
         let _ = ui.interact(rect, id, Sense::hover());
-        // Layout L-DEV-063: Electric's display draws its mechanism at the left,
+        // Layout L-DEV-102: Electric's display draws its mechanism at the left,
         // the parts the shown section acts on lit.
         if matches!(&frame.kind, bl_model::DeviceKind::Native { device_type }
             if device_type == bl_devices::electric::ELECTRIC)
@@ -564,7 +578,7 @@ pub fn show(
                 (highlight(theme, frame.enabled), c.text_dim.0),
             );
         }
-        // Layout L-DEV-065: Drift's displays draw an envelope, the LFO's wave
+        // Layout L-DEV-104: Drift's displays draw an envelope, the LFO's wave
         // and the pitch modulation.
         if matches!(&frame.kind, bl_model::DeviceKind::Native { device_type }
             if device_type == bl_devices::polysynth::POLYSYNTH)
@@ -655,7 +669,7 @@ pub fn show(
             // Layout L-DEV-047: a Drum Synth's display shows its drawing, not
             // the envelope that `device.display` reads.
             Some(_) if bl_devices::drum_synth::is_drum_synth(&frame.kind) => None,
-            // Layout L-DEV-066: Operator's global page is the table, with no
+            // Layout L-DEV-105: Operator's global page is the table, with no
             // graph under it.
             Some(_) if name == bl_devices::operator_panel::GLOBAL && is_operator(&frame.kind) => {
                 None
@@ -762,13 +776,16 @@ pub fn show(
             continue;
         }
         // A knob with a unit pair beside it keeps the rest of its place.
-        let rect = if extra.is_some_and(|e| e.unit.is_some()) {
-            Rect::from_min_max(
+        let rect = match extra.and_then(|e| e.unit) {
+            Some(pair) if pair.below => Rect::from_min_max(
+                whole.min,
+                pos2(whole.right(), whole.bottom() - UNIT_ROW_GAP - BOX_HEIGHT),
+            ),
+            Some(_) => Rect::from_min_max(
                 pos2(whole.left() + UNIT_PAIR_WIDTH + PADDING, whole.top()),
                 whole.max,
-            )
-        } else {
-            whole
+            ),
+            None => whole,
         };
         // A plug-in panel's controls are its knobs, in the panel's own order
         // (WP-5.40), so a control's place is its knob; any other device's
@@ -930,11 +947,23 @@ pub fn show(
                 let cells = button_cells(buttons, usize::from(columns), usize::from(rows));
                 control.choice_buttons(ui, theme, events, (&cells, true, false));
             }
+            Widget::Square => control.square(ui, theme, events),
+            Widget::Switch => control.switch(ui, theme, events),
+            Widget::Stepper => {
+                let target = extra
+                    .and_then(|e| e.target)
+                    .and_then(|id| panel.description.params.iter().position(|p| p.id == id))
+                    .map(|at| (&panel.description.params[at], panel.value(at)));
+                if let Some(target) = target {
+                    control.stepper(ui, theme, events, target);
+                }
+            }
             Widget::Large => control.large(ui, theme, events),
             Widget::Bare => control.boxed(ui, theme, events, (false, false)),
             Widget::BareSlider => control.boxed(ui, theme, events, (false, true)),
             Widget::Framed => control.boxed(ui, theme, events, (true, false)),
-            Widget::Cycle => control.cycle(ui, theme, events),
+            Widget::Cycle => control.cycle(ui, theme, events, false),
+            Widget::Mode => control.cycle(ui, theme, events, true),
             Widget::MiniKnob => control.mini_knob(ui, theme, events),
             Widget::Check => control.check(ui, theme, events),
         };
@@ -957,10 +986,14 @@ pub fn show(
                 .iter()
                 .position(|p| p.id == pair.mode)
         {
-            let pair_rect = Rect::from_min_max(
-                whole.min,
-                pos2(whole.left() + UNIT_PAIR_WIDTH, whole.bottom()),
-            );
+            let pair_rect = if pair.below {
+                Rect::from_min_max(pos2(whole.left(), whole.bottom() - BOX_HEIGHT), whole.max)
+            } else {
+                Rect::from_min_max(
+                    whole.min,
+                    pos2(whole.left() + UNIT_PAIR_WIDTH, whole.bottom()),
+                )
+            };
             let mode = parts::plain_control(frame, panel, mode_at, pair_rect);
             control.unit_pair(ui, theme, events, &pair, &mode);
         }
@@ -1129,7 +1162,10 @@ fn pan_reading(kind: &bl_model::DeviceKind, param: &ParamDescriptor, value: f64)
 
 /// What a control's name above it reads: a sample slot's parameter drops the
 /// slot's number (`Slot 3 Start` reads `Start`), since the panel shows one
-/// slot's at a time, and one of Meld's drops its engine's letter.
+/// slot's at a time, one of Meld's drops its engine's letter, and MPE
+/// Control's Min, Max, X, Y, Smooth, Rise, Fall, Default and Centered drop
+/// their source's name (`Press Min` reads `Min`), which the tab beside them
+/// says.
 fn short_name(name: &str) -> std::borrow::Cow<'_, str> {
     short_name_of(name, 0)
 }
@@ -1142,6 +1178,18 @@ fn short_name_of(name: &str, trim: usize) -> std::borrow::Cow<'_, str> {
     let name = (0..trim).fold(name, |rest, _| {
         rest.split_once(' ').map_or("", |(_, after)| after)
     });
+    if let Some(rest) = ["Press ", "Slide ", "NotePB "]
+        .iter()
+        .find_map(|source| name.strip_prefix(source))
+        .filter(|rest| {
+            [
+                "Min", "Max", "X", "Y", "Smooth", "Rise", "Fall", "Default", "Centered",
+            ]
+            .contains(rest)
+        })
+    {
+        return rest.into();
+    }
     name.strip_prefix("Slot ")
         .and_then(|rest| rest.split_once(' '))
         .filter(|(number, _)| number.chars().all(|c| c.is_ascii_digit()))
@@ -1164,7 +1212,7 @@ fn is_operator(kind: &bl_model::DeviceKind) -> bool {
 }
 
 /// The four coloured squares of Operator's algorithm mini-view, left of Time
-/// (layout L-DEV-066): a click on them shows the global page.
+/// (layout L-DEV-105): a click on them shows the global page.
 const ALGORITHM_SQUARES: [Color32; 4] = [
     Color32::from_rgb(232, 154, 70),
     Color32::from_rgb(120, 104, 224),
@@ -1174,7 +1222,7 @@ const ALGORITHM_SQUARES: [Color32; 4] = [
 
 /// Operator's check boxes before the headings Envelope, Oscillator and
 /// Filter over the display's fields: each shows the view its heading names,
-/// lit while that view is the one shown (layout L-DEV-066).
+/// lit while that view is the one shown (layout L-DEV-105).
 fn operator_view_boxes(
     ui: &mut Ui,
     theme: &Theme,

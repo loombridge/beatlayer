@@ -101,18 +101,7 @@ const LIVE_PANELS: &[&str] = &[
 
 /// The built-in devices of [`LIVE_PANELS`] that still draw the generic grid.
 /// Each task that lays devices out as Live does takes its devices off.
-const STILL_GENERIC: &[&str] = &[
-    "Arpeggiator",
-    "CC Control",
-    "Chord",
-    "MPE Control",
-    "Note Echo",
-    "Note Length",
-    "Pitch",
-    "Random",
-    "Scale",
-    "Velocity",
-];
+const STILL_GENERIC: &[&str] = &[];
 
 // Spec: device-framework R59
 #[test]

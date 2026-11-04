@@ -418,7 +418,7 @@ pub fn electric_type() -> DeviceType {
 }
 
 /// The width of Electric's body, in points (observed in Live 12.4.16, 2
-/// November 2026; layout L-DEV-063).
+/// November 2026; layout L-DEV-102).
 const WIDTH: f32 = 345.0;
 /// The height of the four sections across the top, and of the display under
 /// them.
@@ -431,7 +431,7 @@ const COLUMNS: [f32; 3] = [167.7, 230.9, 293.9];
 const ROWS: [f32; 3] = [3.7, 34.4, 65.3];
 const RULES: [f32; 2] = [30.4, 60.8];
 
-/// Layout L-DEV-063: four sections across the top, each a heading over its
+/// Layout L-DEV-102: four sections across the top, each a heading over its
 /// knobs, and under them a black display with the mechanism drawn at its left
 /// and, at its right, a table of the further controls of the section that was
 /// clicked last.

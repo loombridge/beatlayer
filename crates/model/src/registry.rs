@@ -3117,6 +3117,69 @@ const ENTRIES: &[Entry] = &[
             Repeat in the same undo step. One undo step (Change Partials).",
     },
     Entry {
+        id: "modular.add_block",
+        action: Action::Apply("modular_add_block"),
+        label: "Add Block",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Adds a block of type `block_type` to a Modular device's patch at `x`, `y` in its editor, with its type's default settings and no cables. The type is `oscillator`, `filter`, `envelope`, `lfo`, `amplifier`, `mixer`, `arithmetic`, `delay`, `note_in`, `note_out`, `audio_in`, `audio_out` or `sidechain_in`. `id` is the block's ID in the patch, the next free one if `null`. A patch holds at most 256 blocks. `modular.patch` reads the patch back. One undo step (Add Block).",
+    },
+    Entry {
+        id: "modular.remove_block",
+        action: Action::Apply("modular_remove_block"),
+        label: "Remove Block",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Removes a block from a Modular device's patch, with its cables and any patch parameters made from its settings. `modular.patch` reads the patch back. One undo step (Remove Block).",
+    },
+    Entry {
+        id: "modular.connect",
+        action: Action::Apply("modular_connect"),
+        label: "Connect Blocks",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Joins output port `from_port` of block `from` to input port `to_port` of block `to` in a Modular device's patch. The ports must carry one type, except that control and audio join each other; an input takes one cable and an output any number; a patch holds at most 1,024 cables. A cable that would close a cycle with no Delay block in it is refused with the reason, and the patch stays as it was. `modular.patch` reads the patch back. One undo step (Connect Blocks).",
+    },
+    Entry {
+        id: "modular.disconnect",
+        action: Action::Apply("modular_disconnect"),
+        label: "Disconnect Blocks",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Takes the cable from output port `from_port` of block `from` to input port `to_port` of block `to` out of a Modular device's patch. `modular.patch` reads the patch back. One undo step (Disconnect Blocks).",
+    },
+    Entry {
+        id: "modular.move_block",
+        action: Action::Apply("modular_move_block"),
+        label: "Move Block",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Moves a block to `x`, `y` in a Modular device's editor. Where a block sits does not change what the patch sounds like. `modular.patch` reads the patch back. One undo step (Move Block).",
+    },
+    Entry {
+        id: "modular.set",
+        action: Action::Apply("modular_set"),
+        label: "Change Block Setting",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets setting `setting` of a block in a Modular device's patch to `value`: a choice's number from 0, or a number in the setting's own unit, within its range. A setting that is a patch parameter moves its parameter with it. `modular.patch` reads the patch back. One undo step (Change Block Setting).",
+    },
+    Entry {
+        id: "modular.expose",
+        action: Action::Apply("modular_expose"),
+        label: "Change Patch Parameter",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Makes setting `setting` of a block a patch parameter of a Modular device (`exposed` true) or stops (false). A patch parameter is one of the device's automatable parameters, 1 to 64, numbered by the slot it takes (`modular.patch` says which); its value runs from 0 to 1 across the setting's range. A patch holds at most 64. One undo step (Change Patch Parameter).",
+    },
+    Entry {
         id: "device.compare_switch",
         action: Action::Apply("compare_switch"),
         label: "Compare: Switch",
@@ -3176,6 +3239,20 @@ const ENTRIES: &[Entry] = &[
             One undo step named Save as Similarity Reference. The reference is saved with the \
             set and with the device's preset; loading another sample clears it, and the new \
             sample is the reference again.",
+    },
+    Entry {
+        id: "device.set_impulse_response",
+        action: Action::Apply("set_impulse_response"),
+        label: "Set Impulse Response",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets the response an impulse-response slot of a convolution device \
+            holds (`slot`, counted from 0, and 0 unless given): `media` is a content hash \
+            the media store holds, or null to empty the slot. One undo step, named Load \
+            Impulse Response, or Clear Impulse Response for null. This only names the \
+            response in the set; to load a file from disk, decode and prepare it and read \
+            what it came to, use `device.load_sample`.",
     },
     Entry {
         id: "device.set_wavetable",

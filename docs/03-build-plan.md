@@ -1080,7 +1080,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 9.33 | todo |  |  |
 | 9.34 | todo |  |  |
 | 9.35 | todo |  |  |
-| 9.36 | todo |  |  |
+| 9.36 | done | 4 November 2026 | [#827](https://github.com/loombridge/beatlayer/pull/827): the Modular Instrument, Modular Effect and Modular MIDI Effect hold a patch of typed-port blocks, compiled off the audio thread and swapped at block boundaries with state kept, with polyphonic voices, 64 automatable patch parameters, the `modular.*` edit commands and `modular.patch` readback, the first 13 blocks, and patches saved with the set and in presets. |
 | 9.37 | todo |  |  |
 | 9.38 | todo |  |  |
 | 9.39 | todo |  |  |
@@ -1090,7 +1090,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 9.43 | todo |  |  |
 | 9.44 | todo |  |  |
 | 9.45 | todo |  |  |
-| 9.46 | todo |  |  |
+| 9.46 | done | 4 November 2026 | [#831](https://github.com/loombridge/beatlayer/pull/831): the `bl-library` crate reads the library manifest (each item's source or script, licence, attribution and tags), `cargo xtask library` builds its packages outside the repository and refuses an item without an allowed licence, checksum or tags, the Packages manager installs them on first use, and the browser's Core Library place lists and searches them, with each item's credit and an exportable credits list |
 | 9.47 | todo |  |  |
 | 9.48 | todo |  |  |
 | 9.49 | todo |  |  |

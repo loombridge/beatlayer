@@ -38,6 +38,7 @@ type State = (
     Option<Vec<bl_model::ModRoute>>,
     Option<bl_model::PluginMpe>,
     Option<bl_model::ContentHash>,
+    Option<bl_model::modular::Patch>,
 );
 
 /// A device made ready to go in a chain, with new IDs: what a preset or a
@@ -214,6 +215,7 @@ impl DeviceView {
                     p.routes,
                     p.mpe,
                     p.similarity_reference,
+                    p.patch,
                 );
                 Ok(Ready {
                     device,
@@ -447,6 +449,7 @@ impl DeviceView {
                     routes,
                     mpe,
                     similarity_reference,
+                    patch,
                 )) = state
                 {
                     editor.apply(Command::SetDeviceState {
@@ -458,6 +461,7 @@ impl DeviceView {
                         routes,
                         mpe,
                         similarity_reference,
+                        patch,
                     })?;
                 }
                 map_inner_copies(editor, &pairs)
@@ -520,6 +524,7 @@ impl DeviceView {
                     routes,
                     mpe,
                     similarity_reference,
+                    patch,
                 )) = state
                 {
                     editor.apply(Command::SetDeviceState {
@@ -531,6 +536,7 @@ impl DeviceView {
                         routes,
                         mpe,
                         similarity_reference,
+                        patch,
                     })?;
                 }
                 map_inner_copies(editor, &pairs)

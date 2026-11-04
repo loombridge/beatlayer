@@ -5,9 +5,10 @@
 
 use std::path::{Path, PathBuf};
 
+use bl_core::time::SampleRate;
 use bl_devices::impulse::{self, LoadError};
 use bl_devices::testing;
-use bl_engine::{Collector, Node};
+use bl_engine::{Collector, Node, NodeConfig};
 use bl_media::{BitDepth, Dither, MediaStore};
 use bl_model::ContentHash;
 
@@ -88,7 +89,13 @@ fn send(node: &mut dyn Node, collector: &Collector, store: &MediaStore, device: 
             .entry(bl_media::ContentHash::from_bytes(media.0))
             .map(|entry| entry.path)
     };
-    let data = impulse::data(1)(device, &file, 48_000);
+    let config = NodeConfig {
+        sample_rate: SampleRate::HZ_48000,
+        max_frames: 64,
+        channels: 2,
+        round_trip_latency: 0,
+    };
+    let data = impulse::data(1)(device, &config, &file);
     let gc = collector.handle();
     let sent: Vec<_> = data.items.into_iter().map(|item| item(&gc)).collect();
     for data in sent {

@@ -16,6 +16,9 @@ use crate::theme::Theme;
 pub struct Page<'a> {
     /// The feature, as the sentence names it: "Stem separation".
     pub feature: &'a str,
+    /// What the page says before the list, in place of the sentence every
+    /// on-device feature shares.
+    pub intro: Option<&'a str>,
     /// The packages the feature needs.
     pub packages: &'a [PackageStatus],
     /// The folder they install in.
@@ -37,10 +40,15 @@ fn invoke(events: &mut Vec<UiEvent>, id: &str, args: serde_json::Value) {
 /// Draws the page: the packages, the total, the folder, and Download
 /// Required Packages Now or Cancel.
 pub fn show(ui: &mut Ui, theme: &Theme, page: &Page<'_>, events: &mut Vec<UiEvent>) {
-    ui.label(format!(
-        "{} runs on this computer, with open-source software that doesn't come \
-         with Beatlayer. These packages need to be downloaded once:",
-        page.feature
+    ui.label(page.intro.map_or_else(
+        || {
+            format!(
+                "{} runs on this computer, with open-source software that doesn't come \
+                 with Beatlayer. These packages need to be downloaded once:",
+                page.feature
+            )
+        },
+        str::to_owned,
     ));
     ui.add_space(6.0);
     let total: u64 = page

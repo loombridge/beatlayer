@@ -3792,8 +3792,16 @@ impl DeviceView {
                 index,
                 device,
             })?;
-            if let Some((params, name, shape, articulations, routes, mpe, similarity_reference)) =
-                state
+            if let Some((
+                params,
+                name,
+                shape,
+                articulations,
+                routes,
+                mpe,
+                similarity_reference,
+                patch,
+            )) = state
             {
                 editor.apply(Command::SetDeviceState {
                     device: id,
@@ -3804,6 +3812,7 @@ impl DeviceView {
                     routes,
                     mpe,
                     similarity_reference,
+                    patch,
                 })?;
             }
             map_inner_copies(editor, &pairs)
@@ -3854,6 +3863,7 @@ impl DeviceView {
                 preset.routes,
                 preset.mpe,
                 preset.similarity_reference,
+                preset.patch,
             )
         });
         Ready {
@@ -3915,6 +3925,7 @@ impl DeviceView {
                     routes,
                     mpe,
                     similarity_reference,
+                    patch,
                 )) = state
                 {
                     editor.apply(Command::SetDeviceState {
@@ -3926,6 +3937,7 @@ impl DeviceView {
                         routes,
                         mpe,
                         similarity_reference,
+                        patch,
                     })?;
                 }
                 map_inner_copies(editor, &pairs)
@@ -4436,7 +4448,16 @@ impl DeviceView {
                 editor.apply(Command::AddChain { rack, index, chain })?;
                 if let (
                     Some(device),
-                    Some((params, name, shape, articulations, routes, mpe, similarity_reference)),
+                    Some((
+                        params,
+                        name,
+                        shape,
+                        articulations,
+                        routes,
+                        mpe,
+                        similarity_reference,
+                        patch,
+                    )),
                 ) = (device_id, state)
                 {
                     editor.apply(Command::SetDeviceState {
@@ -4448,6 +4469,7 @@ impl DeviceView {
                         routes,
                         mpe,
                         similarity_reference,
+                        patch,
                     })?;
                 }
                 if let Some(device) = move_device {
@@ -4732,6 +4754,7 @@ pub(crate) fn load_preset(
             routes: Some(loaded.routes.unwrap_or_default()),
             mpe: loaded.mpe,
             similarity_reference: loaded.similarity_reference,
+            patch: loaded.patch,
         })
         .map(|_| ())
         .map_err(|e| DeviceError::Failed(e.to_string()))

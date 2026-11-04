@@ -33,6 +33,7 @@ type PresetState = (
     Option<Vec<bl_model::ModRoute>>,
     Option<bl_model::PluginMpe>,
     Option<bl_model::ContentHash>,
+    Option<bl_model::modular::Patch>,
 );
 
 /// The notes the pad view can start at: the last group of sixteen.
@@ -696,6 +697,7 @@ impl DeviceView {
                             loaded.routes,
                             loaded.mpe,
                             loaded.similarity_reference,
+                            loaded.patch,
                         )),
                     ))
                 }
@@ -1027,6 +1029,7 @@ impl DeviceView {
                             routes,
                             mpe,
                             similarity_reference,
+                            patch,
                         )) = state
                         {
                             editor.apply(Command::SetDeviceState {
@@ -1038,6 +1041,7 @@ impl DeviceView {
                                 routes,
                                 mpe,
                                 similarity_reference,
+                                patch,
                             })?;
                         }
                     }

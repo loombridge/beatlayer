@@ -12,7 +12,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use bl_dsp::convolution::{self, Convolver, Layout, PreparedIr};
-use bl_engine::{DataFn, DeviceData, FileOf, NodeData};
+use bl_engine::{DataFn, DeviceData, FileOf, NodeConfig, NodeData};
 use bl_media::{SampleData, convert_sample_rate};
 use bl_model::Device;
 
@@ -213,29 +213,32 @@ fn silence(rate: u32) -> Option<Arc<PreparedIr>> {
 /// missing and plays silence (R9). Not for the audio thread.
 #[must_use]
 pub fn data(slots: usize) -> DataFn {
-    Arc::new(move |device: &Device, file: FileOf<'_>, rate: u32| {
-        let mut data = DeviceData::default();
-        for slot in 0..slots {
-            let ir = match device.media_at(slot) {
-                None => silence(rate),
-                Some(media) => match file(media) {
-                    Some(path) => load_cached(media, &path, rate)
-                        .map(|loaded| loaded.ir.clone())
-                        .ok()
-                        .or_else(|| silence(rate)),
-                    None => {
-                        data.missing.push(media);
-                        silence(rate)
-                    }
-                },
-            };
-            if let Some(ir) = ir {
-                data.items
-                    .push(Box::new(move |gc| gc.data(Response { slot, ir })));
+    Arc::new(
+        move |device: &Device, config: &NodeConfig, file: FileOf<'_>| {
+            let rate = config.sample_rate.hz();
+            let mut data = DeviceData::default();
+            for slot in 0..slots {
+                let ir = match device.media_at(slot) {
+                    None => silence(rate),
+                    Some(media) => match file(media) {
+                        Some(path) => load_cached(media, &path, rate)
+                            .map(|loaded| loaded.ir.clone())
+                            .ok()
+                            .or_else(|| silence(rate)),
+                        None => {
+                            data.missing.push(media);
+                            silence(rate)
+                        }
+                    },
+                };
+                if let Some(ir) = ir {
+                    data.items
+                        .push(Box::new(move |gc| gc.data(Response { slot, ir })));
+                }
             }
-        }
-        data
-    })
+            data
+        },
+    )
 }
 
 /// The audio-thread half of a device with one impulse-response slot: a

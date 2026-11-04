@@ -28,6 +28,7 @@ mod meld;
 mod midi_clock;
 mod midi_effects;
 mod midi_tools;
+mod modular;
 mod operator;
 mod perception;
 mod permissions;

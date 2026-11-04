@@ -42,8 +42,7 @@ pub struct DeviceData {
 pub type FileOf<'a> = &'a dyn Fn(bl_model::ContentHash) -> Option<std::path::PathBuf>;
 
 /// A native device type's builder of [`DeviceData`].
-/// It is also given the engine's sample rate in hertz.
-pub type DataFn = Arc<dyn Fn(&Device, FileOf<'_>, u32) -> DeviceData + Send + Sync>;
+pub type DataFn = Arc<dyn Fn(&Device, &NodeConfig, FileOf<'_>) -> DeviceData + Send + Sync>;
 
 /// Makes nodes for devices. The compiler asks each factory in a
 /// [`Registry`] in turn. It runs off the audio thread, so a factory may
@@ -81,8 +80,8 @@ pub trait NodeFactory: Send + Sync {
     /// thread (WP-8.9), or `None` if it builds none for that device. The
     /// compiler sends it with a new node and again when the device's
     /// wavetables change.
-    fn data(&self, device: &Device, file: FileOf<'_>, rate: u32) -> Option<DeviceData> {
-        let _ = (device, file, rate);
+    fn data(&self, device: &Device, config: &NodeConfig, file: FileOf<'_>) -> Option<DeviceData> {
+        let _ = (device, config, file);
         None
     }
 }
@@ -351,10 +350,10 @@ where
         }
     }
 
-    fn data(&self, device: &Device, file: FileOf<'_>, rate: u32) -> Option<DeviceData> {
+    fn data(&self, device: &Device, config: &NodeConfig, file: FileOf<'_>) -> Option<DeviceData> {
         match &device.kind {
             DeviceKind::Native { device_type } if *device_type == self.device_type => {
-                self.data.as_ref().map(|data| data(device, file, rate))
+                self.data.as_ref().map(|data| data(device, config, file))
             }
             _ => None,
         }
@@ -605,10 +604,15 @@ impl Registry {
     /// The data the first factory that builds some builds for `device`'s
     /// node, off the audio thread (WP-8.9); none for a device whose factory
     /// builds none.
-    pub(crate) fn data(&self, device: &Device, file: FileOf<'_>, rate: u32) -> Option<DeviceData> {
+    pub(crate) fn data(
+        &self,
+        device: &Device,
+        config: &NodeConfig,
+        file: FileOf<'_>,
+    ) -> Option<DeviceData> {
         self.factories
             .iter()
-            .find_map(|factory| factory.data(device, file, rate))
+            .find_map(|factory| factory.data(device, config, file))
     }
 
     /// Where clips' audio comes from, if anywhere.

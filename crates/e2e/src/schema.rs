@@ -770,6 +770,16 @@ impl Walk<'_> {
             "command" => return "edit.undo".to_owned(),
             "tool" => return "arpeggiate".to_owned(),
             "signature" => return "4/4".to_owned(),
+            // Modular's blocks (modular-device R9): the fixture's patch
+            // holds a Filter as block 1, cabled to Audio Out's (block 3)
+            // left side, so a new cable goes to the free right side.
+            "block_type" => return "mixer".to_owned(),
+            "setting" => return "resonance".to_owned(),
+            "from_port" => return "out".to_owned(),
+            "to_port" if self.about.starts_with("modular.disconnect") => {
+                return "left".to_owned();
+            }
+            "to_port" => return "right".to_owned(),
             _ => {}
         }
         format!("E2E {}", self.fresh)
@@ -950,6 +960,8 @@ impl Walk<'_> {
             "LayerId" => first(&refs.layers),
             "LinkGroupId" => first(&refs.link_groups),
             "ContentHash" => refs.media.first().map(|h| json!(h)),
+            "BlockId" if name == "from" => Some(json!(1)),
+            "BlockId" if name == "to" => Some(json!(3)),
             "ParamId" => Some(json!(self.param_for())),
             "Ticks" => Some(json!(self.ticks(name, hint))),
             "Bpm" => Some(json!(120.0)),
@@ -1070,6 +1082,7 @@ impl Walk<'_> {
         let text = format!("{name} {hint} {}", self.about);
         let order: &[(&[&str], &str)] = &[
             (&["operator"], bl_devices::operator::OPERATOR),
+            (&["modular"], bl_model::modular::EFFECT),
             (
                 &["multisampler", "layer", "zone", "sfz"],
                 bl_devices::multisampler::MULTISAMPLER,

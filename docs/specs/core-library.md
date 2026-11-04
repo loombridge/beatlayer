@@ -1,6 +1,6 @@
 # Beatlayer's library
 
-- **Status:** draft
+- **Status:** partial (R1 to R14 and R16 each have a passing test; R15's previews wait for WP-9.48)
 - **Work packages:** WP-9.46 (the manifest, the licence allowlist, the build tool, packages and their first-use download, the browser's place, tags and credits: R1 to R16); WP-9.47 (multisampled instruments from open-licensed recordings: R17 to R21); WP-9.48 (presets and racks for every native device, vocal racks and drum kits by genre: R22 to R27); WP-9.49 (loops, MIDI clips, grooves, chord banks, drones, textures and foley: R28 to R33). The Packages manager that downloads it is [stem separation](stem-separation.md) R15 to R21; the browser's places and labels are [browser](browser.md) R31's and [browser tags](browser-tags.md)'
 - **Parity-matrix row:** Other: (Beatlayer's own) a library covering the same ground as Live's Packs, tagged on arrival
 - **Checked against:** Beatlayer's own design, 30 October 2026; the Creative Commons licences CC0 1.0 and CC BY 4.0
@@ -28,7 +28,7 @@ The library isn't in the repository. A manifest in the repository names every it
 - **R2.** Only CC0 1.0, CC BY 4.0 and items Beatlayer made itself (which are CC0) are allowed. An item with any other licence, or no licence, attribution (for CC BY), checksum or tags, makes `cargo xtask library` refuse the whole package, naming the item. (S1, S2)
 - **R3.** `cargo xtask library` builds each package outside the repository: it fetches each source, checks its checksum, converts or renders it by its script, writes Beatlayer's own files (samples, presets, racks, clips, grooves, chord banks) and a package manifest with each file's SHA-256, and archives the package. The same manifest and sources give the same package byte for byte. (S2)
 - **R4.** No audio, sample or rendered file of the library is committed to the repository: only the manifest, the scripts and their seeds. (S2)
-- **R5.** The library's packages are entries in the Packages manager ([stem separation](stem-separation.md) R15), in the role `library` with a package per part (Core, Instruments, Drums, Loops), each with its URL, size and SHA-256, downloaded on first use. (S3)
+- **R5.** The library's packages are entries in the Packages manager ([stem separation](stem-separation.md) R15), a package per part (Core, Instruments, Drums, Loops) in the role `library-core`, `library-instruments`, `library-drums` or `library-loops`, each with its URL, size, SHA-256 and item count, downloaded on first use. (S3)
 - **R6.** The first time the person opens the library's place in the browser without its packages, the place shows the packages, their sizes and the folder they install in, with Download and Cancel, as the package page does ([stem separation](stem-separation.md) R16). (S3; Beatlayer's own)
 - **R7.** An installed package unpacks into `Library` in Beatlayer's application-data folder, read-only; a person's edits to a library item save to the User Library. (Beatlayer's own)
 
@@ -40,7 +40,7 @@ The library isn't in the repository. A manifest in the repository names every it
 - **R11.** A library item's credit (its creator, title, licence with its link, and changes made) shows in the Info View when it's selected in the browser, and in the device's or clip's info once loaded. (S1)
 - **R12.** Help ▸ Library Credits... opens a window listing every installed item's credit, grouped by package, with Export Credits..., which writes them as a text file. A set's own credits (the library items it uses) export from File ▸ Export Library Credits.... (S1; Beatlayer's own)
 - **R13.** `library.state` (`read`) gives each package, installed or not, and its item count; `library.credits` (`read`) gives the credits of the installed items, or of a set's items. (S2)
-- **R14.** A set that uses a library item refers to it by its library ID and version and its file's content hash; a set opened where the library isn't installed lists the missing items and offers the download. (S3)
+- **R14.** A set that uses a library item refers to it by its library ID and version, which the place its package installs it names (`library-<part>-<version>/<item ID>/<file>`), and by its file's content hash, which the set's media table holds; a set opened where the library isn't installed lists the missing items in `library.state` and offers the download in the Status Bar. (S3)
 - **R15.** A library item's previews and similarity analysis are worked out once on install, so it's analysed before it's first searched ([sound similarity](sound-similarity.md) R1). (S3)
 - **R16.** The library's packages install headless, under `bl-cli mcp`, as the models do. (S3)
 
@@ -68,7 +68,22 @@ The library isn't in the repository. A manifest in the repository names every it
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 to R16 | to be written in WP-9.46: `xtask` tests on a test manifest; `crates/shell/tests/library.rs` installing from a `file://` URL | unit, shell test |
+| R1 | `crates/library/tests/library.rs`, `a_package_is_built_from_the_test_manifest`; `xtask/src/library.rs`, `a_package_builds_from_a_test_manifest_outside_the_repository` | unit |
+| R2 | `crates/library/tests/library.rs`, `an_item_without_a_licence_a_checksum_or_tags_refuses_the_package`, `a_script_that_changed_is_refused`, `cc_by_needs_its_attribution` | unit |
+| R3 | `crates/library/tests/library.rs`, `a_package_is_built_from_the_test_manifest`, `the_same_manifest_builds_the_same_bytes`; `xtask/src/library.rs`, `a_package_builds_from_a_test_manifest_outside_the_repository` | unit |
+| R4 | `xtask/src/library.rs`, `audio_in_the_librarys_folder_fails_the_check`, `a_package_builds_from_a_test_manifest_outside_the_repository` (and the "library manifest" step of `cargo xtask check`) | unit |
+| R5 | `crates/shell/tests/library.rs`, `the_library_is_offered_before_it_is_installed`, `the_package_installs_and_its_items_list_with_their_tags` | shell test |
+| R6 | `crates/ui/tests/library.rs`, `the_label_shows_the_download_page_until_the_library_is_installed` | UI script |
+| R7 | `crates/shell/tests/library.rs`, `the_package_installs_and_its_items_list_with_their_tags` (the files are in `Library`, read-only); `crates/shell/src/packages.rs` (an archive's every file installs under its own path) | shell test |
+| R8 | `crates/shell/tests/library.rs`, `the_library_is_offered_before_it_is_installed`, `the_package_installs_and_its_items_list_with_their_tags` | shell test |
+| R9 | `crates/shell/tests/library.rs`, `the_package_installs_and_its_items_list_with_their_tags` | shell test |
+| R10 | `crates/shell/tests/library.rs`, `the_package_installs_and_its_items_list_with_their_tags` | shell test |
+| R11 | `crates/ui/tests/library.rs`, `a_selected_library_item_shows_its_credit_in_the_info_view`; `crates/shell/tests/library.rs`, `credits_list_and_export` | UI script, shell test |
+| R12 | `crates/ui/tests/library.rs`, `the_credits_window_lists_each_items_credit`; `crates/shell/tests/library.rs`, `credits_list_and_export`, `a_set_refers_to_its_library_items_and_offers_the_download_when_they_are_missing` | UI script, shell test |
+| R13 | `crates/shell/tests/library.rs`, `the_package_installs_and_its_items_list_with_their_tags`, `credits_list_and_export`; the readback rows in `crates/commands/src/readback/song.rs`, checked by `cargo xtask commands` | shell test |
+| R14 | `crates/library/tests/library.rs`, `an_installed_files_path_names_its_item`; `crates/shell/tests/library.rs`, `a_set_refers_to_its_library_items_and_offers_the_download_when_they_are_missing` | unit, shell test |
+| R15 | not built in WP-9.46: items are analysed by the browser's index as any file is ([sound similarity](sound-similarity.md) R5); previews wait for the presets of WP-9.48 | |
+| R16 | `crates/shell/tests/library.rs`, `the_package_installs_and_its_items_list_with_their_tags` (installs through the shell with no window) | shell test |
 | R17 to R21 | to be written in WP-9.47: conversion scripts' tests; every zone plays | unit |
 | R22 to R27 | to be written in WP-9.48 | unit, shell test |
 | R28 to R33 | to be written in WP-9.49 | unit, shell test |

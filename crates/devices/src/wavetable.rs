@@ -1157,9 +1157,7 @@ pub fn register(registry: &mut Registry) {
         registry,
         wavetable_type(),
         Wavetable::new,
-        Some(std::sync::Arc::new(|device, file, _| {
-            crate::wavetables::device_data(device, file)
-        })),
+        Some(std::sync::Arc::new(crate::wavetables::device_data)),
     );
 }
 

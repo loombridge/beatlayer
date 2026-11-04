@@ -804,6 +804,18 @@ impl Shell {
                         action: None,
                     });
                 }
+                // Spec: core-library R14. Library items the set uses that
+                // aren't installed are listed, and the download offered.
+                self.refresh_stale_library();
+                if let Some(missing) = self.library_missing_message() {
+                    self.message = Some(match self.message.take() {
+                        Some(relinked) => Message {
+                            text: format!("{}; {}", relinked.text, missing.text),
+                            ..missing
+                        },
+                        None => missing,
+                    });
+                }
                 if let Some(notice) = self.store.open_notice() {
                     let text = match self.message.take() {
                         Some(relinked) => format!("{}; {notice}", relinked.text),

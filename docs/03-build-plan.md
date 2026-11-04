@@ -1080,7 +1080,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 9.33 | todo |  |  |
 | 9.34 | todo |  |  |
 | 9.35 | todo |  |  |
-| 9.36 | todo |  |  |
+| 9.36 | done | 4 November 2026 | [#827](https://github.com/loombridge/beatlayer/pull/827): the Modular Instrument, Modular Effect and Modular MIDI Effect hold a patch of typed-port blocks, compiled off the audio thread and swapped at block boundaries with state kept, with polyphonic voices, 64 automatable patch parameters, the `modular.*` edit commands and `modular.patch` readback, the first 13 blocks, and patches saved with the set and in presets. |
 | 9.37 | todo |  |  |
 | 9.38 | todo |  |  |
 | 9.39 | todo |  |  |

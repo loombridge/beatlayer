@@ -58,6 +58,7 @@ mod grain_delay;
 mod granulator_iii;
 mod hardware;
 mod hold;
+mod impulse_responses;
 mod instrument_filter;
 mod instrument_matrix;
 mod instrument_voices;

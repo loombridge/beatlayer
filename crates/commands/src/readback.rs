@@ -73,6 +73,7 @@ impl Object {
                 "capture",
                 "compare",
                 "cv",
+                "impulse_responses",
                 "matrix",
                 "partials",
                 "wavetables",

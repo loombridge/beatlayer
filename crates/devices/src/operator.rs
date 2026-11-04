@@ -1146,7 +1146,12 @@ pub fn presets() -> Vec<Preset> {
 
 /// Adds Operator to `registry`.
 pub fn register(registry: &mut Registry) {
-    add_with_data(registry, operator_type(), make, Some(Arc::new(device_data)));
+    add_with_data(
+        registry,
+        operator_type(),
+        make,
+        Some(Arc::new(|device, file, _| device_data(device, file))),
+    );
     // Repeat shapes a user wave's table (R7).
     let repeats: Vec<ParamId> = (0..OPERATORS)
         .flat_map(|op| [osc(op, OSC_REPEAT), osc(op, OSC_REPEAT_ON)])

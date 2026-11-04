@@ -10134,6 +10134,7 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
 | `banks` | array of [`Bank`](#bank) | no | The banks the type declares for control surfaces, its main controls first; empty for a type that leaves them to [`DeviceDescription::banks`]' generic ones. They hold neither the menu options nor the title switch. |
 | `display_drag` | array of [`ParamId`](#paramid) | no | The parameter a vertical drag on the display changes, one for each of `views`, in their order (Roar's shaper display drags the shown stage's Shaper Amount); empty for a display that isn't dragged. |
 | `grid_params` | array of [`ParamId`](#paramid) | no | The parameters a display cell sets by its own gestures, which the layout places no control for: a matrix grid's route amounts. |
+| `impulse_responses` | array of string | no | The names of the impulse-response slots every device of the type has, in their order (the impulse responses spec, R1). A slot is media, not a parameter: slot `k` is the device's media slot `k`. |
 | `menu_options` | array of [`ParamId`](#paramid) | no | The switches the device lists as its own items in its Show Options menu, after Save as Default Preset (C-DEVICE-015), in this order. They are parameters like any other, but the layout places no control for them. |
 | `relabels` | array of [`Relabel`](#relabel) | no | The parameters whose names follow another parameter's value. |
 | `spectrogram` | [`SpectrogramGrid`](#spectrogramgrid) or null | no | The grid of the spectrogram its display holds, if it holds one (the device framework spec, R46). |
@@ -10171,6 +10172,13 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
       "description": "The parameters a display cell sets by its own gestures, which the layout places no control for: a matrix grid's route amounts.",
       "items": {
         "$ref": "#/$defs/ParamId"
+      },
+      "type": "array"
+    },
+    "impulse_responses": {
+      "description": "The names of the impulse-response slots every device of the type has, in their order (the impulse responses spec, R1). A slot is media, not a parameter: slot `k` is the device's media slot `k`.",
+      "items": {
+        "type": "string"
       },
       "type": "array"
     },
@@ -17547,6 +17555,290 @@ A clip `midi.import_file` placed.
 
 </details>
 
+### `ImpulseCategory`
+
+One category of a device's chooser.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The category's name. |
+| `responses` | array of [`ImpulseChoice`](#impulsechoice) | yes | Its responses, in order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One category of a device's chooser.",
+  "properties": {
+    "name": {
+      "description": "The category's name.",
+      "type": "string"
+    },
+    "responses": {
+      "description": "Its responses, in order.",
+      "items": {
+        "$ref": "#/$defs/ImpulseChoice"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "responses"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ImpulseChoice`
+
+One response in a chooser's category.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Its name: its file's name without the extension. |
+| `file` | string | yes | Its file's path. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One response in a chooser's category.",
+  "properties": {
+    "file": {
+      "description": "Its file's path.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Its name: its file's name without the extension.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "file"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ImpulseResponses`
+
+What `device.impulse_responses` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `slots` | array of [`ImpulseSlot`](#impulseslot) | yes | What each slot holds. |
+| `categories` | array of [`ImpulseCategory`](#impulsecategory) | yes | The chooser's categories in order, the bundled ones then `User`. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.impulse_responses` returns.",
+  "properties": {
+    "categories": {
+      "description": "The chooser's categories in order, the bundled ones then `User`.",
+      "items": {
+        "$ref": "#/$defs/ImpulseCategory"
+      },
+      "type": "array"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "slots": {
+      "description": "What each slot holds.",
+      "items": {
+        "$ref": "#/$defs/ImpulseSlot"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "device",
+    "slots",
+    "categories"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ImpulseSlot`
+
+What an impulse-response slot holds (the impulse responses spec, R12).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The slot's name. |
+| `slot` | integer from 0 to 255 | yes | The slot's number, counted from 0. |
+| `state` | [`ImpulseState`](#impulsestate) | yes | Where the response is. |
+| `category` | string or null | no | The chooser's category for it: `User` for a file from elsewhere. |
+| `file` | string or null | no | The response's file name; left out for an empty slot. |
+| `file_frames` | integer or null | no | The file's length in frames at its own rate, once prepared. |
+| `frames` | integer or null | no | The length in frames at the engine's rate after trimming, once prepared. |
+| `gain_db` | number or null | no | The gain normalising applied, in dB, once prepared. |
+| `layout` | string or null | no | `mono`, `stereo` or `true_stereo`, once it is prepared. |
+| `media` | [`ContentHash`](#contenthash) or null | no | The file's content hash. |
+| `path` | string or null | no | The file's path, if the set knows it. |
+| `response` | string or null | no | Its name in that category. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What an impulse-response slot holds (the impulse responses spec, R12).",
+  "properties": {
+    "category": {
+      "description": "The chooser's category for it: `User` for a file from elsewhere.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "file": {
+      "description": "The response's file name; left out for an empty slot.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "file_frames": {
+      "description": "The file's length in frames at its own rate, once prepared.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "frames": {
+      "description": "The length in frames at the engine's rate after trimming, once prepared.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "gain_db": {
+      "description": "The gain normalising applied, in dB, once prepared.",
+      "format": "float",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "layout": {
+      "description": "`mono`, `stereo` or `true_stereo`, once it is prepared.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "media": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ContentHash"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The file's content hash."
+    },
+    "name": {
+      "description": "The slot's name.",
+      "type": "string"
+    },
+    "path": {
+      "description": "The file's path, if the set knows it.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "response": {
+      "description": "Its name in that category.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "slot": {
+      "description": "The slot's number, counted from 0.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "state": {
+      "$ref": "#/$defs/ImpulseState",
+      "description": "Where the response is."
+    }
+  },
+  "required": [
+    "name",
+    "slot",
+    "state"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ImpulseState`
+
+Where a response is in being made ready to play (the impulse responses spec, R12).
+
+One of:
+
+- `"empty"`: The slot holds no response.
+- `"preparing"`: The response is named and is being decoded and prepared.
+- `"ready"`: The response is prepared and plays.
+- `"missing"`: The response's file can't be found; the slot plays silence.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Where a response is in being made ready to play (the impulse responses spec, R12).",
+  "oneOf": [
+    {
+      "const": "empty",
+      "description": "The slot holds no response.",
+      "type": "string"
+    },
+    {
+      "const": "preparing",
+      "description": "The response is named and is being decoded and prepared.",
+      "type": "string"
+    },
+    {
+      "const": "ready",
+      "description": "The response is prepared and plays.",
+      "type": "string"
+    },
+    {
+      "const": "missing",
+      "description": "The response's file can't be found; the slot plays silence.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `IndexState`
 
 The index of the places' files, built in the background.
@@ -20746,6 +21038,7 @@ What `device.load_sample` returns.
 | `media` | [`ContentHash`](#contenthash) | yes | The sample's media, by content hash: what the device and the set name it by. |
 | `slot` | integer from 0 to 255 | yes | The slot that took it, counted from 0. |
 | `name` | string | yes | The file's name, for messages. |
+| `impulse_response` | [`ImpulseSlot`](#impulseslot) or null | no | For an impulse-response slot, what it now holds (the impulse responses spec, R4). |
 
 <details><summary>JSON Schema</summary>
 
@@ -20756,6 +21049,17 @@ What `device.load_sample` returns.
     "device": {
       "$ref": "#/$defs/DeviceId",
       "description": "The device that took the sample."
+    },
+    "impulse_response": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ImpulseSlot"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "For an impulse-response slot, what it now holds (the impulse responses spec, R4)."
     },
     "media": {
       "$ref": "#/$defs/ContentHash",

@@ -30,7 +30,12 @@ fn playing() -> TransportInfo {
 /// A Shaper playing `shape`, slot 1 giving its output itself, with
 /// `params` over that.
 fn curve(shape: &[ShapePoint], params: &[(ParamId, f64)]) -> Box<dyn Node> {
-    let mut all = vec![(modulator::amount(0), 100.0), (POLARITY, 1.0)];
+    // Live's Shaper starts with its rate in sync: these play it in Hz.
+    let mut all = vec![
+        (modulator::amount(0), 100.0),
+        (POLARITY, 1.0),
+        (bl_devices::modulator::TIME_MODE, 0.0),
+    ];
     all.extend_from_slice(params);
     let mut device = device(&curve_mod_type(), &all);
     device.shape = Some(shape.to_vec());

@@ -31,15 +31,17 @@ fn playing(at: usize) -> TransportInfo {
 }
 
 /// An Envelope MIDI whose slot 1 gives its envelope itself, with an attack of
-/// 20 ms (960 frames), a decay of 40 ms (1,920), a sustain of 50 % and a
+/// 20 ms (960 frames), a decay of 40 ms (1,920), a sustain of half the peak and a
 /// release of 100 ms (4,800); `params` over those.
 fn gate(params: &[(ParamId, f64)]) -> Box<dyn Node> {
+    // Velocity is on in a new device: these start with it off.
     let mut all = vec![
         (modulator::amount(0), 100.0),
         (POLARITY, 1.0),
+        (VELOCITY, 0.0),
         (ATTACK, 20.0),
         (DECAY, 40.0),
-        (SUSTAIN_LEVEL, 50.0),
+        (SUSTAIN_LEVEL, 0.5),
         (RELEASE, 100.0),
     ];
     all.extend_from_slice(params);
@@ -140,7 +142,10 @@ fn velocity_scales_the_peak_when_it_is_on() {
         let out = run(node.as_mut(), 6_000, 512, &[on]);
         out.rows.contribution(0).iter().copied().fold(0.0, f32::max)
     };
-    assert!((peak(&[]) - 1.0).abs() < 0.02, "off: the peak is 1");
+    assert!(
+        (peak(&[(VELOCITY, 0.0)]) - 1.0).abs() < 0.02,
+        "off: the peak is 1"
+    );
     assert!(
         (peak(&[(VELOCITY, 1.0)]) - 0.5).abs() < 0.02,
         "on: the velocity"

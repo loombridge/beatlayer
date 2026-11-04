@@ -30,7 +30,8 @@ const LAG: usize = 32;
 /// stretch.
 pub(crate) struct Indices {
     slots: usize,
-    depth: usize,
+    /// Absent from a modulator with no Depth (Expression Control): 100 %.
+    depth: Option<usize>,
     mode: usize,
     polarity: usize,
     amounts: [usize; SLOTS as usize],
@@ -53,7 +54,7 @@ impl Indices {
         };
         Self {
             slots: slots as usize,
-            depth: index(DEPTH),
+            depth: params.index(DEPTH),
             mode: index(MODE),
             polarity: index(POLARITY),
             amounts: each(modulator::amount),
@@ -171,7 +172,7 @@ impl SignalOut {
         }
         let t = (self.clock % GRID) as f64 / GRID as f64;
         let at = |index: usize| f64::from(params.ramp(index)[f]);
-        let depth = at(ix.depth) / 100.0;
+        let depth = ix.depth.map_or(1.0, |depth| at(depth) / 100.0);
         let remote = at(ix.mode) >= 0.5;
         let unipolar = at(ix.polarity) >= 0.5;
         for slot in 0..ix.slots {

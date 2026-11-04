@@ -8512,6 +8512,7 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
 | `grey` | [`GreyWhen`](#greywhen) or null | no | The condition that greys the control. |
 | `hide` | [`GreyWhen`](#greywhen) or null | no | The condition that puts the control away, so another control of a different kind can take its place (Delay's time grid and its millisecond box). |
 | `only` | [`GreyWhen`](#greywhen) or null | no | The condition that puts the control away unless it holds: the control shows only while the parameter's value, rounded, is the value (one of three modes' boxes in the same place). |
+| `repeat` | boolean | no | Whether the control repeats one of the same parameter placed on another page, which is the one the check counts (the device-wide Mod switch on each of Expression Control's tabs). |
 | `shown` | [`ShownWhen`](#shownwhen) or null | no | The condition under which the control shows: only while parameter `param`'s value, rounded, is `value`. A control that is not shown takes no place and draws nothing, so another can be drawn where it would be (Drift's Envelope 2 shows its Rate, Tilt and Hold in the places of its Attack, Decay and Sustain while it cycles). |
 | `size` | [`Size`](#size) or null | no | Its size where the device sets it, in place of the widget's: the width of a box, a row of buttons or a unit pair's control. |
 | `steps` | array or null | no | For a grid, row or stack of buttons over a whole-number parameter, the values its buttons set, in order (Delay's 1 2 3 4 5 6 8 16 of the sixteen steps its time takes): the button for the value the parameter has is lit, and none is while it has another. Over a choice parameter, the indexes of the choices that have a button, in order. |
@@ -8581,6 +8582,10 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
     "param": {
       "$ref": "#/$defs/ParamId",
       "description": "The parameter."
+    },
+    "repeat": {
+      "description": "Whether the control repeats one of the same parameter placed on another page, which is the one the check counts (the device-wide Mod switch on each of Expression Control's tabs).",
+      "type": "boolean"
     },
     "shown": {
       "anyOf": [
@@ -16256,6 +16261,8 @@ One of:
 - `"peak"`: A peak filter's response.
 - `"headphones"`: Headphones: a device's audition button (Boom Audition, Utility's Bass Mono, EQ Eight's Audition).
 - `"loop"`: A loop arrow: a cycling mode (Drift's Envelope 2).
+- `"plus_minus"`: A plus over a minus: a modulation's polarity.
+- `"list"`: Three lines: Show Multimap.
 
 <details><summary>JSON Schema</summary>
 
@@ -16406,6 +16413,16 @@ One of:
     {
       "const": "loop",
       "description": "A loop arrow: a cycling mode (Drift's Envelope 2).",
+      "type": "string"
+    },
+    {
+      "const": "plus_minus",
+      "description": "A plus over a minus: a modulation's polarity.",
+      "type": "string"
+    },
+    {
+      "const": "list",
+      "description": "Three lines: Show Multimap.",
       "type": "string"
     }
   ]
@@ -27004,6 +27021,8 @@ One of:
 - `"strip"`: A strip down the node's left edge ([`STRIP_WIDTH`] wide) with a ▼ toggle at its top and the node's name written up it; the node's area right of it holds the second page while it is shown and the first, which is empty, while it isn't ([`PagesNode::side_strip`]).
 - `"regions"`: No buttons: each page shows when its region of the body is clicked, the region being the controls its [`Page::select`] names with the heading over them (Electric's sections, Analog's, Operator's). The node's area is the shown page's alone.
 - `"placed"`: A button for each page at a place of its own ([`Page::button`]) in the node's area, as the 1 and 2 over Drift's envelope display are; the node's area is the shown page's.
+- `"rail"`: A column of tabs down the node's left edge ([`RAIL_WIDTH`] wide, the node's height shared between them), one per page, beside the shown page's area (Expression Control's five source tabs).
+- `"switch"`: No buttons of its own: the node's area is the shown page's alone, and a control inside a page switches to the other with `device.set_page` (a modulator's Show Multimap).
 - `"column"`: A column of tabs down the node's left edge ([`COLUMN_TAB_WIDTH`] wide), with the shown page's section under them, beside the area the shown page fills (MPE Control's Press, Slide and NotePB).
 - `"follower"`: No tabs of its own: the node shows the page its [`PagesNode::follows`] node shows, by name (MPE Control's settings, which change with its source).
 
@@ -27041,6 +27060,16 @@ One of:
     {
       "const": "placed",
       "description": "A button for each page at a place of its own ([`Page::button`]) in the node's area, as the 1 and 2 over Drift's envelope display are; the node's area is the shown page's.",
+      "type": "string"
+    },
+    {
+      "const": "rail",
+      "description": "A column of tabs down the node's left edge ([`RAIL_WIDTH`] wide, the node's height shared between them), one per page, beside the shown page's area (Expression Control's five source tabs).",
+      "type": "string"
+    },
+    {
+      "const": "switch",
+      "description": "No buttons of its own: the node's area is the shown page's alone, and a control inside a page switches to the other with `device.set_page` (a modulator's Show Multimap).",
       "type": "string"
     },
     {
@@ -44726,6 +44755,7 @@ A pair of unit buttons beside a knob that switch which of two parameters the kno
 |---|---|---|---|
 | `mode` | [`ParamId`](#paramid) | yes | The switch that picks the unit: off, the first unit's parameter (the control's own) shows and the first button is lit. |
 | `units` | array of [`Unit`](#unit), at least 2 | yes | The two units, in the order of `mode`'s values. |
+| `right` | boolean | yes | Whether the buttons are right of the knob (the modulators') rather than left of it (Arpeggiator's). |
 | `below` | boolean | no | Set for a pair drawn side by side in a row under the knob rather than stacked at its left (Note Length's). |
 
 <details><summary>JSON Schema</summary>
@@ -44742,6 +44772,11 @@ A pair of unit buttons beside a knob that switch which of two parameters the kno
       "$ref": "#/$defs/ParamId",
       "description": "The switch that picks the unit: off, the first unit's parameter (the control's own) shows and the first button is lit."
     },
+    "right": {
+      "default": false,
+      "description": "Whether the buttons are right of the knob (the modulators') rather than left of it (Arpeggiator's).",
+      "type": "boolean"
+    },
     "units": {
       "description": "The two units, in the order of `mode`'s values.",
       "items": {
@@ -44754,7 +44789,8 @@ A pair of unit buttons beside a knob that switch which of two parameters the kno
   },
   "required": [
     "mode",
-    "units"
+    "units",
+    "right"
   ],
   "type": "object"
 }
@@ -46183,6 +46219,8 @@ One of:
 - `"bare_slider"`: A [`Bare`](Self::Bare) box whose blue fill shows the value's place in its range, as [`Slider`](Self::Slider)'s does.
 - `"framed"`: A [`Bare`](Self::Bare) box outlined in the accent: the Drum Synths' display boxes.
 - an object with `abbreviated` (integer from 0 to 255): A text button like [`Toggle`](Self::Toggle) that holds only the first that many characters of its parameter's name (Impulse's M, S and Sat).
+- `"checkbox"`: A small square box, filled while on, with the parameter's name beside it (the LFO's ×10).
+- an object with `map` (integer from 0 to 255): The Map button of that slot of a modulator: no parameter's control, so its [`Control::param`] is not placed or checked.
 - `"bare_chooser"`: A [`Chooser`](Self::Chooser) with no name row: the device's own label is beside it, or it needs none (the Drum Sampler's effect type).
 - `"cycle"`: A lit text button holding the chosen choice's name, a press taking the next choice and the last going round to the first (the Drum Sampler's modulation source, Resonators' Mode).
 - `"mini_knob"`: Operator's knob: the name over its left edge, a ring 19 points across and the value at its lower right.
@@ -46503,6 +46541,27 @@ One of:
       },
       "required": [
         "abbreviated"
+      ],
+      "type": "object"
+    },
+    {
+      "const": "checkbox",
+      "description": "A small square box, filled while on, with the parameter's name beside it (the LFO's ×10).",
+      "type": "string"
+    },
+    {
+      "additionalProperties": false,
+      "description": "The Map button of that slot of a modulator: no parameter's control, so its [`Control::param`] is not placed or checked.",
+      "properties": {
+        "map": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "map"
       ],
       "type": "object"
     },

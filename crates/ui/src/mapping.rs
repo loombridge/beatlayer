@@ -565,6 +565,194 @@ pub fn mapping_cell(
     }
 }
 
+/// The width of the Map button in a modulator's mapping row, in points
+/// (layout L-DEV-016).
+pub const MAP_WIDTH: f32 = 63.0;
+
+/// A round button 12 points across holding `glyph`, lit while `lit`.
+fn round_button(
+    ui: &mut Ui,
+    theme: &Theme,
+    (rect, id): (Rect, Id),
+    (glyph, lit, enabled): (bl_model::device_layout::Glyph, bool, bool),
+    name: &str,
+) -> bool {
+    let c = &theme.colors;
+    let response = ui.interact(
+        rect,
+        id,
+        if enabled {
+            Sense::click()
+        } else {
+            Sense::hover()
+        },
+    );
+    crate::focus::register(ui.ctx(), id, bl_shell::Area::Detail, None);
+    let pressed = enabled
+        && (response.clicked()
+            || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))));
+    let (fill, ink) = if lit {
+        (c.mapping.0, c.accent_text.0)
+    } else {
+        (c.window.0, c.text.0)
+    };
+    ui.painter()
+        .circle_filled(rect.center(), rect.width() / 2.0, fill);
+    crate::device_panel::paint_glyph(ui.painter(), rect.shrink(3.0), glyph, ink);
+    if response.has_focus() && crate::focus::outlined(ui.ctx()) {
+        ui.painter().circle_stroke(
+            rect.center(),
+            rect.width() / 2.0 + 1.5,
+            Stroke::new(1.0, c.focus.0),
+        );
+    }
+    let name = name.to_owned();
+    ui.ctx().accesskit_node_builder(id, |node| {
+        node.set_role(Role::Button);
+        node.set_label(name);
+        node.set_selected(lit);
+    });
+    pressed
+}
+
+/// The ID of a modulator's Show Multimap button.
+#[must_use]
+pub fn multimap_button_id(device: DeviceId) -> Id {
+    Id::new(("modulator-multimap", device))
+}
+
+/// A modulator's Show Multimap button at `rect`: it switches the panel to the
+/// list of its eight mappings (`shown` false) and back (layout L-DEV-016).
+pub fn multimap_button(
+    ui: &mut Ui,
+    theme: &Theme,
+    frame: &DeviceFrame,
+    rect: Rect,
+    shown: bool,
+    events: &mut Vec<UiEvent>,
+) {
+    let glyph = if shown {
+        bl_model::device_layout::Glyph::Minus
+    } else {
+        bl_model::device_layout::Glyph::List
+    };
+    let pressed = round_button(
+        ui,
+        theme,
+        (rect, multimap_button_id(frame.id)),
+        (glyph, shown, true),
+        "Show/Hide Multimap",
+    );
+    if pressed {
+        let page = if shown {
+            bl_model::modulator::MULTIMAP_HIDDEN
+        } else {
+            bl_model::modulator::MULTIMAP_SHOWN
+        };
+        events.push(UiEvent::Invoke(Invocation::new(
+            bl_shell::device_commands::SET_PAGE,
+            json!({
+                "device": frame.id,
+                "node": bl_model::modulator::MULTIMAP_NODE,
+                "page": page,
+            }),
+        )));
+    }
+}
+
+/// Slot `slot`'s Map button with `at` as the top-left corner of its row, and
+/// beside it, once it maps something, the round button that unmaps it: the
+/// button is outlined, reads "Map" and lights while it waits for a click on a
+/// parameter, and reads the target's name once it maps one.
+pub fn map_button(
+    ui: &mut Ui,
+    theme: &Theme,
+    frame: &DeviceFrame,
+    modulator: &ModulatorFrame,
+    slot: u8,
+    (at, width): (Pos2, f32),
+    events: &mut Vec<UiEvent>,
+) {
+    let c = &theme.colors;
+    let rect = Rect::from_min_size(at, vec2(width, 12.0));
+    let mapped: Option<&MappingRow> = modulator.mappings.iter().find(|m| m.slot == slot);
+    let lit = modulator.armed == Some(slot);
+    let id = map_button_id(frame.id, slot);
+    let response = ui.interact(
+        rect,
+        id,
+        if frame.enabled {
+            Sense::click()
+        } else {
+            Sense::hover()
+        },
+    );
+    crate::focus::register(ui.ctx(), id, bl_shell::Area::Detail, None);
+    let pressed = frame.enabled
+        && (response.clicked()
+            || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))));
+    let filled = lit || mapped.is_some();
+    let ink = if filled { c.accent_text.0 } else { c.mapping.0 };
+    let painter = ui.painter();
+    painter.rect_filled(
+        rect,
+        crate::device_panel::BOX_CORNER,
+        if filled { c.mapping.0 } else { c.window.0 },
+    );
+    painter.rect_stroke(
+        rect.shrink(0.5),
+        crate::device_panel::BOX_CORNER,
+        Stroke::new(1.0, c.mapping.0),
+        StrokeKind::Inside,
+    );
+    let font = crate::device_panel::font();
+    let text = crate::device_panel::truncated(mapped.map_or("Map", |m| m.label.as_str()), |t| {
+        painter
+            .layout_no_wrap(t.to_owned(), font.clone(), ink)
+            .size()
+            .x
+            <= rect.width() - 4.0
+    });
+    painter.text(rect.center(), Align2::CENTER_CENTER, text, font, ink);
+    if response.has_focus() && crate::focus::outlined(ui.ctx()) {
+        ui.painter().rect_stroke(
+            rect.expand(1.5),
+            crate::device_panel::BOX_CORNER,
+            Stroke::new(1.0, c.focus.0),
+            StrokeKind::Outside,
+        );
+    }
+    let n = slot + 1;
+    let name = format!("Map {n}");
+    ui.ctx().accesskit_node_builder(id, |node| {
+        node.set_role(Role::Button);
+        node.set_label(name);
+        node.set_selected(lit);
+    });
+    if pressed {
+        events.push(UiEvent::Invoke(Invocation::new(
+            "modulator.arm_map",
+            json!({ "device": frame.id, "slot": slot }),
+        )));
+    }
+    if mapped.is_some() {
+        let unmap = Rect::from_min_size(at + vec2(width + 3.0, 0.0), vec2(12.0, 12.0));
+        let pressed = round_button(
+            ui,
+            theme,
+            (unmap, unmap_button_id(frame.id, slot)),
+            (bl_model::device_layout::Glyph::Minus, false, frame.enabled),
+            &format!("Unmap {n}"),
+        );
+        if pressed {
+            events.push(UiEvent::Invoke(Invocation::new(
+                "modulator.unmap",
+                json!({ "device": frame.id, "slot": slot }),
+            )));
+        }
+    }
+}
+
 /// How far a pointer may be from a breakpoint and still hold it, in points.
 const GRAB: f32 = 6.0;
 
@@ -588,7 +776,7 @@ pub fn curve_cell(
     frame: &DeviceFrame,
     points: &[ShapePoint],
     cell: Rect,
-    (grid, snap): (u32, bool),
+    (grid, snap, live): (u32, bool, bool),
     events: &mut Vec<UiEvent>,
 ) {
     let c = &theme.colors;
@@ -598,47 +786,127 @@ pub fn curve_cell(
     } else {
         c.inactive.0
     };
-    // Clear and the presets along the top, the grid's choosers below
-    // (the cell's own bottom band).
-    let top = cell.top() + 3.0;
-    let mut x = cell.left() + 3.0;
     let set = |points: Vec<ShapePoint>, events: &mut Vec<UiEvent>| {
         events.push(UiEvent::Invoke(Invocation::new(
             "modulator.set_shape",
             json!({ "device": device, "points": points }),
         )));
     };
-    let mut buttons: Vec<(u8, String, f32)> = vec![(0, "Clear".to_owned(), 36.0)];
-    buttons.extend((1..=6).map(|n| (n, n.to_string(), 18.0)));
-    for (number, text, width) in buttons {
-        let rect = Rect::from_min_size(pos2(x, top), vec2(width, 14.0));
-        x += width + 3.0;
-        let name = if number == 0 {
-            "Clear".to_owned()
-        } else {
-            format!("Shape preset {number}")
-        };
-        let pressed = Button {
-            rect,
-            id: preset_button_id(device, number),
-            text: &text,
-            lit: false,
-            enabled: frame.enabled,
-            name: &name,
-        }
-        .show(ui, theme);
-        if pressed {
-            let points = if number == 0 {
-                Vec::new()
+    let (area_top, bottom_band) = if live {
+        // Layout L-DEV-016: under the mapping row, with Clear and the six
+        // presets as drawings along the foot, left of Grid and Snap.
+        let y = cell.bottom() - 16.0;
+        for number in 0..=6u8 {
+            let (x, width) = if number == 0 {
+                (cell.left() + 8.0, 12.0)
             } else {
-                shape_preset(number).unwrap_or_default()
+                (cell.left() + 30.0 + 24.0 * f32::from(number - 1), 20.0)
             };
-            set(points, events);
+            let rect = Rect::from_min_size(pos2(x, y), vec2(width, 12.0));
+            let id = preset_button_id(device, number);
+            let response = ui.interact(
+                rect,
+                id,
+                if frame.enabled {
+                    Sense::click()
+                } else {
+                    Sense::hover()
+                },
+            );
+            crate::focus::register(ui.ctx(), id, bl_shell::Area::Detail, None);
+            let ink = if response.hovered() {
+                c.text.0
+            } else {
+                c.text_dim.0
+            };
+            let painter = ui.painter();
+            if number == 0 {
+                crate::device_panel::paint_glyph(
+                    painter,
+                    rect.shrink(2.0),
+                    bl_model::device_layout::Glyph::Minus,
+                    ink,
+                );
+                painter.line_segment(
+                    [rect.shrink(3.0).left_top(), rect.shrink(3.0).right_bottom()],
+                    Stroke::new(1.0, ink),
+                );
+                painter.line_segment(
+                    [rect.shrink(3.0).left_bottom(), rect.shrink(3.0).right_top()],
+                    Stroke::new(1.0, ink),
+                );
+            } else if let Some(shape) = shape_preset(number) {
+                let inner = rect.shrink2(vec2(1.0, 2.0));
+                let line: Vec<Pos2> = (0..=16)
+                    .map(|i| {
+                        let x = f64::from(i) / 16.0;
+                        pos2(
+                            inner.left() + inner.width() * x as f32,
+                            inner.bottom() - inner.height() * shape_value(&shape, x) as f32,
+                        )
+                    })
+                    .collect();
+                painter.add(Shape::line(line, Stroke::new(1.0, ink)));
+            }
+            let pressed = frame.enabled
+                && (response.clicked()
+                    || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))));
+            let name = if number == 0 {
+                "Clear".to_owned()
+            } else {
+                format!("Shape preset {number}")
+            };
+            ui.ctx().accesskit_node_builder(id, |node| {
+                node.set_role(Role::Button);
+                node.set_label(name);
+            });
+            if pressed {
+                let points = if number == 0 {
+                    Vec::new()
+                } else {
+                    shape_preset(number).unwrap_or_default()
+                };
+                set(points, events);
+            }
         }
-    }
-    let bottom_band = 44.0;
+        (cell.top() + 22.0, 20.0)
+    } else {
+        // Clear and the presets along the top, the grid's choosers below
+        // (the cell's own bottom band).
+        let top = cell.top() + 3.0;
+        let mut x = cell.left() + 3.0;
+        let mut buttons: Vec<(u8, String, f32)> = vec![(0, "Clear".to_owned(), 36.0)];
+        buttons.extend((1..=6).map(|n| (n, n.to_string(), 18.0)));
+        for (number, text, width) in buttons {
+            let rect = Rect::from_min_size(pos2(x, top), vec2(width, 14.0));
+            x += width + 3.0;
+            let name = if number == 0 {
+                "Clear".to_owned()
+            } else {
+                format!("Shape preset {number}")
+            };
+            let pressed = Button {
+                rect,
+                id: preset_button_id(device, number),
+                text: &text,
+                lit: false,
+                enabled: frame.enabled,
+                name: &name,
+            }
+            .show(ui, theme);
+            if pressed {
+                let points = if number == 0 {
+                    Vec::new()
+                } else {
+                    shape_preset(number).unwrap_or_default()
+                };
+                set(points, events);
+            }
+        }
+        (top + 18.0, 44.0)
+    };
     let area = Rect::from_min_max(
-        pos2(cell.left() + 4.0, top + 18.0),
+        pos2(cell.left() + 4.0, area_top),
         pos2(cell.right() - 4.0, cell.bottom() - bottom_band),
     );
     if area.width() < 8.0 || area.height() < 8.0 {

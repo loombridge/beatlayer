@@ -18,11 +18,11 @@
 use bl_engine::modbus::Shape;
 use bl_engine::{DeviceType, NodeData, NoteEvent, NoteKind, Registry};
 use bl_model::device_layout::{
-    BODY_HEIGHT, ControlBand, DeviceLayout, DisplayCell, LayoutNode, Widget,
+    Control, ControlBand, DeviceLayout, DisplayCell, LayoutNode, TitlePart, Unit, Widget,
 };
 use bl_model::modulator::{
-    self, GRID_DIVISIONS, GRIDS, MAX_POINTS, SLOTS, SNAP, STRIKE_MOD, ShapePoint, default_shape_of,
-    shape_value,
+    DEPTH, GRID_DIVISIONS, GRIDS, MAX_POINTS, SLOTS, SNAP, STRIKE_MOD, ShapePoint,
+    default_shape_of, shape_value,
 };
 use bl_model::{
     DeviceDescription, DeviceDisplay, DeviceId, DeviceRole, DisplayReading, OrdMap,
@@ -32,8 +32,8 @@ use bl_model::{
 use crate::framework::{Audio, Modulation, NativeDevice, ParamBank, add};
 use crate::midi_fx::seed;
 use crate::modulator::{
-    DIVISIONS, JITTER, OFFSET, RATE_BEATS, RATE_HZ, SMOOTH, TIME_MODE, TIMES_TEN, mapping_cells,
-    mapping_params,
+    DIVISIONS, JITTER, OFFSET, RATE_BEATS, SMOOTH, TIME_MODE, mapped_layout, mapping_params,
+    mapping_row, rate_label,
 };
 use crate::signal_mod::{Held, Indices, Post, SignalOut};
 
@@ -45,6 +45,11 @@ pub const VELOCITY: ParamId = ParamId(11);
 pub const ECHO_TIME: ParamId = ParamId(15);
 /// Echo: how much of each echo the next keeps.
 pub const ECHO: ParamId = ParamId(16);
+
+/// T: turning it on plays the shape once, as a note does.
+pub const TRIGGER: ParamId = ParamId(18);
+/// Rate, as the length of a cycle in milliseconds.
+pub const RATE_MS: ParamId = ParamId(17);
 
 /// The peak under which echoes stop.
 const ECHO_FLOOR: f64 = 1.0 / 256.0;
@@ -65,12 +70,12 @@ pub fn strike_mod_type() -> DeviceType {
         ParamDescriptor::continuous(SMOOTH, "Smooth", (0.0, 100.0), 0.0, ParamUnit::Percent)
             .decimals(0)
             .describe("Softens sharp changes in the output."),
-        ParamDescriptor::choice(TIME_MODE, "Time Mode", &["Hz", "Beats"], 0)
-            .describe("Sets the rate in Hz or in beat divisions of the song's tempo."),
-        ParamDescriptor::continuous(RATE_HZ, "Rate", (0.01, 40.0), 1.0, ParamUnit::Hertz)
+        ParamDescriptor::choice(TIME_MODE, "Time Mode", &["ms", "Beats"], 1)
+            .describe("Sets the rate as a length in milliseconds or in beat divisions of the song's tempo."),
+        ParamDescriptor::continuous(RATE_MS, "Rate", (25.0, 100_000.0), 1_000.0, ParamUnit::Milliseconds)
             .logarithmic()
-            .describe("Cycles per second: the shape plays through once in the time of one."),
-        ParamDescriptor::toggle(TIMES_TEN, "x10", false).describe("Multiplies the rate in Hz by 10."),
+            .decimals(0)
+            .describe("The time the shape takes to play through once."),
         ParamDescriptor::choice(
             RATE_BEATS,
             "Beat Rate",
@@ -85,18 +90,20 @@ pub fn strike_mod_type() -> DeviceType {
             ECHO_TIME,
             "Time",
             (10.0, 2_000.0),
-            250.0,
+            100.0,
             ParamUnit::Milliseconds,
         )
         .logarithmic()
         .decimals(0)
         .describe("The time between echoes."),
         ParamDescriptor::continuous(ECHO, "Echo", (0.0, 100.0), 0.0, ParamUnit::Percent)
-            .decimals(0)
+            .decimals(2)
             .describe("How much of each echo the next one keeps; 0 % makes none."),
+        ParamDescriptor::toggle(TRIGGER, "T", false)
+            .describe("Turning it on plays the shape from its start, as a note does."),
         ParamDescriptor::choice(GRID_DIVISIONS, "Grid", &GRIDS.map(|(name, _)| name), 1)
             .describe("The display's divisions of the cycle."),
-        ParamDescriptor::toggle(SNAP, "Snap", false)
+        ParamDescriptor::toggle(SNAP, "Snap", true)
             .describe("Snaps breakpoints to the grid as they are placed and dragged."),
     ];
     params.extend(mapping_params(
@@ -108,6 +115,8 @@ pub fn strike_mod_type() -> DeviceType {
     ));
     DeviceType::native(STRIKE_MOD, "Shaper MIDI", DeviceRole::MidiEffect).with_description(
         DeviceDescription::new(params)
+            .with_alternate_at((TIME_MODE, 1), RATE_MS, RATE_BEATS)
+            .with_relabels(vec![rate_label(RATE_BEATS, TIME_MODE)])
             .with_layout(layout())
             .with_banks(&[
                 (
@@ -116,10 +125,7 @@ pub fn strike_mod_type() -> DeviceType {
                         "Loop", "Velocity", "Grid", "Snap", "Time", "Echo", "Jitter", "Smooth",
                     ],
                 ),
-                (
-                    "Timing",
-                    &["Time Mode", "Rate", "x10", "Beat Rate", "Offset"],
-                ),
+                ("Timing", &["Time Mode", "Rate", "Beat Rate", "Offset", "T"]),
                 ("Mapping", &["Mod", "Polarity", "Depth"]),
                 (
                     "Targets 1-2",
@@ -141,50 +147,53 @@ pub fn strike_mod_type() -> DeviceType {
     )
 }
 
+/// The panel as Live draws it (layout L-DEV-021): the shape display with the
+/// mapping row along its top and Grid and Snap along its foot; at the right
+/// the output display with T, Jitter and Smooth inside, Velocity, Offset and
+/// Loop, Rate with its ms and sync buttons beside Depth, and Echo over Time.
 fn layout() -> DeviceLayout {
-    let play = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (LOOP, Widget::Toggle),
-            (VELOCITY, Widget::Knob),
-            (JITTER, Widget::Knob),
-            (SMOOTH, Widget::Knob),
-            (OFFSET, Widget::Knob),
-        ],
-    );
-    let display =
-        DisplayCell::new("Curve", 200.0, BODY_HEIGHT, 2.0).with_bottom(ControlBand::stacked(
-            44.0,
-            &[(GRID_DIVISIONS, Widget::Chooser), (SNAP, Widget::Toggle)],
+    let at = Control::new;
+    let curve = DisplayCell::new("Curve", 290.0, 150.0, 3.0)
+        .with_inset(4.0)
+        .with_top(mapping_row())
+        .with_bottom(ControlBand::free(
+            290.0,
+            20.0,
+            vec![
+                at(GRID_DIVISIONS, Widget::Inline, 207.0, 4.0).sized(46.0, 12.0),
+                at(SNAP, Widget::Toggle, 259.0, 4.0).sized(28.0, 12.0),
+            ],
         ));
-    let rate = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (TIME_MODE, Widget::Chooser),
-            (RATE_HZ, Widget::Knob),
-            (TIMES_TEN, Widget::Toggle),
-            (RATE_BEATS, Widget::Chooser),
-            (ECHO_TIME, Widget::Knob),
-            (ECHO, Widget::Knob),
+    let output = DisplayCell::new("Output", 146.0, 66.0, 1.0)
+        .with_inset(4.0)
+        .with_bottom(ControlBand::free(
+            146.0,
+            24.0,
+            vec![
+                at(TRIGGER, Widget::Round, 4.0, 6.0),
+                at(JITTER, Widget::Inline, 22.0, 6.0).sized(60.0, 12.0),
+                at(SMOOTH, Widget::Inline, 86.0, 6.0).sized(58.0, 12.0),
+            ],
+        ));
+    let controls = ControlBand::free(
+        154.0,
+        84.0,
+        vec![
+            at(VELOCITY, Widget::Number, 5.0, 3.0).sized(40.0, 21.0),
+            at(OFFSET, Widget::Number, 56.0, 3.0).sized(40.0, 21.0),
+            at(LOOP, Widget::Toggle, 110.0, 12.0).sized(38.0, 12.0),
+            at(RATE_MS, Widget::SmallKnob, 8.0, 30.0)
+                .with_unit_right(TIME_MODE, [Unit::Ms, Unit::Sync]),
+            at(DEPTH, Widget::SmallKnob, 67.0, 30.0),
+            at(ECHO, Widget::Number, 110.0, 30.0).sized(40.0, 21.0),
+            at(ECHO_TIME, Widget::Number, 110.0, 58.0).sized(40.0, 21.0),
         ],
     );
-    let output = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (modulator::MODE, Widget::Chooser),
-            (modulator::POLARITY, Widget::Chooser),
-            (modulator::DEPTH, Widget::Knob),
-        ],
-    );
-    let (first, rest) = mapping_cells(SLOTS);
-    DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Band(play),
-        LayoutNode::Cell(display),
-        LayoutNode::Band(rate),
-        first,
-        LayoutNode::Band(output),
+    mapped_layout(LayoutNode::Row(vec![
+        LayoutNode::Cell(curve),
+        LayoutNode::Column(vec![LayoutNode::Cell(output), LayoutNode::Band(controls)]),
     ]))
-    .with_expanded(rest)
+    .with_title(vec![TitlePart::Mpe])
 }
 
 /// Adds the Shaper MIDI to `registry`.
@@ -219,6 +228,8 @@ struct StrikeMod {
     velocity: f64,
     flashed: bool,
     level: f64,
+    /// Whether T was on at the last frame.
+    triggered: bool,
 }
 
 impl StrikeMod {
@@ -240,6 +251,7 @@ impl StrikeMod {
             velocity: 1.0,
             flashed: false,
             level: 0.0,
+            triggered: false,
         }
     }
 
@@ -310,7 +322,7 @@ impl NativeDevice for StrikeMod {
                 DIVISIONS[(at(RATE_BEATS, f) as usize).min(DIVISIONS.len() - 1)].1 * 60.0 / bpm
                     * self.rate
             } else {
-                self.rate / (at(RATE_HZ, f) * if at(TIMES_TEN, f) >= 0.5 { 10.0 } else { 1.0 })
+                at(RATE_MS, f) * self.rate / 1000.0
             };
             let settings = Settings {
                 looped: at(LOOP, f) >= 0.5,
@@ -323,6 +335,12 @@ impl NativeDevice for StrikeMod {
                 audio.send(note);
                 self.note(&note, &settings);
             }
+            // T plays the shape from its start, as a note does.
+            let trigger = at(TRIGGER, f) >= 0.5;
+            if trigger && !self.triggered {
+                self.start(1.0);
+            }
+            self.triggered = trigger;
             self.step(&settings);
             if self.out.at_grid() {
                 // Spec: modulation R26, R22. Jitter, Smooth and Offset.

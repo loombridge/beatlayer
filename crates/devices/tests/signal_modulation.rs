@@ -440,7 +440,7 @@ fn gate_rig(block: usize) -> Rig {
         &[
             (POLARITY, 1.0),
             (modulator::amount(0), 100.0),
-            (SUSTAIN_LEVEL, 60.0),
+            (SUSTAIN_LEVEL, 0.6),
         ],
     );
     rig.apply(Command::MapModulator {

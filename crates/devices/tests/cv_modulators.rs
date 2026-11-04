@@ -524,13 +524,29 @@ fn the_envelope_followers_level_comes_through_rise_fall_and_delay() {
     // (modulation R20), so its row on a grid frame is CV Envelope Follower's
     // output on the grid frame before.
     for params in [
-        vec![],
+        vec![(RISE, 5.0), (FALL, 100.0)],
         vec![(RISE, 20.0), (FALL, 300.0)],
         vec![(RISE, 0.0), (FALL, 0.0), (DELAY_TIME, 10.0)],
-        vec![(DELAY_MODE, 1.0), (DELAY_BEATS, 0.0)],
+        vec![
+            (RISE, 5.0),
+            (FALL, 100.0),
+            (DELAY_MODE, 1.0),
+            (DELAY_BEATS, 0.0),
+        ],
     ] {
         let mut all = vec![(modulator::amount(0), 100.0), (POLARITY, 1.0)];
-        all.extend_from_slice(&params);
+        // Live's Envelope Follower reads Rise and Fall in per cent, 10 ms to
+        // the per cent.
+        all.extend(params.iter().map(|&(id, value)| {
+            (
+                id,
+                if id == RISE || id == FALL {
+                    value / 10.0
+                } else {
+                    value
+                },
+            )
+        }));
         let mut follower = node(&registry(), &device(&level_mod_type(), &all), 4_096);
         let want = signal(
             follower.as_mut(),

@@ -53,7 +53,7 @@ mod scale_grid;
 /// 12.4.16, 2 November 2026; layout L-DEV-047).
 const DRAWING_CENTRE: (f32, f32) = (70.0, 26.0);
 const NOTE_CENTRE: (f32, f32) = (23.0, 28.0);
-pub use parts::{BOX_CORNER, DEVICE_TEXT, glyph_for, paint_glyph, title_parts, truncated};
+pub use parts::{BOX_CORNER, DEVICE_TEXT, font, glyph_for, paint_glyph, title_parts, truncated};
 
 /// What the panel asks of the device view for each parameter: its base and
 /// played value while a clip modulates it, and its context menu's automation
@@ -629,6 +629,42 @@ pub fn show(
                 )));
             }
         }
+        // Layout L-DEV-016. The display cell with a modulator's mapping row
+        // holds its first slot's Map button and Show Multimap; the list Show
+        // Multimap shows holds a row for every slot.
+        if let Some(modulator) = &frame.modulator {
+            let shown = panel.pages.iter().any(|p| {
+                p.node == bl_model::modulator::MULTIMAP_NODE
+                    && p.shown == bl_model::modulator::MULTIMAP_SHOWN
+            });
+            let host = controls
+                .iter()
+                .any(|(param, _, r)| *param == bl_model::modulator::MODE && rect.contains_rect(*r));
+            if name == "Multimap" {
+                parts::multimap_rows(ui, theme, (frame, panel), rect, events);
+            }
+            if host || name == "Multimap" {
+                let button = Rect::from_min_size(
+                    pos2(rect.right() - 16.0, rect.top() + 3.0),
+                    vec2(12.0, 12.0),
+                );
+                crate::mapping::multimap_button(ui, theme, frame, button, shown, events);
+            }
+            if host {
+                crate::mapping::map_button(
+                    ui,
+                    theme,
+                    frame,
+                    modulator,
+                    0,
+                    (
+                        pos2(rect.left() + 4.0, rect.top() + 3.0),
+                        crate::mapping::MAP_WIDTH,
+                    ),
+                    events,
+                );
+            }
+        }
         // Spec: analog R22. Quick Routing's four buttons fill its cell.
         if name == bl_devices::analog::QUICK_ROUTING
             && matches!(&frame.kind, bl_model::DeviceKind::Native { device_type }
@@ -657,7 +693,17 @@ pub fn show(
                     .get(value(bl_model::modulator::GRID_DIVISIONS) as usize)
                     .map_or(4, |&(_, n)| n);
                 let snap = value(bl_model::modulator::SNAP) >= 0.5;
-                crate::mapping::curve_cell(ui, theme, frame, points, rect, (grid, snap), events);
+                let live = !matches!(&frame.kind, bl_model::DeviceKind::Native { device_type }
+                    if device_type == bl_model::modulator::CV_CURVE);
+                crate::mapping::curve_cell(
+                    ui,
+                    theme,
+                    frame,
+                    points,
+                    rect,
+                    (grid, snap, live),
+                    events,
+                );
             }
         }
         // Spec: device-framework R36. The device's own drawing fills its
@@ -722,6 +768,27 @@ pub fn show(
             display_drag(ui, frame, panel, display, rect, id, events);
             crate::device_display::draw(ui, theme, rect, id, frame.enabled, display, panel, events);
         }
+        // Layout L-DEV-021. The LED of a modulator driven by notes: left of
+        // the Envelope MIDI's Loop Mode, and in the Shaper MIDI's output
+        // display at its top-left.
+        if frame.modulator.is_some()
+            && let Some(display) = display
+        {
+            let led = match name.as_str() {
+                "Envelope" => Some(pos2(rect.left() + 181.0, rect.top() + 28.0)),
+                "Output" => Some(pos2(rect.left() + 9.0, rect.top() + 9.0)),
+                _ => None,
+            };
+            if let Some(at) = led {
+                crate::device_display::trigger_led(
+                    &ui.painter_at(rect),
+                    theme,
+                    at,
+                    highlight(theme, frame.enabled),
+                    display,
+                );
+            }
+        }
         // Spec: articulation-map R15. The Articulation Map's list shows
         // every articulation, the current one lit.
         let list = crate::articulation_map::is_list(&name);
@@ -763,6 +830,22 @@ pub fn show(
     }
     for (at, (param, widget, whole)) in controls.into_iter().enumerate() {
         let extra = laid.controls.get(at);
+        // A modulator slot's Map button: no parameter's control.
+        if let Widget::Map(slot) = widget {
+            if let Some(modulator) = &frame.modulator {
+                let wide = whole.width();
+                crate::mapping::map_button(
+                    ui,
+                    theme,
+                    frame,
+                    modulator,
+                    slot,
+                    (whole.min, wide),
+                    events,
+                );
+            }
+            continue;
+        }
         // A control put away while another's value says so: its place is
         // another control's.
         let at_value =
@@ -777,6 +860,10 @@ pub fn show(
         }
         // A knob with a unit pair beside it keeps the rest of its place.
         let rect = match extra.and_then(|e| e.unit) {
+            Some(pair) if pair.right => Rect::from_min_max(
+                whole.min,
+                pos2(whole.right() - UNIT_PAIR_WIDTH - PADDING, whole.bottom()),
+            ),
             Some(pair) if pair.below => Rect::from_min_max(
                 whole.min,
                 pos2(whole.right(), whole.bottom() - UNIT_ROW_GAP - BOX_HEIGHT),
@@ -962,6 +1049,8 @@ pub fn show(
             Widget::Bare => control.boxed(ui, theme, events, (false, false)),
             Widget::BareSlider => control.boxed(ui, theme, events, (false, true)),
             Widget::Framed => control.boxed(ui, theme, events, (true, false)),
+            Widget::Checkbox => control.checkbox(ui, theme, events),
+            Widget::Map(_) => {}
             Widget::Cycle => control.cycle(ui, theme, events, false),
             Widget::Mode => control.cycle(ui, theme, events, true),
             Widget::MiniKnob => control.mini_knob(ui, theme, events),
@@ -986,7 +1075,12 @@ pub fn show(
                 .iter()
                 .position(|p| p.id == pair.mode)
         {
-            let pair_rect = if pair.below {
+            let pair_rect = if pair.right {
+                Rect::from_min_max(
+                    pos2(whole.right() - UNIT_PAIR_WIDTH, whole.top()),
+                    whole.max,
+                )
+            } else if pair.below {
                 Rect::from_min_max(pos2(whole.left(), whole.bottom() - BOX_HEIGHT), whole.max)
             } else {
                 Rect::from_min_max(

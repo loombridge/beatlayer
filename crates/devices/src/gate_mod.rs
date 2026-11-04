@@ -21,19 +21,19 @@
 use bl_engine::{DeviceType, NoteEvent, NoteKind, Registry};
 use bl_model::automation::curve_value;
 use bl_model::device_layout::{
-    BODY_HEIGHT, ControlBand, DeviceLayout, DisplayCell, LayoutNode, Widget,
+    BandLabel, Control, ControlBand, DeviceLayout, DisplayCell, LayoutNode, TitlePart, Widget,
 };
-use bl_model::modulator::{GATE_MOD, SLOTS};
+use bl_model::modulator::{DEPTH, GATE_MOD, SLOTS};
 use bl_model::{
     DeviceDescription, DeviceDisplay, DeviceId, DeviceRole, DisplayReading, DisplaySeries, OrdMap,
     ParamDescriptor, ParamId, ParamUnit,
 };
 
 use crate::framework::{Audio, Modulation, NativeDevice, ParamBank, add};
-use crate::modulator::{DIVISIONS, mapping_cells, mapping_params};
+use crate::modulator::{CELL_WIDTH, DIVISIONS, mapped_layout, mapping_params, mapping_row_with};
 use crate::signal_mod::{Held, Indices, SignalOut};
 
-/// Attack, Decay, Sustain and Release.
+/// Attack, Decay, Sustain (a level, in dB) and Release.
 pub const ATTACK: ParamId = ParamId(0);
 pub const DECAY: ParamId = ParamId(1);
 pub const SUSTAIN_LEVEL: ParamId = ParamId(2);
@@ -79,25 +79,18 @@ pub fn gate_mod_type() -> DeviceType {
             .describe(what)
     };
     let mut params = vec![
-        time(ATTACK, "Attack", 10.0, "The time the envelope takes to rise to its peak."),
-        time(DECAY, "Decay", 300.0, "The time the envelope takes to fall to the Sustain level."),
-        ParamDescriptor::continuous(
-            SUSTAIN_LEVEL,
-            "Sustain Level",
-            (0.0, 100.0),
-            60.0,
-            ParamUnit::Percent,
-        )
-        .decimals(0)
-        .describe("The share of the peak the envelope holds while a key is held."),
-        time(RELEASE, "Release", 300.0, "The time the envelope takes to fall to nothing."),
+        time(ATTACK, "Attack", 5.0, "The time the envelope takes to rise to its peak."),
+        time(DECAY, "Decay", 333.0, "The time the envelope takes to fall to the Sustain level."),
+        ParamDescriptor::gain(SUSTAIN_LEVEL, "Sustain", 0.0, -6.0)
+            .describe("The level, under the peak, the envelope holds while a key is held."),
+        time(RELEASE, "Release", 333.0, "The time the envelope takes to fall to nothing."),
         slope(ATTACK_SLOPE, "Attack Slope", "Bends the attack: positive holds it back, negative brings it forward."),
         slope(DECAY_SLOPE, "Decay Slope", "Bends the decay."),
         slope(RELEASE_SLOPE, "Release Slope", "Bends the release."),
-        ParamDescriptor::toggle(SUSTAIN_ON, "Sustain", true).describe(
+        ParamDescriptor::toggle(SUSTAIN_ON, "Sustain Mode", true).describe(
             "On, the envelope holds the Sustain level while a key is held; off, it releases after its decay.",
         ),
-        ParamDescriptor::toggle(VELOCITY, "Velocity", false)
+        ParamDescriptor::toggle(VELOCITY, "Velocity", true)
             .describe("Scales the envelope's peak by the note's velocity."),
         ParamDescriptor::choice(LOOP_MODE, "Loop Mode", &LOOP_MODES, 0).describe(
             "Free starts the envelope on each note, Sync again on every Sync Rate division while a key is held, Loop runs it over and over while a key is held, and Echo repeats it every Env Echo Time.",
@@ -144,12 +137,12 @@ pub fn gate_mod_type() -> DeviceType {
                     &[
                         "Attack",
                         "Decay",
-                        "Sustain Level",
+                        "Sustain",
                         "Release",
                         "Attack Slope",
                         "Decay Slope",
                         "Release Slope",
-                        "Sustain",
+                        "Sustain Mode",
                     ],
                 ),
                 ("Loop", &["Velocity", "Loop Mode", "Sync Rate"]),
@@ -175,48 +168,53 @@ pub fn gate_mod_type() -> DeviceType {
     )
 }
 
+/// The panel as Live draws it (layout L-DEV-021): the envelope's display with
+/// the mapping row along its top, the Loop Mode chooser (and under it the
+/// Sync rate, or the echo controls) at its right, and Time × at its foot;
+/// under it Amount, Attack, Decay, Sustain and Release as small knobs, each
+/// with its box: Velocity, the three slopes and Sustain Mode.
 fn layout() -> DeviceLayout {
-    let times = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (ATTACK, Widget::Knob),
-            (DECAY, Widget::Knob),
-            (SUSTAIN_LEVEL, Widget::Knob),
-            (RELEASE, Widget::Knob),
-            (ATTACK_SLOPE, Widget::Knob),
-            (DECAY_SLOPE, Widget::Knob),
-            (RELEASE_SLOPE, Widget::Knob),
+    let at = Control::new;
+    let cell = DisplayCell::new("Envelope", CELL_WIDTH, 88.0, 1.0)
+        .with_inset(4.0)
+        .with_top(mapping_row_with(
+            88.0,
+            vec![
+                at(LOOP_MODE, Widget::BareChooser, 188.0, 22.0).sized(40.0, 12.0),
+                at(SYNC_RATE, Widget::BareChooser, 188.0, 38.0)
+                    .sized(40.0, 12.0)
+                    .shown_only_while(LOOP_MODE, 1),
+                at(ECHO_TIME, Widget::Bare, 188.0, 38.0)
+                    .sized(40.0, 12.0)
+                    .shown_only_while(LOOP_MODE, 3),
+                at(ECHO_FEEDBACK, Widget::Bare, 188.0, 52.0)
+                    .sized(40.0, 12.0)
+                    .shown_only_while(LOOP_MODE, 3),
+                at(GLOBAL_TIME, Widget::Bare, 188.0, 73.0).sized(40.0, 12.0),
+            ],
+            vec![BandLabel::new("Time ×", 188.0, 64.0, 40.0)],
+        ));
+    let controls = ControlBand::free(
+        CELL_WIDTH + 8.0,
+        62.0,
+        vec![
+            at(DEPTH, Widget::SmallKnob, 17.0, 4.0),
+            at(ATTACK, Widget::SmallKnob, 58.0, 4.0),
+            at(DECAY, Widget::SmallKnob, 104.0, 4.0),
+            at(SUSTAIN_LEVEL, Widget::SmallKnob, 145.0, 4.0),
+            at(RELEASE, Widget::SmallKnob, 190.0, 4.0),
+            at(VELOCITY, Widget::Toggle, 9.0, 48.0).sized(40.0, 12.0),
+            at(ATTACK_SLOPE, Widget::Bare, 54.0, 48.0).sized(40.0, 12.0),
+            at(DECAY_SLOPE, Widget::Bare, 100.0, 48.0).sized(40.0, 12.0),
+            at(SUSTAIN_ON, Widget::Abbreviated(7), 141.0, 48.0).sized(40.0, 12.0),
+            at(RELEASE_SLOPE, Widget::Bare, 186.0, 48.0).sized(40.0, 12.0),
         ],
     );
-    let modes = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (SUSTAIN_ON, Widget::Toggle),
-            (VELOCITY, Widget::Toggle),
-            (LOOP_MODE, Widget::Chooser),
-            (SYNC_RATE, Widget::Chooser),
-            (GLOBAL_TIME, Widget::Knob),
-            (ECHO_TIME, Widget::Knob),
-            (ECHO_FEEDBACK, Widget::Knob),
-        ],
-    );
-    let output = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (bl_model::modulator::MODE, Widget::Chooser),
-            (bl_model::modulator::POLARITY, Widget::Chooser),
-            (bl_model::modulator::DEPTH, Widget::Knob),
-        ],
-    );
-    let (first, rest) = mapping_cells(SLOTS);
-    DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Band(times),
-        LayoutNode::Cell(DisplayCell::new("Envelope", 150.0, BODY_HEIGHT, 1.0)),
-        LayoutNode::Band(modes),
-        first,
-        LayoutNode::Band(output),
+    mapped_layout(LayoutNode::Column(vec![
+        LayoutNode::Cell(cell),
+        LayoutNode::Band(controls),
     ]))
-    .with_expanded(rest)
+    .with_title(vec![TitlePart::Mpe])
 }
 
 /// Adds the Envelope MIDI to `registry`.
@@ -449,7 +447,7 @@ impl NativeDevice for GateMod {
             let settings = Settings {
                 attack: at(ATTACK, f),
                 decay: at(DECAY, f),
-                sustain: at(SUSTAIN_LEVEL, f) / 100.0,
+                sustain: at(SUSTAIN_LEVEL, f),
                 release: at(RELEASE, f),
                 bends: [
                     at(ATTACK_SLOPE, f) / 100.0,
@@ -509,7 +507,7 @@ pub fn display(
         0.0
     };
     let total = attack + decay + hold + release;
-    let sustain = value(SUSTAIN_LEVEL) / 100.0;
+    let sustain = value(SUSTAIN_LEVEL);
     let bends = [
         value(ATTACK_SLOPE) / 100.0,
         value(DECAY_SLOPE) / 100.0,

@@ -969,6 +969,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bl-library"
+version = "0.2.0"
+dependencies = [
+ "flate2",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tar",
+ "toml",
+]
+
+[[package]]
 name = "bl-link"
 version = "0.2.0"
 dependencies = [
@@ -1132,6 +1144,7 @@ dependencies = [
  "bl-engine",
  "bl-ext",
  "bl-interop",
+ "bl-library",
  "bl-link",
  "bl-media",
  "bl-midi-io",
@@ -1232,6 +1245,7 @@ dependencies = [
  "bl-core",
  "bl-devices",
  "bl-engine",
+ "bl-library",
  "bl-link",
  "bl-media",
  "bl-midi-io",
@@ -7623,6 +7637,7 @@ version = "0.2.0"
 dependencies = [
  "bl-commands",
  "bl-engine",
+ "bl-library",
  "bl-model",
  "bl-project",
  "bl-shell-spec",

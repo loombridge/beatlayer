@@ -34,6 +34,7 @@ pub mod hash;
 pub mod history;
 pub mod index;
 pub mod labels;
+pub mod library;
 pub mod listing;
 pub mod places;
 pub mod plugin_presets;
@@ -402,6 +403,8 @@ pub struct BrowserView {
     sets: HashMap<PathBuf, SetState>,
     /// Sets read on background threads send what they read here.
     set_reads: (Sender<SetRead>, Receiver<SetRead>),
+    /// Beatlayer's library, once installed (core library R8).
+    library: library::LibraryView,
 }
 
 /// The tags some item under a label carries, with the generation and label
@@ -650,6 +653,7 @@ impl BrowserView {
             width: clamp_browser_width(prefs.width),
             sets: HashMap::new(),
             set_reads: channel(),
+            library: library::LibraryView::default(),
         };
         view.user_library.clone_from(&prefs.user_library);
         view.places_changed();
@@ -1568,6 +1572,12 @@ impl BrowserView {
         for folder in self.groove_folders() {
             self.list_into(&folder, 0, &mut items);
         }
+        // Spec: core-library R8. The library's grooves list beside them.
+        items.extend(
+            self.library_items_of(&Label::Grooves)
+                .into_iter()
+                .map(|item| self.library_row(item, false)),
+        );
         items
     }
 
@@ -1702,7 +1712,14 @@ impl BrowserView {
     fn places_changed(&mut self) {
         self.generation += 1;
         self.forget_details();
-        let roots = self.roots().into_iter().map(|(_, path)| path).collect();
+        let mut roots: Vec<PathBuf> = self.roots().into_iter().map(|(_, path)| path).collect();
+        // Spec: core-library R10. The library is indexed after the places,
+        // so a search finds its items beside the person's.
+        if let Some(dir) = self.library.dir()
+            && !roots.iter().any(|root| root == dir)
+        {
+            roots.push(dir.to_path_buf());
+        }
         self.index.set_roots(roots);
         self.indexing = self.index.indexing();
         if let Label::Folder(path) = &self.label
@@ -1930,7 +1947,7 @@ impl BrowserView {
         if !label_devices(&label).is_empty() {
             // Spec: modulation R12, racks R43. These labels list devices.
             let query = self.search.trim().to_ascii_lowercase();
-            let items: Vec<Item> = label_devices(&label)
+            let mut items: Vec<Item> = label_devices(&label)
                 .into_iter()
                 .filter(|d| query.is_empty() || d.name.to_ascii_lowercase().contains(&query))
                 .filter(|d| self.carries_all(&d.id, &tags))
@@ -1951,6 +1968,11 @@ impl BrowserView {
                 })
                 .filter(|item| self.item_passes(&selection, &builtin, item))
                 .collect();
+            // Spec: core-library R8. The library's items list beside them.
+            items.extend(
+                self.library_rows(&label, &selection, &builtin)
+                    .unwrap_or_default(),
+            );
             if items.is_empty() {
                 self.note = Some(format!(
                     "Nothing matches \u{201c}{}\u{201d}.",
@@ -1965,6 +1987,19 @@ impl BrowserView {
             // Spec: tunings R25. Beatlayer's own tunings, then the files in
             // the places.
             let items = self.tuning_rows(&tags, &selection, &builtin);
+            self.rows = Rows::Items(items);
+            self.cursor = self.selected.last().and_then(|path| self.position_of(path));
+            return;
+        }
+        // Spec: core-library R8, R10. The library's items list under Core
+        // Library and under the content labels beside the person's own.
+        if let Some(items) = self.library_rows(&label, &selection, &builtin) {
+            if items.is_empty() && self.library_installed() {
+                self.note = Some(format!(
+                    "Nothing matches \u{201c}{}\u{201d}.",
+                    self.search.trim()
+                ));
+            }
             self.rows = Rows::Items(items);
             self.cursor = self.selected.last().and_then(|path| self.position_of(path));
             return;

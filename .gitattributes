@@ -1,0 +1,4 @@
+# The library manifest pins each script by its SHA-256 (core library R1), so a
+# checkout on Windows must not turn their line endings into CRLF.
+library/** text eol=lf
+crates/library/tests/fixtures/** text eol=lf

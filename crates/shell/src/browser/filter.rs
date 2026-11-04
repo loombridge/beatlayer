@@ -55,7 +55,10 @@ fn default_shown(label: &Label, group: &str, builtin: bool) -> bool {
     }
     let is = |names: &[&str]| names.iter().any(|name| name.eq_ignore_ascii_case(group));
     match label {
-        Label::All => true,
+        Label::All | Label::CoreLibrary => true,
+        // Spec: core-library R9. The groups the library fills show with the
+        // others, under every label that can list its items.
+        _ if is(&super::library::GROUPS) => true,
         Label::PlugIns => is(&["Devices", "Format", "Creator"]),
         Label::Instruments
         | Label::AudioEffects
@@ -363,6 +366,14 @@ impl BrowserView {
             for entry in entries {
                 found.extend(self.file_ids(&entry.path, entry.kind, &builtin));
             }
+        }
+        // Spec: core-library R9. The library's items count too.
+        for item in self.library_items_of(base) {
+            found.extend(
+                self.searchable_tags(&item.path.to_string_lossy())
+                    .into_iter()
+                    .map(|(id, _)| id),
+            );
         }
         // An item that carries a subtag also carries its tag (spec:
         // browser-tags R6).

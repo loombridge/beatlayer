@@ -1,0 +1,28 @@
+# Beatlayer's library: the packages, and below them the items of each (spec:
+# core-library R1, R5). `cargo xtask library` builds each package outside the
+# repository; nothing of the library's audio is committed, only this manifest
+# and the scripts that make or convert its items.
+
+[[package]]
+id = "core"
+name = "Core Library"
+version = "1"
+purpose = "Beatlayer's own presets, racks, clips, grooves and one-shots"
+
+[[package]]
+id = "instruments"
+name = "Library Instruments"
+version = "1"
+purpose = "Multisampled instruments from open-licensed recordings"
+
+[[package]]
+id = "drums"
+name = "Library Drums"
+version = "1"
+purpose = "Drum kits by genre"
+
+[[package]]
+id = "loops"
+name = "Library Loops"
+version = "1"
+purpose = "Loops, textures and foley"

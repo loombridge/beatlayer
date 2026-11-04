@@ -138,6 +138,7 @@ pub mod freeze;
 pub mod granulator;
 pub mod groove;
 pub mod keymap;
+pub mod library;
 pub mod link;
 pub mod linked_clips;
 pub mod locator;
@@ -230,6 +231,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     stems::register(registry)?;
     audio_to_midi::register(registry)?;
     packages::register(registry)?;
+    library::register(registry)?;
     extensions::register(registry)?;
     sample_editor::register(registry)?;
     audio_editing::register(registry)?;

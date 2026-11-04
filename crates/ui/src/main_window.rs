@@ -797,6 +797,9 @@ impl MainWindowUi {
             // Spec: dawproject R87. The report of a person's import or export
             // sits over the window while it is open.
             crate::dawproject_window::show(ctx, shell, theme, &mut events);
+            // Spec: core-library R12. Help ▸ Library Credits... lists every
+            // installed item's credit.
+            crate::library_credits::show(ctx, shell, theme, &mut events);
             // Spec: external-devices R23. The real-time render's dialog sits
             // over the window while a render that runs through external
             // hardware is under way.
@@ -839,6 +842,7 @@ impl MainWindowUi {
                 && (shell.stems_dialog().is_some()
                     || shell.audio_to_midi_dialog().is_some()
                     || shell.dawproject_report_window().is_some()
+                    || shell.library_credits_open()
                     || shell.export_dialog().is_some()
                     || shell.export_running()
                     || shell.pack_status().job.is_some()
@@ -1983,6 +1987,17 @@ impl MainWindowUi {
             if let Some((_, content)) = &self.tuning_info {
                 self.info = content.clone();
             }
+        }
+        // Spec: info-view R13. A library item selected in the browser shows
+        // its credit.
+        if self.info.title.is_empty()
+            && let Some((title, body)) = shell.library_info_of_selection()
+        {
+            self.info = InfoViewContent {
+                title,
+                body,
+                shortcut: None,
+            };
         }
         if self.info.title.is_empty() {
             return;

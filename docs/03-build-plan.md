@@ -1090,7 +1090,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 9.43 | todo |  |  |
 | 9.44 | todo |  |  |
 | 9.45 | todo |  |  |
-| 9.46 | todo |  |  |
+| 9.46 | done | 4 November 2026 | [#831](https://github.com/loombridge/beatlayer/pull/831): the `bl-library` crate reads the library manifest (each item's source or script, licence, attribution and tags), `cargo xtask library` builds its packages outside the repository and refuses an item without an allowed licence, checksum or tags, the Packages manager installs them on first use, and the browser's Core Library place lists and searches them, with each item's credit and an exportable credits list |
 | 9.47 | todo |  |  |
 | 9.48 | todo |  |  |
 | 9.49 | todo |  |  |

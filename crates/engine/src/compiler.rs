@@ -639,6 +639,15 @@ impl Compiler {
             {
                 self.send_device_data(document, id, &mut update);
             }
+            // A device that reads its media as data gets them again when
+            // they change, with no new program (impulse responses, R4).
+            if let (Change::Modified, Some(before), Some(after)) =
+                (change, old.device(id), document.device(id))
+                && before.media != after.media
+                && self.registry.reads_media_as_data(&after.kind)
+            {
+                self.send_device_data(document, id, &mut update);
+            }
             // An Operator whose drawn partials changed, or a parameter its
             // user waves' tables are built from, gets the tables again, with
             // no new program (operator R7, R27).
@@ -2248,7 +2257,10 @@ impl Compiler {
                 });
             // A node that swaps samples in place is the same node while it
             // holds one, whichever it is (sound similarity R29).
-            let media = if self.registry.swaps_samples_in_place(&device.kind) {
+            let media = if self.registry.reads_media_as_data(&device.kind) {
+                // Impulse responses reach the node as data (R4).
+                Vec::new()
+            } else if self.registry.swaps_samples_in_place(&device.kind) {
                 device
                     .media_at(0)
                     .map(|_| vec![Some(ContentHash([0; 32]))])
@@ -2277,7 +2289,8 @@ impl Compiler {
                         // with this compile's update (WP-2.16).
                         // A device with wavetables reads its media as tables,
                         // sent as data, not as decoded audio.
-                        let wavetables = device.wavetables.iter().any(Option::is_some);
+                        let wavetables = device.wavetables.iter().any(Option::is_some)
+                            || self.registry.reads_media_as_data(&device.kind);
                         build.dataful.push(device.id);
                         for (slot, media) in device.media.iter().enumerate() {
                             if let Some(media) = *media

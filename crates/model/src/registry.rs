@@ -3241,6 +3241,20 @@ const ENTRIES: &[Entry] = &[
             sample is the reference again.",
     },
     Entry {
+        id: "device.set_impulse_response",
+        action: Action::Apply("set_impulse_response"),
+        label: "Set Impulse Response",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets the response an impulse-response slot of a convolution device \
+            holds (`slot`, counted from 0, and 0 unless given): `media` is a content hash \
+            the media store holds, or null to empty the slot. One undo step, named Load \
+            Impulse Response, or Clear Impulse Response for null. This only names the \
+            response in the set; to load a file from disk, decode and prepare it and read \
+            what it came to, use `device.load_sample`.",
+    },
+    Entry {
         id: "device.set_wavetable",
         action: Action::Apply("set_device_wavetable"),
         label: "Set Wavetable",

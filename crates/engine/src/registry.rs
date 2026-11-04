@@ -375,6 +375,10 @@ pub struct Registry {
     /// data, fading out the voices of the one before, so a sample change
     /// doesn't make a new node.
     swaps_samples: Vec<String>,
+    /// The native device types whose media are read as node data by their
+    /// [`DataFn`], not as decoded samples, and change without a new node
+    /// (impulse-response slots).
+    media_as_data: Vec<String>,
     /// The native device types whose node data is built from some of their
     /// parameters, and which: a change to one sends the data again
     /// ([`Registry::rebuilds_data_on`]).
@@ -401,6 +405,7 @@ impl Registry {
             factories: Vec::new(),
             media: None,
             swaps_samples: Vec::new(),
+            media_as_data: Vec::new(),
             data_params: Vec::new(),
         }
     }
@@ -441,6 +446,20 @@ impl Registry {
     #[must_use]
     pub fn swaps_samples_in_place(&self, kind: &DeviceKind) -> bool {
         matches!(kind, DeviceKind::Native { device_type } if self.swaps_samples.contains(device_type))
+    }
+
+    /// Says that the node of the native device type `device_type` is sent its
+    /// media by its [`DataFn`] and keeps running when they change (the
+    /// impulse responses spec, R4).
+    pub fn media_as_data(&mut self, device_type: &str) {
+        self.media_as_data.push(device_type.to_owned());
+    }
+
+    /// Whether a device of `kind` reads its media as node data
+    /// ([`Registry::media_as_data`]).
+    #[must_use]
+    pub fn reads_media_as_data(&self, kind: &DeviceKind) -> bool {
+        matches!(kind, DeviceKind::Native { device_type } if self.media_as_data.contains(device_type))
     }
 
     /// Adds a factory, asked after the ones already here.

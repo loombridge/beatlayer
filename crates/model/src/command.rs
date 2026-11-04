@@ -2239,6 +2239,18 @@ pub enum Command {
         #[serde(default)]
         slot: u8,
     },
+    /// Sets the response an impulse-response slot holds, by content hash
+    /// (the impulse responses spec, R2): slot `slot` of the device is its
+    /// media slot `slot`.
+    SetImpulseResponse {
+        /// The device.
+        device: DeviceId,
+        /// The slot, counted from 0.
+        #[serde(default)]
+        slot: u8,
+        /// The response's file, or `null` to empty the slot.
+        media: Option<ContentHash>,
+    },
     /// Sets the sample similar-sample swapping goes by (sound similarity
     /// R23): the one the device holds, or `media`.
     SetSimilarityReference {
@@ -3416,6 +3428,9 @@ impl Command {
             Self::ModularExpose { .. } => "Change Patch Parameter",
             Self::SetDeviceSample { media: Some(_), .. } => "Load Sample",
             Self::SetDeviceSample { media: None, .. } => "Clear Sample",
+            // Spec: impulse-responses R2. Beatlayer's own names.
+            Self::SetImpulseResponse { media: Some(_), .. } => "Load Impulse Response",
+            Self::SetImpulseResponse { media: None, .. } => "Clear Impulse Response",
             // Spec: sound-similarity R23.
             Self::SetSimilarityReference { .. } => "Save as Similarity Reference",
             Self::SetDeviceWavetable { .. } => "Load Wavetable",
@@ -5413,6 +5428,22 @@ impl Document {
             } => {
                 check_value(
                     "sample slot",
+                    f64::from(*slot),
+                    usize::from(*slot) < crate::device::MAX_MEDIA_SLOTS,
+                )?;
+                if self.device_ref(*device)?.media_at(usize::from(*slot)) != *media {
+                    self.device_mut(*device)?
+                        .set_media(usize::from(*slot), *media);
+                }
+                Ok(())
+            }
+            Command::SetImpulseResponse {
+                device,
+                slot,
+                media,
+            } => {
+                check_value(
+                    "impulse-response slot",
                     f64::from(*slot),
                     usize::from(*slot) < crate::device::MAX_MEDIA_SLOTS,
                 )?;

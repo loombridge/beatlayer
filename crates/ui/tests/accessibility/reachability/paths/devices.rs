@@ -406,6 +406,18 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             "device.set_wavetable",
             Exception(Equivalent("loading a wavetable (`device.load_wavetable`)")),
         ),
+        (
+            "device.set_impulse_response",
+            Exception(Equivalent(
+                "loading an impulse response (`device.load_sample`)",
+            )),
+        ),
+        (
+            "device.impulse_responses",
+            Exception(LaterView(
+                "the response chooser on a convolution device's panel, which lists it",
+            )),
+        ),
         // WP-5.10: a modulator's Map and Unmap buttons, the controls it
         // maps while Map is lit (Enter on one), and the Shaper's preset
         // buttons, which draw its shape.

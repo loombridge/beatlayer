@@ -82,6 +82,7 @@ mod freeze;
 mod gain_reduction;
 mod granulator_capture;
 mod grooves;
+mod impulse_responses;
 mod info_text;
 mod instant_mappings;
 mod instrument_matrix;

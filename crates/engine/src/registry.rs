@@ -42,7 +42,8 @@ pub struct DeviceData {
 pub type FileOf<'a> = &'a dyn Fn(bl_model::ContentHash) -> Option<std::path::PathBuf>;
 
 /// A native device type's builder of [`DeviceData`].
-pub type DataFn = Arc<dyn Fn(&Device, FileOf<'_>) -> DeviceData + Send + Sync>;
+/// It is also given the engine's sample rate in hertz.
+pub type DataFn = Arc<dyn Fn(&Device, FileOf<'_>, u32) -> DeviceData + Send + Sync>;
 
 /// Makes nodes for devices. The compiler asks each factory in a
 /// [`Registry`] in turn. It runs off the audio thread, so a factory may
@@ -80,8 +81,8 @@ pub trait NodeFactory: Send + Sync {
     /// thread (WP-8.9), or `None` if it builds none for that device. The
     /// compiler sends it with a new node and again when the device's
     /// wavetables change.
-    fn data(&self, device: &Device, file: FileOf<'_>) -> Option<DeviceData> {
-        let _ = (device, file);
+    fn data(&self, device: &Device, file: FileOf<'_>, rate: u32) -> Option<DeviceData> {
+        let _ = (device, file, rate);
         None
     }
 }
@@ -350,10 +351,10 @@ where
         }
     }
 
-    fn data(&self, device: &Device, file: FileOf<'_>) -> Option<DeviceData> {
+    fn data(&self, device: &Device, file: FileOf<'_>, rate: u32) -> Option<DeviceData> {
         match &device.kind {
             DeviceKind::Native { device_type } if *device_type == self.device_type => {
-                self.data.as_ref().map(|data| data(device, file))
+                self.data.as_ref().map(|data| data(device, file, rate))
             }
             _ => None,
         }
@@ -375,6 +376,10 @@ pub struct Registry {
     /// data, fading out the voices of the one before, so a sample change
     /// doesn't make a new node.
     swaps_samples: Vec<String>,
+    /// The native device types whose media are read as node data by their
+    /// [`DataFn`], not as decoded samples, and change without a new node
+    /// (impulse-response slots).
+    media_as_data: Vec<String>,
     /// The native device types whose node data is built from some of their
     /// parameters, and which: a change to one sends the data again
     /// ([`Registry::rebuilds_data_on`]).
@@ -401,6 +406,7 @@ impl Registry {
             factories: Vec::new(),
             media: None,
             swaps_samples: Vec::new(),
+            media_as_data: Vec::new(),
             data_params: Vec::new(),
         }
     }
@@ -441,6 +447,20 @@ impl Registry {
     #[must_use]
     pub fn swaps_samples_in_place(&self, kind: &DeviceKind) -> bool {
         matches!(kind, DeviceKind::Native { device_type } if self.swaps_samples.contains(device_type))
+    }
+
+    /// Says that the node of the native device type `device_type` is sent its
+    /// media by its [`DataFn`] and keeps running when they change (the
+    /// impulse responses spec, R4).
+    pub fn media_as_data(&mut self, device_type: &str) {
+        self.media_as_data.push(device_type.to_owned());
+    }
+
+    /// Whether a device of `kind` reads its media as node data
+    /// ([`Registry::media_as_data`]).
+    #[must_use]
+    pub fn reads_media_as_data(&self, kind: &DeviceKind) -> bool {
+        matches!(kind, DeviceKind::Native { device_type } if self.media_as_data.contains(device_type))
     }
 
     /// Adds a factory, asked after the ones already here.
@@ -585,10 +605,10 @@ impl Registry {
     /// The data the first factory that builds some builds for `device`'s
     /// node, off the audio thread (WP-8.9); none for a device whose factory
     /// builds none.
-    pub(crate) fn data(&self, device: &Device, file: FileOf<'_>) -> Option<DeviceData> {
+    pub(crate) fn data(&self, device: &Device, file: FileOf<'_>, rate: u32) -> Option<DeviceData> {
         self.factories
             .iter()
-            .find_map(|factory| factory.data(device, file))
+            .find_map(|factory| factory.data(device, file, rate))
     }
 
     /// Where clips' audio comes from, if anywhere.

@@ -1158,6 +1158,69 @@ fn a_dropped_sample_loads_into_the_sampler_under_the_pointer() {
     let _ = std::fs::remove_file(&file);
 }
 
+// Spec: device-framework R47; impulse-responses R2, R14
+#[test]
+fn a_file_dropped_on_a_convolution_device_loads_a_response_and_a_refused_one_says_why() {
+    let mut h = harness();
+    let convolution = bl_devices::testing::convolution_type();
+    h.shell.set_device_types(vec![convolution.clone()]);
+    let device = add(
+        &mut h,
+        json!({ "kind": convolution.kind, "name": convolution.name, "role": convolution.role }),
+    );
+    let frame = frame_of(&mut h, device);
+    let write = |name: &str, channels: u16| {
+        let file = std::env::temp_dir().join(format!("bl-ui-ir-{}-{name}.wav", std::process::id()));
+        let samples: Vec<f32> = (0..480 * usize::from(channels))
+            .map(|i| ((i / usize::from(channels)) as f32 * 0.3).sin() * 0.25)
+            .collect();
+        let bytes = bl_media::wav_bytes(
+            &samples,
+            channels,
+            48_000,
+            bl_media::BitDepth::Int16,
+            bl_media::Dither::None,
+        )
+        .unwrap();
+        std::fs::write(&file, bytes).unwrap();
+        file
+    };
+    let media = |h: &Harness| {
+        h.shell
+            .editor()
+            .document()
+            .device(device)
+            .unwrap()
+            .media_at(0)
+    };
+    let (good, three) = (write("good", 2), write("three", 3));
+    assert_eq!(media(&h), None);
+    h.frame(vec![Event::PointerMoved(frame.center())]);
+    h.dropped
+        .push(std::sync::Arc::new(DroppedFile(good.clone())));
+    h.frame(Vec::new());
+    let loaded = media(&h);
+    assert!(loaded.is_some(), "the drop loaded the response");
+    assert_eq!(last_step(&h), "Load Impulse Response");
+
+    h.dropped
+        .push(std::sync::Arc::new(DroppedFile(three.clone())));
+    h.frame(Vec::new());
+    assert_eq!(
+        media(&h),
+        loaded,
+        "the refused file leaves the slot as it was"
+    );
+    assert!(
+        h.shell
+            .message()
+            .is_some_and(|m| m.error && m.text.contains("1, 2 or 4 channels")),
+        "the Status Bar says why: {:?}",
+        h.shell.message()
+    );
+    let _ = (std::fs::remove_file(good), std::fs::remove_file(three));
+}
+
 /// The drum sampler's cell for sample slot `slot` (counted from 0), as the
 /// panel draws it.
 fn slot_cell_rect(h: &mut Harness, device: DeviceId, slot: u32) -> Rect {

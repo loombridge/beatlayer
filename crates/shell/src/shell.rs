@@ -113,6 +113,7 @@ mod file_manager;
 mod freeze;
 mod granulator;
 mod grooves;
+mod impulse;
 mod keymap;
 mod link;
 mod multisampler;
@@ -802,6 +803,9 @@ pub struct Shell {
     /// The media the set's clips play, which the browser fills and the
     /// Arrangement's waveforms read.
     media: Arc<MediaStore>,
+    /// The bundled impulse-response folder a test chose, instead of the
+    /// app's (the impulse responses spec, R10).
+    bundled_impulses: Option<PathBuf>,
     /// The movies the set's video clips name (WP-9.25).
     movies: video::Movies,
     /// The Video Window (WP-9.26).
@@ -1374,6 +1378,7 @@ impl Shell {
         let mut shell = Self {
             browser_view,
             media,
+            bundled_impulses: None,
             movies: video::Movies::default(),
             video_window: video_window::VideoWindow::default(),
             processed: Vec::new(),
@@ -1876,6 +1881,12 @@ impl Shell {
                     track.0
                 ),
             });
+        }
+        if id == "device.set_sample"
+            && let Some(result) = self.set_impulse_sample(id, &args)
+        {
+            // Spec: impulse-responses R2.
+            return result;
         }
         if id == bl_shell_spec::transport::SET_RECORD_QUANTIZATION
             && let Some(reason) = self.record_quantization_locked()

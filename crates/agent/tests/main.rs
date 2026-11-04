@@ -18,6 +18,7 @@ mod fades;
 mod granulator_capture;
 mod grooves;
 mod http;
+mod impulse_responses;
 mod instrument_filter;
 mod instrument_matrix;
 mod kit_devices;

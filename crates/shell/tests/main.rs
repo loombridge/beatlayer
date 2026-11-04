@@ -107,6 +107,7 @@ mod midi_io;
 mod midi_timecode;
 mod midi_tools;
 mod mixer_view;
+mod modular;
 mod mpe_recording;
 mod mpe_tab;
 mod multi_clip;

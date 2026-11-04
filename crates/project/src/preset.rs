@@ -76,6 +76,9 @@ pub struct Preset {
     /// from another sample (sound similarity R23); `None` for the sample the
     /// device holds, and for any other device.
     pub similarity_reference: Option<bl_model::ContentHash>,
+    /// A Modular's patch and its editor layout (the modular device spec,
+    /// R8); `None` for any other device.
+    pub patch: Option<bl_model::modular::Patch>,
     /// A plug-in's own saved state, in its format (plugin scanning R16);
     /// `None` for a preset saved without one, and for any other device.
     pub state: Option<Vec<u8>>,
@@ -99,6 +102,8 @@ struct File {
     mpe: Option<bl_model::PluginMpe>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     similarity_reference: Option<bl_model::ContentHash>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    patch: Option<bl_model::modular::Patch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     state: Option<String>,
 }
@@ -170,6 +175,7 @@ impl Preset {
             routes: (!device.routes.is_empty()).then(|| device.routes.clone()),
             mpe: matches!(device.kind, DeviceKind::Plugin { .. }).then_some(device.mpe),
             similarity_reference: device.similarity_reference,
+            patch: device.patch.clone(),
             state: device
                 .plugin
                 .as_ref()
@@ -218,6 +224,7 @@ impl Preset {
             routes: self.routes.clone().unwrap_or_default(),
             mpe: self.mpe,
             similarity_reference: self.similarity_reference,
+            patch: self.patch.clone(),
             state: self.state.as_deref().map(bl_model::base64::encode),
         };
         let mut bytes = serde_json::to_vec_pretty(&file).unwrap_or_default();
@@ -296,6 +303,13 @@ impl Preset {
         // rules doesn't load.
         bl_model::matrix::check_routes(&file.routes)
             .map_err(|why| PresetError::Invalid(why.to_string()))?;
+        // Spec: modular-device R8. A preset whose patch breaks the rules
+        // doesn't load.
+        if let Some(patch) = &file.patch {
+            patch
+                .check()
+                .map_err(|why| PresetError::Invalid(why.to_string()))?;
+        }
         Ok(Self {
             kind: file.device.kind,
             role: file.device.role,
@@ -309,6 +323,7 @@ impl Preset {
                 _ => None,
             },
             similarity_reference: file.similarity_reference,
+            patch: file.patch,
             state,
         })
     }

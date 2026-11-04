@@ -1146,12 +1146,7 @@ pub fn presets() -> Vec<Preset> {
 
 /// Adds Operator to `registry`.
 pub fn register(registry: &mut Registry) {
-    add_with_data(
-        registry,
-        operator_type(),
-        make,
-        Some(Arc::new(|device, file, _| device_data(device, file))),
-    );
+    add_with_data(registry, operator_type(), make, Some(Arc::new(device_data)));
     // Repeat shapes a user wave's table (R7).
     let repeats: Vec<ParamId> = (0..OPERATORS)
         .flat_map(|op| [osc(op, OSC_REPEAT), osc(op, OSC_REPEAT_ON)])
@@ -1163,7 +1158,11 @@ pub fn register(registry: &mut Registry) {
 /// from its drawn partials and Repeat, off the audio thread: a new user
 /// wave is the first partial alone.
 #[must_use]
-pub fn device_data(device: &Device, _file: bl_engine::FileOf<'_>) -> bl_engine::DeviceData {
+pub fn device_data(
+    device: &Device,
+    _config: &NodeConfig,
+    _file: bl_engine::FileOf<'_>,
+) -> bl_engine::DeviceData {
     let mut data = bl_engine::DeviceData::default();
     for op in 0..OPERATORS {
         let levels = device

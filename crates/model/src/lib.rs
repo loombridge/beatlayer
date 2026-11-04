@@ -92,6 +92,7 @@ mod linked;
 mod locator;
 pub mod matrix;
 mod metronome;
+pub mod modular;
 pub mod modulation;
 pub mod modulator;
 mod mpe_settings;

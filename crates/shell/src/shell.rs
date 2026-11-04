@@ -72,6 +72,7 @@ use bl_shell_spec::midi_files as midi_ids;
 use bl_shell_spec::midi_io as midi_io_ids;
 use bl_shell_spec::midi_tools as tool_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
+use bl_shell_spec::modular as modular_ids;
 use bl_shell_spec::multisampler as multisampler_ids;
 use bl_shell_spec::notes::{self as note_ids};
 use bl_shell_spec::packages as packages_ids;
@@ -146,6 +147,7 @@ mod map_mode;
 mod menus;
 mod midi_input;
 mod mixer;
+mod modular;
 mod packages;
 mod packs;
 mod perception_commands;
@@ -2396,6 +2398,9 @@ impl Shell {
         }
         if tuning_ids::handles(id) {
             return self.run_tunings(id, args);
+        }
+        if modular_ids::handles(id) {
+            return self.run_modular(id, args);
         }
         if dawproject_ids::handles(id) {
             return self.run_dawproject(id, args);

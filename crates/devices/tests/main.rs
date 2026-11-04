@@ -77,6 +77,7 @@ mod midi_cc;
 mod midi_effect_defaults;
 mod midi_monitor;
 mod midi_mpe;
+mod modular;
 mod modulation;
 mod modulators;
 mod multiband_dynamics;

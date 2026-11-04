@@ -194,6 +194,8 @@ fn the_sidebar_lists_live_s_labels_without_ableton_s_services() {
         library,
         [
             "All",
+            // Spec: browser R31. Beatlayer's library, first after All.
+            "Core Library",
             "Sounds",
             "Drums",
             "Instruments",

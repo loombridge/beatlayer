@@ -1,0 +1,44 @@
+# A small manifest of generated items only, for the tests of the build tool
+# and of the library's installation (spec: core-library R1).
+
+[[package]]
+id = "core"
+name = "Test Library"
+version = "1"
+purpose = "Two generated tones, for tests"
+
+[[item]]
+id = "tone-a3"
+name = "Tone A3"
+kind = "one-shot"
+package = "core"
+file = "tone-a3.wav"
+licence = "CC0-1.0"
+tags = ["Genre|Test", "Character|Pure"]
+[item.source]
+script = "sine.py"
+sha256 = "cf52830fa2eea129278ce557793c3008a8c2474de0dc8e18e50cc198dec3e4a3"
+seed = 220
+[item.attribution]
+creator = "Beatlayer"
+title = "Tone A3"
+link = "https://github.com/loombridge/beatlayer"
+changes = ""
+
+[[item]]
+id = "tone-a4"
+name = "Tone A4"
+kind = "one-shot"
+package = "core"
+file = "tone-a4.wav"
+licence = "CC0-1.0"
+tags = ["Genre|Test", "Character|Bright"]
+[item.source]
+script = "sine.py"
+sha256 = "cf52830fa2eea129278ce557793c3008a8c2474de0dc8e18e50cc198dec3e4a3"
+seed = 440
+[item.attribution]
+creator = "Beatlayer"
+title = "Tone A4"
+link = "https://github.com/loombridge/beatlayer"
+changes = ""

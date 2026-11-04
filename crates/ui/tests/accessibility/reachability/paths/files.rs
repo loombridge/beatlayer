@@ -87,6 +87,28 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                 "no place in the interface shows installed packages yet, so only agents remove one",
             )),
         ),
+        // Beatlayer's library (WP-9.46): its page in the browser and its
+        // credits window.
+        ("library.state", Exception(Query)),
+        ("library.credits", Exception(Query)),
+        (
+            "library.install",
+            Exception(Equivalent(
+                "the Core Library page's Download Required Packages Now, which Tab reaches",
+            )),
+        ),
+        (
+            "library.cancel",
+            Exception(Equivalent(
+                "the Core Library page's Cancel, which Tab reaches",
+            )),
+        ),
+        (
+            "library.close_credits",
+            Exception(Equivalent(
+                "the Library Credits window's Close, which Tab reaches, or Esc",
+            )),
+        ),
         // The extension host (WP-9.29).
         ("extension.list", Exception(Query)),
         ("extension.describe", Exception(Query)),

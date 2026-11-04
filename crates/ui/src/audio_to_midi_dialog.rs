@@ -48,6 +48,7 @@ pub fn show(ctx: &Context, shell: &Shell, theme: &Theme, events: &mut Vec<UiEven
                 theme,
                 &crate::packages_page::Page {
                     feature: "Audio to MIDI",
+                    intro: None,
                     packages: &status.packages,
                     folder: &status.folder,
                     install: &status.install,

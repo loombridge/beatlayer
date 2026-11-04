@@ -1187,6 +1187,59 @@ impl BrowserUi {
         }
     }
 
+    /// The library's download page in the content pane (core library R6):
+    /// the packages, their sizes and the folder, with Download and Cancel;
+    /// while they download, the progress and Cancel.
+    fn library_page(
+        &mut self,
+        ui: &mut Ui,
+        shell: &Shell,
+        theme: &Theme,
+        list: Rect,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let state = shell.library_state();
+        let mut page = ui.new_child(egui::UiBuilder::new().max_rect(list.shrink(8.0)));
+        egui::ScrollArea::vertical().show(&mut page, |ui| {
+            if state.packages.is_empty() {
+                ui.label("Beatlayer's library hasn't been published for this platform yet.");
+                return;
+            }
+            if state.install.state == bl_shell::stems_commands::JobState::Running {
+                ui.label(if state.install.stage.is_empty() {
+                    "Downloading Beatlayer's library"
+                } else {
+                    &state.install.stage
+                });
+                ui.add(egui::ProgressBar::new(state.install.progress).show_percentage());
+                if ui.button("Cancel").clicked() {
+                    invoke(events, bl_shell::library_commands::CANCEL, json!({}));
+                }
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_millis(100));
+                return;
+            }
+            crate::packages_page::show(
+                ui,
+                theme,
+                &crate::packages_page::Page {
+                    feature: "Beatlayer's library",
+                    intro: Some(
+                        "Beatlayer's own sounds, instruments, drums and loops aren't in the app. \
+                         These packages need to be downloaded once:",
+                    ),
+                    packages: &state.packages,
+                    folder: &state.folder,
+                    install: &state.install,
+                    install_command: bl_shell::library_commands::INSTALL,
+                    install_args: &json!({}),
+                    close_command: bl_shell::library_commands::CANCEL,
+                },
+                events,
+            );
+        });
+    }
+
     fn content(
         &mut self,
         ui: &mut Ui,
@@ -1281,6 +1334,11 @@ impl BrowserUi {
                 galley,
                 theme.colors.pending.0,
             );
+        }
+        // Spec: browser R31, core-library R6. Core Library, before it's
+        // installed, shows the library's download page.
+        if *view.label() == Label::CoreLibrary && !view.library_installed() {
+            self.library_page(ui, shell, theme, list, events);
         }
         // L-BRW-008: a search or a filter that matches nothing says so.
         if total == 0 && view.note().is_none() && view.results_bar() {

@@ -57,7 +57,7 @@ impl Shell {
 
     /// The manifest in use (R21): the run's, unless a test gave this shell
     /// its own with [`Shell::use_manifest`].
-    fn manifest(&self) -> &Manifest {
+    pub(super) fn manifest(&self) -> &Manifest {
         self.packages
             .manifest
             .as_ref()
@@ -68,6 +68,7 @@ impl Shell {
     /// from files and local servers.
     pub fn use_manifest(&mut self, manifest: Manifest) {
         self.packages.manifest = Some(manifest);
+        self.library_changed();
     }
 
     /// The packages `feature` needs, as `packages.list` gives them.
@@ -130,6 +131,7 @@ impl Shell {
                 && package.role == ONNX_RUNTIME
                 && loaded.is_some_and(|library| !library.starts_with(package.dir(&folder))),
             features: self.manifest().features_needing(package),
+            items: self.library_items_in(package).unwrap_or(package.items),
         }
     }
 
@@ -261,9 +263,13 @@ impl Shell {
     /// Takes the installer thread's news and starts the next download.
     /// Returns whether any download is still going or waiting.
     pub(super) fn poll_packages(&mut self) -> bool {
+        self.refresh_stale_library();
         let ended = self.packages.running.as_mut().and_then(|r| r.worker.poll());
         if let Some(ended) = ended {
             let Running { package, .. } = self.packages.running.take().expect("polled above");
+            if package.role.starts_with(crate::packages::LIBRARY_ROLE) {
+                self.library_changed();
+            }
             let outcome = match ended {
                 Ended::Done(()) => Outcome::Done,
                 Ended::Cancelled => Outcome::Cancelled,
@@ -282,9 +288,17 @@ impl Shell {
             if let Err(error) = self.start_next_package() {
                 self.set_message(error, true);
             }
+            self.refresh_stale_library();
             self.touch();
         }
         self.packages_busy()
+    }
+
+    /// Waits until every download has finished, for tests and headless runs.
+    pub fn wait_packages(&mut self) {
+        while self.poll_packages() {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
     }
 
     /// The packages `ids` name, for this platform.
@@ -334,6 +348,8 @@ impl Shell {
                         .map_err(|e| self.failed(id, e))?;
                     self.packages.outcomes.remove(&package.id);
                 }
+                self.library_changed();
+                self.refresh_stale_library();
                 self.touch();
             }
             _ => return Err(ShellError::UnknownCommand(id.to_owned())),

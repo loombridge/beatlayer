@@ -1939,6 +1939,28 @@ impl Host {
                     ));
                 }
             }
+            Effect::PickCreditsPath {
+                file_name,
+                set,
+                folder,
+            } => {
+                let mut dialog = rfd::FileDialog::new()
+                    .set_title("Export Library Credits")
+                    .add_filter("Text", &["txt"])
+                    .set_file_name(file_name);
+                if let Some(folder) = folder {
+                    dialog = dialog.set_directory(folder);
+                }
+                if let Some(main) = &self.main {
+                    dialog = dialog.set_parent(main.window.as_ref());
+                }
+                if let Some(path) = dialog.save_file() {
+                    self.invoke(&Invocation::new(
+                        bl_shell::library_commands::EXPORT_CREDITS,
+                        json!({ "path": path.to_string_lossy(), "set": set }),
+                    ));
+                }
+            }
             Effect::PickSavePath { then } => {
                 let mut dialog = rfd::FileDialog::new()
                     .set_title("Save Beatlayer Set As")

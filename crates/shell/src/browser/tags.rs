@@ -153,6 +153,9 @@ pub enum AutoSource {
     Plugin,
     /// A sample's sound.
     Sound,
+    /// An item of Beatlayer's library, from its manifest's tags (core
+    /// library R9).
+    Library,
 }
 
 impl AutoSource {
@@ -162,6 +165,7 @@ impl AutoSource {
         match self {
             Self::Plugin => "plugin",
             Self::Sound => "sound",
+            Self::Library => "library",
         }
     }
 
@@ -169,6 +173,7 @@ impl AutoSource {
         match name {
             "plugin" => Some(Self::Plugin),
             "sound" => Some(Self::Sound),
+            "library" => Some(Self::Library),
             _ => None,
         }
     }
@@ -611,6 +616,53 @@ impl TagStore {
                 builtin: false,
             }],
         ))
+    }
+
+    /// The tag a full name (`Group|Tag` or `Group|Tag|Subtag`) names,
+    /// made with its group and parent as Beatlayer's own if they aren't
+    /// there (core library R9). `None` for a name that isn't one.
+    pub fn ensure_path(&mut self, path: &str, ops: &mut Vec<TagOp>) -> Option<i64> {
+        let parts: Vec<&str> = path.split('|').map(str::trim).collect();
+        if !(2..=3).contains(&parts.len()) || parts.contains(&"") {
+            return None;
+        }
+        let group = match self.group_id(parts[0]) {
+            Some(id) => id,
+            None => {
+                let id = self.next_id;
+                self.next_id += 1;
+                let position = i32::try_from(self.groups.len()).unwrap_or(i32::MAX);
+                self.groups.push(TagGroup {
+                    id,
+                    name: parts[0].to_owned(),
+                    position,
+                    builtin: true,
+                    first: position,
+                });
+                ops.push(TagOp::AddGroup {
+                    id,
+                    name: parts[0].to_owned(),
+                    position,
+                    builtin: true,
+                });
+                id
+            }
+        };
+        let mut parent = None;
+        for name in &parts[1..] {
+            let found = self.tags.iter().find(|t| {
+                t.group == group && t.parent == parent && t.name.eq_ignore_ascii_case(name)
+            });
+            let id = if let Some(tag) = found {
+                tag.id
+            } else {
+                let (id, added) = self.make_tag(name, group, parent, true).ok()?;
+                ops.extend(added);
+                id
+            };
+            parent = Some(id);
+        }
+        parent
     }
 
     /// Makes a tag in a group, or a subtag under a tag, and says what to

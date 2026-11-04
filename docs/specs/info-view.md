@@ -1,6 +1,6 @@
 # Info View
 
-- **Status:** partial (R1 to R12 each have a passing test; R13 is WP-9.46's)
+- **Status:** partial (R1 to R13 each have a passing test, but R13's device loaded from a library preset waits for WP-9.48's presets)
 - **Work packages:** WP-2.24 (R1 to R6), WP-6.27 (R7, the Info View beside stacked and hidden detail views), WP-6.29 (R8, the Info View with the second window open), WP-6.58 (R9 to R12, the user's own info text and Edit Info Text); WP-9.46 (a library item's credit, R13)
 - **Parity-matrix row:** Info View (M2, "Built in WP-2.24")
 - **Checked against:** Live 12.4.3, on 10 October 2026; for R9 to R12, the Live 12 reference manual (online edition), read 20 October 2026, and the UI parity reference's menu rows (M-EDIT-025, C-TRACK-006, C-SCENE-006, C-CLIP-SES-006, C-CLIP-ARR-008, C-DEVICE-005, C-TIME-025)
@@ -56,7 +56,7 @@ This spec covers the Info View's place, its show and hide, and what it shows whi
 | R10 | `crates/shell/tests/info_text.rs`, `a_command_with_no_text_opens_the_field_and_shows_a_hidden_info_view`, `the_edit_menus_item_acts_on_the_selection_and_is_disabled_without_one`; `crates/ui/tests/info_view.rs`, `edit_info_text_in_the_edit_menu_opens_the_field_with_the_focus_and_return_keeps_it`, `option_return_adds_a_line_and_escape_drops_the_change`, `the_focus_leaving_keeps_the_text`, `a_tracks_context_menu_edit_info_text_opens_the_field`, `edit_info_text_in_the_edit_menu_acts_on_a_selected_scene`; the other menus': `crates/ui/tests/editing.rs`, `a_clips_menu_edit_info_text_types_the_text_in_the_info_view`; `device_view.rs`, `a_devices_menu_edit_info_text_types_the_text_in_the_info_view`; `rack_view.rs`, `a_chains_menu_edit_info_text_types_the_text_in_the_info_view`; `macros.rs`, `a_macros_menu_edit_info_text_types_the_text_in_the_info_view`; `locator.rs`, `a_locators_menu_edit_info_text_types_the_text_in_the_info_view` | UI script, unit |
 | R11 | `crates/ui/tests/info_view.rs`, `hovering_an_item_with_info_text_shows_its_name_and_text_and_assistive_technology_reads_it`; `crates/ui/tests/editing.rs`, `a_clips_menu_edit_info_text_types_the_text_in_the_info_view`; `crates/ui/tests/macros.rs`, `a_macros_menu_edit_info_text_types_the_text_in_the_info_view` | UI script (AccessKit tree) |
 | R12 | `crates/shell/tests/info_text.rs`, `each_commands_text_is_one_undo_step_and_reads_back`; `crates/model/tests/command_registry.rs`, `every_command_runs_by_id`; `crates/agent/tests/readback.rs`, `every_query_readback_the_command_table_names_is_in_a_real_full_result`; `crates/ui/tests/accessibility/reachability/mod.rs`, `every_m1_command_is_reachable_from_the_keyboard` | unit, UI script |
-| R13 | to be written in WP-9.46 | UI script |
+| R13 | `crates/ui/tests/library.rs`, `a_selected_library_item_shows_its_credit_in_the_info_view`; `crates/shell/tests/library.rs`, `a_set_refers_to_its_library_items_and_offers_the_download_when_they_are_missing` (a clip that plays a library file is credited) | UI script, shell test |
 
 ## Not built yet
 

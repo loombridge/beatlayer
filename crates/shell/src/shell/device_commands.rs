@@ -359,6 +359,9 @@ impl Shell {
         ) {
             return self.run_sample_swap(id, args);
         }
+        if id == device_ids::IMPULSE_RESPONSES {
+            return self.run_impulse_responses(id, args);
+        }
         if id == device_ids::LOAD_WAVETABLE {
             return self.load_wavetable(id, args);
         }
@@ -615,6 +618,11 @@ impl Shell {
                 command: id.to_owned(),
                 message: format!("no {device}"),
             })?;
+        // Spec: impulse-responses R2. A device with impulse-response slots
+        // loads the file as a response.
+        if !self.impulse_slot_names(&target).is_empty() {
+            return self.load_impulse_response(id, &target, Path::new(&path), slot);
+        }
         // Only the sampler and the drum sampler play samples (the sampler
         // spec, R11).
         let plays = matches!(
@@ -677,6 +685,7 @@ impl Shell {
             media,
             slot,
             name,
+            impulse_response: None,
         }))
     }
 
@@ -947,12 +956,14 @@ impl Shell {
 
     pub(super) fn hot_swap_sample(&self) -> Option<(bl_model::DeviceId, PathBuf)> {
         let device = self.devices.hot_swap()?;
+        // Spec: impulse-responses R2. A device with an impulse-response slot
+        // takes the browser's file as its response.
         let takes = self.editor.document().device(device).is_some_and(|d| {
             matches!(
                 &d.kind,
                 bl_model::DeviceKind::Native { device_type }
                     if bl_devices::plays_samples(device_type)
-            )
+            ) || !self.impulse_slot_names(d).is_empty()
         });
         match self.browser_view.selected() {
             [one] if takes && browser::arrange::is_audio(&one.to_string_lossy()) => {

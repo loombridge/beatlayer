@@ -12,9 +12,14 @@ use bl_model::ParamId;
 const RATE: SampleRate = common::RATE;
 const HZ: f64 = 48_000.0;
 
-/// A pickup that stays in its linear range, and no damper noise, so a test
-/// sees the fork.
-const LINEAR: [(ParamId, f64); 2] = [(INPUT, 0.02), (DAMPER_LEVEL, 0.0)];
+/// A pickup that stays in its linear range (Input at 3.6 %, a gain of 0.02),
+/// and no damper noise, so a test sees the fork.
+const LINEAR: [(ParamId, f64); 2] = [(INPUT, 3.6), (DAMPER_LEVEL, 0.0)];
+
+/// The per cent Live reads for a decay of `ms`.
+fn decay(ms: f64) -> f64 {
+    percent_of(ms, DECAY_MS.0, DECAY_MS.1)
+}
 
 fn on(offset: u32, key: u8, velocity: f32) -> NoteEvent {
     NoteEvent {
@@ -146,15 +151,16 @@ fn electric_is_an_instrument_with_the_three_sections_and_the_global_one() {
     let layout = &electric.description.layout;
     let pages = layout.pages();
     assert_eq!(pages.len(), 1);
-    assert_eq!(pages[0].style, PageStyle::Shell);
+    assert_eq!(pages[0].style, PageStyle::Regions);
     let names: Vec<&str> = pages[0].pages.iter().map(|p| p.name.as_str()).collect();
-    assert_eq!(names, ["Hammer", "Fork", "Damper/Pickup"]);
-    // The global section sits beside the pages, always shown.
-    let LayoutNode::Row(row) = &layout.root else {
-        panic!("the body is a row");
+    assert_eq!(names, ["Hammer", "Fork", "Damper/Pickup", "Global"]);
+    // The four sections' controls sit across the top, always shown, and the
+    // page of the section last clicked under them.
+    let LayoutNode::Column(column) = &layout.root else {
+        panic!("the body is a column");
     };
-    assert!(matches!(row[0], LayoutNode::Pages(_)));
-    assert!(matches!(row[1], LayoutNode::Band(_)));
+    assert!(matches!(column[0], LayoutNode::Band(_)));
+    assert!(matches!(column[1], LayoutNode::Pages(_)));
 }
 
 // Spec: electric R1
@@ -247,19 +253,59 @@ fn the_noise_is_a_burst_by_its_level_decay_pitch_and_key() {
     };
     // At 0 there is none; at 100 % it is a burst that falls over its Decay.
     assert!(heard(&[(NOISE, 0.0)], 60).iter().all(|s| *s == 0.0));
-    let short = heard(&[(NOISE, 100.0), (NOISE_DECAY, 20.0)], 60);
-    let long = heard(&[(NOISE, 100.0), (NOISE_DECAY, 500.0)], 60);
+    let short = heard(
+        &[
+            (NOISE, 100.0),
+            (
+                NOISE_DECAY,
+                percent_of(20.0, NOISE_DECAY_MS.0, NOISE_DECAY_MS.1),
+            ),
+        ],
+        60,
+    );
+    let long = heard(
+        &[
+            (NOISE, 100.0),
+            (
+                NOISE_DECAY,
+                percent_of(500.0, NOISE_DECAY_MS.0, NOISE_DECAY_MS.1),
+            ),
+        ],
+        60,
+    );
     assert!(energy(&short[..2_400]) > 1e-3);
     assert!(energy(&long[12_000..14_400]) > 20.0 * energy(&short[12_000..14_400]));
-    // Pitch moves the band: a high one has more of its energy above 4 kHz.
+    // Pitch moves the band: a high one has more of its energy above 4 kHz. The
+    // W pickup, which Electric opened with before R became its default, passes
+    // the band as it is, where R's differentiator lifts the highs of both.
     let above = |s: &[f32]| {
         let sp = common::spectrum(&s[..8_192]);
         let bin = |hz: f64| (hz * 8_192.0 / HZ) as usize;
         sp[bin(4_000.0)..].iter().map(|a| a * a).sum::<f64>()
             / sp.iter().map(|a| a * a).sum::<f64>()
     };
-    let low = heard(&[(NOISE, 100.0), (NOISE_PITCH, 200.0)], 60);
-    let high = heard(&[(NOISE, 100.0), (NOISE_PITCH, 8_000.0)], 60);
+    let low = heard(
+        &[
+            (NOISE, 100.0),
+            (PICKUP_TYPE, 1.0),
+            (
+                NOISE_PITCH,
+                percent_of(200.0, NOISE_PITCH_HZ.0, NOISE_PITCH_HZ.1),
+            ),
+        ],
+        60,
+    );
+    let high = heard(
+        &[
+            (NOISE, 100.0),
+            (PICKUP_TYPE, 1.0),
+            (
+                NOISE_PITCH,
+                percent_of(8_000.0, NOISE_PITCH_HZ.0, NOISE_PITCH_HZ.1),
+            ),
+        ],
+        60,
+    );
     assert!(above(&high) > 10.0 * above(&low));
     // Key 96 is 9 dB above C3 at 100 %.
     let flat = peak(&heard(&[(NOISE, 100.0)], 96));
@@ -308,8 +354,8 @@ fn the_tine_decays_as_its_decay_says() {
             &[
                 LINEAR[0],
                 LINEAR[1],
-                (TINE_DECAY, 3_000.0),
-                (TONE_DECAY, 100.0),
+                (TINE_DECAY, decay(3_000.0)),
+                (TONE_DECAY, decay(100.0)),
             ],
             &[on(0, key, 0.8)],
             96_000,
@@ -347,6 +393,24 @@ fn key_moves_the_tines_and_the_pickups_level_by_up_to_12_db_over_four_octaves() 
     }
 }
 
+// Spec: electric R15
+#[test]
+fn tine_and_tone_set_the_levels_of_the_tine_and_the_tone_bar() {
+    let heard = |tine: f64, tone: f64| {
+        let mut all = LINEAR.to_vec();
+        all.extend([(NOISE, 0.0), (TINE, tine), (TONE, tone)]);
+        peak(&render(&all, &[on(0, 60, 0.8)], 12_000))
+    };
+    // Neither is anything, and nothing else sounds.
+    assert_eq!(heard(0.0, 0.0), 0.0);
+    // At 100 % each is twice what it is at 50 %, the bar's drive being the
+    // tine's own whatever the tine's level.
+    for (alone, other) in [((100.0, 0.0), (50.0, 0.0)), ((0.0, 100.0), (0.0, 50.0))] {
+        let ratio = heard(alone.0, alone.1) / heard(other.0, other.1);
+        assert!((ratio - 2.0).abs() < 0.03, "{alone:?}: {ratio}");
+    }
+}
+
 // Spec: electric R4, R6
 #[test]
 fn the_tone_bar_rings_on_for_its_own_decay_after_the_tine_has_died() {
@@ -355,8 +419,8 @@ fn the_tone_bar_rings_on_for_its_own_decay_after_the_tine_has_died() {
             &[
                 LINEAR[0],
                 LINEAR[1],
-                (TINE_DECAY, 100.0),
-                (TONE_DECAY, 3_000.0),
+                (TINE_DECAY, decay(100.0)),
+                (TONE_DECAY, decay(3_000.0)),
             ],
             &[on(0, key, 0.8)],
             96_000,
@@ -372,9 +436,9 @@ fn the_fork_falls_60_db_within_release_after_the_key_is_let_go() {
     let params = [
         LINEAR[0],
         LINEAR[1],
-        (TINE_DECAY, 20_000.0),
-        (TONE_DECAY, 20_000.0),
-        (RELEASE, 1_500.0),
+        (TINE_DECAY, decay(20_000.0)),
+        (TONE_DECAY, decay(20_000.0)),
+        (RELEASE, percent_of(1_500.0, RELEASE_MS.0, RELEASE_MS.1)),
     ];
     let notes = [on(0, 60, 0.8), off(48_000, 60)];
     let s = render(&params, &notes, 48_000 * 4);
@@ -395,8 +459,8 @@ fn a_long_hammer_noise_fades_with_the_fork_on_release() {
         LINEAR[0],
         LINEAR[1],
         (NOISE, 100.0),
-        (NOISE_DECAY, 1_000.0),
-        (RELEASE, 10.0),
+        (NOISE_DECAY, 100.0),
+        (RELEASE, 0.0),
     ];
     let notes = [on(0, 60, 0.8), off(4_800, 60)];
     let s = render(&params, &notes, 48_000);
@@ -410,7 +474,7 @@ fn a_long_hammer_noise_fades_with_the_fork_on_release() {
 fn symmetry_and_distance_shape_the_pickups_harmonics() {
     let hz = hz_of(60);
     let level = |params: &[(ParamId, f64)], harmonic: f64| {
-        let mut all = vec![(TINE_DECAY, 20_000.0), (NOISE, 0.0), (INPUT, 4.0)];
+        let mut all = vec![(TINE_DECAY, decay(20_000.0)), (NOISE, 0.0), (INPUT, 100.0)];
         all.extend_from_slice(params);
         let s = render(&all, &[on(0, 60, 1.0)], 48_000);
         let f0 = magnitude(&s, hz, 4_800, 24_000);
@@ -441,7 +505,7 @@ fn the_pickup_never_divides_by_zero_however_hard_it_is_driven() {
                     (PICKUP_TYPE, kind),
                     (SYMMETRY, symmetry),
                     (DISTANCE, 0.0),
-                    (INPUT, 4.0),
+                    (INPUT, 100.0),
                     (FORCE, 100.0),
                     (FORCE_VEL, 100.0),
                 ],
@@ -467,6 +531,7 @@ fn the_device_reports_the_oversamplers_latency() {
 #[test]
 fn the_damper_sounds_at_the_start_the_end_or_both_by_att_rel() {
     let heard = |att_rel: f64, level: f64| {
+        let level = level * 100.0;
         let s = render(
             &[
                 (FORCE, 0.0),
@@ -515,8 +580,8 @@ fn volume_scales_the_output_and_voices_limits_the_notes() {
             LINEAR[0],
             LINEAR[1],
             (VOICES, 1.0),
-            (TINE_DECAY, 20_000.0),
-            (TONE_DECAY, 20_000.0),
+            (TINE_DECAY, decay(20_000.0)),
+            (TONE_DECAY, decay(20_000.0)),
         ],
         &[on(0, 60, 0.8), on(4_800, 67, 0.8)],
         48_000,

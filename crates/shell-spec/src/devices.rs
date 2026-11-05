@@ -507,18 +507,25 @@ pub fn body_width(frame: &DeviceFrame) -> f32 {
     if let Some(rack) = &frame.rack {
         return rack_width(rack);
     }
+    // The External Instrument's body is its Gain knob beside the section: its
+    // frame is Live's 129 points, narrower than a title bar's least (L-DEV-103).
+    let least = if external_width(frame) == EXTERNAL_INSTRUMENT_WIDTH {
+        0.0
+    } else {
+        MIN_DEVICE_WIDTH
+    };
     frame.panel.as_ref().map_or(DEFAULT_DEVICE_WIDTH, |panel| {
-        panel
-            .layout(frame.expanded)
-            .docked_size()
-            .width
-            .max(MIN_DEVICE_WIDTH)
+        panel.layout(frame.expanded).docked_size().width.max(least)
     })
 }
 
 /// The width at 100%, in points, of an external device's section: its three
 /// choosers and Hardware Latency (Beatlayer's own; to observe).
 pub const EXTERNAL_SECTION_WIDTH: f32 = 92.0;
+
+/// The width at 100%, in points, of the External Instrument's section, which
+/// Live's 129-point panel gives its Gain knob the rest of (L-DEV-103).
+pub const EXTERNAL_INSTRUMENT_WIDTH: f32 = 88.0;
 
 /// The width at 100%, in points, of the External Audio Effect's section, the
 /// strip of its choosers down the left of its panel (observed in Live 12.4.16,
@@ -530,14 +537,10 @@ pub const EXTERNAL_EFFECT_WIDTH: f32 = 86.0;
 /// layout holds its section's room itself (its Phase switch sits in it).
 #[must_use]
 pub fn external_width(frame: &DeviceFrame) -> f32 {
-    if frame
-        .external
-        .as_ref()
-        .is_some_and(|section| !section.output)
-    {
-        EXTERNAL_SECTION_WIDTH
-    } else {
-        0.0
+    match &frame.external {
+        Some(section) if !section.output && section.cv.is_none() => EXTERNAL_INSTRUMENT_WIDTH,
+        Some(section) if !section.output => EXTERNAL_SECTION_WIDTH,
+        _ => 0.0,
     }
 }
 

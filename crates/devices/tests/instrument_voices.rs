@@ -280,6 +280,12 @@ fn assert_close(actual: f64, expected: f64, tolerance: f64, what: &str) {
     );
 }
 
+/// What Drift opened with before its panel was laid out as Live's: see
+/// [`bl_devices::testing::drift_before_live`].
+pub(crate) fn drift_before() -> Vec<(ParamId, f64)> {
+    bl_devices::testing::drift_before_live()
+}
+
 pub(crate) fn drift_type() -> DeviceType {
     bl_devices::device_types()
         .into_iter()
@@ -318,7 +324,9 @@ fn drift_phrase(block: usize) -> Vec<f32> {
         (MOD1_DEST, destination("LP Frequency")),
         (MOD1_AMOUNT, 0.5),
     ];
-    let mut node = node(&registry(), &device(&drift_type(), &params), 4096);
+    let mut before = drift_before();
+    before.extend_from_slice(&params);
+    let mut node = node(&registry(), &device(&drift_type(), &before), 4096);
     let notes = [
         on_at(0, 60, 0.8),
         on_at(0, 64, 0.6),

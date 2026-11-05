@@ -767,7 +767,7 @@ fn drift_with_every_route() -> Vec<f32> {
         (MOD3_SOURCE, source("Slide")),
         (MOD3_DEST, destination("Osc 2 Detune")),
         (MOD3_AMOUNT, 50.0),
-        (SHAPE_MOD_SOURCE, source("Env 2 / Cyc")),
+        (SHAPE_MOD_SOURCE, source("Env 2")),
         (SHAPE_MOD_AMOUNT, 30.0),
         (PITCH_MOD1_SOURCE, source("Key")),
         (PITCH_MOD1_AMOUNT, 5.0),
@@ -781,7 +781,10 @@ fn drift_with_every_route() -> Vec<f32> {
         (LFO_MOD_AMOUNT, 30.0),
     ];
     let mut device = drift_type().device(DeviceId(bl_core::id::Id::new(1).unwrap()));
-    for (param, value) in params {
+    for (param, value) in crate::instrument_voices::drift_before()
+        .into_iter()
+        .chain(params)
+    {
         device.params.insert(param, value);
     }
     let mut node = node(&registry(), &device, 4096);

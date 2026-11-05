@@ -10,7 +10,8 @@
 //! ([`bl_model::External`]). The node scales what comes back.
 
 use bl_engine::{DeviceType, Registry};
-use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId};
+use bl_model::device_layout::{Control, ControlBand, LayoutNode, Widget};
+use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 
@@ -36,8 +37,24 @@ pub fn hardware_instrument_type() -> DeviceType {
             ParamDescriptor::gain(GAIN, "Gain", 24.0, 0.0)
                 .describe("Scales the sound that comes back from the hardware."),
         ])
+        .with_layout(layout())
         .with_banks(&[("Gain", &["Gain"])]),
     )
+}
+
+/// The width of the body at the right of the section, in points: the frame is
+/// Live's 129 points wide with the section's 88 (layout L-DEV-103).
+const BODY_WIDTH: f32 = 41.0;
+
+/// Layout L-DEV-103: Gain is a small knob at the right of the Audio From box,
+/// on the row of its name; the choosers, Peak and Hardware Latency are the
+/// section's, down the left.
+fn layout() -> DeviceLayout {
+    DeviceLayout::new(LayoutNode::Band(ControlBand::free(
+        BODY_WIDTH,
+        bl_model::device_layout::BODY_HEIGHT,
+        vec![Control::new(GAIN, Widget::SmallKnob, 0.6, 59.1)],
+    )))
 }
 
 /// Adds the External Instrument to `registry`.

@@ -201,3 +201,17 @@ pub fn realtime_waiting(shell: &Shell, seconds: u64) {
 pub fn arm_by_selection(shell: &mut Shell, track: bl_model::TrackId) {
     shell.mark_armed_by_selection(track);
 }
+
+/// Sets a Drift to what it opened with before Live's starting values (2
+/// November 2026), for tests that compare renders or measure one thing: Drift
+/// at 7.2 % wanders differently in every instance of the device.
+pub fn drift_before_live(shell: &mut Shell, device: bl_model::DeviceId) {
+    for (param, value) in bl_devices::testing::drift_before_live() {
+        shell
+            .run(
+                "device.set_param",
+                serde_json::json!({ "device": device, "param": param, "value": value }),
+            )
+            .expect("a Drift's parameter sets");
+    }
+}

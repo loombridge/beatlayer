@@ -52,11 +52,13 @@ fn off(offset: u32, key: u8) -> NoteEvent {
     }
 }
 
-/// A new device's parameters but for Antialias off, Tone at 100 % and
+/// What a new device opened with before Live's panel (the filter and the LFO
+/// as they were, short envelopes), with Antialias off, Tone at 100 % and
 /// Volume at 0 dB, so a test hears the oscillators' own sound; `extra`
 /// overrides them.
 fn patch(extra: &[(ParamId, f64)]) -> Vec<(ParamId, f64)> {
-    let mut params = vec![(ANTIALIAS, 0.0), (TONE, 100.0), (VOLUME, 1.0)];
+    let mut params = bl_devices::testing::operator_before_live();
+    params.extend([(ANTIALIAS, 0.0), (TONE, 100.0), (VOLUME, 1.0)]);
     params.extend_from_slice(extra);
     params
 }
@@ -1391,20 +1393,20 @@ fn shell_placed(show: Option<&str>) -> (Placed, Vec<String>) {
     (placed, names)
 }
 
-// Spec: operator R18 (a shell of sections in the manual's order)
+// Spec: operator R18 (Live's rows, shown by a click, and the display of the last)
 #[test]
-fn the_body_is_a_shell_of_sections_and_each_section_fills_the_display() {
+fn the_body_is_rows_and_a_display_and_each_row_shows_its_fields() {
     let kind = operator_type();
     let layout = &kind.description.layout;
     let nodes = layout.pages();
     assert_eq!(nodes.len(), 1);
     assert_eq!(nodes[0].name, "Sections");
-    assert_eq!(nodes[0].style, PageStyle::Shell);
+    assert_eq!(nodes[0].style, PageStyle::Regions);
     let (_, names) = shell_placed(None);
     assert_eq!(
         names,
         [
-            "Global", "Osc A", "Osc B", "Osc C", "Osc D", "LFO", "Filter", "Pitch"
+            "Osc A", "Osc B", "Osc C", "Osc D", "LFO", "Filter", "Pitch", "Global"
         ]
     );
     // Every parameter's control is placed once across the pages, and the
@@ -1415,35 +1417,37 @@ fn the_body_is_a_shell_of_sections_and_each_section_fills_the_display() {
         found.sort_unstable();
         found
     };
-    // The sections' controls show whichever page does; the display holds
-    // the shown page's further controls.
+    // The rows show whichever page does; the display holds the shown page's
+    // fields.
     let (global, _) = shell_placed(Some("Global"));
     let (a, _) = shell_placed(Some("Osc A"));
     let (d, _) = shell_placed(Some("Osc D"));
     let (pitch, _) = shell_placed(Some("Pitch"));
     for placed in [&global, &a, &d, &pitch] {
         let ids = controls_of(placed);
-        for section in [
-            ALGORITHM.0,
-            osc(0, OSC_WAVE).0,
+        for row in [
+            osc(0, OSC_COARSE).0,
             osc(3, OSC_COARSE).0,
+            LFO_ON.0,
+            FILTER_FREQ.0,
             PITCH_ON.0,
+            TIME.0,
         ] {
-            assert!(ids.contains(&section), "section control {section}");
+            assert!(ids.contains(&row), "the rows' control {row}");
         }
     }
-    assert!(controls_of(&global).contains(&TONE.0));
-    assert!(!controls_of(&global).contains(&osc(0, OSC_FINE).0));
-    assert!(controls_of(&a).contains(&osc(0, OSC_FINE).0));
+    assert!(controls_of(&global).contains(&ALGORITHM.0));
+    assert!(!controls_of(&global).contains(&osc(0, ENV_ATTACK).0));
     assert!(controls_of(&a).contains(&osc(0, ENV_ATTACK).0));
-    assert!(!controls_of(&a).contains(&osc(3, OSC_FINE).0));
-    assert!(controls_of(&d).contains(&osc(3, OSC_FINE).0));
+    assert!(controls_of(&a).contains(&osc(0, OSC_FEEDBACK).0));
+    assert!(!controls_of(&a).contains(&osc(3, ENV_ATTACK).0));
+    assert!(controls_of(&d).contains(&osc(3, ENV_ATTACK).0));
     assert!(controls_of(&pitch).contains(&shaped(PITCH_ENV, SHAPED_ATTACK).0));
     assert!(controls_of(&pitch).contains(&PITCH_DEST_B.0));
-    // The device keeps its size whichever section shows.
+    // The device keeps its size whichever row shows.
     let size = layout.docked_size();
     for name in [
-        "Global", "Osc A", "Osc B", "Osc C", "Osc D", "LFO", "Filter", "Pitch",
+        "Osc A", "Osc B", "Osc C", "Osc D", "LFO", "Filter", "Pitch", "Global",
     ] {
         let shown = layout.with_pages(&[("Sections".to_owned(), name.to_owned())].into());
         assert_eq!(shown.docked_size(), size, "{name}");

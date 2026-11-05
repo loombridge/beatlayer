@@ -1996,3 +1996,101 @@ impl Instrument for FmVoices {
         }
     }
 }
+
+/// What Drift opened with before its panel was laid out as Live's (2
+/// November 2026): the tests that record a render, or that measure one thing,
+/// start from it, so Live's new starting values (a sine second oscillator an
+/// octave down, Drift at 7.2 %, a modwheel route on HP Frequency and the rest)
+/// don't move what they measure.
+pub fn drift_before_live() -> Vec<(ParamId, f64)> {
+    use crate::polysynth::{
+        DRIFT, ENV1_DECAY, ENV1_RELEASE, ENV1_SUSTAIN, ENV2_ATTACK, ENV2_DECAY, ENV2_RELEASE,
+        ENV2_SUSTAIN, FREQ, FREQ_MOD1_AMOUNT, FREQ_MOD1_SOURCE, FREQ_MOD2_AMOUNT, FREQ_MOD2_SOURCE,
+        HP, LFO_MOD_SOURCE, LFO_MODE, LFO_RATE, MOD1_AMOUNT, MOD1_DEST, MOD1_SOURCE, MOD2_SOURCE,
+        MOD3_SOURCE, NOISE, NOISE_GAIN, OSC2_GAIN, OSC2_OCT, OSC2_WAVE, PB_RANGE,
+        PITCH_MOD1_SOURCE, PITCH_MOD2_SOURCE, SHAPE_MOD_AMOUNT, SHAPE_MOD_SOURCE, VEL_VOL, VOICES,
+        VOLUME,
+    };
+    let gain = bl_model::param::db_to_gain(-6.0);
+    vec![
+        (OSC2_WAVE, 3.0),
+        (OSC2_OCT, 0.0),
+        (OSC2_GAIN, gain),
+        (NOISE, 0.0),
+        (NOISE_GAIN, gain),
+        (FREQ, 1_000.0),
+        (HP, 20.0),
+        (ENV1_DECAY, 1_000.0),
+        (ENV1_SUSTAIN, 100.0),
+        (ENV1_RELEASE, 15.0),
+        (ENV2_ATTACK, 0.5),
+        (ENV2_DECAY, 1_000.0),
+        (ENV2_SUSTAIN, 100.0),
+        (ENV2_RELEASE, 15.0),
+        (VOLUME, 1.0),
+        (VOICES, 16.0),
+        (VEL_VOL, 0.0),
+        (DRIFT, 0.0),
+        (PB_RANGE, 48.0),
+        (LFO_MODE, 3.0),
+        (LFO_RATE, 1.0),
+        (LFO_MOD_SOURCE, 0.0),
+        (MOD1_SOURCE, 0.0),
+        (MOD1_DEST, 0.0),
+        (MOD1_AMOUNT, 0.0),
+        (MOD2_SOURCE, 0.0),
+        (MOD3_SOURCE, 0.0),
+        (SHAPE_MOD_SOURCE, 0.0),
+        (SHAPE_MOD_AMOUNT, 0.0),
+        (PITCH_MOD1_SOURCE, 0.0),
+        (PITCH_MOD2_SOURCE, 0.0),
+        (FREQ_MOD1_SOURCE, 0.0),
+        (FREQ_MOD1_AMOUNT, 0.0),
+        (FREQ_MOD2_SOURCE, 0.0),
+        (FREQ_MOD2_AMOUNT, 0.0),
+    ]
+}
+
+/// What Operator opened with before its panel was laid out as Live's (3
+/// November 2026): the tests that measure one thing start from it, so Live's
+/// new starting values (the filter on at 12 kHz, the LFO off, an attack of 0 ms
+/// and a release of 400 ms, Level < Vel at 50 % and the rest) don't move what
+/// they measure.
+pub fn operator_before_live() -> Vec<(ParamId, f64)> {
+    use crate::operator::{
+        ENV_ATTACK, ENV_DECAY, ENV_RELEASE, ENV_SUSTAIN, FILTER_ENV, FILTER_FREQ, FILTER_ON,
+        FILTER_RES, GLIDE_TIME, LFO_AMOUNT, LFO_ENV, LFO_ON, LFO_RATE, OSC_LEVEL_VEL, PITCH_ENV,
+        SHAPED_DECAY, SHAPED_END, SHAPED_INITIAL, SHAPED_PEAK, SHAPED_RELEASE, SHAPED_SUSTAIN,
+        VOLUME, osc, shaped,
+    };
+    let mut params = vec![
+        (FILTER_ON, 0.0),
+        (FILTER_FREQ, 20_000.0),
+        (FILTER_RES, 0.0),
+        (LFO_ON, 1.0),
+        (LFO_RATE, 50.0),
+        (LFO_AMOUNT, 0.0),
+        (GLIDE_TIME, 100.0),
+        (VOLUME, bl_model::param::db_to_gain(-6.0)),
+    ];
+    for op in 0..4 {
+        params.extend([
+            (osc(op, ENV_ATTACK), 1.0),
+            (osc(op, ENV_DECAY), 1_000.0),
+            (osc(op, ENV_SUSTAIN), 1.0),
+            (osc(op, ENV_RELEASE), 50.0),
+            (osc(op, OSC_LEVEL_VEL), 0.0),
+        ]);
+    }
+    for (base, level) in [(FILTER_ENV, 0.0), (PITCH_ENV, 0.0), (LFO_ENV, 100.0)] {
+        params.extend([
+            (shaped(base, SHAPED_INITIAL), level),
+            (shaped(base, SHAPED_PEAK), level),
+            (shaped(base, SHAPED_SUSTAIN), level),
+            (shaped(base, SHAPED_END), level),
+            (shaped(base, SHAPED_DECAY), 1_000.0),
+            (shaped(base, SHAPED_RELEASE), 50.0),
+        ]);
+    }
+    params
+}

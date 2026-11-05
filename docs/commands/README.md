@@ -339,7 +339,7 @@ An allowed agent as the agent server's commands report it: without its token.
 
 ### `Alternate`
 
-Two parameters that share one control, which a switch turns between: while `switch` is on the control is `on`'s, and otherwise `off`'s. The layout places `off`'s control only (Limiter's Maximize turns Ceiling into Threshold).
+Two parameters that share one control, which a switch turns between: while `switch` is on the control is `on`'s, and otherwise `off`'s. The layout places `off`'s control only (Limiter's Maximize turns Ceiling into Threshold). A control can have several alternates, one for each choice of a choice parameter (Drift's LFO Rate is its Ratio, Time or Sync as the time mode says).
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -352,7 +352,7 @@ Two parameters that share one control, which a switch turns between: while `swit
 
 ```json
 {
-  "description": "Two parameters that share one control, which a switch turns between: while `switch` is on the control is `on`'s, and otherwise `off`'s. The layout places `off`'s control only (Limiter's Maximize turns Ceiling into Threshold).",
+  "description": "Two parameters that share one control, which a switch turns between: while `switch` is on the control is `on`'s, and otherwise `off`'s. The layout places `off`'s control only (Limiter's Maximize turns Ceiling into Threshold). A control can have several alternates, one for each choice of a choice parameter (Drift's LFO Rate is its Ratio, Time or Sync as the time mode says).",
   "properties": {
     "at": {
       "description": "For a switch that is a choice: the choice, by its number, that puts `on` in place (the Drum Sampler's Res is its Peak filter's gain while the type is Peak). Left out, `on` takes over while the switch is on: a toggle, or a choice past its first (Shifter's Freq and Ring modes).",
@@ -3320,6 +3320,7 @@ A line of text in a band that names a control or a pair of them: centred in `wid
 | `x` | number | yes | Its left edge, from the band's. |
 | `y` | number | yes | Its top edge, from the band's. |
 | `width` | number | yes | The width it is centred in. |
+| `left` | boolean | no | Whether the text starts at `x` instead of being centred (a table's row names). |
 
 <details><summary>JSON Schema</summary>
 
@@ -3327,6 +3328,10 @@ A line of text in a band that names a control or a pair of them: centred in `wid
 {
   "description": "A line of text in a band that names a control or a pair of them: centred in `width` points from `x`, in a row of [`LABEL_HEIGHT`] at `y`.",
   "properties": {
+    "left": {
+      "description": "Whether the text starts at `x` instead of being centred (a table's row names).",
+      "type": "boolean"
+    },
     "text": {
       "description": "The text.",
       "type": "string"
@@ -3405,6 +3410,54 @@ One octave band.
     "low_hz",
     "high_hz",
     "level_db"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `BandRule`
+
+A thin line in a band that divides its parts: the rules between the rows of Electric's table.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `x` | number | yes | Its left edge, from the band's. |
+| `y` | number | yes | Its top edge, from the band's. |
+| `length` | number | yes | How long it is. |
+| `vertical` | boolean | no | Whether it runs down instead of across. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A thin line in a band that divides its parts: the rules between the rows of Electric's table.",
+  "properties": {
+    "length": {
+      "description": "How long it is.",
+      "format": "float",
+      "type": "number"
+    },
+    "vertical": {
+      "description": "Whether it runs down instead of across.",
+      "type": "boolean"
+    },
+    "x": {
+      "description": "Its left edge, from the band's.",
+      "format": "float",
+      "type": "number"
+    },
+    "y": {
+      "description": "Its top edge, from the band's.",
+      "format": "float",
+      "type": "number"
+    }
+  },
+  "required": [
+    "x",
+    "y",
+    "length"
   ],
   "type": "object"
 }
@@ -8460,10 +8513,12 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
 | `hide` | [`GreyWhen`](#greywhen) or null | no | The condition that puts the control away, so another control of a different kind can take its place (Delay's time grid and its millisecond box). |
 | `only` | [`GreyWhen`](#greywhen) or null | no | The condition that puts the control away unless it holds: the control shows only while the parameter's value, rounded, is the value (one of three modes' boxes in the same place). |
 | `repeat` | boolean | no | Whether the control repeats one of the same parameter placed on another page, which is the one the check counts (the device-wide Mod switch on each of Expression Control's tabs). |
+| `shown` | [`ShownWhen`](#shownwhen) or null | no | The condition under which the control shows: only while parameter `param`'s value, rounded, is `value`. A control that is not shown takes no place and draws nothing, so another can be drawn where it would be (Drift's Envelope 2 shows its Rate, Tilt and Hold in the places of its Attack, Decay and Sustain while it cycles). |
 | `size` | [`Size`](#size) or null | no | Its size where the device sets it, in place of the widget's: the width of a box, a row of buttons or a unit pair's control. |
 | `steps` | array or null | no | For a grid, row or stack of buttons over a whole-number parameter, the values its buttons set, in order (Delay's 1 2 3 4 5 6 8 16 of the sixteen steps its time takes): the button for the value the parameter has is lit, and none is while it has another. Over a choice parameter, the indexes of the choices that have a button, in order. |
 | `target` | [`ParamId`](#paramid) or null | no | The parameter a [`Widget::Stepper`]'s buttons move. |
 | `titled` | boolean | no | Set for a row, stack or grid of buttons with its parameter's name above it, left-aligned (Chorus-Ensemble's Taps). |
+| `trim` | integer from 0 to 255 | no | How many words of the parameter's name the control leaves out of the name it shows: a table's `Stiffness Vel` shows `Vel` under its row's name. |
 | `unit` | [`UnitPair`](#unitpair) or null | no | The unit pair beside a knob, which makes the knob show one of two parameters. |
 | `unnamed` | boolean | no | Set for a box drawn without its name above it: its place says what it is (Delay's offset under its grid), and the control is its box alone. |
 
@@ -8532,6 +8587,17 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
       "description": "Whether the control repeats one of the same parameter placed on another page, which is the one the check counts (the device-wide Mod switch on each of Expression Control's tabs).",
       "type": "boolean"
     },
+    "shown": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ShownWhen"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The condition under which the control shows: only while parameter `param`'s value, rounded, is `value`. A control that is not shown takes no place and draws nothing, so another can be drawn where it would be (Drift's Envelope 2 shows its Rate, Tilt and Hold in the places of its Attack, Decay and Sustain while it cycles)."
+    },
     "size": {
       "anyOf": [
         {
@@ -8569,6 +8635,13 @@ One control in a band: a parameter, drawn by a widget, at a place in the band.
     "titled": {
       "description": "Set for a row, stack or grid of buttons with its parameter's name above it, left-aligned (Chorus-Ensemble's Taps).",
       "type": "boolean"
+    },
+    "trim": {
+      "description": "How many words of the parameter's name the control leaves out of the name it shows: a table's `Stiffness Vel` shows `Vel` under its row's name.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
     },
     "unit": {
       "anyOf": [
@@ -8623,6 +8696,7 @@ A band of controls, of a fixed size.
 | `controls` | array of [`Control`](#control) | yes | Its controls. |
 | `captions` | array of [`Caption`](#caption) | no | Lines of text among the controls: an L beside a box, an ms after it. |
 | `labels` | array of [`BandLabel`](#bandlabel) | no | Its text labels, drawn beside the controls they name. |
+| `rules` | array of [`BandRule`](#bandrule) | no | Its rules, drawn between its parts. |
 | `slots` | [`SlotGroup`](#slotgroup) or null | no | Set for a band that shows the selected sample slot's controls: its controls name the first slot's parameters, and the band is placed for the selected slot ([`DeviceLayout::place_for`]). |
 
 <details><summary>JSON Schema</summary>
@@ -8654,6 +8728,13 @@ A band of controls, of a fixed size.
       "description": "Its text labels, drawn beside the controls they name.",
       "items": {
         "$ref": "#/$defs/BandLabel"
+      },
+      "type": "array"
+    },
+    "rules": {
+      "description": "Its rules, drawn between its parts.",
+      "items": {
+        "$ref": "#/$defs/BandRule"
       },
       "type": "array"
     },
@@ -16179,6 +16260,7 @@ One of:
 - `"high_pass24"`: A high-pass filter's response at 24 dB per octave.
 - `"peak"`: A peak filter's response.
 - `"headphones"`: Headphones: a device's audition button (Boom Audition, Utility's Bass Mono, EQ Eight's Audition).
+- `"loop"`: A loop arrow: a cycling mode (Drift's Envelope 2).
 - `"plus_minus"`: A plus over a minus: a modulation's polarity.
 - `"list"`: Three lines: Show Multimap.
 
@@ -16326,6 +16408,11 @@ One of:
     {
       "const": "headphones",
       "description": "Headphones: a device's audition button (Boom Audition, Utility's Bass Mono, EQ Eight's Audition).",
+      "type": "string"
+    },
+    {
+      "const": "loop",
+      "description": "A loop arrow: a cycling mode (Drift's Envelope 2).",
       "type": "string"
     },
     {
@@ -26831,7 +26918,9 @@ One page of a pages node.
 |---|---|---|---|
 | `name` | string | yes | Its name, which its tab or section button shows and a command names. |
 | `node` | [`LayoutNode`](#layoutnode) | yes | What fills the node's area while it shows: the display area of a shell. |
+| `button` | array or null | no | In the placed style, the page's button: its left, top, width and height in points from the node's top-left corner. |
 | `section` | [`LayoutNode`](#layoutnode) or null | no | In the shell style, the page's section of the strip: its main controls, which show whichever page does. |
+| `select` | array of [`ParamId`](#paramid) | no | In the regions style, the parameters whose controls, with the heading over them, make the region that shows the page when it is clicked. |
 
 <details><summary>JSON Schema</summary>
 
@@ -26839,6 +26928,19 @@ One page of a pages node.
 {
   "description": "One page of a pages node.",
   "properties": {
+    "button": {
+      "description": "In the placed style, the page's button: its left, top, width and height in points from the node's top-left corner.",
+      "items": {
+        "format": "float",
+        "type": "number"
+      },
+      "maxItems": 4,
+      "minItems": 4,
+      "type": [
+        "array",
+        "null"
+      ]
+    },
     "name": {
       "description": "Its name, which its tab or section button shows and a command names.",
       "type": "string"
@@ -26857,6 +26959,13 @@ One page of a pages node.
         }
       ],
       "description": "In the shell style, the page's section of the strip: its main controls, which show whichever page does."
+    },
+    "select": {
+      "description": "In the regions style, the parameters whose controls, with the heading over them, make the region that shows the page when it is clicked.",
+      "items": {
+        "$ref": "#/$defs/ParamId"
+      },
+      "type": "array"
     }
   },
   "required": [
@@ -26910,6 +27019,8 @@ One of:
 - `"title_bar"`: Tabs in the device's title bar, after its name, that the device's title bar draws: the node's area is the shown page's alone.
 - `"shell"`: A strip of sections, each its page's main controls under a section button, beside a display area the shown page fills.
 - `"strip"`: A strip down the node's left edge ([`STRIP_WIDTH`] wide) with a ▼ toggle at its top and the node's name written up it; the node's area right of it holds the second page while it is shown and the first, which is empty, while it isn't ([`PagesNode::side_strip`]).
+- `"regions"`: No buttons: each page shows when its region of the body is clicked, the region being the controls its [`Page::select`] names with the heading over them (Electric's sections, Analog's, Operator's). The node's area is the shown page's alone.
+- `"placed"`: A button for each page at a place of its own ([`Page::button`]) in the node's area, as the 1 and 2 over Drift's envelope display are; the node's area is the shown page's.
 - `"rail"`: A column of tabs down the node's left edge ([`RAIL_WIDTH`] wide, the node's height shared between them), one per page, beside the shown page's area (Expression Control's five source tabs).
 - `"switch"`: No buttons of its own: the node's area is the shown page's alone, and a control inside a page switches to the other with `device.set_page` (a modulator's Show Multimap).
 - `"column"`: A column of tabs down the node's left edge ([`COLUMN_TAB_WIDTH`] wide), with the shown page's section under them, beside the area the shown page fills (MPE Control's Press, Slide and NotePB).
@@ -26939,6 +27050,16 @@ One of:
     {
       "const": "strip",
       "description": "A strip down the node's left edge ([`STRIP_WIDTH`] wide) with a ▼ toggle at its top and the node's name written up it; the node's area right of it holds the second page while it is shown and the first, which is empty, while it isn't ([`PagesNode::side_strip`]).",
+      "type": "string"
+    },
+    {
+      "const": "regions",
+      "description": "No buttons: each page shows when its region of the body is clicked, the region being the controls its [`Page::select`] names with the heading over them (Electric's sections, Analog's, Operator's). The node's area is the shown page's alone.",
+      "type": "string"
+    },
+    {
+      "const": "placed",
+      "description": "A button for each page at a place of its own ([`Page::button`]) in the node's area, as the 1 and 2 over Drift's envelope display are; the node's area is the shown page's.",
       "type": "string"
     },
     {
@@ -27027,6 +27148,7 @@ Pages of a device's body, one shown at a time (device framework R41).
 | `pages` | array of [`Page`](#page) | yes | The pages, in order; the first shows in a new device. |
 | `follows` | string or null | no | For a [`PageStyle::Follower`], the node whose page it shows. |
 | `shown` | integer, at least 0 | no | The page shown, as an index; [`DeviceLayout::with_pages`] sets it. |
+| `title_at` | number or null | no | In the title-bar style, where the run of tabs starts, in points from the frame's left edge: at the title's right end where left out. |
 
 <details><summary>JSON Schema</summary>
 
@@ -27061,6 +27183,14 @@ Pages of a device's body, one shown at a time (device framework R41).
     "style": {
       "$ref": "#/$defs/PageStyle",
       "description": "How the pages show."
+    },
+    "title_at": {
+      "description": "In the title-bar style, where the run of tabs starts, in points from the frame's left edge: at the title's right end where left out.",
+      "format": "float",
+      "type": [
+        "number",
+        "null"
+      ]
     }
   },
   "required": [
@@ -38458,6 +38588,48 @@ One shortcut in the keymap in use, as `keymap.state` reports it.
 
 </details>
 
+### `ShownWhen`
+
+A condition that shows a control: while parameter `param`'s value, rounded, is from `from` to `to`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `param` | [`ParamId`](#paramid) | yes | The parameter that decides. |
+| `from` | integer | yes | The lowest value, rounded, at which the control shows. |
+| `to` | integer | yes | The highest. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A condition that shows a control: while parameter `param`'s value, rounded, is from `from` to `to`.",
+  "properties": {
+    "from": {
+      "description": "The lowest value, rounded, at which the control shows.",
+      "format": "int32",
+      "type": "integer"
+    },
+    "param": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The parameter that decides."
+    },
+    "to": {
+      "description": "The highest.",
+      "format": "int32",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "param",
+    "from",
+    "to"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Sidechain`
 
 A device's sidechain input: `enabled` (the External switch), `input` (Source: `none`, or `track` with a track and a `tap`), `gain` (SC Gain, linear, 1 is 0 dB), `mix` (0 the device's own input to 1 the sidechain alone), and `listen` (Sidechain Listen: hear what the detector hears).
@@ -42490,6 +42662,7 @@ A part a device adds to its title bar, besides the activator, the name, its titl
 One of:
 
 - an object with `heading` (string): A heading across the title bar over its tabs and parts, as Drift's and Meld's.
+- an object with `section` (pair of string and number): A heading centred `centre` points from the frame's left edge, over the section of the body that lies under it (Drift's Osc Mix, Filter and Envelopes).
 - `"mpe"`: The MPE label, for a device that takes MPE.
 - an object with `maker` ([`Maker`](#maker)): A maker's mark.
 - an object with `letter` (pair of string of 1 characters and [`ParamId`](#paramid)): A lettered toggle for the parameter (the A A S buttons).
@@ -42512,6 +42685,30 @@ One of:
       },
       "required": [
         "heading"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A heading centred `centre` points from the frame's left edge, over the section of the body that lies under it (Drift's Osc Mix, Filter and Envelopes).",
+      "properties": {
+        "section": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "string"
+            },
+            {
+              "format": "float",
+              "type": "number"
+            }
+          ],
+          "type": "array"
+        }
+      },
+      "required": [
+        "section"
       ],
       "type": "object"
     },
@@ -46026,6 +46223,7 @@ One of:
 - an object with `map` (integer from 0 to 255): The Map button of that slot of a modulator: no parameter's control, so its [`Control::param`] is not placed or checked.
 - `"bare_chooser"`: A [`Chooser`](Self::Chooser) with no name row: the device's own label is beside it, or it needs none (the Drum Sampler's effect type).
 - `"cycle"`: A lit text button holding the chosen choice's name, a press taking the next choice and the last going round to the first (the Drum Sampler's modulation source, Resonators' Mode).
+- `"mini_knob"`: Operator's knob: the name over its left edge, a ring 19 points across and the value at its lower right.
 - `"mode"`: A text button holding the chosen name of a two-choice parameter, lit while its second choice is chosen; a press switches to the other (Note Echo's Sync, which reads Time while it is off).
 
 <details><summary>JSON Schema</summary>
@@ -46375,6 +46573,11 @@ One of:
     {
       "const": "cycle",
       "description": "A lit text button holding the chosen choice's name, a press taking the next choice and the last going round to the first (the Drum Sampler's modulation source, Resonators' Mode).",
+      "type": "string"
+    },
+    {
+      "const": "mini_knob",
+      "description": "Operator's knob: the name over its left edge, a ring 19 points across and the value at its lower right.",
       "type": "string"
     },
     {

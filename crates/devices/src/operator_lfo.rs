@@ -21,8 +21,9 @@ const SAW_DOWN: usize = 4;
 const SAMPLE_HOLD: usize = 5;
 const NOISE: usize = 6;
 
-/// The Range chooser's names: Low, Hi and Sync (R23).
-pub const RANGES: [&str; 3] = ["Low", "Hi", "Sync"];
+/// The Range chooser's names: L for Low, H for Hi and S for Sync (R23), as
+/// Live's chooser, which is 17 points wide, reads L.
+pub const RANGES: [&str; 3] = ["L", "H", "S"];
 pub const SYNC: usize = 2;
 
 /// Spec: operator R23. Range Low runs from 50 seconds a cycle to 30 Hz, Hi

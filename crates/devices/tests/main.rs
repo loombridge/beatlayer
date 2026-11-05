@@ -115,6 +115,7 @@ mod spectrogram;
 mod spectrum_analyser;
 mod stack;
 mod strike_mod;
+mod synth_panels;
 mod tension;
 mod three_band_eq;
 mod touch;

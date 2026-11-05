@@ -19,12 +19,13 @@ use realfft::RealFftPlanner;
 
 use bl_devices::polysynth::{
     CYC_HOLD, CYC_MODE, CYC_RATE, CYC_RATIO, CYC_SYNC, CYC_TILT, CYC_TIME, DRIFT, ENV1_DECAY,
-    ENV1_SUSTAIN, ENV2_ATTACK, ENV2_MODE, FILTER, FILTER_TYPE, FREQ, GLIDE, HI_QUALITY, HP, KEY,
-    LEGATO, LFO_AMOUNT, LFO_DIVISIONS, LFO_MODE, LFO_MODES, LFO_RATIO, LFO_RETRIGGER, LFO_SHAPE,
+    ENV1_SUSTAIN, ENV2_ATTACK, ENV2_MODE, FILTER_TYPE, FREQ, GLIDE, HI_QUALITY, HP, KEY, LEGATO,
+    LFO_AMOUNT, LFO_DIVISIONS, LFO_MODE, LFO_MODES, LFO_RATIO, LFO_RETRIGGER, LFO_SHAPE,
     LFO_SHAPES, LFO_SYNC, MOD_DESTINATIONS, MOD_SOURCES, MOD1_AMOUNT, MOD1_DEST, MOD1_SOURCE,
-    MOD2_AMOUNT, MOD2_DEST, MOD2_SOURCE, NOISE, NOISE_GAIN, NOTE_PB, OSC1_GAIN, OSC1_SHAPE,
-    OSC1_WAVE, OSC2, OSC2_DETUNE, PB_RANGE, PITCH_MOD1_AMOUNT, PITCH_MOD1_SOURCE, POLYSYNTH, RES,
-    RETRIGGER, SPREAD, STRENGTH, THICKNESS, VEL_VOL, VOICE_MODE, VOICES, VOLUME,
+    MOD2_AMOUNT, MOD2_DEST, MOD2_SOURCE, NOISE, NOISE_FILTER, NOISE_GAIN, NOTE_PB, OSC1_FILTER,
+    OSC1_GAIN, OSC1_SHAPE, OSC1_WAVE, OSC2, OSC2_DETUNE, OSC2_FILTER, PB_RANGE, PITCH_MOD1_AMOUNT,
+    PITCH_MOD1_SOURCE, POLYSYNTH, RES, RETRIGGER, SPREAD, STRENGTH, THICKNESS, VEL_VOL, VOICE_MODE,
+    VOICES, VOLUME,
 };
 
 /// The sample rate the tests run at, in hertz.
@@ -256,17 +257,20 @@ fn end_time_ms(signal: &[f32], fraction: f32) -> Option<f64> {
 /// A device with the switches and values the tests share: Oscillator 1
 /// alone, both filters wide open.
 fn device_with(params: &[(ParamId, f64)]) -> bl_model::Device {
-    let mut all = vec![
+    let mut all = crate::instrument_voices::drift_before();
+    all.extend([
         (OSC2, 0.0),
         (NOISE, 0.0),
-        (FILTER, 0.0),
+        (OSC1_FILTER, 0.0),
+        (OSC2_FILTER, 0.0),
+        (NOISE_FILTER, 0.0),
         (FREQ, 20_000.0),
         (HP, 20.0),
         (RES, 0.0),
         (KEY, 0.0),
         (RETRIGGER, 1.0),
         (VOLUME, 1.0),
-    ];
+    ]);
     all.extend_from_slice(params);
     device(&cascade(), &all)
 }
@@ -284,6 +288,38 @@ fn a_note_plays_at_the_notes_pitch() {
     );
 }
 
+// Spec: polysynth R36
+#[test]
+fn an_arrow_off_sends_its_source_round_the_filter() {
+    let registry = registry();
+    // How much of the sound's energy is in its sample-to-sample change: a saw
+    // low-passed at 200 Hz has little, one that goes round the filter all of
+    // its harmonics' worth.
+    let brightness = |through: f64| {
+        let params = [
+            (OSC1_WAVE, 4.0),
+            (OSC1_FILTER, through),
+            (FREQ, 200.0),
+            (HP, 10.0),
+        ];
+        let mut node = node(&registry, &device_with(&params), 4_096);
+        let signal = play_blocks(node.as_mut(), 24_000, 4_096, &[on(0, 57, 1.0)]);
+        let tail = &signal[8_192..];
+        let change: f64 = tail
+            .windows(2)
+            .map(|w| f64::from(w[1] - w[0]).powi(2))
+            .sum();
+        let energy: f64 = tail.iter().map(|s| f64::from(*s).powi(2)).sum();
+        change / energy
+    };
+    assert!(
+        brightness(0.0) > 20.0 * brightness(1.0),
+        "{} round the filter against {} through it",
+        brightness(0.0),
+        brightness(1.0)
+    );
+}
+
 // Spec: polysynth R1 (the oscillators' aliasing)
 #[test]
 fn a_saw_at_the_top_key_aliases_below_minus_80_db() {
@@ -292,7 +328,9 @@ fn a_saw_at_the_top_key_aliases_below_minus_80_db() {
         (OSC1_WAVE, 4.0),
         (OSC1_GAIN, db_to_gain(-6.0)),
         (OSC1_SHAPE, 0.0),
-        (FILTER, 0.0),
+        (OSC1_FILTER, 0.0),
+        (OSC2_FILTER, 0.0),
+        (NOISE_FILTER, 0.0),
     ];
     let mut node = node(&registry, &device_with(&params), 1 << 15);
     // The top key, where the band-limiting leaves the fundamental alone,
@@ -333,7 +371,9 @@ fn the_low_pass_filters_match_their_prototypes_within_point_two_db() {
             &device_with(&[
                 (OSC1_WAVE, 0.0),
                 (OSC1_GAIN, db_to_gain(-20.0)),
-                (FILTER, 1.0),
+                (OSC1_FILTER, 1.0),
+                (OSC2_FILTER, 1.0),
+                (NOISE_FILTER, 1.0),
                 (FILTER_TYPE, kind as f64),
                 (FREQ, cutoff),
                 (HP, 20.0),
@@ -345,7 +385,9 @@ fn the_low_pass_filters_match_their_prototypes_within_point_two_db() {
             &device_with(&[
                 (OSC1_WAVE, 0.0),
                 (OSC1_GAIN, db_to_gain(-20.0)),
-                (FILTER, 0.0),
+                (OSC1_FILTER, 0.0),
+                (OSC2_FILTER, 0.0),
+                (NOISE_FILTER, 0.0),
             ]),
             24_000,
         );
@@ -493,7 +535,7 @@ fn the_shape_knob_changes_the_wave() {
     );
     let mut shaped = node(
         &registry,
-        &device_with(&[(OSC1_WAVE, 4.0), (OSC1_SHAPE, 100.0)]),
+        &device_with(&[(OSC1_WAVE, 4.0), (OSC1_SHAPE, 1.0)]),
         4_096,
     );
     let a = play(plain.as_mut(), 4_096, &[on(0, 60, 1.0)]);
@@ -547,7 +589,9 @@ fn louder_sources_drive_the_filters_saturators() {
             &device_with(&[
                 (OSC1_WAVE, 0.0),
                 (OSC1_GAIN, db_to_gain(db)),
-                (FILTER, 1.0),
+                (OSC1_FILTER, 1.0),
+                (OSC2_FILTER, 1.0),
+                (NOISE_FILTER, 1.0),
                 (FREQ, 20_000.0),
             ]),
             24_000,
@@ -589,7 +633,12 @@ fn sixteen_voices_render_faster_than_the_device_budget() {
     let registry = registry();
     let mut node = node(
         &registry,
-        &device_with(&[(OSC1_WAVE, 4.0), (FILTER, 1.0)]),
+        &device_with(&[
+            (OSC1_WAVE, 4.0),
+            (OSC1_FILTER, 1.0),
+            (OSC2_FILTER, 1.0),
+            (NOISE_FILTER, 1.0),
+        ]),
         128,
     );
     let seconds = 10;
@@ -754,7 +803,9 @@ fn an_lfo_to_cutoff_route_moves_the_cutoff_at_the_synced_rate() {
         let params = [
             (OSC1_WAVE, 4.0),
             (OSC1_GAIN, db_to_gain(-6.0)),
-            (FILTER, 1.0),
+            (OSC1_FILTER, 1.0),
+            (OSC2_FILTER, 1.0),
+            (NOISE_FILTER, 1.0),
             (FREQ, 400.0),
             (HP, 20.0),
             (RES, 0.0),
@@ -946,7 +997,13 @@ fn mpe_pressure_and_slide_are_modulation_sources() {
         "Slide",
         "LP Frequency",
         50.0,
-        &[(FILTER, 1.0), (FREQ, 300.0), (OSC1_WAVE, 4.0)],
+        &[
+            (OSC1_FILTER, 1.0),
+            (OSC2_FILTER, 1.0),
+            (NOISE_FILTER, 1.0),
+            (FREQ, 300.0),
+            (OSC1_WAVE, 4.0),
+        ],
     );
     let notes = [
         on_id(0, 40, 1.0, 1),
@@ -974,16 +1031,40 @@ fn every_modulation_destination_moves_the_sound() {
             "Noise Gain",
             vec![(NOISE, 1.0), (NOISE_GAIN, db_to_gain(-12.0))],
         ),
-        ("LP Frequency", vec![(FILTER, 1.0), (FREQ, 500.0)]),
+        (
+            "LP Frequency",
+            vec![
+                (OSC1_FILTER, 1.0),
+                (OSC2_FILTER, 1.0),
+                (NOISE_FILTER, 1.0),
+                (FREQ, 500.0),
+            ],
+        ),
         (
             "LP Resonance",
-            vec![(FILTER, 1.0), (FREQ, 500.0), (RES, 40.0)],
+            vec![
+                (OSC1_FILTER, 1.0),
+                (OSC2_FILTER, 1.0),
+                (NOISE_FILTER, 1.0),
+                (FREQ, 500.0),
+                (RES, 40.0),
+            ],
         ),
-        ("HP Frequency", vec![(FILTER, 1.0), (HP, 400.0)]),
+        (
+            "HP Frequency",
+            vec![
+                (OSC1_FILTER, 1.0),
+                (OSC2_FILTER, 1.0),
+                (NOISE_FILTER, 1.0),
+                (HP, 400.0),
+            ],
+        ),
         (
             "LFO Rate",
             vec![
-                (FILTER, 1.0),
+                (OSC1_FILTER, 1.0),
+                (OSC2_FILTER, 1.0),
+                (NOISE_FILTER, 1.0),
                 (FREQ, 500.0),
                 (MOD2_SOURCE, lfo),
                 (MOD2_DEST, lp_freq),
@@ -1025,7 +1106,7 @@ fn the_lfo_ratio_mode_modulates_the_note_at_its_own_rate() {
         let params = [
             (OSC1_WAVE, 0.0),
             (OSC1_GAIN, db_to_gain(-6.0)),
-            (LFO_MODE, choice(&LFO_MODES, "Ratio")),
+            (LFO_MODE, choice(&LFO_MODES, "1:1")),
             (LFO_RATIO, 1.0),
             (LFO_AMOUNT, 100.0),
             (PITCH_MOD1_SOURCE, choice(&MOD_SOURCES, "LFO")),
@@ -1482,7 +1563,9 @@ fn drift_moves_each_voices_cutoff_too() {
     let render = |drift: f64| {
         let params = [
             (OSC1_WAVE, 4.0),
-            (FILTER, 1.0),
+            (OSC1_FILTER, 1.0),
+            (OSC2_FILTER, 1.0),
+            (NOISE_FILTER, 1.0),
             (FREQ, 700.0),
             (DRIFT, drift),
         ];
@@ -1602,7 +1685,7 @@ fn cycling(mode: &str, rate: (ParamId, f64), extra: &[(ParamId, f64)]) -> Vec<(P
         (ENV2_MODE, 1.0),
         (CYC_MODE, choice(&LFO_MODES, mode)),
         rate,
-        (MOD1_SOURCE, choice(&MOD_SOURCES, "Env 2 / Cyc")),
+        (MOD1_SOURCE, choice(&MOD_SOURCES, "Env 2")),
         (MOD1_DEST, choice(&MOD_DESTINATIONS, "Main Volume")),
         (MOD1_AMOUNT, 100.0),
     ];
@@ -1622,11 +1705,11 @@ fn envelope_2_cycles_at_its_rate_in_each_time_mode() {
     };
     // 120 BPM: a quarter note is half a second.
     for (name, rate, key, wanted) in [
-        ("Rate", (CYC_RATE, 4.0), 69, 4.0),
-        ("Time", (CYC_TIME, 250.0), 69, 4.0),
+        ("Hz", (CYC_RATE, 4.0), 69, 4.0),
+        ("ms", (CYC_TIME, 250.0), 69, 4.0),
         ("Sync", (CYC_SYNC, choice(&LFO_DIVISIONS, "1/4")), 69, 2.0),
         // The Ratio mode follows the note: 1/16 of A1's 55 Hz.
-        ("Ratio", (CYC_RATIO, 0.0625), 33, 3.4375),
+        ("1:1", (CYC_RATIO, 0.0625), 33, 3.4375),
     ] {
         let found = measure(&cycling(name, rate, &[]), key);
         println!("{name}: {found:.2} Hz (wanted {wanted})");
@@ -1637,13 +1720,13 @@ fn envelope_2_cycles_at_its_rate_in_each_time_mode() {
     }
     // Attack, Decay, Sustain and Release don't act on it while it cycles.
     let slow = [(ENV2_ATTACK, 5_000.0)];
-    let found = measure(&cycling("Rate", (CYC_RATE, 4.0), &slow), 69);
+    let found = measure(&cycling("Hz", (CYC_RATE, 4.0), &slow), 69);
     assert!(
         (found - 4.0).abs() < 0.2,
         "an ADSR setting moved the cycle: {found:.2}"
     );
     // As an ADSR (the default) it holds still on a held note.
-    let mut adsr = cycling("Rate", (CYC_RATE, 4.0), &[]);
+    let mut adsr = cycling("Hz", (CYC_RATE, 4.0), &[]);
     adsr.push((ENV2_MODE, 0.0));
     let mut node = node(&registry, &drift_device(1, &adsr), 4_096);
     let signal = play_lr(node.as_mut(), 240_000, 4_096, &[on(0, 69, 1.0)]).0;
@@ -1666,7 +1749,7 @@ fn tilt_moves_the_cycles_top_and_hold_keeps_it_there() {
         let extra = [(CYC_TILT, tilt), (CYC_HOLD, hold)];
         let mut node = node(
             &registry,
-            &drift_device(1, &cycling("Rate", (CYC_RATE, 2.0), &extra)),
+            &drift_device(1, &cycling("Hz", (CYC_RATE, 2.0), &extra)),
             4_096,
         );
         let signal = play_lr(node.as_mut(), 48_000, 4_096, &[on(0, 69, 1.0)]).0;
@@ -1703,7 +1786,7 @@ fn a_route_into_cyc_env_rate_moves_the_cycles_rate() {
         ];
         let mut node = node(
             &registry,
-            &drift_device(1, &cycling("Rate", (CYC_RATE, 2.0), &extra)),
+            &drift_device(1, &cycling("Hz", (CYC_RATE, 2.0), &extra)),
             4_096,
         );
         let signal = play_lr(node.as_mut(), 240_000, 4_096, &[on(0, 69, 1.0)]).0;
@@ -1718,7 +1801,7 @@ fn a_route_into_cyc_env_rate_moves_the_cycles_rate() {
     assert_eq!(MOD_DESTINATIONS[10], "Main Volume");
     assert_eq!(MOD_DESTINATIONS[11], "Cyc Env Rate");
     // While Envelope 2 is an ADSR the route moves nothing.
-    let mut adsr = cycling("Rate", (CYC_RATE, 2.0), &[]);
+    let mut adsr = cycling("Hz", (CYC_RATE, 2.0), &[]);
     adsr.extend([
         (ENV2_MODE, 0.0),
         (MOD2_SOURCE, choice(&MOD_SOURCES, "Velocity")),
@@ -1741,7 +1824,9 @@ fn a_route_into_cyc_env_rate_moves_the_cycles_rate() {
 fn everything(mode: f64) -> Vec<(ParamId, f64)> {
     vec![
         (OSC1_WAVE, 4.0),
-        (FILTER, 1.0),
+        (OSC1_FILTER, 1.0),
+        (OSC2_FILTER, 1.0),
+        (NOISE_FILTER, 1.0),
         (FREQ, 1_500.0),
         (VOICE_MODE, mode),
         (THICKNESS, 60.0),
@@ -1751,9 +1836,9 @@ fn everything(mode: f64) -> Vec<(ParamId, f64)> {
         (LEGATO, 1.0),
         (GLIDE, 100.0),
         (ENV2_MODE, 1.0),
-        (CYC_MODE, choice(&LFO_MODES, "Rate")),
+        (CYC_MODE, choice(&LFO_MODES, "Hz")),
         (CYC_RATE, 3.0),
-        (MOD1_SOURCE, choice(&MOD_SOURCES, "Env 2 / Cyc")),
+        (MOD1_SOURCE, choice(&MOD_SOURCES, "Env 2")),
         (MOD1_DEST, choice(&MOD_DESTINATIONS, "LP Frequency")),
         (MOD1_AMOUNT, 30.0),
     ]
@@ -1816,7 +1901,9 @@ fn each_voice_mode_renders_as_it_did_when_it_was_recorded() {
     for (mode, _, _) in GOLDEN {
         let params = [
             (OSC1_WAVE, 4.0),
-            (FILTER, 1.0),
+            (OSC1_FILTER, 1.0),
+            (OSC2_FILTER, 1.0),
+            (NOISE_FILTER, 1.0),
             (FREQ, 3_000.0),
             (VOICE_MODE, mode),
             (THICKNESS, 100.0),
@@ -1883,12 +1970,11 @@ const GOLDEN: [(f64, [f64; 8], [f64; 8]); 4] = [
 
 // Spec: polysynth R34 (a set saved before opens as it sounded)
 #[test]
-fn a_set_saved_before_opens_as_poly_without_drift_and_renders_as_it_did() {
+fn a_set_saved_before_opens_as_poly_at_lives_drift_and_renders_as_a_new_one_does() {
     let registry = registry();
     let description = cascade().description;
     for (id, name) in [
         (VOICE_MODE, "Poly"),
-        (DRIFT, "Drift 0 %"),
         (LEGATO, "Legato off"),
         (GLIDE, "Glide 0"),
         (ENV2_MODE, "an ADSR"),
@@ -1900,6 +1986,9 @@ fn a_set_saved_before_opens_as_poly_without_drift_and_renders_as_it_did() {
             "{name}"
         );
     }
+    // Drift opens at the 7.2 % Live shows, since its panel was laid out as
+    // Live's (2 November 2026).
+    assert_eq!(description.param(DRIFT).expect("described").default, 7.2);
     // Every parameter this package adds is missing from an older set's
     // device, which plays the defaults.
     let added = (62..=77).map(ParamId);
@@ -1910,13 +1999,20 @@ fn a_set_saved_before_opens_as_poly_without_drift_and_renders_as_it_did() {
     };
     let params = [
         (OSC1_WAVE, 4.0),
-        (FILTER, 1.0),
+        (OSC1_FILTER, 1.0),
+        (OSC2_FILTER, 1.0),
+        (NOISE_FILTER, 1.0),
         (FREQ, 1_500.0),
         (MOD1_AMOUNT, 40.0),
     ];
     // A device saved before holds none of the parameters this package adds,
     // and a new one holds every one at its default.
-    let older = drift_device(1, &params);
+    let mut older = drift_device(1, &params);
+    // The tests' common start sets some of them (Drift at 0 %): an older set
+    // holds none.
+    for id in (62..=77).map(ParamId) {
+        older.params.remove(&id);
+    }
     let mut current = older.clone();
     for id in added {
         assert!(!older.params.contains_key(&id), "{id:?} is new");
@@ -1932,8 +2028,9 @@ fn a_set_saved_before_opens_as_poly_without_drift_and_renders_as_it_did() {
     );
     // The saved choices of a route keep their destinations: the old list is
     // a prefix of the new one.
+    // (The first entry reads None, as Live's does, where it read Off.)
     let before = [
-        "Off",
+        "None",
         "Osc 1 Gain",
         "Osc 1 Shape",
         "Osc 2 Gain",

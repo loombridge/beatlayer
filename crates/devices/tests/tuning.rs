@@ -11,8 +11,8 @@ use std::sync::Arc;
 
 use bl_devices::multisampler::multisampler_type;
 use bl_devices::polysynth::{
-    FILTER, FREQ, HP, KEY, NOISE, NOTE_PB, OSC1_WAVE, OSC2, PB_RANGE, POLYSYNTH, RES, RETRIGGER,
-    VOLUME,
+    FREQ, HP, KEY, NOISE, NOISE_FILTER, NOTE_PB, OSC1_FILTER, OSC1_WAVE, OSC2, OSC2_FILTER,
+    PB_RANGE, POLYSYNTH, RES, RETRIGGER, VOLUME,
 };
 use bl_devices::sampler::{LOOP, sampler_type};
 use bl_engine::{
@@ -154,7 +154,9 @@ fn drift(block: usize) -> Rig {
         (OSC1_WAVE, 0.0),
         (OSC2, 0.0),
         (NOISE, 0.0),
-        (FILTER, 0.0),
+        (OSC1_FILTER, 0.0),
+        (OSC2_FILTER, 0.0),
+        (NOISE_FILTER, 0.0),
         (FREQ, 20_000.0),
         (HP, 20.0),
         (RES, 0.0),
@@ -164,6 +166,10 @@ fn drift(block: usize) -> Rig {
         (NOTE_PB, 1.0),
         (PB_RANGE, 12.0),
     ];
+    let params: Vec<_> = crate::instrument_voices::drift_before()
+        .into_iter()
+        .chain(params)
+        .collect();
     Rig::new(
         node(&registry(), &device(&device_type, &params), 4096),
         block,

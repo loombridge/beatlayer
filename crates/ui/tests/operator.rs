@@ -5,7 +5,7 @@
 //! Spec: operator R18.
 
 use crate::common;
-use bl_devices::operator::{OSC_FINE, OSC_WAVE, PITCH_DEST_B, operator_type, osc};
+use bl_devices::operator::{OSC_FEEDBACK, OSC_WAVE, PITCH_DEST_B, operator_type, osc, target_dest};
 use bl_model::{DeviceId, TrackId};
 use bl_shell::device_commands::{DeviceAdded, TITLE_BAR_HEIGHT};
 use bl_ui::device_panel::{body_rect, place_with_pages};
@@ -16,7 +16,7 @@ use serde_json::json;
 
 const NODE: &str = "Sections";
 const SECTIONS: [&str; 8] = [
-    "Global", "Osc A", "Osc B", "Osc C", "Osc D", "LFO", "Filter", "Pitch",
+    "Osc A", "Osc B", "Osc C", "Osc D", "LFO", "Filter", "Pitch", "Global",
 ];
 
 fn harness() -> (Harness, DeviceId, TrackId) {
@@ -96,29 +96,33 @@ fn name_of(param: bl_model::ParamId) -> String {
 
 // Spec: operator R18
 #[test]
-fn a_section_button_switches_the_display_to_that_sections_controls() {
+fn a_click_on_a_row_switches_the_display_to_that_rows_fields() {
     let (mut h, device, _) = harness();
     let steps = h.shell.editor().undo_history().len();
-    assert_eq!(shown(&h, device), "Global");
+    assert_eq!(shown(&h, device), "Osc A");
+    // A click in the margin of a row's controls, where no control takes it.
     let click = |h: &mut Harness, index: usize| {
         let pages = placed_all(h, device).2;
         let r = pages.iter().find(|p| p.name == NODE).unwrap().buttons[index];
-        h.click(egui::Rect::from_min_size(pos2(r.x, r.y), egui::vec2(r.width, r.height)).center());
+        h.click(pos2(r.x + 1.0, r.y + 1.0));
         h.settle();
     };
     let drawn =
         |h: &mut Harness, label: &str| Harness::nodes(&h.settle()).iter().any(|n| n.label == label);
-    // Global: its own controls, not an oscillator's.
+    // Osc A's row is shown: its fields, not the global table's.
+    assert!(drawn(&mut h, &name_of(osc(0, OSC_FEEDBACK))));
+    assert!(!drawn(&mut h, &name_of(target_dest(0, false))));
+    // The rows' own controls show whichever row does.
     assert!(drawn(&mut h, "Tone"));
-    assert!(!drawn(&mut h, &name_of(osc(2, OSC_FINE))));
-    // The sections' own controls show whichever section does.
-    assert!(drawn(&mut h, &name_of(osc(2, OSC_WAVE))));
-    click(&mut h, 3);
-    assert_eq!(shown(&h, device), "Osc C");
-    assert!(drawn(&mut h, &name_of(osc(2, OSC_FINE))));
-    assert!(!drawn(&mut h, &name_of(osc(0, OSC_FINE))));
-    assert!(!drawn(&mut h, "Tone"));
     click(&mut h, 7);
+    assert_eq!(shown(&h, device), "Global");
+    assert!(drawn(&mut h, &name_of(target_dest(0, false))));
+    assert!(!drawn(&mut h, &name_of(osc(0, OSC_FEEDBACK))));
+    click(&mut h, 2);
+    assert_eq!(shown(&h, device), "Osc C");
+    assert!(drawn(&mut h, &name_of(osc(2, OSC_FEEDBACK))));
+    assert!(!drawn(&mut h, &name_of(osc(0, OSC_FEEDBACK))));
+    click(&mut h, 6);
     assert_eq!(shown(&h, device), "Pitch");
     assert!(drawn(&mut h, &name_of(PITCH_DEST_B)));
     assert_eq!(h.shell.editor().undo_history().len(), steps, "no undo step");
@@ -126,7 +130,7 @@ fn a_section_button_switches_the_display_to_that_sections_controls() {
 
 // Spec: operator R18
 #[test]
-fn every_section_is_laid_out_with_nothing_overlapping_at_50_100_and_200_percent() {
+fn every_row_is_laid_out_with_nothing_overlapping_at_50_100_and_200_percent() {
     let (mut h, device, _) = harness();
     for percent in [50, 100, 200] {
         h.shell
@@ -140,15 +144,62 @@ fn every_section_is_laid_out_with_nothing_overlapping_at_50_100_and_200_percent(
                     json!({ "device": device, "node": NODE, "page": page }),
                 )
                 .unwrap();
-            let (controls, cells, pages) = placed_all(&mut h, device);
-            let mut rects: Vec<Rect> = pages
-                .iter()
-                .flat_map(|p| p.buttons.iter())
-                .map(|r| Rect::from_min_size(pos2(r.x, r.y), egui::vec2(r.width, r.height)))
-                .collect();
-            assert_eq!(rects.len(), SECTIONS.len());
-            rects.extend(controls.iter().map(|(_, _, r)| *r));
-            rects.extend(cells.iter().map(|(_, r, _)| *r));
+            let (_, cells, pages) = placed_all(&mut h, device);
+            // The controls that show now, as the panel draws them: those a
+            // condition leaves out take no place.
+            let panel = h
+                .shell
+                .device_view_state()
+                .devices
+                .into_iter()
+                .find(|d| d.id == device)
+                .unwrap()
+                .panel
+                .unwrap();
+            let (controls, _, _) = {
+                let nodes = Harness::nodes(&h.settle());
+                let b = Harness::node(&nodes, "Device View").bounds.unwrap();
+                let view = Rect::from_min_max(
+                    pos2(b.x0 as f32, b.y0 as f32),
+                    pos2(b.x1 as f32, b.y1 as f32),
+                );
+                let frame = layout(&h.shell, view)
+                    .into_iter()
+                    .find(|(id, _)| *id == device)
+                    .unwrap()
+                    .1;
+                let body = body_rect(frame, TITLE_BAR_HEIGHT);
+                let laid = panel.layout(false).place_for(
+                    bl_model::device_layout::Size::new(body.width(), body.height()),
+                    0,
+                );
+                let shown: Vec<_> = laid
+                    .controls
+                    .iter()
+                    .filter(|c| c.shown.is_none_or(|s| s.holds(panel.read(s.param))))
+                    .map(|c| {
+                        Rect::from_min_size(
+                            body.min + egui::vec2(c.rect.x, c.rect.y),
+                            egui::vec2(c.rect.width, c.rect.height),
+                        )
+                    })
+                    .collect();
+                (shown, (), ())
+            };
+            assert_eq!(
+                pages.iter().map(|p| p.buttons.len()).sum::<usize>(),
+                SECTIONS.len(),
+                "a region for each row"
+            );
+            let mut rects = controls;
+            // The global page's cell holds its controls, so it is no part of
+            // the check.
+            rects.extend(
+                cells
+                    .iter()
+                    .filter(|(name, _, _)| name != "Global")
+                    .map(|(_, r, _)| *r),
+            );
             for (i, a) in rects.iter().enumerate() {
                 for b in &rects[i + 1..] {
                     assert!(

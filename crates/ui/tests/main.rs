@@ -111,6 +111,7 @@ mod slice_to_midi;
 mod sound_analysis;
 mod spectral_blur;
 mod stems_dialog;
+mod synth_panels;
 mod take_lanes;
 mod tempo_follower;
 mod theme_page;

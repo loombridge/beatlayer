@@ -175,8 +175,26 @@ fn saturator() -> Value {
 /// A native device as `device.insert` takes it, its ID the new name `name`.
 #[must_use]
 pub fn native(name: &str, device_type: &str, role: &str) -> Value {
-    json!({ "id": { "$new": name }, "name": name, "enabled": true, "params": [],
-            "role": role, "kind": { "native": { "device_type": device_type } } })
+    let mut device = json!({ "id": { "$new": name }, "name": name, "enabled": true,
+            "params": [], "role": role, "kind": { "native": { "device_type": device_type } } });
+    // Cascade, the native polysynth, and Operator open with the values they
+    // had before their panels were laid out as Live's (2 and 3 November
+    // 2026): short envelopes, the polysynth's filter at 1 kHz and no Drift, so
+    // the scenarios' notes end when they are meant to.
+    let before = if device_type == POLYSYNTH {
+        Some(bl_devices::testing::drift_before_live())
+    } else if device_type == OPERATOR {
+        Some(bl_devices::testing::operator_before_live())
+    } else {
+        None
+    };
+    if let Some(before) = before {
+        device["params"] = before
+            .into_iter()
+            .map(|(param, value)| json!([param, value]))
+            .collect();
+    }
+    device
 }
 
 /// The same with the parameters `settings` set (number and value), as a set
